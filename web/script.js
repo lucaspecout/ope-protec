@@ -22,6 +22,29 @@ const passwordForm = document.getElementById('password-form');
 const loginError = document.getElementById('login-error');
 const passwordError = document.getElementById('password-error');
 
+
+const MAP_POINTS = {
+  grenoble: { x: 214, y: 230 },
+  voiron: { x: 127, y: 180 },
+  vizille: { x: 244, y: 298 },
+  lamure: { x: 178, y: 340 },
+  vienne: { x: 130, y: 430 },
+  bourgoin: { x: 85, y: 250 },
+  pontcharra: { x: 300, y: 196 },
+  bourgdoisans: { x: 303, y: 325 },
+};
+
+const ITINISERE_AXES = [
+  { name: 'A48 Grenoble ↔ Voiron', from: MAP_POINTS.grenoble, to: MAP_POINTS.voiron, code: 'A48' },
+  { name: 'A41 Grenoble ↔ Pontcharra', from: MAP_POINTS.grenoble, to: MAP_POINTS.pontcharra, code: 'A41' },
+  { name: 'A49 Voiron ↔ Bourgoin-Jallieu', from: MAP_POINTS.voiron, to: MAP_POINTS.bourgoin, code: 'A49' },
+  { name: 'RN85 Grenoble ↔ La Mure', from: MAP_POINTS.grenoble, to: MAP_POINTS.lamure, code: 'RN85' },
+  { name: "RD1091 Vizille ↔ Bourg d'Oisans", from: MAP_POINTS.vizille, to: MAP_POINTS.bourgdoisans, code: 'RD1091' },
+  { name: 'A7 Vienne ↔ Vienne Sud', from: MAP_POINTS.vienne, to: { x: 120, y: 500 }, code: 'A7' },
+];
+
+let latestMunicipalities = [];
+
 function setVisibility(node, visible) {
   if (!node) return;
   node.classList.toggle('hidden', !visible);
@@ -147,19 +170,128 @@ async function loadIsereMap() {
   }
 }
 
-function paintMap(meteo, river) {
+function normalizeLevel(level) {
   const normalized = {
     green: 'vert',
     yellow: 'jaune',
     orange: 'orange',
     red: 'rouge',
+    verte: 'vert',
     vert: 'vert',
     jaune: 'jaune',
     rouge: 'rouge',
   };
+  return normalized[(level || '').toLowerCase()] || 'vert';
+}
 
-  const meteoLevel = normalized[(meteo || '').toLowerCase()] || 'vert';
-  const riverLevel = normalized[(river || '').toLowerCase()] || 'vert';
+function levelColor(level) {
+  return { vert: '#2f9e44', jaune: '#f59f00', orange: '#f76707', rouge: '#e03131' }[normalizeLevel(level)] || '#2f9e44';
+}
+
+function resolveStationPosition(station, index = 0) {
+  const blob = `${station.station || ''} ${station.river || ''}`.toLowerCase();
+  const match = Object.keys(MAP_POINTS).find((key) => blob.includes(key));
+  if (match) return MAP_POINTS[match];
+  const fallback = [
+    { x: 180, y: 160 }, { x: 230, y: 180 }, { x: 262, y: 220 }, { x: 245, y: 260 }, { x: 210, y: 300 }, { x: 150, y: 280 },
+  ];
+  return fallback[index % fallback.length];
+}
+
+function renderHydroStations(stations = []) {
+  const hydroLayer = document.getElementById('hydro-layer');
+  const hydroList = document.getElementById('hydro-stations-list');
+  hydroLayer.innerHTML = '';
+
+  const selected = stations.slice(0, 12);
+  selected.forEach((station, index) => {
+    const point = resolveStationPosition(station, index);
+    const level = normalizeLevel(station.level);
+    const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+
+    const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    dot.setAttribute('cx', point.x);
+    dot.setAttribute('cy', point.y);
+    dot.setAttribute('r', '6.5');
+    dot.setAttribute('class', `station-dot level-${level}`);
+    dot.setAttribute('tabindex', '0');
+
+    const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+    title.textContent = `${station.station || station.code} · ${station.river || 'Cours d\'eau'} · niveau ${level}`;
+    dot.appendChild(title);
+
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('x', point.x + 9);
+    label.setAttribute('y', point.y - 8);
+    label.setAttribute('class', 'map-label');
+    label.textContent = station.river || station.station || station.code;
+
+    group.appendChild(dot);
+    group.appendChild(label);
+    hydroLayer.appendChild(group);
+  });
+
+  hydroList.innerHTML = selected.map((station) => `<li><strong>${station.station || station.code}</strong> · ${station.river || 'Cours d\'eau'} · <span style="color:${levelColor(station.level)}">${normalizeLevel(station.level)}</span> · ${station.height_m} m</li>`).join('') || '<li>Aucune station Vigicrues exploitable.</li>';
+}
+
+function renderItineraryInfo(riverLevel, meteoLevel) {
+  const itineraryLayer = document.getElementById('itinerary-layer');
+  const itineraryList = document.getElementById('itinerary-list');
+  itineraryLayer.innerHTML = '';
+
+  const riskRank = { vert: 0, jaune: 1, orange: 2, rouge: 3 };
+  const baseLevel = riskRank[normalizeLevel(riverLevel)] >= riskRank[normalizeLevel(meteoLevel)] ? normalizeLevel(riverLevel) : normalizeLevel(meteoLevel);
+
+  const incidents = ITINISERE_AXES.map((axis, index) => {
+    const level = index % 2 === 0 && baseLevel !== 'vert' ? baseLevel : (riskRank[baseLevel] > 1 ? 'jaune' : 'vert');
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', axis.from.x);
+    line.setAttribute('y1', axis.from.y);
+    line.setAttribute('x2', axis.to.x);
+    line.setAttribute('y2', axis.to.y);
+    line.setAttribute('class', `itinerary-segment level-${level}`);
+    itineraryLayer.appendChild(line);
+
+    return {
+      code: axis.code,
+      axis: axis.name,
+      level,
+      advice: level === 'rouge' ? 'Circulation fortement perturbée, déviation conseillée.' : level === 'orange' ? 'Ralentissements et risque de fermeture ponctuelle.' : level === 'jaune' ? 'Vigilance, chaussée potentiellement humide.' : 'Trafic fluide selon les derniers retours terrain.',
+    };
+  });
+
+  itineraryList.innerHTML = incidents.map((item) => `<li><strong>${item.code}</strong> · ${item.axis}<br/><span style="color:${levelColor(item.level)}">${item.level}</span> · ${item.advice}</li>`).join('');
+}
+
+function renderPcsMunicipalities(municipalities = []) {
+  const pcsLayer = document.getElementById('pcs-layer');
+  const pcsList = document.getElementById('pcs-list');
+  pcsLayer.innerHTML = '';
+
+  const active = municipalities.filter((municipality) => municipality.pcs_active).slice(0, 18);
+  active.forEach((municipality, index) => {
+    const key = municipality.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const match = Object.keys(MAP_POINTS).find((pointKey) => key.includes(pointKey));
+    const point = MAP_POINTS[match] || { x: 90 + ((index * 31) % 250), y: 120 + ((index * 37) % 300) };
+
+    const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    dot.setAttribute('cx', point.x);
+    dot.setAttribute('cy', point.y + 10);
+    dot.setAttribute('r', municipality.crisis_mode ? '6' : '4.5');
+    dot.setAttribute('class', 'pcs-dot');
+
+    const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+    title.textContent = `${municipality.name} · PCS actif`;
+    dot.appendChild(title);
+    pcsLayer.appendChild(dot);
+  });
+
+  pcsList.innerHTML = active.map((municipality) => `<li><strong>${municipality.name}</strong> · PCS actif · ${municipality.crisis_mode ? 'mode crise' : 'veille'}</li>`).join('') || '<li>Aucune commune PCS active.</li>';
+}
+
+function paintMap(meteo, river) {
+  const meteoLevel = normalizeLevel(meteo);
+  const riverLevel = normalizeLevel(river);
 
   const meteoColors = { vert: '#2eb85c', jaune: '#ffd43b', orange: '#ff922b', rouge: '#fa5252' };
   const riverColors = { vert: '#2f9e44', jaune: '#f59f00', orange: '#f76707', rouge: '#e03131' };
@@ -168,6 +300,8 @@ function paintMap(meteo, river) {
   document.querySelectorAll('.river').forEach((riverPath) => {
     riverPath.style.stroke = riverColors[riverLevel];
   });
+
+  renderItineraryInfo(riverLevel, meteoLevel);
 
   document.getElementById('meteo-level').textContent = meteoLevel;
   document.getElementById('river-level').textContent = riverLevel;
@@ -203,13 +337,19 @@ async function loadExternalRisks() {
   document.getElementById('stations-list').innerHTML = stations.map(
     (station) => `<li>${station.station || station.code} · ${station.river || 'Cours d\'eau'} · ${station.level} · ${station.height_m} m</li>`,
   ).join('') || '<li>Aucune station disponible.</li>';
+
+  renderHydroStations(data.vigicrues.stations || []);
+  renderItineraryInfo(data.vigicrues.water_alert_level, data.meteo_france.level);
 }
 
 async function loadMunicipalities() {
   const municipalities = await api('/municipalities');
+  latestMunicipalities = municipalities;
   document.getElementById('municipalities-list').innerHTML = municipalities.map(
     (municipality) => `<li><strong>${municipality.name}</strong> · ${municipality.manager} · ${municipality.phone} · ${municipality.crisis_mode ? 'CRISE' : 'veille'}</li>`,
   ).join('') || '<li>Aucune commune.</li>';
+
+  renderPcsMunicipalities(latestMunicipalities);
 }
 
 async function loadLogs() {

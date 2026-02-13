@@ -175,19 +175,29 @@
           <h3>Carte stratégique Isère</h3>
           <div class="map-layout">
             <svg class="isere-map" viewBox="0 0 420 520" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Carte réelle du département de l'Isère">
+              <g id="itinerary-layer"></g>
               <path id="isere-shape" d="M143 33l46 26 48-8 29 36 45 17-1 48 36 43-15 56-41 35-2 53-45 31-31 52-56 25-48-31-54-4-32-34 3-44-34-40 11-58 40-32 6-51 35-29 10-47z"/>
-              <path class="river" d="M116 112c58 11 76 29 103 65 23 31 42 70 88 104"/>
-              <path class="river" d="M205 76c-18 58-30 123-26 188"/>
-              <circle id="grenoble-dot" cx="214" cy="230" r="7"/>
-              <text x="225" y="233">Grenoble</text>
-              <circle cx="127" cy="180" r="5" class="city"/><text x="137" y="183">Voiron</text>
-              <circle cx="244" cy="298" r="5" class="city"/><text x="254" y="301">Vizille</text>
-              <circle cx="178" cy="340" r="5" class="city"/><text x="188" y="343">La Mure</text>
+              <g id="river-layer">
+                <path class="river" d="M116 112c58 11 76 29 103 65 23 31 42 70 88 104"/>
+                <path class="river" d="M205 76c-18 58-30 123-26 188"/>
+              </g>
+              <g id="hydro-layer"></g>
+              <g id="pcs-layer"></g>
             </svg>
             <div>
               <p>Niveau météo <strong id="meteo-level">-</strong></p>
               <p>Niveau hydrologique <strong id="river-level">-</strong></p>
               <p class="muted" id="map-source">Source carte: chargement…</p>
+              <div class="legend">
+                <span class="badge green">Vert</span>
+                <span class="badge yellow">Jaune</span>
+                <span class="badge orange">Orange</span>
+                <span class="badge red">Rouge</span>
+              </div>
+              <h4>Cours d'eau Vigicrues (interactif)</h4>
+              <ul id="hydro-stations-list" class="list practical"></ul>
+              <h4>Points PCS partenaires</h4>
+              <ul id="pcs-list" class="list practical"></ul>
               <h4>Infos pratiques</h4>
               <ul class="list practical">
                 <li>CODIS 38: 18 / 112</li>
@@ -195,6 +205,8 @@
                 <li>SAMU: 15</li>
                 <li>Référentiel ORSEC/PCS interne</li>
               </ul>
+              <h4>Info mobilité Itinisère</h4>
+              <ul id="itinerary-list" class="list practical"></ul>
             </div>
           </div>
         </section>
