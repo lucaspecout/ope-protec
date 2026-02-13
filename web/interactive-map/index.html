@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Carte de vigilance Isère</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <style>
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        background: #f5f7fa;
+      }
+
+      header {
+        padding: 12px 16px;
+        background: #0b3d91;
+        color: #fff;
+      }
+
+      #status {
+        margin: 8px 16px;
+        padding: 10px;
+        border-radius: 6px;
+        display: none;
+      }
+
+      #status.error {
+        display: block;
+        background: #ffe8e8;
+        color: #a20000;
+        border: 1px solid #f3b0b0;
+      }
+
+      #map {
+        height: calc(100vh - 110px);
+        margin: 0 16px 16px;
+        border-radius: 8px;
+      }
+
+      .legend {
+        background: white;
+        padding: 8px;
+        line-height: 1.4;
+        border-radius: 6px;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+      }
+
+      .legend i {
+        width: 12px;
+        height: 12px;
+        float: left;
+        margin-right: 8px;
+        margin-top: 3px;
+        opacity: 0.9;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Vigilances météo, crues et trafic — Isère (38)</h1>
+      <small>Données Météo-France, Vigicrues et Itinisère via proxy Node.js</small>
+    </header>
+
+    <div id="status" role="alert"></div>
+    <div id="map"></div>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="./main.js" type="module"></script>
+  </body>
+</html>
