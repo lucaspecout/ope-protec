@@ -12,25 +12,51 @@ Puis ouvrir `http://localhost:3000`.
 
 ## Clés API
 
-Renseigner les variables d'environnement (recommandé) ou adapter `config.js`:
-
 - `METEO_FRANCE_API_KEY`
-- `ITINISERE_API_KEY`
+- `ITINISERE_API_KEY` (préconfigurée par défaut avec la clé fournie, surchargeable via variable d'environnement)
+
+## Cache Redis
+
+Le proxy met en cache les réponses Itinisère pendant 1h (par défaut) pour limiter les appels API.
+
+Variables utiles :
+
+- `REDIS_URL` (défaut: `redis://127.0.0.1:6379/0`)
+- `ITINISERE_CACHE_TTL_SECONDS` (défaut: `3600`)
+
+Si Redis est indisponible, l'application continue sans cache.
 
 ## Endpoints proxy exposés
 
+### Sources existantes
+
 - `GET /api/meteo-france/vigilance`
-  - Proxy vers l'endpoint JSON Bulletin Vigilance Météo-France.
-  - Ajoute l'en-tête `apikey` côté serveur.
 - `GET /api/vigicrues/geojson`
-  - Proxy GeoJSON de Vigicrues (ex: `InfoVigiCru.geojson` ou URL data.gouv de substitution).
-- `GET /api/itinisere/events`
-  - Proxy des événements de circulation Itinisère.
-  - Ajoute `x-api-key` côté serveur.
 
-## Rafraîchissement automatique
+### Intégration Itinisère Open Services
 
-Dans `main.js`, la constante `REFRESH_INTERVAL_MS` est fixée à 5 minutes.
+- `GET /api/itinisere/nearest-road?lon=&lat=`
+- `GET /api/itinisere/nearest-place?lon=&lat=`
+- `GET /api/itinisere/places?minLon=&minLat=&maxLon=&maxLat=`
+- `GET /api/itinisere/stops?minLon=&minLat=&maxLon=&maxLat=`
+- `GET /api/itinisere/line-stops?minLon=&minLat=&maxLon=&maxLat=`
+- `GET /api/itinisere/lines?networkId=`
+- `GET /api/itinisere/line-shapes?networkId=`
+- `GET /api/itinisere/realtime-state?networkId=`
+- `GET /api/itinisere/monitored-stop-points?stopAreaId=`
+- `GET /api/itinisere/trip-places?city=&category=&text=`
+- `GET /api/itinisere/road-disruptions?minLon=&minLat=&maxLon=&maxLat=`
 
-- `refreshLayers()` recharge les 3 couches via `fetch()`.
-- `setInterval(refreshLayers, REFRESH_INTERVAL_MS)` relance automatiquement la synchronisation.
+Le proxy ajoute automatiquement `apiKey` à chaque requête vers Itinisère.
+
+## Couche carte Itinisère
+
+L'interface Leaflet propose des couches activables/désactivables :
+
+- Routes proches
+- Perturbations routières crowdsourcées
+- Arrêts transport
+- POI / lieux publics
+- Tracés des lignes
+
+En cas d'indisponibilité Itinisère, un message « données mobilité non disponibles » est affiché.
