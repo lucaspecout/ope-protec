@@ -1,10 +1,12 @@
 const STORAGE_KEYS = {
   token: 'token',
+  activePanel: 'activePanel',
 };
 
 let token = localStorage.getItem(STORAGE_KEYS.token);
 let pendingCurrentPassword = '';
 let currentUser = null;
+let activePanelId = localStorage.getItem(STORAGE_KEYS.activePanel) || 'dashboard-panel';
 
 const loginView = document.getElementById('login-view');
 const appView = document.getElementById('app-view');
@@ -40,6 +42,28 @@ function canEdit() {
 
 function canManageUsers() {
   return ['admin', 'ope'].includes(currentUser?.role);
+}
+
+function setActivePanel(panelId) {
+  activePanelId = panelId;
+  localStorage.setItem(STORAGE_KEYS.activePanel, panelId);
+
+  document.querySelectorAll('.menu-btn').forEach((button) => {
+    button.classList.toggle('active', button.dataset.target === panelId);
+  });
+
+  document.querySelectorAll('.panel').forEach((panel) => {
+    setVisibility(panel, panel.id === panelId);
+  });
+}
+
+function restoreActivePanel() {
+  const panelExists = document.getElementById(activePanelId);
+  const usersPanelRequested = activePanelId === 'users-panel';
+  const allowedPanelId = panelExists && (!usersPanelRequested || canManageUsers())
+    ? activePanelId
+    : 'dashboard-panel';
+  setActivePanel(allowedPanelId);
 }
 
 
@@ -122,6 +146,7 @@ function applyRoleVisibility() {
   const usersMenu = document.querySelector('.menu-btn[data-target="users-panel"]');
   setVisibility(usersMenu, canManageUsers());
   setVisibility(document.getElementById('users-create-card'), canManageUsers());
+  restoreActivePanel();
 }
 
 async function api(path, options = {}) {
@@ -147,7 +172,11 @@ async function api(path, options = {}) {
     let message = 'Une erreur est survenue.';
     try {
       const payload = await response.json();
-      message = payload.detail || message;
+      if (Array.isArray(payload.detail)) {
+        message = payload.detail.map((issue) => issue.msg || issue).join(' · ');
+      } else if (typeof payload.detail === 'string') {
+        message = payload.detail;
+      }
     } catch {
       // Ignore JSON parse errors.
     }
@@ -468,6 +497,14 @@ document.getElementById('user-role').addEventListener('change', (event) => {
 document.getElementById('user-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const formData = new FormData(event.target);
+  const role = formData.get('role');
+  const municipalityName = formData.get('municipality_name') || null;
+
+  if (role === 'mairie' && !municipalityName) {
+    document.getElementById('user-error').textContent = 'Sélectionnez une commune pour créer un compte mairie.';
+    return;
+  }
+
   try {
     await api('/auth/register', {
       method: 'POST',
@@ -477,11 +514,11 @@ document.getElementById('user-form').addEventListener('submit', async (event) =>
       body: JSON.stringify({
         username: formData.get('username'),
         password: formData.get('password'),
-        role: formData.get('role'),
-        municipality_name: formData.get('municipality_name') || null,
+        role,
+        municipality_name: municipalityName,
       }),
     });
-    document.getElementById('user-error').textContent = '';
+    document.getElementById('user-error').textContent = 'Compte créé avec succès.';
     event.target.reset();
     setVisibility(document.getElementById('user-mairie-name'), false);
     await loadUsers();
@@ -494,11 +531,7 @@ document.getElementById('logout-btn').addEventListener('click', logout);
 
 document.querySelectorAll('.menu-btn').forEach((button) => {
   button.addEventListener('click', () => {
-    document.querySelectorAll('.menu-btn').forEach((b) => b.classList.remove('active'));
-    button.classList.add('active');
-
-    document.querySelectorAll('.panel').forEach((panel) => setVisibility(panel, false));
-    setVisibility(document.getElementById(button.dataset.target), true);
+    setActivePanel(button.dataset.target);
   });
 });
 
