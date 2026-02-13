@@ -1,5 +1,12 @@
-const apiBase = '/api';
-let token = localStorage.getItem('token');
+const STORAGE_KEYS = {
+  token: 'token',
+  users: 'vo_users',
+  logs: 'vo_logs',
+  municipalities: 'vo_municipalities',
+  vigilance: 'vo_vigilance',
+};
+
+let token = localStorage.getItem(STORAGE_KEYS.token);
 
 const loginView = document.getElementById('login-view');
 const appView = document.getElementById('app-view');
@@ -8,8 +15,46 @@ const passwordForm = document.getElementById('password-form');
 const loginError = document.getElementById('login-error');
 const passwordError = document.getElementById('password-error');
 
-function authHeaders() {
-  return token ? { Authorization: `Bearer ${token}` } : {};
+function seedData() {
+  if (!localStorage.getItem(STORAGE_KEYS.users)) {
+    localStorage.setItem(STORAGE_KEYS.users, JSON.stringify([
+      { username: 'admin', password: 'admin', mustChangePassword: true },
+    ]));
+  }
+
+  if (!localStorage.getItem(STORAGE_KEYS.logs)) {
+    localStorage.setItem(STORAGE_KEYS.logs, JSON.stringify([]));
+  }
+
+  if (!localStorage.getItem(STORAGE_KEYS.municipalities)) {
+    localStorage.setItem(STORAGE_KEYS.municipalities, JSON.stringify([]));
+  }
+
+  if (!localStorage.getItem(STORAGE_KEYS.vigilance)) {
+    localStorage.setItem(STORAGE_KEYS.vigilance, JSON.stringify({
+      vigilance: 'Vert',
+      crues: 'Normal',
+      global_risk: 'green',
+    }));
+  }
+}
+
+function readJson(key, fallback) {
+  try {
+    return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback));
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJson(key, value) {
+  localStorage.setItem(key, JSON.stringify(value));
+}
+
+function currentUser() {
+  if (!token) return null;
+  const users = readJson(STORAGE_KEYS.users, []);
+  return users.find((u) => u.username === token) || null;
 }
 
 function showApp() {
@@ -24,45 +69,30 @@ function showLogin() {
   loginForm.classList.remove('hidden');
 }
 
-async function apiFetch(path, options = {}) {
-  const headers = {
-    ...authHeaders(),
-    ...(options.headers || {}),
-  };
-  if (!Object.prototype.hasOwnProperty.call(headers, 'Content-Type')) {
-    headers['Content-Type'] = 'application/json';
-  }
-
-  const response = await fetch(`${apiBase}${path}`, {
-    ...options,
-    headers,
+function loadDashboard() {
+  const logs = readJson(STORAGE_KEYS.logs, []);
+  const municipalities = readJson(STORAGE_KEYS.municipalities, []);
+  const vigilance = readJson(STORAGE_KEYS.vigilance, {
+    vigilance: 'Vert',
+    crues: 'Normal',
+    global_risk: 'green',
   });
 
-  if (response.status === 403) {
-    showLogin();
-  }
-  return response;
-}
-
-async function loadDashboard() {
-  const res = await apiFetch('/dashboard');
-  if (!res.ok) return;
-  const data = await res.json();
-  document.getElementById('vigilance').textContent = data.vigilance;
-  document.getElementById('crues').textContent = data.crues;
+  document.getElementById('vigilance').textContent = vigilance.vigilance;
+  document.getElementById('crues').textContent = vigilance.crues;
   const risk = document.getElementById('risk');
-  risk.textContent = data.global_risk;
-  risk.className = data.global_risk;
-  document.getElementById('crisis').textContent = data.communes_crise;
-  document.getElementById('logs').innerHTML = data.latest_logs
+  risk.textContent = vigilance.global_risk;
+  risk.className = vigilance.global_risk;
+  document.getElementById('crisis').textContent = municipalities.filter((m) => m.crisis_mode).length;
+  document.getElementById('logs').innerHTML = logs
+    .slice(-10)
+    .reverse()
     .map((l) => `<li>${new Date(l.created_at).toLocaleString()} - ${l.event_type}</li>`)
     .join('');
 }
 
-async function loadMunicipalities() {
-  const res = await apiFetch('/municipalities', { headers: { Accept: 'application/json' } });
-  if (!res.ok) return;
-  const municipalities = await res.json();
+function loadMunicipalities() {
+  const municipalities = readJson(STORAGE_KEYS.municipalities, []);
   const list = document.getElementById('municipalities-list');
   list.innerHTML = municipalities.map((m) => `
     <li>
@@ -72,100 +102,111 @@ async function loadMunicipalities() {
   `).join('');
 
   document.querySelectorAll('.crisis-toggle').forEach((button) => {
-    button.addEventListener('click', async () => {
-      await apiFetch(`/municipalities/${button.dataset.id}/crisis`, { method: 'POST', headers: { Accept: 'application/json' } });
-      await Promise.all([loadMunicipalities(), loadDashboard()]);
+    button.addEventListener('click', () => {
+      const items = readJson(STORAGE_KEYS.municipalities, []);
+      const next = items.map((m) => (
+        m.id === Number(button.dataset.id) ? { ...m, crisis_mode: !m.crisis_mode } : m
+      ));
+      writeJson(STORAGE_KEYS.municipalities, next);
+      loadMunicipalities();
+      loadDashboard();
     });
   });
 }
 
-async function login(username, password) {
-  const body = new URLSearchParams({ username, password });
-  const res = await fetch(`${apiBase}/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
-  });
+function login(username, password) {
+  const users = readJson(STORAGE_KEYS.users, []);
+  const user = users.find((u) => u.username === username && u.password === password);
 
-  if (!res.ok) {
+  if (!user) {
     loginError.textContent = 'Identifiants invalides.';
     return;
   }
 
   loginError.textContent = '';
-  const data = await res.json();
-  token = data.access_token;
-  localStorage.setItem('token', token);
+  token = user.username;
+  localStorage.setItem(STORAGE_KEYS.token, token);
 
-  if (data.must_change_password) {
+  if (user.mustChangePassword) {
     loginForm.classList.add('hidden');
     passwordForm.classList.remove('hidden');
     return;
   }
 
   showApp();
-  await Promise.all([loadDashboard(), loadMunicipalities()]);
+  loadDashboard();
+  loadMunicipalities();
 }
 
-loginForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  const formData = new FormData(loginForm);
-  await login(formData.get('username'), formData.get('password'));
-});
+function updatePassword(currentPassword, newPassword) {
+  const user = currentUser();
+  const users = readJson(STORAGE_KEYS.users, []);
 
-passwordForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  const formData = new FormData(passwordForm);
-  const res = await apiFetch('/auth/change-password', {
-    method: 'POST',
-    body: JSON.stringify({
-      current_password: formData.get('current_password'),
-      new_password: formData.get('new_password'),
-    }),
-  });
-
-  if (!res.ok) {
-    passwordError.textContent = 'Impossible de modifier le mot de passe.';
+  if (!user || user.password !== currentPassword) {
+    passwordError.textContent = 'Mot de passe actuel incorrect.';
     return;
   }
 
+  const nextUsers = users.map((u) => (
+    u.username === user.username
+      ? { ...u, password: newPassword, mustChangePassword: false }
+      : u
+  ));
+
+  writeJson(STORAGE_KEYS.users, nextUsers);
   passwordError.textContent = '';
   showApp();
-  await Promise.all([loadDashboard(), loadMunicipalities()]);
+  loadDashboard();
+  loadMunicipalities();
+}
+
+loginForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const formData = new FormData(loginForm);
+  login(formData.get('username'), formData.get('password'));
 });
 
-document.getElementById('municipality-form').addEventListener('submit', async (event) => {
+passwordForm.addEventListener('submit', (event) => {
   event.preventDefault();
-  const formData = new FormData(event.target);
-  await apiFetch('/municipalities', {
-    method: 'POST',
-    body: JSON.stringify({
-      name: formData.get('name'),
-      phone: formData.get('phone'),
-      email: formData.get('email'),
-      manager: formData.get('manager'),
-    }),
-  });
-  event.target.reset();
-  await Promise.all([loadMunicipalities(), loadDashboard()]);
+  const formData = new FormData(passwordForm);
+  updatePassword(formData.get('current_password'), formData.get('new_password'));
 });
 
-document.getElementById('log-form').addEventListener('submit', async (event) => {
+document.getElementById('municipality-form').addEventListener('submit', (event) => {
   event.preventDefault();
   const formData = new FormData(event.target);
-  await apiFetch('/logs', {
-    method: 'POST',
-    body: JSON.stringify({
-      event_type: formData.get('event_type'),
-      description: formData.get('description'),
-    }),
+  const items = readJson(STORAGE_KEYS.municipalities, []);
+  items.push({
+    id: Date.now(),
+    name: formData.get('name'),
+    phone: formData.get('phone'),
+    email: formData.get('email'),
+    manager: formData.get('manager'),
+    crisis_mode: false,
   });
+  writeJson(STORAGE_KEYS.municipalities, items);
   event.target.reset();
-  await loadDashboard();
+  loadMunicipalities();
+  loadDashboard();
+});
+
+document.getElementById('log-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  const formData = new FormData(event.target);
+  const logs = readJson(STORAGE_KEYS.logs, []);
+  logs.push({
+    id: Date.now(),
+    event_type: formData.get('event_type'),
+    description: formData.get('description'),
+    created_at: new Date().toISOString(),
+  });
+  writeJson(STORAGE_KEYS.logs, logs);
+  event.target.reset();
+  loadDashboard();
 });
 
 document.getElementById('logout-btn').addEventListener('click', () => {
-  localStorage.removeItem('token');
+  localStorage.removeItem(STORAGE_KEYS.token);
   token = null;
   showLogin();
 });
@@ -180,9 +221,16 @@ document.querySelectorAll('.menu-btn').forEach((button) => {
   });
 });
 
+seedData();
 if (token) {
-  showApp();
-  Promise.all([loadDashboard(), loadMunicipalities()]);
+  const user = currentUser();
+  if (user && !user.mustChangePassword) {
+    showApp();
+    loadDashboard();
+    loadMunicipalities();
+  } else {
+    showLogin();
+  }
 } else {
   showLogin();
 }

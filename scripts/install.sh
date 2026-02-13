@@ -8,4 +8,4 @@ docker compose version
 echo "[2/3] Build et démarrage"
 docker compose up -d --build
 
-echo "[3/3] Application disponible sur http://localhost:8080"
+echo "[3/3] Application disponible sur http://localhost:1182"
