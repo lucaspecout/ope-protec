@@ -55,17 +55,50 @@ function showHome() { setVisibility(homeView, true); setVisibility(loginView, fa
 function showLogin() { setVisibility(homeView, false); setVisibility(loginView, true); setVisibility(appView, false); setVisibility(passwordForm, false); setVisibility(loginForm, true); }
 function showApp() { setVisibility(homeView, false); setVisibility(loginView, false); setVisibility(appView, true); }
 
+function apiOrigins() {
+  return Array.from(new Set([
+    window.location.origin,
+    'http://localhost:1182',
+    'http://127.0.0.1:1182',
+  ]));
+}
+
+function buildApiUrl(path, origin) {
+  if (origin === window.location.origin) return path;
+  return `${origin}${path}`;
+}
+
+function sanitizeErrorMessage(message) {
+  if (!message) return 'Erreur inconnue';
+  if (message.includes('<!doctype') || message.includes('<html')) {
+    return "L'API renvoie une page HTML au lieu d'un JSON. Vérifiez que le backend tourne bien sur le même hôte (docker compose up -d).";
+  }
+  return message;
+}
+
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const response = await fetch(path, { ...options, headers });
-  const payload = await parseJsonResponse(response, path);
-  if (!response.ok) {
-    const message = payload?.detail || payload?.message || `Erreur API (${response.status})`;
-    if (response.status === 401) logout();
-    throw new Error(message);
+
+  let lastError = null;
+  for (const origin of apiOrigins()) {
+    const url = buildApiUrl(path, origin);
+    try {
+      const response = await fetch(url, { ...options, headers });
+      const payload = await parseJsonResponse(response, path);
+      if (!response.ok) {
+        const message = payload?.detail || payload?.message || `Erreur API (${response.status})`;
+        if (response.status === 401) logout();
+        throw new Error(message);
+      }
+      return payload;
+    } catch (error) {
+      lastError = error;
+      if (!String(error.message || '').includes('Réponse non-JSON')) break;
+    }
   }
-  return payload;
+
+  throw new Error(sanitizeErrorMessage(lastError?.message || 'API indisponible'));
 }
 
 async function parseJsonResponse(response, path = '') {
@@ -98,16 +131,36 @@ function initMap() {
   searchLayer = window.L.layerGroup().addTo(leafletMap);
 }
 
+function setMapFeedback(message = '', isError = false) {
+  const target = document.getElementById('map-feedback');
+  if (!target) return;
+  target.textContent = message;
+  target.className = isError ? 'error' : 'muted';
+}
+
+function fitMapToData() {
+  if (!leafletMap) return;
+  const layers = [boundaryLayer, hydroLayer, pcsLayer, resourceLayer, searchLayer].filter(Boolean);
+  const bounds = window.L.latLngBounds([]);
+  layers.forEach((layer) => {
+    if (layer?.getBounds) {
+      const layerBounds = layer.getBounds();
+      if (layerBounds?.isValid && layerBounds.isValid()) bounds.extend(layerBounds);
+    }
+  });
+  if (bounds.isValid()) leafletMap.fitBounds(bounds, { padding: [24, 24] });
+}
+
 async function loadIsereBoundary() {
   initMap();
-  const response = await fetch('/public/isere-map');
-  const data = await parseJsonResponse(response, '/public/isere-map');
-  if (!response.ok) throw new Error(data?.detail || data?.message || `Erreur API (${response.status})`);
+  const data = await api('/public/isere-map');
   if (boundaryLayer) leafletMap.removeLayer(boundaryLayer);
   boundaryLayer = window.L.geoJSON({ type: 'Feature', geometry: data.geometry }, { style: { color: '#163a87', weight: 2, fillColor: '#63c27d', fillOpacity: 0.2 } }).addTo(leafletMap);
   leafletMap.fitBounds(boundaryLayer.getBounds(), { padding: [16, 16] });
   document.getElementById('map-source').textContent = `Source carte: ${data.source}`;
+  setMapFeedback('Fond de carte et contour Isère chargés.');
 }
+
 
 function renderStations(stations = []) {
   cachedStations = stations;
@@ -122,7 +175,9 @@ function renderStations(stations = []) {
       .bindPopup(`<strong>${s.station || s.code}</strong><br>${s.river || ''}<br>Niveau: ${normalizeLevel(s.level)}<br>Hauteur: ${s.height_m} m`)
       .addTo(hydroLayer);
   });
+  setMapFeedback(`${stations.length} station(s) Vigicrues chargée(s).`);
 }
+
 
 async function geocodeMunicipality(municipality) {
   const key = `${municipality.name}|${municipality.postal_code || ''}`;
@@ -131,7 +186,7 @@ async function geocodeMunicipality(municipality) {
   try {
     const url = `https://geo.api.gouv.fr/communes?nom=${encodeURIComponent(municipality.name)}&codePostal=${encodeURIComponent(municipality.postal_code)}&fields=centre&limit=1`;
     const response = await fetch(url);
-    const payload = await response.json();
+    const payload = await parseJsonResponse(response, url);
     const center = payload?.[0]?.centre?.coordinates;
     if (!Array.isArray(center) || center.length !== 2) return null;
     const point = { lat: center[1], lon: center[0] };
@@ -156,6 +211,7 @@ async function renderMunicipalitiesOnMap(municipalities = []) {
       .bindPopup(`<strong>${municipality.name}</strong><br>Code postal: ${municipality.postal_code || '-'}<br>Responsable: ${municipality.manager}<br>PCS: actif`)
       .addTo(pcsLayer);
   });
+  setMapFeedback(`${pcs.length} commune(s) PCS chargée(s).`);
 }
 
 function renderResources() {
@@ -171,6 +227,7 @@ function renderResources() {
       .bindPopup(`<strong>${r.name}</strong><br>Type: ${r.type.replace('_', ' ')}<br>Adresse: ${r.address}<br>Activation: ${r.active ? 'oui' : 'non'}`)
       .addTo(resourceLayer);
   });
+  setMapFeedback(`${resources.length} ressource(s) affichée(s).`);
 }
 
 async function handleMapSearch() {
@@ -179,17 +236,19 @@ async function handleMapSearch() {
   if (!query || !leafletMap) return;
   try {
     const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query + ', Isère, France')}`);
-    const payload = await response.json();
-    if (!payload?.length) return;
+    const payload = await parseJsonResponse(response, 'nominatim');
+    if (!payload?.length) { setMapFeedback('Aucun résultat de recherche trouvé.'); return; }
     const lat = Number(payload[0].lat);
     const lon = Number(payload[0].lon);
     searchLayer.clearLayers();
     window.L.marker([lat, lon]).bindPopup(`Résultat: ${payload[0].display_name}`).addTo(searchLayer).openPopup();
     leafletMap.setView([lat, lon], 12);
+    setMapFeedback(`Recherche OK: ${payload[0].display_name}`);
   } catch {
-    // ignore erreur de recherche externe
+    setMapFeedback('Service de recherche temporairement indisponible.', true);
   }
 }
+
 
 function renderItinisereEvents(events = [], targetId = 'itinerary-list') {
   document.getElementById(targetId).innerHTML = events.slice(0, 8).map((e) => `<li><strong>${e.title}</strong><br>${e.description || ''}<br><a href="${e.link}" target="_blank" rel="noreferrer">Détail</a></li>`).join('') || '<li>Aucune perturbation publiée.</li>';
@@ -250,9 +309,11 @@ async function refreshAll() {
   try {
     await Promise.all([loadDashboard(), loadExternalRisks(), loadMunicipalities(), loadLogs(), loadUsers(), loadSupervision()]);
     renderResources();
+    fitMapToData();
     document.getElementById('dashboard-error').textContent = '';
   } catch (error) {
-    document.getElementById('dashboard-error').textContent = error.message;
+    document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
+    setMapFeedback(sanitizeErrorMessage(error.message), true);
   }
 }
 
@@ -274,15 +335,18 @@ function bindAppInteractions() {
   document.getElementById('logout-btn').addEventListener('click', logout);
   document.getElementById('refresh-btn').addEventListener('click', refreshAll);
   document.getElementById('map-search-btn')?.addEventListener('click', handleMapSearch);
+  document.getElementById('map-fit-btn')?.addEventListener('click', fitMapToData);
   document.getElementById('map-search')?.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); handleMapSearch(); } });
   ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'resource-type-filter'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       renderStations(cachedStations);
       await renderMunicipalitiesOnMap(cachedMunicipalities);
       renderResources();
+      fitMapToData();
     });
   });
 }
+
 
 function logout() {
   token = null;
@@ -299,9 +363,7 @@ function startAutoRefresh() {
 
 async function loadHomeLiveStatus() {
   try {
-    const response = await fetch('/public/live');
-    const data = await parseJsonResponse(response, '/public/live');
-    if (!response.ok) throw new Error(data?.detail || data?.message || `Erreur API (${response.status})`);
+    const data = await api('/public/live');
     document.getElementById('home-meteo-state').textContent = normalizeLevel(data.dashboard.vigilance || '-');
     document.getElementById('home-river-state').textContent = normalizeLevel(data.dashboard.crues || '-');
     document.getElementById('home-global-risk').textContent = normalizeLevel(data.dashboard.global_risk || '-');
