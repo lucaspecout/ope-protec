@@ -1,6 +1,6 @@
 # Protection Civile de l'Isère – Veille Opérationnelle
 
-Application web de veille opérationnelle avec un frontend moderne et une stack conteneurisée complète.
+Application web repensée comme un centre de crise départemental (CRISIS38) dédié à l'Isère, avec une interface modernisée, une carte stratégique locale et des interconnexions vers les services publics de référence.
 
 ## Démarrage rapide
 
@@ -36,7 +36,9 @@ Ou via script:
 ## Fonctionnalités livrées
 
 - Connexion locale et changement de mot de passe obligatoire au premier login.
-- Dashboard synthétique modernisé (vigilance, crues, risque global, communes en crise, derniers événements).
+- Tableau de situation repensé (vigilance, crues, risque global, communes en crise, chronologie courte).
+- Module d'interconnexions Isère (Météo-France, Vigicrues, Préfecture, Géorisques, Itinisère).
+- Carte stratégique Isère enrichie (couleurs de niveau, villes clés, infos pratiques d'astreinte).
 - Gestion des communes (ajout, enrichissement contacts/informations, bascule mode crise, import ORSEC et conventions).
 - Main courante locale (ajout d’évènements horodatés).
 - Carte opérationnelle embarquée (OpenStreetMap).
