@@ -116,7 +116,8 @@ async function api(path, options = {}) {
   try {
     return JSON.parse(raw);
   } catch {
-    throw new Error(`Réponse invalide reçue depuis ${path}`);
+    const looksHtml = raw.trim().startsWith('<');
+    throw new Error(looksHtml ? `Réponse HTML inattendue depuis ${path} (proxy API à vérifier)` : `Réponse invalide reçue depuis ${path}`);
   }
 }
 
@@ -132,41 +133,41 @@ function setActivePanel(panelId) {
   document.getElementById('app-sidebar')?.classList.remove('open');
   const menuButton = document.getElementById('app-menu-btn');
   menuButton?.setAttribute('aria-expanded', 'false');
+  if (panelId === 'map-panel' && leafletMap) setTimeout(() => leafletMap.invalidateSize(), 50);
 }
 
 
-function geometryToPath(geometry, width = 420, height = 520) {
-  const rings = geometry.type === 'Polygon' ? [geometry.coordinates[0]] : geometry.coordinates.map((poly) => poly[0]);
-  const points = rings.flat();
-  const xs = points.map((pt) => pt[0]);
-  const ys = points.map((pt) => pt[1]);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
-  const pad = 20;
-  const scaleX = (width - 2 * pad) / (maxX - minX || 1);
-  const scaleY = (height - 2 * pad) / (maxY - minY || 1);
+function initMapIfNeeded() {
+  if (leafletMap || typeof window.L === 'undefined') return;
 
-  return rings.map((ring) => ring.map((pt, index) => {
-    const x = pad + (pt[0] - minX) * scaleX;
-    const y = height - pad - (pt[1] - minY) * scaleY;
-    return `${index === 0 ? 'M' : 'L'}${x.toFixed(2)} ${y.toFixed(2)}`;
-  }).join(' ') + ' Z').join(' ');
+  leafletMap = window.L.map('isere-map-leaflet', { zoomControl: true, minZoom: 8 }).setView(MAP_POINTS.grenoble, 9);
+  window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 18,
+    attribution: '&copy; OpenStreetMap contributors',
+  }).addTo(leafletMap);
+
+  itineraryLayer = window.L.layerGroup().addTo(leafletMap);
+  hydroLayer = window.L.layerGroup().addTo(leafletMap);
+  pcsLayer = window.L.layerGroup().addTo(leafletMap);
 }
 
 async function loadIsereMap() {
+  initMapIfNeeded();
   try {
     const response = await fetch('/public/isere-map');
     if (!response.ok) throw new Error('Carte Isère indisponible');
     const data = await response.json();
     const geometry = data.geometry;
-    if (!geometry || !geometry.coordinates) throw new Error('Géométrie invalide');
-    const path = geometryToPath(geometry);
-    document.getElementById('isere-shape').setAttribute('d', path);
+    if (!geometry || !geometry.coordinates || !leafletMap) throw new Error('Géométrie invalide');
+
+    if (isereBoundaryLayer) leafletMap.removeLayer(isereBoundaryLayer);
+    isereBoundaryLayer = window.L.geoJSON({ type: 'Feature', geometry }, {
+      style: { color: '#163a87', weight: 2, fillColor: '#63c27d', fillOpacity: 0.2 },
+    }).addTo(leafletMap);
+    leafletMap.fitBounds(isereBoundaryLayer.getBounds(), { padding: [20, 20] });
     document.getElementById('map-source').textContent = `Source carte: ${data.source}`;
   } catch (error) {
-    document.getElementById('map-source').textContent = `Source carte: fallback local (${error.message})`;
+    document.getElementById('map-source').textContent = `Source carte: indisponible (${error.message})`;
   }
 }
 
@@ -293,18 +294,37 @@ function paintMap(meteo, river) {
   const meteoLevel = normalizeLevel(meteo);
   const riverLevel = normalizeLevel(river);
 
-  const meteoColors = { vert: '#2eb85c', jaune: '#ffd43b', orange: '#ff922b', rouge: '#fa5252' };
-  const riverColors = { vert: '#2f9e44', jaune: '#f59f00', orange: '#f76707', rouge: '#e03131' };
+function pickMunicipalityCoords(name, index) {
+  const key = name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const matched = Object.entries(MAP_POINTS).find(([city]) => key.includes(city.replace('_', '')))?.[1];
+  if (matched) return matched;
+  return [45.0 + ((index % 6) * 0.08), 5.15 + ((index % 5) * 0.12)];
+}
 
-  document.getElementById('isere-shape').style.fill = meteoColors[meteoLevel];
-  document.querySelectorAll('.river').forEach((riverPath) => {
-    riverPath.style.stroke = riverColors[riverLevel];
+function renderHydroStations(stations = []) {
+  const hydroList = document.getElementById('hydro-stations-list');
+  if (hydroLayer) hydroLayer.clearLayers();
+
+  const selected = stations.slice(0, 14);
+  selected.forEach((station, index) => {
+    const coords = pickMunicipalityCoords(`${station.station || ''} ${station.river || ''}`, index + 2);
+    const level = normalizeLevel(station.level);
+    if (hydroLayer) {
+      window.L.circleMarker(coords, {
+        radius: 8,
+        weight: 2,
+        color: '#ffffff',
+        fillColor: levelColor(level),
+        fillOpacity: 0.95,
+      }).bindPopup(`<strong>${station.station || station.code}</strong><br>${station.river || "Cours d'eau"}<br>Niveau: ${level}<br>Hauteur: ${station.height_m} m`).addTo(hydroLayer);
+    }
   });
 
   renderItineraryInfo(riverLevel, meteoLevel);
 
   document.getElementById('meteo-level').textContent = meteoLevel;
   document.getElementById('river-level').textContent = riverLevel;
+  renderItineraryInfo(riverLevel, meteoLevel);
 }
 
 async function loadDashboard() {
