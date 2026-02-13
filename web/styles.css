@@ -102,7 +102,8 @@ label { display: block; margin-bottom: .8rem; }
 .sidebar { padding: 1rem; display: flex; flex-direction: column; gap: .8rem; }
 .sidebar-header { border: 1px solid var(--line); border-radius: 12px; padding: .8rem; background: #f7faff; }
 .side-nav { display: grid; gap: .45rem; width: 100%; }
-.menu-btn { text-align: left; background: #edf3ff; color: #163a87; border: 1px solid #d3e0f8; width: 100%; padding: .95rem 1rem; }
+.menu-btn, .menu-link-btn { text-align: left; background: #edf3ff; color: #163a87; border: 1px solid #d3e0f8; width: 100%; padding: .95rem 1rem; }
+.menu-link-btn { display: block; text-decoration: none; border-radius: 12px; }
 .menu-btn.active { background: linear-gradient(145deg, #2b6bff, #1f57d8); color: #fff; }
 .danger { margin-top: auto; background: linear-gradient(145deg, #e4576a, var(--danger)); }
 
