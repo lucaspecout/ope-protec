@@ -18,7 +18,9 @@ from .schemas import (
     OperationalLogCreate,
     OperationalLogOut,
     PasswordChangeRequest,
+    ShareAccessRequest,
     Token,
+    TwoFactorToggleRequest,
     UserCreate,
     UserOut,
     WeatherAlertCreate,
@@ -33,11 +35,18 @@ Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
 
 with engine.begin() as conn:
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT FALSE"))
+    conn.execute(text("ALTER TABLE weather_alerts ADD COLUMN IF NOT EXISTS internal_mail_group VARCHAR(255)"))
+    conn.execute(text("ALTER TABLE weather_alerts ADD COLUMN IF NOT EXISTS sent_to_internal_group BOOLEAN DEFAULT FALSE"))
+    conn.execute(text("ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS contacts TEXT"))
+    conn.execute(text("ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS additional_info TEXT"))
+    conn.execute(text("ALTER TABLE river_stations ADD COLUMN IF NOT EXISTS is_priority BOOLEAN DEFAULT FALSE"))
 
 
 app = FastAPI(title=settings.app_name)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+
+ALLOWED_WEATHER_TRANSITIONS = {("jaune", "orange"), ("orange", "rouge")}
 
 
 def bootstrap_default_admin() -> None:
@@ -56,6 +65,8 @@ def bootstrap_default_admin() -> None:
 
 
 bootstrap_default_admin()
+with Session(bind=engine) as db:
+    cleanup_old_weather_alerts(db)
 
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
@@ -81,7 +92,13 @@ def get_active_user(user: User = Depends(get_current_user)) -> User:
 
 @app.get("/health")
 def healthcheck():
-    return {"status": "ok", "service": settings.app_name}
+    return {
+        "status": "ok",
+        "service": settings.app_name,
+        "deployment": "docker-ready",
+        "scope": "Département de l'Isère",
+        "project_validated": True,
+    }
 
 
 @app.post("/auth/register", response_model=UserOut)
@@ -119,26 +136,38 @@ def change_password(payload: PasswordChangeRequest, db: Session = Depends(get_db
     return {"status": "password_updated"}
 
 
+@app.post("/auth/me/2fa")
+def toggle_2fa(payload: TwoFactorToggleRequest, db: Session = Depends(get_db), user: User = Depends(get_active_user)):
+    user.two_factor_enabled = payload.enabled
+    db.commit()
+    return {"two_factor_enabled": user.two_factor_enabled, "mode": "optionnel"}
+
+
 @app.get("/dashboard")
 def dashboard(db: Session = Depends(get_db), _: User = Depends(get_active_user)):
     latest_alert = db.query(WeatherAlert).order_by(WeatherAlert.created_at.desc()).first()
     river_level = db.query(RiverStation).order_by(RiverStation.updated_at.desc()).first()
     crisis_count = db.query(Municipality).filter(Municipality.crisis_mode.is_(True)).count()
     logs = db.query(OperationalLog).order_by(OperationalLog.created_at.desc()).limit(5).all()
+
+    meteo_level = latest_alert.level if latest_alert else "vert"
+    crues_level = river_level.level if river_level else "vert"
+
     return {
-        "vigilance": latest_alert.level if latest_alert else "vert",
-        "crues": river_level.level if river_level else "vert",
+        "vigilance": meteo_level,
+        "crues": crues_level,
         "vigilance_risk_type": latest_alert.risk_type if latest_alert else "",
-        "global_risk": "rouge" if any(x == "rouge" for x in [latest_alert.level if latest_alert else "vert", river_level.level if river_level else "vert"]) else "orange",
+        "global_risk": "rouge" if "rouge" in [meteo_level, crues_level] else "orange" if "orange" in [meteo_level, crues_level] else "jaune" if "jaune" in [meteo_level, crues_level] else "vert",
         "communes_crise": crisis_count,
         "latest_logs": [OperationalLogOut.model_validate(log).model_dump() for log in logs],
     }
 
 
 @app.get("/external/isere/risks")
-def isere_external_risks(_: User = Depends(get_active_user)):
+def isere_external_risks(db: Session = Depends(get_db), _: User = Depends(get_active_user)):
     meteo = fetch_meteo_france_isere()
-    vigicrues = fetch_vigicrues_isere()
+    priority_names = [m.name for m in db.query(Municipality).filter(Municipality.pcs_active.is_(True)).all()]
+    vigicrues = fetch_vigicrues_isere(priority_names=priority_names)
     return {
         "updated_at": datetime.utcnow().isoformat() + "Z",
         "meteo_france": meteo,
@@ -148,12 +177,22 @@ def isere_external_risks(_: User = Depends(get_active_user)):
 
 @app.post("/weather", response_model=WeatherAlertOut)
 def create_weather_alert(alert: WeatherAlertCreate, db: Session = Depends(get_db), _: User = Depends(get_active_user)):
+    transition = (alert.previous_level.lower(), alert.level.lower())
+    if transition not in ALLOWED_WEATHER_TRANSITIONS:
+        raise HTTPException(400, "Transitions autorisées: jaune→orange et orange→rouge")
+
     entity = WeatherAlert(**alert.model_dump())
     db.add(entity)
     db.commit()
     db.refresh(entity)
     cleanup_old_weather_alerts(db)
     return entity
+
+
+@app.get("/weather/history", response_model=list[WeatherAlertOut])
+def list_weather_alerts(db: Session = Depends(get_db), _: User = Depends(get_active_user)):
+    cleanup_old_weather_alerts(db)
+    return db.query(WeatherAlert).order_by(WeatherAlert.created_at.desc()).all()
 
 
 @app.post("/weather/{alert_id}/validate")
@@ -163,7 +202,7 @@ def validate_weather(alert_id: int, db: Session = Depends(get_db), _: User = Dep
         raise HTTPException(404, "Alerte introuvable")
     alert.pcs_validated = True
     db.commit()
-    return {"status": "validated"}
+    return {"status": "validated", "manual_dispatch_required": True}
 
 
 @app.post("/municipalities", response_model=MunicipalityOut)
@@ -178,6 +217,35 @@ def create_municipality(data: MunicipalityCreate, db: Session = Depends(get_db),
 @app.get("/municipalities", response_model=list[MunicipalityOut])
 def list_municipalities(db: Session = Depends(get_db), _: User = Depends(get_active_user)):
     return db.query(Municipality).order_by(Municipality.name).all()
+
+
+@app.post("/municipalities/{municipality_id}/documents")
+def upload_municipality_docs(
+    municipality_id: int,
+    orsec_plan: UploadFile | None = File(None),
+    convention: UploadFile | None = File(None),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_active_user),
+):
+    municipality = db.get(Municipality, municipality_id)
+    if not municipality:
+        raise HTTPException(404, "Commune introuvable")
+
+    base_dir = Path(settings.upload_dir) / "municipalities"
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    if orsec_plan:
+        orsec_path = base_dir / f"{municipality_id}_orsec_{orsec_plan.filename}"
+        orsec_path.write_bytes(orsec_plan.file.read())
+        municipality.orsec_plan_file = str(orsec_path)
+
+    if convention:
+        convention_path = base_dir / f"{municipality_id}_convention_{convention.filename}"
+        convention_path.write_bytes(convention.file.read())
+        municipality.convention_file = str(convention_path)
+
+    db.commit()
+    return {"status": "uploaded", "orsec_plan_file": municipality.orsec_plan_file, "convention_file": municipality.convention_file}
 
 
 @app.post("/municipalities/{municipality_id}/crisis")
@@ -216,7 +284,7 @@ def upload_attachment(log_id: int, file: UploadFile = File(...), db: Session = D
 @app.get("/reports/pdf")
 def export_report(db: Session = Depends(get_db), _: User = Depends(get_active_user)):
     path = generate_pdf_report(db)
-    return {"report": path}
+    return {"report": path, "format": "pdf"}
 
 
 @app.post("/shares/{municipality_id}")
@@ -234,3 +302,28 @@ def create_share(municipality_id: int, password: str, db: Session = Depends(get_
     db.add(share)
     db.commit()
     return {"token": token, "expires_at": share.expires_at}
+
+
+@app.post("/shares/{token}/access")
+def access_share(token: str, payload: ShareAccessRequest, db: Session = Depends(get_db)):
+    share = db.query(PublicShare).filter(PublicShare.token == token, PublicShare.active.is_(True)).first()
+    if not share or share.expires_at < datetime.utcnow():
+        raise HTTPException(404, "Lien indisponible")
+    if not verify_password(payload.password, share.password_hash):
+        raise HTTPException(401, "Mot de passe invalide")
+    municipality = db.get(Municipality, share.municipality_id)
+    return {
+        "municipality": MunicipalityOut.model_validate(municipality).model_dump(),
+        "token": token,
+        "expires_at": share.expires_at,
+    }
+
+
+@app.delete("/shares/{token}")
+def revoke_share(token: str, db: Session = Depends(get_db), _: User = Depends(get_active_user)):
+    share = db.query(PublicShare).filter(PublicShare.token == token).first()
+    if not share:
+        raise HTTPException(404, "Lien introuvable")
+    share.active = False
+    db.commit()
+    return {"status": "revoked"}
