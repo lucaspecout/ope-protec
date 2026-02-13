@@ -74,8 +74,11 @@ async function api(path, options = {}) {
   if (!response.ok) {
     let message = 'Erreur API';
     try {
-      const payload = await response.json();
-      message = payload.detail || message;
+      const raw = await response.text();
+      if (raw) {
+        const payload = JSON.parse(raw);
+        message = payload.detail || payload.message || message;
+      }
     } catch {
       // ignore
     }
@@ -84,7 +87,14 @@ async function api(path, options = {}) {
   }
 
   if (response.status === 204) return null;
-  return response.json();
+  const raw = await response.text();
+  if (!raw) return null;
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new Error(`Réponse invalide reçue depuis ${path}`);
+  }
 }
 
 function setActivePanel(panelId) {
@@ -239,7 +249,14 @@ async function loadHomeLiveStatus() {
     const response = await fetch('/public/live');
     if (!response.ok) throw new Error('Flux temps réel indisponible');
 
-    const data = await response.json();
+    const raw = await response.text();
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      throw new Error('Flux temps réel invalide (JSON attendu)');
+    }
+
     document.getElementById('home-meteo-state').textContent = data.dashboard.vigilance || '-';
     document.getElementById('home-river-state').textContent = data.dashboard.crues || '-';
     document.getElementById('home-global-risk').textContent = data.dashboard.global_risk || '-';
