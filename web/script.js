@@ -4,6 +4,7 @@ const STORAGE_KEYS = {
 
 let token = localStorage.getItem(STORAGE_KEYS.token);
 let pendingCurrentPassword = '';
+let currentUser = null;
 
 const loginView = document.getElementById('login-view');
 const appView = document.getElementById('app-view');
@@ -18,6 +19,14 @@ function setVisibility(element, isVisible) {
   element.hidden = !isVisible;
 }
 
+function canEdit() {
+  return ['admin', 'ope'].includes(currentUser?.role);
+}
+
+function canManageUsers() {
+  return ['admin', 'ope'].includes(currentUser?.role);
+}
+
 function showApp() {
   setVisibility(loginView, false);
   setVisibility(appView, true);
@@ -29,6 +38,15 @@ function showLogin() {
   setVisibility(passwordForm, false);
   setVisibility(loginForm, true);
   pendingCurrentPassword = '';
+}
+
+function applyRoleVisibility() {
+  document.getElementById('current-role').textContent = currentUser?.role || '-';
+  document.getElementById('current-commune').textContent = currentUser?.municipality_name || 'Toutes';
+
+  document.querySelectorAll('[data-requires-edit]').forEach((node) => setVisibility(node, canEdit()));
+  const usersMenu = document.querySelector('.menu-btn[data-target="users-panel"]');
+  setVisibility(usersMenu, canManageUsers());
 }
 
 async function api(path, options = {}) {
@@ -76,7 +94,6 @@ function normalizeRisk(value) {
   if (['rouge', 'red'].includes(level)) return 'rouge';
   return level;
 }
-
 
 function normalizeAlertLevel(value) {
   if (!value) return 'green';
@@ -218,7 +235,7 @@ async function loadMunicipalities() {
     list.innerHTML = municipalities.map((m) => `
       <li>
         <strong>${m.name}</strong> — ${m.manager} (${m.phone})
-        <button data-id="${m.id}" class="crisis-toggle">${m.crisis_mode ? 'Retirer crise' : 'Mode crise'}</button>
+        ${canEdit() ? `<button data-id="${m.id}" class="crisis-toggle">${m.crisis_mode ? 'Retirer crise' : 'Mode crise'}</button>` : ''}
       </li>
     `).join('');
 
@@ -229,9 +246,18 @@ async function loadMunicipalities() {
         await loadDashboard();
       });
     });
+
+    const options = municipalities.map((m) => `<option value="${m.id}">${m.name}</option>`).join('');
+    document.getElementById('log-municipality').innerHTML = '<option value="">Toutes / non précisé</option>' + options;
+    document.getElementById('user-mairie-name').innerHTML = '<option value="">Sélectionner une commune</option>' + municipalities.map((m) => `<option value="${m.name}">${m.name}</option>`).join('');
   } catch (error) {
     dashboardError.textContent = error.message;
   }
+}
+
+async function loadCurrentUser() {
+  currentUser = await api('/auth/me');
+  applyRoleVisibility();
 }
 
 async function login(username, password) {
@@ -257,6 +283,7 @@ async function login(username, password) {
     }
 
     showApp();
+    await loadCurrentUser();
     await loadDashboard();
     await loadExternalRisks();
     await loadMunicipalities();
@@ -281,6 +308,7 @@ async function updatePassword(newPassword) {
     passwordError.textContent = '';
     pendingCurrentPassword = '';
     showApp();
+    await loadCurrentUser();
     await loadDashboard();
     await loadExternalRisks();
     await loadMunicipalities();
@@ -292,6 +320,7 @@ async function updatePassword(newPassword) {
 function logout() {
   localStorage.removeItem(STORAGE_KEYS.token);
   token = null;
+  currentUser = null;
   showLogin();
 }
 
@@ -344,6 +373,7 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
       body: JSON.stringify({
         event_type: formData.get('event_type'),
         description: formData.get('description'),
+        municipality_id: formData.get('municipality_id') || null,
       }),
     });
     event.target.reset();
@@ -351,6 +381,34 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
     await loadExternalRisks();
   } catch (error) {
     dashboardError.textContent = error.message;
+  }
+});
+
+document.getElementById('user-role').addEventListener('change', (event) => {
+  setVisibility(document.getElementById('user-mairie-name'), event.target.value === 'mairie');
+});
+
+document.getElementById('user-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const formData = new FormData(event.target);
+  try {
+    await api('/auth/register', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        username: formData.get('username'),
+        password: formData.get('password'),
+        role: formData.get('role'),
+        municipality_name: formData.get('municipality_name') || null,
+      }),
+    });
+    document.getElementById('user-error').textContent = '';
+    event.target.reset();
+    setVisibility(document.getElementById('user-mairie-name'), false);
+  } catch (error) {
+    document.getElementById('user-error').textContent = error.message;
   }
 });
 
@@ -373,7 +431,12 @@ document.querySelectorAll('.menu-btn').forEach((button) => {
   }
 
   showApp();
-  await loadDashboard();
-  await loadExternalRisks();
-  await loadMunicipalities();
+  try {
+    await loadCurrentUser();
+    await loadDashboard();
+    await loadExternalRisks();
+    await loadMunicipalities();
+  } catch {
+    logout();
+  }
 })();

@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 import secrets
+from typing import Callable
 
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -35,11 +36,13 @@ Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
 
 with engine.begin() as conn:
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT FALSE"))
+    conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS municipality_name VARCHAR(120)"))
     conn.execute(text("ALTER TABLE weather_alerts ADD COLUMN IF NOT EXISTS internal_mail_group VARCHAR(255)"))
     conn.execute(text("ALTER TABLE weather_alerts ADD COLUMN IF NOT EXISTS sent_to_internal_group BOOLEAN DEFAULT FALSE"))
     conn.execute(text("ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS contacts TEXT"))
     conn.execute(text("ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS additional_info TEXT"))
     conn.execute(text("ALTER TABLE river_stations ADD COLUMN IF NOT EXISTS is_priority BOOLEAN DEFAULT FALSE"))
+    conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS municipality_id INTEGER REFERENCES municipalities(id)"))
 
 
 app = FastAPI(title=settings.app_name)
@@ -47,6 +50,8 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 ALLOWED_WEATHER_TRANSITIONS = {("jaune", "orange"), ("orange", "rouge")}
+READ_ROLES = {"admin", "ope", "securite", "visiteur", "mairie"}
+EDIT_ROLES = {"admin", "ope"}
 
 
 def bootstrap_default_admin() -> None:
@@ -90,6 +95,24 @@ def get_active_user(user: User = Depends(get_current_user)) -> User:
     return user
 
 
+def require_roles(*roles: str) -> Callable[[User], User]:
+    allowed = set(roles)
+
+    def validator(user: User = Depends(get_active_user)) -> User:
+        if user.role not in allowed:
+            raise HTTPException(403, "Droits insuffisants")
+        return user
+
+    return validator
+
+
+def get_user_municipality_id(user: User, db: Session) -> int | None:
+    if not user.municipality_name:
+        return None
+    municipality = db.query(Municipality).filter(Municipality.name == user.municipality_name).first()
+    return municipality.id if municipality else None
+
+
 @app.get("/health")
 def healthcheck():
     return {
@@ -102,12 +125,26 @@ def healthcheck():
 
 
 @app.post("/auth/register", response_model=UserOut)
-def register(user: UserCreate, db: Session = Depends(get_db)):
+def register(user: UserCreate, db: Session = Depends(get_db), creator: User = Depends(require_roles("admin", "ope"))):
+    allowed_roles = {"admin", "ope", "securite", "visiteur", "mairie"}
+    if user.role not in allowed_roles:
+        raise HTTPException(400, "Rôle invalide")
+    if creator.role == "ope" and user.role not in {"securite", "visiteur", "mairie"}:
+        raise HTTPException(403, "Un opérateur ne peut créer que sécurité, visiteur ou mairie")
+    if user.role == "mairie" and not user.municipality_name:
+        raise HTTPException(400, "Le rôle mairie nécessite le nom de la commune")
+
     if db.query(User).count() >= 20:
         raise HTTPException(400, "Limite de 20 utilisateurs atteinte")
     if db.query(User).filter(User.username == user.username).first():
         raise HTTPException(400, "Identifiant déjà utilisé")
-    entity = User(username=user.username, hashed_password=hash_password(user.password), role=user.role)
+
+    entity = User(
+        username=user.username,
+        hashed_password=hash_password(user.password),
+        role=user.role,
+        municipality_name=user.municipality_name if user.role == "mairie" else None,
+    )
     db.add(entity)
     db.commit()
     db.refresh(entity)
@@ -124,6 +161,11 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         "token_type": "bearer",
         "must_change_password": user.must_change_password,
     }
+
+
+@app.get("/auth/me", response_model=UserOut)
+def auth_me(user: User = Depends(get_current_user)):
+    return user
 
 
 @app.post("/auth/change-password")
@@ -144,11 +186,18 @@ def toggle_2fa(payload: TwoFactorToggleRequest, db: Session = Depends(get_db), u
 
 
 @app.get("/dashboard")
-def dashboard(db: Session = Depends(get_db), _: User = Depends(get_active_user)):
+def dashboard(db: Session = Depends(get_db), user: User = Depends(require_roles(*READ_ROLES))):
     latest_alert = db.query(WeatherAlert).order_by(WeatherAlert.created_at.desc()).first()
     river_level = db.query(RiverStation).order_by(RiverStation.updated_at.desc()).first()
     crisis_count = db.query(Municipality).filter(Municipality.crisis_mode.is_(True)).count()
-    logs = db.query(OperationalLog).order_by(OperationalLog.created_at.desc()).limit(5).all()
+
+    logs_query = db.query(OperationalLog)
+    if user.role == "mairie":
+        municipality_id = get_user_municipality_id(user, db)
+        logs_query = logs_query.filter(OperationalLog.municipality_id == municipality_id)
+        crisis_count = 1 if municipality_id and db.get(Municipality, municipality_id).crisis_mode else 0
+
+    logs = logs_query.order_by(OperationalLog.created_at.desc()).limit(5).all()
 
     meteo_level = latest_alert.level if latest_alert else "vert"
     crues_level = river_level.level if river_level else "vert"
@@ -164,7 +213,7 @@ def dashboard(db: Session = Depends(get_db), _: User = Depends(get_active_user))
 
 
 @app.get("/external/isere/risks")
-def isere_external_risks(db: Session = Depends(get_db), _: User = Depends(get_active_user)):
+def isere_external_risks(db: Session = Depends(get_db), _: User = Depends(require_roles(*READ_ROLES))):
     meteo = fetch_meteo_france_isere()
     priority_names = [m.name for m in db.query(Municipality).filter(Municipality.pcs_active.is_(True)).all()]
     vigicrues = fetch_vigicrues_isere(priority_names=priority_names)
@@ -176,7 +225,7 @@ def isere_external_risks(db: Session = Depends(get_db), _: User = Depends(get_ac
 
 
 @app.post("/weather", response_model=WeatherAlertOut)
-def create_weather_alert(alert: WeatherAlertCreate, db: Session = Depends(get_db), _: User = Depends(get_active_user)):
+def create_weather_alert(alert: WeatherAlertCreate, db: Session = Depends(get_db), _: User = Depends(require_roles(*EDIT_ROLES))):
     transition = (alert.previous_level.lower(), alert.level.lower())
     if transition not in ALLOWED_WEATHER_TRANSITIONS:
         raise HTTPException(400, "Transitions autorisées: jaune→orange et orange→rouge")
@@ -190,13 +239,13 @@ def create_weather_alert(alert: WeatherAlertCreate, db: Session = Depends(get_db
 
 
 @app.get("/weather/history", response_model=list[WeatherAlertOut])
-def list_weather_alerts(db: Session = Depends(get_db), _: User = Depends(get_active_user)):
+def list_weather_alerts(db: Session = Depends(get_db), _: User = Depends(require_roles(*READ_ROLES))):
     cleanup_old_weather_alerts(db)
     return db.query(WeatherAlert).order_by(WeatherAlert.created_at.desc()).all()
 
 
 @app.post("/weather/{alert_id}/validate")
-def validate_weather(alert_id: int, db: Session = Depends(get_db), _: User = Depends(get_active_user)):
+def validate_weather(alert_id: int, db: Session = Depends(get_db), _: User = Depends(require_roles(*EDIT_ROLES))):
     alert = db.get(WeatherAlert, alert_id)
     if not alert:
         raise HTTPException(404, "Alerte introuvable")
@@ -206,7 +255,7 @@ def validate_weather(alert_id: int, db: Session = Depends(get_db), _: User = Dep
 
 
 @app.post("/municipalities", response_model=MunicipalityOut)
-def create_municipality(data: MunicipalityCreate, db: Session = Depends(get_db), _: User = Depends(get_active_user)):
+def create_municipality(data: MunicipalityCreate, db: Session = Depends(get_db), _: User = Depends(require_roles(*EDIT_ROLES))):
     municipality = Municipality(**data.model_dump())
     db.add(municipality)
     db.commit()
@@ -215,7 +264,11 @@ def create_municipality(data: MunicipalityCreate, db: Session = Depends(get_db),
 
 
 @app.get("/municipalities", response_model=list[MunicipalityOut])
-def list_municipalities(db: Session = Depends(get_db), _: User = Depends(get_active_user)):
+def list_municipalities(db: Session = Depends(get_db), user: User = Depends(require_roles(*READ_ROLES))):
+    if user.role == "mairie":
+        if not user.municipality_name:
+            return []
+        return db.query(Municipality).filter(Municipality.name == user.municipality_name).all()
     return db.query(Municipality).order_by(Municipality.name).all()
 
 
@@ -225,7 +278,7 @@ def upload_municipality_docs(
     orsec_plan: UploadFile | None = File(None),
     convention: UploadFile | None = File(None),
     db: Session = Depends(get_db),
-    _: User = Depends(get_active_user),
+    _: User = Depends(require_roles(*EDIT_ROLES)),
 ):
     municipality = db.get(Municipality, municipality_id)
     if not municipality:
@@ -249,7 +302,7 @@ def upload_municipality_docs(
 
 
 @app.post("/municipalities/{municipality_id}/crisis")
-def toggle_crisis(municipality_id: int, db: Session = Depends(get_db), _: User = Depends(get_active_user)):
+def toggle_crisis(municipality_id: int, db: Session = Depends(get_db), _: User = Depends(require_roles(*EDIT_ROLES))):
     municipality = db.get(Municipality, municipality_id)
     if not municipality:
         raise HTTPException(404, "Commune introuvable")
@@ -259,7 +312,7 @@ def toggle_crisis(municipality_id: int, db: Session = Depends(get_db), _: User =
 
 
 @app.post("/logs", response_model=OperationalLogOut)
-def create_log(data: OperationalLogCreate, db: Session = Depends(get_db), user: User = Depends(get_active_user)):
+def create_log(data: OperationalLogCreate, db: Session = Depends(get_db), user: User = Depends(require_roles(*EDIT_ROLES))):
     entry = OperationalLog(**data.model_dump(), created_by_id=user.id)
     db.add(entry)
     db.commit()
@@ -268,7 +321,7 @@ def create_log(data: OperationalLogCreate, db: Session = Depends(get_db), user: 
 
 
 @app.post("/logs/{log_id}/attachment")
-def upload_attachment(log_id: int, file: UploadFile = File(...), db: Session = Depends(get_db), _: User = Depends(get_active_user)):
+def upload_attachment(log_id: int, file: UploadFile = File(...), db: Session = Depends(get_db), _: User = Depends(require_roles(*EDIT_ROLES))):
     if not file.filename.lower().endswith((".pdf", ".png", ".jpg", ".jpeg")):
         raise HTTPException(400, "Type de fichier interdit")
     log = db.get(OperationalLog, log_id)
@@ -282,13 +335,13 @@ def upload_attachment(log_id: int, file: UploadFile = File(...), db: Session = D
 
 
 @app.get("/reports/pdf")
-def export_report(db: Session = Depends(get_db), _: User = Depends(get_active_user)):
+def export_report(db: Session = Depends(get_db), _: User = Depends(require_roles(*READ_ROLES))):
     path = generate_pdf_report(db)
     return {"report": path, "format": "pdf"}
 
 
 @app.post("/shares/{municipality_id}")
-def create_share(municipality_id: int, password: str, db: Session = Depends(get_db), _: User = Depends(get_active_user)):
+def create_share(municipality_id: int, password: str, db: Session = Depends(get_db), _: User = Depends(require_roles(*EDIT_ROLES))):
     municipality = db.get(Municipality, municipality_id)
     if not municipality:
         raise HTTPException(404, "Commune introuvable")
@@ -320,7 +373,7 @@ def access_share(token: str, payload: ShareAccessRequest, db: Session = Depends(
 
 
 @app.delete("/shares/{token}")
-def revoke_share(token: str, db: Session = Depends(get_db), _: User = Depends(get_active_user)):
+def revoke_share(token: str, db: Session = Depends(get_db), _: User = Depends(require_roles(*EDIT_ROLES))):
     share = db.query(PublicShare).filter(PublicShare.token == token).first()
     if not share:
         raise HTTPException(404, "Lien introuvable")

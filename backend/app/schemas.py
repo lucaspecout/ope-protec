@@ -13,12 +13,14 @@ class UserCreate(BaseModel):
     username: str
     password: str
     role: str
+    municipality_name: str | None = None
 
 
 class UserOut(BaseModel):
     id: int
     username: str
     role: str
+    municipality_name: str | None = None
     two_factor_enabled: bool
 
     class Config:
@@ -75,6 +77,7 @@ class MunicipalityOut(BaseModel):
 class OperationalLogCreate(BaseModel):
     event_type: str
     description: str
+    municipality_id: int | None = None
 
 
 class OperationalLogOut(BaseModel):

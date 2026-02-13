@@ -35,12 +35,15 @@
         <div>
           <p class="eyebrow">Protection Civile 38</p>
           <h2>Ops Dashboard</h2>
+          <p class="help">Rôle: <strong id="current-role">-</strong></p>
+          <p class="help">Commune: <strong id="current-commune">Toutes</strong></p>
         </div>
         <nav class="menu">
           <button class="menu-btn active" data-target="dashboard-panel">Dashboard</button>
           <button class="menu-btn" data-target="municipalities-panel">Communes</button>
           <button class="menu-btn" data-target="logs-panel">Main courante</button>
           <button class="menu-btn" data-target="map-panel">Carte</button>
+          <button class="menu-btn" data-target="users-panel">Comptes et droits</button>
         </nav>
         <button id="logout-btn" class="logout">Déconnexion</button>
       </aside>
@@ -81,7 +84,7 @@
         </section>
 
         <section id="municipalities-panel" class="panel hidden" hidden>
-          <article class="card">
+          <article class="card" data-requires-edit>
             <h2>Ajouter une commune</h2>
             <form id="municipality-form" class="inline-form">
               <input name="name" placeholder="Nom" required />
@@ -98,11 +101,12 @@
         </section>
 
         <section id="logs-panel" class="panel hidden" hidden>
-          <article class="card">
+          <article class="card" data-requires-edit>
             <h2>Nouvelle entrée main courante</h2>
             <form id="log-form" class="inline-form">
               <input name="event_type" placeholder="Type d'évènement" required />
               <input name="description" placeholder="Description" required />
+              <select id="log-municipality" name="municipality_id"></select>
               <button type="submit">Ajouter</button>
             </form>
           </article>
@@ -116,6 +120,27 @@
               src="https://www.openstreetmap.org/export/embed.html?bbox=5.3%2C44.8%2C6.7%2C45.7&layer=mapnik"
               class="map"
             ></iframe>
+          </article>
+        </section>
+
+        <section id="users-panel" class="panel hidden" hidden>
+          <article class="card">
+            <h2>Créer un compte avec droits</h2>
+            <form id="user-form" class="inline-form">
+              <input name="username" placeholder="Identifiant" required />
+              <input name="password" type="password" placeholder="Mot de passe" required />
+              <select id="user-role" name="role" required>
+                <option value="securite">Sécurité (lecture)</option>
+                <option value="visiteur">Visiteur (lecture)</option>
+                <option value="mairie">Mairie (commune)</option>
+                <option value="ope">Opérateur</option>
+                <option value="admin">Admin</option>
+              </select>
+              <select id="user-mairie-name" name="municipality_name" class="hidden" hidden></select>
+              <button type="submit">Créer le compte</button>
+            </form>
+            <p class="help">Admin: accès complet · OPE: modification · Sécurité/Visiteur: lecture · Mairie: accès limité à sa commune.</p>
+            <p id="user-error" class="error"></p>
           </article>
         </section>
       </section>
