@@ -27,8 +27,10 @@ services:
       timeout: 5s
       retries: 5
 
-  backend:
-    build: ./backend
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
     restart: always
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/veille
@@ -39,15 +41,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    ports:
-      - "4568:8000"
-
-  web:
-    build: ./web
-    restart: always
-    depends_on:
-      backend:
-        condition: service_started
     ports:
       - "1182:80"
 
