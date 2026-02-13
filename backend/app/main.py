@@ -127,6 +127,42 @@ def healthcheck():
     }
 
 
+@app.get("/public/live")
+def public_live_status(db: Session = Depends(get_db)):
+    latest_alert = db.query(WeatherAlert).order_by(WeatherAlert.created_at.desc()).first()
+    latest_station = db.query(RiverStation).order_by(RiverStation.updated_at.desc()).first()
+    crisis_count = db.query(Municipality).filter(Municipality.crisis_mode.is_(True)).count()
+
+    meteo_level = (latest_alert.level if latest_alert else "vert").lower()
+    crues_level = (latest_station.level if latest_station else "vert").lower()
+    global_risk = "rouge" if "rouge" in [meteo_level, crues_level] else "orange" if "orange" in [meteo_level, crues_level] else "jaune" if "jaune" in [meteo_level, crues_level] else "vert"
+
+    meteo = fetch_meteo_france_isere()
+    priority_names = [m.name for m in db.query(Municipality).filter(Municipality.pcs_active.is_(True)).all()]
+    vigicrues = fetch_vigicrues_isere(priority_names=priority_names)
+
+    return {
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+        "dashboard": {
+            "vigilance": meteo_level,
+            "crues": crues_level,
+            "global_risk": global_risk,
+            "communes_crise": crisis_count,
+        },
+        "meteo_france": {
+            "status": meteo.get("status", "unknown"),
+            "department": meteo.get("department", "Isère"),
+            "level": meteo.get("level", "n/a"),
+            "title": meteo.get("bulletin_title", ""),
+        },
+        "vigicrues": {
+            "status": vigicrues.get("status", "unknown"),
+            "water_alert_level": vigicrues.get("water_alert_level", "vert"),
+            "station_count": len(vigicrues.get("stations", [])),
+        },
+    }
+
+
 @app.post("/auth/register", response_model=UserOut)
 def register(user: UserCreate, db: Session = Depends(get_db), creator: User = Depends(require_roles("admin", "ope"))):
     allowed_roles = {"admin", "ope", "securite", "visiteur", "mairie"}
