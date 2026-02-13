@@ -175,7 +175,16 @@
         <section id="map-panel" class="panel view hidden" hidden>
           <h3>Carte stratégique Isère</h3>
           <div class="map-layout">
-            <div id="isere-map-leaflet" class="isere-map" role="img" aria-label="Carte interactive du département de l'Isère"></div>
+            <svg class="isere-map" viewBox="0 0 420 520" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Carte réelle du département de l'Isère">
+              <g id="itinerary-layer"></g>
+              <path id="isere-shape" d="M143 33l46 26 48-8 29 36 45 17-1 48 36 43-15 56-41 35-2 53-45 31-31 52-56 25-48-31-54-4-32-34 3-44-34-40 11-58 40-32 6-51 35-29 10-47z"/>
+              <g id="river-layer">
+                <path class="river" d="M116 112c58 11 76 29 103 65 23 31 42 70 88 104"/>
+                <path class="river" d="M205 76c-18 58-30 123-26 188"/>
+              </g>
+              <g id="hydro-layer"></g>
+              <g id="pcs-layer"></g>
+            </svg>
             <div>
               <p>Niveau météo <strong id="meteo-level">-</strong></p>
               <p>Niveau hydrologique <strong id="river-level">-</strong></p>
