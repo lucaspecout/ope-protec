@@ -4,15 +4,21 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>CRISIS38 · Centre opérationnel Isère</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
+  <div class="bg-glow bg-glow-a"></div>
+  <div class="bg-glow bg-glow-b"></div>
+
   <main>
     <section id="login-view" class="auth-wrap">
       <form id="login-form" class="panel auth-card" method="post" action="#" autocomplete="off">
         <p class="tag">Protection Civile · Isère</p>
         <h1>CRISIS38</h1>
-        <p>Application de gestion des opérations de crise départementales.</p>
+        <p class="lead">Plateforme de pilotage des opérations de crise départementales, pensée pour une prise de décision rapide.</p>
         <label>Identifiant<input name="username" required /></label>
         <label>Mot de passe<input name="password" type="password" required /></label>
         <button type="submit">Connexion sécurisée</button>
@@ -21,7 +27,7 @@
 
       <form id="password-form" class="panel auth-card hidden" hidden method="post" action="#" autocomplete="off">
         <h2>Changement de mot de passe</h2>
-        <p>Le mot de passe temporaire doit être remplacé.</p>
+        <p class="lead">Le mot de passe temporaire doit être remplacé.</p>
         <label>Nouveau mot de passe<input name="new_password" type="password" minlength="8" required /></label>
         <button type="submit">Valider</button>
         <p id="password-error" class="error"></p>
@@ -30,7 +36,7 @@
 
     <section id="app-view" class="app hidden" hidden>
       <aside class="panel sidebar">
-        <div>
+        <div class="sidebar-header">
           <p class="tag">Centre de commandement</p>
           <h2>Isère · 38</h2>
           <p class="muted">Rôle: <strong id="current-role">-</strong></p>
@@ -49,9 +55,12 @@
 
       <section class="content">
         <header class="panel hero">
-          <h1>Gestion intégrée des opérations de crise</h1>
+          <div>
+            <p class="tag">Tableau de bord en temps réel</p>
+            <h1>Gestion intégrée des opérations de crise</h1>
+            <p class="muted">Surveillance météo, crues, communes et coordination inter-services pour l'Isère.</p>
+          </div>
           <p id="dashboard-error" class="error"></p>
-          <p class="muted">Surveillance météo, crues, communes et coordination inter-services pour l'Isère.</p>
         </header>
 
         <section id="situation-panel" class="panel view">
