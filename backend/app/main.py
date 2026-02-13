@@ -28,7 +28,13 @@ from .schemas import (
     WeatherAlertOut,
 )
 from .security import create_access_token, hash_password, verify_password
-from .services import cleanup_old_weather_alerts, fetch_meteo_france_isere, fetch_vigicrues_isere, generate_pdf_report
+from .services import (
+    cleanup_old_weather_alerts,
+    fetch_isere_boundary_geojson,
+    fetch_meteo_france_isere,
+    fetch_vigicrues_isere,
+    generate_pdf_report,
+)
 
 Base.metadata.create_all(bind=engine)
 Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
@@ -161,6 +167,11 @@ def public_live_status(db: Session = Depends(get_db)):
             "station_count": len(vigicrues.get("stations", [])),
         },
     }
+
+
+@app.get("/public/isere-map")
+def public_isere_map():
+    return fetch_isere_boundary_geojson()
 
 
 @app.post("/auth/register", response_model=UserOut)

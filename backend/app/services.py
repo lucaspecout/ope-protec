@@ -79,13 +79,18 @@ def fetch_meteo_france_isere() -> dict[str, Any]:
         html = _http_get_text(source_url)
         title_match = re.search(r"<title>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
         desc_match = re.search(r'<meta name="description" content="(.*?)"', html, re.IGNORECASE)
+        color_match = re.search(r"vigilance (verte|jaune|orange|rouge)", html, re.IGNORECASE)
+        level = color_match.group(1).lower() if color_match else "inconnu"
+        level = "vert" if level == "verte" else level
         return {
             "service": "Météo-France Vigilance",
             "department": "Isère (38)",
             "status": "online",
             "source": source_url,
+            "level": level,
             "bulletin_title": title_match.group(1).strip() if title_match else "Vigilance Météo Isère",
             "info_state": desc_match.group(1).replace("&#039;", "'") if desc_match else "Informations disponibles",
+            "updated_at": datetime.utcnow().isoformat() + "Z",
         }
     except (HTTPError, URLError, TimeoutError, ValueError) as exc:
         return {
@@ -93,7 +98,36 @@ def fetch_meteo_france_isere() -> dict[str, Any]:
             "department": "Isère (38)",
             "status": "degraded",
             "source": source_url,
+            "level": "inconnu",
             "info_state": f"indisponible ({exc})",
+        }
+
+
+def fetch_isere_boundary_geojson() -> dict[str, Any]:
+    source_url = "https://france-geojson.gregoiredavid.fr/repo/departements/38-isere/departement-38-isere.geojson"
+    try:
+        data = _http_get_json(source_url)
+        geometry = data.get("geometry", {})
+        if geometry.get("type") not in {"Polygon", "MultiPolygon"}:
+            raise ValueError("Format géométrique inattendu")
+
+        return {
+            "status": "online",
+            "source": source_url,
+            "geometry": geometry,
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+        return {
+            "status": "degraded",
+            "source": source_url,
+            "error": str(exc),
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[
+                    [5.09, 45.07], [5.63, 45.61], [6.45, 45.28], [6.35, 44.84], [5.73, 44.63], [5.15, 44.82], [5.09, 45.07],
+                ]],
+            },
         }
 
 
