@@ -1,0 +1,13 @@
+{
+  "name": "interactive-map-isere",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Carte Leaflet Isère avec proxies Météo-France, Vigicrues et Itinisère",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
