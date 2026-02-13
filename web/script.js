@@ -77,6 +77,56 @@ function normalizeRisk(value) {
   return level;
 }
 
+
+function normalizeAlertLevel(value) {
+  if (!value) return 'green';
+  const level = String(value).toLowerCase();
+  if (['vert', 'green', 'vigilance verte'].includes(level)) return 'green';
+  if (['jaune', 'yellow', 'vigilance jaune'].includes(level)) return 'yellow';
+  if (['orange', 'amber', 'vigilance orange'].includes(level)) return 'orange';
+  if (['rouge', 'red', 'vigilance rouge'].includes(level)) return 'red';
+  return 'green';
+}
+
+function levelLabel(level) {
+  return {
+    green: 'Vert',
+    yellow: 'Jaune',
+    orange: 'Orange',
+    red: 'Rouge',
+  }[level] || 'Vert';
+}
+
+function setMiniMapLevels(meteoValue, riverValue) {
+  const meteoLevel = normalizeAlertLevel(meteoValue);
+  const riverLevel = normalizeAlertLevel(riverValue);
+
+  const meteoClasses = ['meteo-green', 'meteo-yellow', 'meteo-orange', 'meteo-red'];
+  const riverClasses = ['river-green', 'river-yellow', 'river-orange', 'river-red'];
+
+  const isereShape = document.getElementById('isere-shape');
+  const meteoChip = document.getElementById('meteo-chip');
+  const riverChip = document.getElementById('river-chip');
+  const riverPaths = document.querySelectorAll('.river');
+
+  isereShape.classList.remove(...meteoClasses);
+  isereShape.classList.add(`meteo-${meteoLevel}`);
+
+  meteoChip.classList.remove(...meteoClasses);
+  meteoChip.classList.add(`meteo-${meteoLevel}`);
+
+  riverChip.classList.remove(...riverClasses);
+  riverChip.classList.add(`river-${riverLevel}`);
+
+  riverPaths.forEach((path) => {
+    path.classList.remove(...riverClasses);
+    path.classList.add(`river-${riverLevel}`);
+  });
+
+  document.getElementById('meteo-level').textContent = levelLabel(meteoLevel);
+  document.getElementById('river-level').textContent = levelLabel(riverLevel);
+}
+
 function renderLogs(logs) {
   document.getElementById('logs').innerHTML = logs
     .map((log) => `<li>${new Date(log.created_at).toLocaleString()} - ${log.event_type}</li>`)
@@ -89,6 +139,7 @@ async function loadDashboard() {
     const data = await api('/dashboard');
     document.getElementById('vigilance').textContent = data.vigilance;
     document.getElementById('crues').textContent = data.crues;
+    setMiniMapLevels(data.vigilance, data.crues);
 
     const riskValue = normalizeRisk(data.global_risk);
     const risk = document.getElementById('risk');

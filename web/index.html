@@ -57,6 +57,22 @@
           <article class="card metric"><h2>Niveau crues</h2><p id="crues">-</p></article>
           <article class="card metric"><h2>Risque global</h2><p id="risk">-</p></article>
           <article class="card metric"><h2>Communes en crise</h2><p id="crisis">0</p></article>
+          <article class="card mini-map-card">
+            <h2>Mini-carte Isère</h2>
+            <p class="map-caption">Fond coloré Météo-France + surcouche cours d'eau Vigicrues.</p>
+            <svg viewBox="0 0 240 240" class="isere-map" role="img" aria-labelledby="isere-map-title isere-map-desc">
+              <title id="isere-map-title">Mini-carte de l'Isère</title>
+              <desc id="isere-map-desc">La couleur de fond montre la vigilance météo, les tracés bleus montrent la vigilance crues.</desc>
+              <path id="isere-shape" class="meteo-green" d="M119 18 146 29 164 42 184 40 201 56 191 80 208 104 188 131 195 153 182 174 158 184 149 207 128 223 102 216 84 201 68 205 49 188 36 166 41 142 26 122 41 99 31 76 52 58 65 36 87 42 103 28z"/>
+              <path id="river-isere" class="river river-green" d="M54 165 C81 151, 98 140, 121 120 S170 90, 197 71"/>
+              <path id="river-roman" class="river river-green" d="M83 181 C102 163, 115 151, 127 139"/>
+              <path id="river-drome" class="river river-green" d="M107 203 C121 182, 132 170, 146 155"/>
+            </svg>
+            <ul class="map-legend">
+              <li><span id="meteo-chip" class="legend-chip meteo-green"></span>Météo-France: <strong id="meteo-level">Vert</strong></li>
+              <li><span id="river-chip" class="legend-chip river-green"></span>Vigicrues: <strong id="river-level">Vert</strong></li>
+            </ul>
+          </article>
           <article class="card logs"><h2>Dernières entrées main courante</h2><ul id="logs" class="list"></ul></article>
         </section>
 
