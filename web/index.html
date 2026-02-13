@@ -139,7 +139,22 @@
         <section id="services-panel" class="panel view hidden" hidden>
           <h3>Écosystème de données et services connectés (Isère)</h3>
           <div class="services-grid">
-            <article class="service-card"><h4>Météo-France Vigilance</h4><p id="meteo-status">-</p><p id="meteo-info" class="muted"></p></article>
+            <article class="service-card">
+              <h4>Météo-France Vigilance</h4>
+              <p id="meteo-status">-</p>
+              <p id="meteo-info" class="muted"></p>
+              <!-- Debut code vignette vigilance départementale  Météo-France -->
+              <iframe
+                class="meteo-widget"
+                src="https://vigilance.meteofrance.fr/fr/widget-vigilance/vigilance-departement/38"
+                width="302"
+                height="122"
+                frameborder="0"
+                title="Vignette vigilance départementale Météo-France"
+                loading="lazy"
+              ></iframe>
+              <!-- FIN -->
+            </article>
             <article class="service-card"><h4>Vigicrues</h4><p id="vigicrues-status">-</p><p id="vigicrues-info" class="muted"></p></article>
             <article class="service-card"><h4>Préfecture de l'Isère</h4><p>Coordination institutionnelle</p><a href="https://www.isere.gouv.fr" target="_blank" rel="noreferrer">isère.gouv.fr</a></article>
             <article class="service-card"><h4>Vigicrues Flash</h4><p>Veille pluie-inondation</p><a href="https://www.vigicrues.gouv.fr" target="_blank" rel="noreferrer">vigicrues.gouv.fr</a></article>

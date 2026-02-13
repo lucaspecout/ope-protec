@@ -130,6 +130,7 @@ label { display: block; margin-bottom: .8rem; }
 .services-grid { display: grid; gap: .65rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
 .service-card { border: 1px solid var(--line); border-radius: 12px; padding: .8rem; background: linear-gradient(180deg, #fff, #f7faff); }
 .service-card a { color: #0b4daa; font-weight: 600; }
+.meteo-widget { display: block; max-width: 100%; margin-top: .6rem; border: 0; border-radius: 8px; }
 .form { display: grid; gap: .6rem; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: .8rem; }
 
 .map-layout { display: grid; gap: .8rem; grid-template-columns: minmax(290px, 520px) 1fr; }
