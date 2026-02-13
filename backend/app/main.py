@@ -32,8 +32,10 @@ from .services import (
     cleanup_old_weather_alerts,
     fetch_isere_boundary_geojson,
     fetch_meteo_france_isere,
+    fetch_itinisere_disruptions,
     fetch_vigicrues_isere,
     generate_pdf_report,
+    vigicrues_geojson_from_stations,
 )
 
 Base.metadata.create_all(bind=engine)
@@ -275,10 +277,12 @@ def isere_external_risks(db: Session = Depends(get_db), _: User = Depends(requir
     meteo = fetch_meteo_france_isere()
     priority_names = [m.name for m in db.query(Municipality).filter(Municipality.pcs_active.is_(True)).all()]
     vigicrues = fetch_vigicrues_isere(priority_names=priority_names)
+    itinisere = fetch_itinisere_disruptions()
     return {
         "updated_at": datetime.utcnow().isoformat() + "Z",
         "meteo_france": meteo,
         "vigicrues": vigicrues,
+        "itinisere": itinisere,
     }
 
 
@@ -288,20 +292,34 @@ def interactive_map_meteo_vigilance():
 
 
 @app.get("/api/vigicrues/geojson")
-def interactive_map_vigicrues_geojson():
-    return {
-        "type": "FeatureCollection",
-        "features": [],
-        "source": "https://www.vigicrues.gouv.fr",
-    }
+def interactive_map_vigicrues_geojson(db: Session = Depends(get_db), _: User = Depends(require_roles(*READ_ROLES))):
+    priority_names = [m.name for m in db.query(Municipality).filter(Municipality.pcs_active.is_(True)).all()]
+    vigicrues = fetch_vigicrues_isere(priority_names=priority_names, station_limit=60)
+    return vigicrues_geojson_from_stations(vigicrues.get("stations", []))
 
 
 @app.get("/api/itinisere/events")
-def interactive_map_itinisere_events():
+def interactive_map_itinisere_events(_: User = Depends(require_roles(*READ_ROLES))):
+    return fetch_itinisere_disruptions()
+
+
+@app.get("/supervision/overview")
+def supervision_overview(db: Session = Depends(get_db), _: User = Depends(require_roles(*READ_ROLES))):
+    meteo = fetch_meteo_france_isere()
+    priority_names = [m.name for m in db.query(Municipality).filter(Municipality.pcs_active.is_(True)).all()]
+    vigicrues = fetch_vigicrues_isere(priority_names=priority_names, station_limit=12)
+    itinisere = fetch_itinisere_disruptions(limit=8)
+    crisis = db.query(Municipality).filter(Municipality.crisis_mode.is_(True)).all()
+    latest_logs = db.query(OperationalLog).order_by(OperationalLog.created_at.desc()).limit(10).all()
     return {
-        "events": [],
-        "source": "https://www.itinisere.fr",
-        "status": "degraded",
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+        "alerts": {
+            "meteo": meteo,
+            "vigicrues": vigicrues,
+            "itinisere": itinisere,
+        },
+        "crisis_municipalities": [MunicipalityOut.model_validate(c).model_dump() for c in crisis],
+        "timeline": [OperationalLogOut.model_validate(log).model_dump() for log in latest_logs],
     }
 
 

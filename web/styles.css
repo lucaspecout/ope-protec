@@ -169,3 +169,5 @@ svg text { font-size: 14px; fill: #17335f; }
 }
 
 #map-source { font-size: .86rem; }
+
+.leaflet-map { min-height: 520px; width: 100%; border-radius: 12px; border: 1px solid #ccdbf4; }
