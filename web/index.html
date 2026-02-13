@@ -37,16 +37,13 @@
           </div>
         </div>
         <article class="hero-status panel">
-          <h3>Simulation en direct</h3>
-          <p>Niveau météo <strong id="home-meteo-state">Vert</strong></p>
-          <p>Niveau crues <strong id="home-river-state">Vert</strong></p>
-          <p>Cellule active <strong id="home-cell-state">Veille</strong></p>
-          <div class="simulator-controls" role="group" aria-label="Niveaux d'alerte">
-            <button class="alert-btn active" data-level="vert" type="button">Vert</button>
-            <button class="alert-btn" data-level="jaune" type="button">Jaune</button>
-            <button class="alert-btn" data-level="orange" type="button">Orange</button>
-            <button class="alert-btn" data-level="rouge" type="button">Rouge</button>
-          </div>
+          <h3>Données temps réel · Isère</h3>
+          <p>Niveau météo <strong id="home-meteo-state">-</strong></p>
+          <p>Niveau crues <strong id="home-river-state">-</strong></p>
+          <p>Risque global <strong id="home-global-risk">-</strong></p>
+          <p>Communes en crise <strong id="home-crisis-count">0</strong></p>
+          <p class="muted" id="home-live-updated">Dernière mise à jour: -</p>
+          <p class="error" id="home-live-error"></p>
         </article>
       </section>
 
@@ -70,14 +67,8 @@
       </section>
 
       <section id="home-actions" class="panel quick-actions">
-        <h2>Actions rapides</h2>
-        <div class="actions-grid">
-          <button class="quick-btn" data-message="✅ Checklist COD chargée et prête à l'emploi.">Checklist COD</button>
-          <button class="quick-btn" data-message="📞 Script d'appel préfectoral préparé.">Alerter préfecture</button>
-          <button class="quick-btn" data-message="🚧 Procédure inondation affichée.">Procédure inondation</button>
-          <button class="quick-btn" data-message="🛰️ Canal inter-services activé.">Canal inter-services</button>
-        </div>
-        <p id="quick-result" class="quick-result">Cliquez sur une action pour obtenir une réponse immédiate.</p>
+        <h2>Vue opérationnelle immédiate</h2>
+        <p class="muted">L'accueil affiche uniquement des données réelles consolidées (base locale + services institutionnels). Connectez-vous pour la main courante, les communes et les documents ORSEC.</p>
       </section>
     </section>
 

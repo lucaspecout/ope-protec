@@ -12,6 +12,7 @@ let token = localStorage.getItem(STORAGE_KEYS.token);
 let currentUser = null;
 let pendingCurrentPassword = '';
 let refreshTimer = null;
+let homeLiveTimer = null;
 
 const homeView = document.getElementById('home-view');
 const loginView = document.getElementById('login-view');
@@ -231,28 +232,29 @@ function bindHomeInteractions() {
     document.getElementById('home-actions')?.scrollIntoView({ behavior: 'smooth' });
   });
 
-  const levels = {
-    vert: { meteo: 'Vert', river: 'Vert', cell: 'Veille' },
-    jaune: { meteo: 'Jaune', river: 'Surveillance', cell: 'Pré-alerte' },
-    orange: { meteo: 'Orange', river: 'Fortes tensions', cell: 'Activation partielle' },
-    rouge: { meteo: 'Rouge', river: 'Critique', cell: 'Cellule de crise active' },
-  };
+}
 
-  document.querySelectorAll('.alert-btn').forEach((button) => {
-    button.addEventListener('click', () => {
-      document.querySelectorAll('.alert-btn').forEach((node) => node.classList.toggle('active', node === button));
-      const state = levels[button.dataset.level] || levels.vert;
-      document.getElementById('home-meteo-state').textContent = state.meteo;
-      document.getElementById('home-river-state').textContent = state.river;
-      document.getElementById('home-cell-state').textContent = state.cell;
-    });
-  });
+async function loadHomeLiveStatus() {
+  try {
+    const response = await fetch('/public/live');
+    if (!response.ok) throw new Error('Flux temps réel indisponible');
 
-  document.querySelectorAll('.quick-btn').forEach((button) => {
-    button.addEventListener('click', () => {
-      document.getElementById('quick-result').textContent = button.dataset.message;
-    });
-  });
+    const data = await response.json();
+    document.getElementById('home-meteo-state').textContent = data.dashboard.vigilance || '-';
+    document.getElementById('home-river-state').textContent = data.dashboard.crues || '-';
+    document.getElementById('home-global-risk').textContent = data.dashboard.global_risk || '-';
+    document.getElementById('home-crisis-count').textContent = String(data.dashboard.communes_crise ?? 0);
+    document.getElementById('home-live-updated').textContent = `Dernière mise à jour: ${new Date(data.updated_at).toLocaleString()}`;
+    document.getElementById('home-live-error').textContent = '';
+  } catch (error) {
+    document.getElementById('home-live-error').textContent = error.message;
+  }
+}
+
+function startHomeLiveRefresh() {
+  if (homeLiveTimer) clearInterval(homeLiveTimer);
+  loadHomeLiveStatus();
+  homeLiveTimer = setInterval(loadHomeLiveStatus, 60000);
 }
 
 function bindAppInteractions() {
@@ -376,6 +378,7 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
 (async function bootstrap() {
   bindHomeInteractions();
   bindAppInteractions();
+  startHomeLiveRefresh();
 
   if (!token) {
     showHome();
