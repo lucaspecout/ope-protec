@@ -238,6 +238,10 @@
     </section>
   </main>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <!-- Compatibilité avec d'anciens scripts qui pilotent #isere-shape. -->
+  <svg aria-hidden="true" width="0" height="0" focusable="false" style="position:absolute">
+    <path id="isere-shape" d="M0 0h1v1H0z"></path>
+  </svg>
   <script src="/script.js"></script>
 </body>
 </html>
