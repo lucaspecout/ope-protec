@@ -34,7 +34,7 @@ services:
     build: ./web
     restart: always
     ports:
-      - "8080:80"
+      - "1182:80"
     depends_on:
       - backend
 
