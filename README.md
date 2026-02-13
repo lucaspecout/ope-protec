@@ -65,3 +65,10 @@ Retourne un bloc consolidé :
 - Cartographie/PCS: fiche commune enrichissable (contacts, pièces ORSEC/conventions), mode crise, partage public par lien avec mot de passe et révocation.
 - Rapports: export PDF contenant synthèse, chronologie et rappels carte/graphes.
 - Sécurité: rôles, limite 20 utilisateurs, option d'activation 2FA par utilisateur.
+
+
+## Nouveaux flux de supervision
+
+- `GET /supervision/overview` : consolidation prête à l'emploi (Météo-France + Vigicrues + Itinisère + communes en crise + timeline).
+- `GET /api/vigicrues/geojson` : stations Vigicrues Isère en GeoJSON pour cartographie interactive.
+- `GET /api/itinisere/events` : perturbations Itinisère en direct via le flux RSS officiel.

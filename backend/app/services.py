@@ -4,7 +4,9 @@ from pathlib import Path
 import re
 from typing import Any
 from urllib.error import HTTPError, URLError
+from urllib.parse import quote_plus
 from urllib.request import Request, urlopen
+import xml.etree.ElementTree as ET
 
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
@@ -61,13 +63,13 @@ def generate_pdf_report(db: Session, report_name: str = "rapport_veille.pdf") ->
     return report_path
 
 
-def _http_get_json(url: str, timeout: int = 8) -> Any:
+def _http_get_json(url: str, timeout: int = 10) -> Any:
     request = Request(url, headers={"User-Agent": "ope-protec/1.0"})
     with urlopen(request, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
-def _http_get_text(url: str, timeout: int = 8) -> str:
+def _http_get_text(url: str, timeout: int = 10) -> str:
     request = Request(url, headers={"User-Agent": "ope-protec/1.0"})
     with urlopen(request, timeout=timeout) as response:
         return response.read().decode("utf-8", errors="ignore")
@@ -141,8 +143,20 @@ def _vigicrues_level_from_delta(delta_m: float) -> str:
     return "vert"
 
 
+def _commune_center(code_insee: str) -> tuple[float, float] | None:
+    try:
+        payload = _http_get_json(f"https://geo.api.gouv.fr/communes/{quote_plus(code_insee)}?fields=centre")
+        coordinates = payload.get("centre", {}).get("coordinates")
+        if not coordinates or len(coordinates) != 2:
+            return None
+        lon, lat = coordinates
+        return float(lat), float(lon)
+    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
+        return None
+
+
 def fetch_vigicrues_isere(
-    sample_size: int = 240,
+    sample_size: int = 220,
     station_limit: int | None = None,
     priority_names: list[str] | None = None,
 ) -> dict[str, Any]:
@@ -153,18 +167,23 @@ def fetch_vigicrues_isere(
         observations = _http_get_json(f"{base_url}/observations.json?GrdSerie=H&FormatSortie=simple")
         station_codes = [code for _, code in observations.get("Observations", {}).get("ListeStation", [])][:sample_size]
         isere_stations: list[dict[str, Any]] = []
+        commune_cache: dict[str, tuple[float, float] | None] = {}
 
         for code in station_codes:
             try:
                 station = _http_get_json(f"{base_url}/station.json?CdStationHydro={code}")
-            except (HTTPError, URLError, TimeoutError, ValueError):
+            except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
                 continue
 
             commune_code = str(station.get("CdCommune", ""))
             if not commune_code.startswith("38"):
                 continue
 
-            series = _http_get_json(f"{base_url}/observations.json?CdStationHydro={code}&GrdSerie=H&FormatSortie=simple")
+            try:
+                series = _http_get_json(f"{base_url}/observations.json?CdStationHydro={code}&GrdSerie=H&FormatSortie=simple")
+            except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
+                continue
+
             values = series.get("Serie", {}).get("ObssHydro", [])
             if not values:
                 continue
@@ -175,6 +194,10 @@ def fetch_vigicrues_isere(
             station_name = station.get("LbStationHydro", "")
             river_name = station.get("LbCoursEau", "")
             station_blob = f"{station_name} {river_name}".lower()
+
+            if commune_code not in commune_cache:
+                commune_cache[commune_code] = _commune_center(commune_code)
+            commune_center = commune_cache[commune_code]
 
             is_priority = "grenoble" in station_blob or any(name in station_blob for name in priority_names)
             isere_stations.append(
@@ -187,6 +210,9 @@ def fetch_vigicrues_isere(
                     "level": _vigicrues_level_from_delta(abs(delta)),
                     "is_priority": is_priority,
                     "observed_at": datetime.utcfromtimestamp(int(latest_ts) / 1000).isoformat() + "Z",
+                    "lat": commune_center[0] if commune_center else None,
+                    "lon": commune_center[1] if commune_center else None,
+                    "commune_code": commune_code,
                 }
             )
 
@@ -206,6 +232,7 @@ def fetch_vigicrues_isere(
             "source": "https://www.vigicrues.gouv.fr",
             "water_alert_level": global_level,
             "stations": isere_stations,
+            "updated_at": datetime.utcnow().isoformat() + "Z",
         }
     except (HTTPError, URLError, TimeoutError, ValueError) as exc:
         return {
@@ -217,3 +244,71 @@ def fetch_vigicrues_isere(
             "stations": [],
             "error": str(exc),
         }
+
+
+def fetch_itinisere_disruptions(limit: int = 20) -> dict[str, Any]:
+    source = "https://www.itinisere.fr/fr/rss/Disruptions"
+    try:
+        xml_payload = _http_get_text(source)
+        root = ET.fromstring(xml_payload)
+        events: list[dict[str, Any]] = []
+        for item in root.findall(".//item")[:limit]:
+            title = (item.findtext("title") or "Perturbation").strip()
+            description = re.sub(r"\s+", " ", (item.findtext("description") or "").strip())
+            published = (item.findtext("pubDate") or "").strip()
+            link = (item.findtext("link") or "https://www.itinisere.fr").strip()
+            events.append(
+                {
+                    "title": title,
+                    "description": description[:400],
+                    "published_at": published,
+                    "link": link,
+                }
+            )
+        return {
+            "service": "Itinisère",
+            "status": "online",
+            "source": source,
+            "events": events,
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+    except (ET.ParseError, HTTPError, URLError, TimeoutError, ValueError) as exc:
+        return {
+            "service": "Itinisère",
+            "status": "degraded",
+            "source": source,
+            "events": [],
+            "error": str(exc),
+        }
+
+
+def vigicrues_geojson_from_stations(stations: list[dict[str, Any]]) -> dict[str, Any]:
+    features = []
+    for station in stations:
+        if station.get("lat") is None or station.get("lon") is None:
+            continue
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [station["lon"], station["lat"]],
+                },
+                "properties": {
+                    "code": station.get("code"),
+                    "station": station.get("station"),
+                    "river": station.get("river"),
+                    "level": station.get("level"),
+                    "height_m": station.get("height_m"),
+                    "is_priority": station.get("is_priority", False),
+                    "observed_at": station.get("observed_at"),
+                },
+            }
+        )
+
+    return {
+        "type": "FeatureCollection",
+        "features": features,
+        "source": "https://www.vigicrues.gouv.fr",
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+    }
