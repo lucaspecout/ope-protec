@@ -3,6 +3,7 @@ let token = localStorage.getItem(STORAGE_KEYS.token);
 let currentUser = null;
 let pendingCurrentPassword = '';
 
+const homeView = document.getElementById('home-view');
 const loginView = document.getElementById('login-view');
 const appView = document.getElementById('app-view');
 const loginForm = document.getElementById('login-form');
@@ -14,6 +15,26 @@ function setVisibility(node, visible) { node.classList.toggle('hidden', !visible
 function canEdit() { return ['admin', 'ope'].includes(currentUser?.role); }
 function canManageUsers() { return ['admin', 'ope'].includes(currentUser?.role); }
 
+function showHome() {
+  setVisibility(appView, false);
+  setVisibility(loginView, false);
+  setVisibility(homeView, true);
+}
+
+function showLogin() {
+  setVisibility(appView, false);
+  setVisibility(homeView, false);
+  setVisibility(loginView, true);
+  setVisibility(passwordForm, false);
+  setVisibility(loginForm, true);
+}
+
+function showApp() {
+  setVisibility(homeView, false);
+  setVisibility(loginView, false);
+  setVisibility(appView, true);
+}
+
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -21,7 +42,7 @@ async function api(path, options = {}) {
   if (!response.ok) {
     let message = 'Erreur API';
     try { const payload = await response.json(); message = payload.detail || message; } catch {}
-    if (response.status === 401) { logout(); }
+    if (response.status === 401) logout();
     throw new Error(message);
   }
   if (response.status === 204) return null;
@@ -34,12 +55,6 @@ function setActivePanel(panelId) {
   document.querySelectorAll('.view').forEach((panel) => setVisibility(panel, panel.id === panelId));
 }
 
-function showApp() { setVisibility(loginView, false); setVisibility(appView, true); }
-function showLogin() {
-  setVisibility(appView, false); setVisibility(loginView, true);
-  setVisibility(passwordForm, false); setVisibility(loginForm, true);
-}
-
 function roleLabel(role) { return { admin: 'Admin', ope: 'Opérateur', securite: 'Sécurité', visiteur: 'Visiteur', mairie: 'Mairie' }[role] || role; }
 
 function paintMap(meteo, river) {
@@ -49,7 +64,7 @@ function paintMap(meteo, river) {
   const meteoLevel = norm(meteo);
   const riverLevel = norm(river);
   document.getElementById('isere-shape').style.fill = colors[meteoLevel];
-  document.querySelectorAll('.river').forEach((r) => r.style.stroke = riverColors[riverLevel]);
+  document.querySelectorAll('.river').forEach((r) => { r.style.stroke = riverColors[riverLevel]; });
   document.getElementById('meteo-level').textContent = meteoLevel;
   document.getElementById('river-level').textContent = riverLevel;
 }
@@ -105,7 +120,50 @@ function logout() {
   token = null;
   currentUser = null;
   localStorage.removeItem(STORAGE_KEYS.token);
-  showLogin();
+  showHome();
+}
+
+function bindHomeInteractions() {
+  const menuToggle = document.getElementById('mobile-menu-btn');
+  const homeNav = document.getElementById('home-nav');
+  menuToggle?.addEventListener('click', () => {
+    const isOpen = homeNav.classList.toggle('open');
+    menuToggle.setAttribute('aria-expanded', String(isOpen));
+  });
+
+  const openLogin = () => {
+    showLogin();
+    homeNav?.classList.remove('open');
+    menuToggle?.setAttribute('aria-expanded', 'false');
+  };
+
+  document.getElementById('open-login-btn')?.addEventListener('click', openLogin);
+  document.getElementById('hero-login-btn')?.addEventListener('click', openLogin);
+  document.getElementById('back-home-btn')?.addEventListener('click', showHome);
+  document.getElementById('scroll-actions-btn')?.addEventListener('click', () => document.getElementById('home-actions')?.scrollIntoView({ behavior: 'smooth' }));
+
+  const levels = {
+    vert: { meteo: 'Vert', river: 'Vert', cell: 'Veille' },
+    jaune: { meteo: 'Jaune', river: 'Surveillance', cell: 'Pré-alerte' },
+    orange: { meteo: 'Orange', river: 'Fortes tensions', cell: 'Activation partielle' },
+    rouge: { meteo: 'Rouge', river: 'Critique', cell: 'Cellule de crise active' },
+  };
+
+  document.querySelectorAll('.alert-btn').forEach((button) => {
+    button.addEventListener('click', () => {
+      document.querySelectorAll('.alert-btn').forEach((b) => b.classList.toggle('active', b === button));
+      const state = levels[button.dataset.level] || levels.vert;
+      document.getElementById('home-meteo-state').textContent = state.meteo;
+      document.getElementById('home-river-state').textContent = state.river;
+      document.getElementById('home-cell-state').textContent = state.cell;
+    });
+  });
+
+  document.querySelectorAll('.quick-btn').forEach((button) => {
+    button.addEventListener('click', () => {
+      document.getElementById('quick-result').textContent = button.dataset.message;
+    });
+  });
 }
 
 document.querySelectorAll('.menu-btn').forEach((button) => button.addEventListener('click', () => setActivePanel(button.dataset.target)));
@@ -189,8 +247,10 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
 });
 
 (async function bootstrap() {
+  bindHomeInteractions();
+
   if (!token) {
-    showLogin();
+    showHome();
     return;
   }
   try {

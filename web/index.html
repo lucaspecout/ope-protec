@@ -14,7 +14,81 @@
   <div class="bg-glow bg-glow-b"></div>
 
   <main>
-    <section id="login-view" class="auth-wrap">
+    <section id="home-view" class="home-wrap">
+      <header class="panel topbar">
+        <div class="brand">
+          <p class="tag">Protection Civile · Isère</p>
+          <strong>CRISIS38</strong>
+        </div>
+        <button id="mobile-menu-btn" class="menu-toggle" type="button" aria-expanded="false">☰ Menu</button>
+        <nav id="home-nav" class="home-nav">
+          <a href="#home-hero">Accueil</a>
+          <a href="#home-features">Fonctionnalités</a>
+          <a href="#home-alerts">Alerte live</a>
+          <a href="#home-actions">Actions rapides</a>
+          <button id="open-login-btn" type="button">Se connecter</button>
+        </nav>
+      </header>
+
+      <section id="home-hero" class="panel home-hero">
+        <div>
+          <p class="tag">Plateforme modernisée</p>
+          <h1>Centre opérationnel nouvelle génération</h1>
+          <p class="lead">Une page d'accueil claire, avec menu interactif, simulation d'alerte et accès rapide aux outils essentiels.</p>
+          <div class="hero-actions">
+            <button id="hero-login-btn" type="button">Ouvrir l'espace sécurisé</button>
+            <button id="scroll-actions-btn" type="button" class="ghost">Voir les actions</button>
+          </div>
+        </div>
+        <article class="status-card">
+          <h3>État instantané</h3>
+          <p>Niveau météo: <strong id="home-meteo-state">Vert</strong></p>
+          <p>Niveau crues: <strong id="home-river-state">Vert</strong></p>
+          <p>Cellule active: <strong id="home-cell-state">Veille</strong></p>
+        </article>
+      </section>
+
+      <section id="home-features" class="home-grid">
+        <article class="panel feature-card">
+          <h3>Menu clair</h3>
+          <p>Navigation simple vers chaque zone opérationnelle, en desktop et mobile.</p>
+        </article>
+        <article class="panel feature-card">
+          <h3>Interface interactive</h3>
+          <p>Simulation visuelle d'alerte pour tester les scénarios avant une crise réelle.</p>
+        </article>
+        <article class="panel feature-card">
+          <h3>Actions rapides</h3>
+          <p>Checklists, appels d'urgence et procédures standard accessibles en 1 clic.</p>
+        </article>
+      </section>
+
+      <section id="home-alerts" class="panel simulator">
+        <div>
+          <h3>Simulateur d'alerte</h3>
+          <p class="muted">Choisissez un niveau pour vérifier la réaction des indicateurs.</p>
+        </div>
+        <div class="simulator-controls" role="group" aria-label="Niveaux d'alerte">
+          <button class="alert-btn active" data-level="vert" type="button">Vert</button>
+          <button class="alert-btn" data-level="jaune" type="button">Jaune</button>
+          <button class="alert-btn" data-level="orange" type="button">Orange</button>
+          <button class="alert-btn" data-level="rouge" type="button">Rouge</button>
+        </div>
+      </section>
+
+      <section id="home-actions" class="panel quick-actions">
+        <h3>Actions rapides</h3>
+        <div class="actions-grid">
+          <button class="quick-btn" data-message="✅ Checklist ouverture COD affichée.">Checklist COD</button>
+          <button class="quick-btn" data-message="📞 Appel type préfecture préparé.">Contacter préfecture</button>
+          <button class="quick-btn" data-message="🚧 Procédure inondation chargée.">Procédure inondation</button>
+          <button class="quick-btn" data-message="🛰️ Canal inter-services prêt.">Canal inter-services</button>
+        </div>
+        <p id="quick-result" class="quick-result">Cliquez sur une action pour lancer une interaction.</p>
+      </section>
+    </section>
+
+    <section id="login-view" class="auth-wrap hidden" hidden>
       <form id="login-form" class="panel auth-card" method="post" action="#" autocomplete="off">
         <p class="tag">Protection Civile · Isère</p>
         <h1>CRISIS38</h1>
@@ -22,6 +96,7 @@
         <label>Identifiant<input name="username" required /></label>
         <label>Mot de passe<input name="password" type="password" required /></label>
         <button type="submit">Connexion sécurisée</button>
+        <button id="back-home-btn" type="button" class="ghost">Retour à l'accueil</button>
         <p id="login-error" class="error"></p>
       </form>
 
