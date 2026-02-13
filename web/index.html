@@ -10,14 +10,86 @@
   <header>
     <h1>Protection Civile de l’Isère – Veille Opérationnelle</h1>
   </header>
-  <main class="dashboard">
-    <section class="card"><h2>Vigilance actuelle</h2><p id="vigilance">-</p></section>
-    <section class="card"><h2>Niveau crues</h2><p id="crues">-</p></section>
-    <section class="card"><h2>Risque global</h2><p id="risk">-</p></section>
-    <section class="card"><h2>Communes en crise</h2><p id="crisis">0</p></section>
-    <section class="card logs"><h2>Dernières entrées main courante</h2><ul id="logs"></ul></section>
-    <button id="crisis-btn">Passer en mode crise</button>
+
+  <main>
+    <section id="login-view" class="auth-wrapper">
+      <form id="login-form" class="card auth-card">
+        <h2>Connexion sécurisée</h2>
+        <p class="help">Accès réservé aux équipes autorisées.</p>
+        <label>Identifiant<input name="username" required /></label>
+        <label>Mot de passe<input name="password" type="password" required /></label>
+        <button type="submit">Se connecter</button>
+        <p id="login-error" class="error"></p>
+      </form>
+
+      <form id="password-form" class="card auth-card hidden">
+        <h2>Changement mot de passe obligatoire</h2>
+        <p class="help">Pour continuer, remplacez le mot de passe temporaire.</p>
+        <label>Mot de passe actuel<input name="current_password" type="password" required /></label>
+        <label>Nouveau mot de passe<input name="new_password" type="password" minlength="8" required /></label>
+        <button type="submit">Mettre à jour</button>
+        <p id="password-error" class="error"></p>
+      </form>
+    </section>
+
+    <section id="app-view" class="hidden">
+      <nav class="menu card">
+        <button class="menu-btn active" data-target="dashboard-panel">Dashboard</button>
+        <button class="menu-btn" data-target="municipalities-panel">Communes</button>
+        <button class="menu-btn" data-target="logs-panel">Main courante</button>
+        <button class="menu-btn" data-target="map-panel">Carte</button>
+        <button id="logout-btn" class="logout">Déconnexion</button>
+      </nav>
+
+      <section id="dashboard-panel" class="panel dashboard">
+        <article class="card"><h2>Vigilance actuelle</h2><p id="vigilance">-</p></article>
+        <article class="card"><h2>Niveau crues</h2><p id="crues">-</p></article>
+        <article class="card"><h2>Risque global</h2><p id="risk">-</p></article>
+        <article class="card"><h2>Communes en crise</h2><p id="crisis">0</p></article>
+        <article class="card logs"><h2>Dernières entrées main courante</h2><ul id="logs"></ul></article>
+      </section>
+
+      <section id="municipalities-panel" class="panel hidden">
+        <article class="card">
+          <h2>Ajouter une commune</h2>
+          <form id="municipality-form" class="inline-form">
+            <input name="name" placeholder="Nom" required />
+            <input name="phone" placeholder="Téléphone" required />
+            <input name="email" type="email" placeholder="Email" required />
+            <input name="manager" placeholder="Responsable" required />
+            <button type="submit">Ajouter</button>
+          </form>
+        </article>
+        <article class="card">
+          <h2>Liste des communes</h2>
+          <ul id="municipalities-list" class="list"></ul>
+        </article>
+      </section>
+
+      <section id="logs-panel" class="panel hidden">
+        <article class="card">
+          <h2>Nouvelle entrée main courante</h2>
+          <form id="log-form" class="inline-form">
+            <input name="event_type" placeholder="Type d'évènement" required />
+            <input name="description" placeholder="Description" required />
+            <button type="submit">Ajouter</button>
+          </form>
+        </article>
+      </section>
+
+      <section id="map-panel" class="panel hidden">
+        <article class="card">
+          <h2>Carte opérationnelle</h2>
+          <iframe
+            title="Carte des opérations"
+            src="https://www.openstreetmap.org/export/embed.html?bbox=5.3%2C44.8%2C6.7%2C45.7&layer=mapnik"
+            class="map"
+          ></iframe>
+        </article>
+      </section>
+    </section>
   </main>
+
   <script src="script.js"></script>
 </body>
 </html>

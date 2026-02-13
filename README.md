@@ -14,6 +14,13 @@ Ou via script:
 ./scripts/install.sh
 ```
 
+
+## Compte par défaut
+
+- Utilisateur initial : `admin`
+- Mot de passe initial : `admin`
+- Le changement du mot de passe est obligatoire à la première connexion.
+
 ## Architecture
 
 - `web` : interface dashboard corporate (Nginx + HTML/CSS/JS)

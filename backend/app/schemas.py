@@ -6,6 +6,7 @@ from pydantic import BaseModel, EmailStr
 class Token(BaseModel):
     access_token: str
     token_type: str
+    must_change_password: bool = False
 
 
 class UserCreate(BaseModel):
@@ -21,6 +22,11 @@ class UserOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str
 
 
 class WeatherAlertCreate(BaseModel):
