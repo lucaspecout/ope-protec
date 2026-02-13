@@ -164,8 +164,21 @@ async function api(path, options = {}) {
   });
 
   if (response.status === 401) {
-    logout();
-    throw new Error('Session expirée, veuillez vous reconnecter.');
+    if (token) {
+      logout();
+      throw new Error('Session expirée, veuillez vous reconnecter.');
+    }
+
+    let authMessage = 'Utilisateur ou mot de passe incorrect';
+    try {
+      const payload = await response.json();
+      if (typeof payload.detail === 'string' && payload.detail.trim()) {
+        authMessage = payload.detail;
+      }
+    } catch {
+      // Ignore JSON parse errors.
+    }
+    throw new Error(authMessage);
   }
 
   if (!response.ok) {

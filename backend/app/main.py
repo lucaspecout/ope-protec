@@ -58,6 +58,9 @@ def bootstrap_default_admin() -> None:
     with Session(bind=engine) as db:
         admin = db.query(User).filter(User.username == "admin").first()
         if admin:
+            if admin.role != "admin":
+                admin.role = "admin"
+                db.commit()
             return
         entity = User(
             username="admin",
@@ -163,7 +166,7 @@ def list_users(db: Session = Depends(get_db), user: User = Depends(require_roles
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == form_data.username).first()
     if not user or not verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(401, "Identifiants invalides")
+        raise HTTPException(401, "Utilisateur ou mot de passe incorrect")
     return {
         "access_token": create_access_token(user.username),
         "token_type": "bearer",
