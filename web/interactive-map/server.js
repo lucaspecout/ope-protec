@@ -79,11 +79,17 @@ async function writeCache(key, payload) {
   }
 }
 
+function withCacheFlag(payload, cached) {
+  if (Array.isArray(payload)) return { data: payload, cached };
+  if (payload && typeof payload === 'object') return { ...payload, cached };
+  return { data: payload, cached };
+}
+
 async function proxyItinisere(req, res, { endpoint, query, cachePrefix }) {
   const cacheKey = getCacheKey(cachePrefix, req);
-  const cached = await readCache(cacheKey);
-  if (cached) {
-    return res.json({ ...cached, cached: true });
+  const cachedPayload = await readCache(cacheKey);
+  if (cachedPayload) {
+    return res.json(withCacheFlag(cachedPayload, true));
   }
 
   try {
@@ -91,7 +97,7 @@ async function proxyItinisere(req, res, { endpoint, query, cachePrefix }) {
       headers: { Accept: 'application/json' }
     });
     await writeCache(cacheKey, data);
-    return res.json({ ...data, cached: false });
+    return res.json(withCacheFlag(data, false));
   } catch (error) {
     return res.status(502).json({
       error: 'Données mobilité non disponibles',
