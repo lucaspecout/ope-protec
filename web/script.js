@@ -47,15 +47,25 @@ async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
   if (token) headers.Authorization = `Bearer ${token}`;
   const response = await fetch(path, { ...options, headers });
+  const payload = await parseJsonResponse(response, path);
   if (!response.ok) {
-    let message = 'Erreur API';
-    try { const payload = await response.json(); message = payload.detail || payload.message || message; } catch {}
+    let message = payload?.detail || payload?.message || `Erreur API (${response.status})`;
     if (response.status === 401) logout();
     throw new Error(message);
   }
+  return payload;
+}
+
+async function parseJsonResponse(response, path = '') {
   if (response.status === 204) return null;
   const text = await response.text();
-  return text ? JSON.parse(text) : null;
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    const snippet = text.slice(0, 80).replace(/\s+/g, ' ');
+    throw new Error(`Réponse non-JSON pour ${path || response.url} (${response.status}): ${snippet}`);
+  }
 }
 
 function setActivePanel(panelId) {
@@ -76,7 +86,9 @@ function initMap() {
 
 async function loadIsereBoundary() {
   initMap();
-  const data = await fetch('/public/isere-map').then((r) => r.json());
+  const response = await fetch('/public/isere-map');
+  const data = await parseJsonResponse(response, '/public/isere-map');
+  if (!response.ok) throw new Error(data?.detail || data?.message || `Erreur API (${response.status})`);
   if (boundaryLayer) leafletMap.removeLayer(boundaryLayer);
   boundaryLayer = window.L.geoJSON({ type: 'Feature', geometry: data.geometry }, { style: { color: '#163a87', weight: 2, fillColor: '#63c27d', fillOpacity: 0.2 } }).addTo(leafletMap);
   leafletMap.fitBounds(boundaryLayer.getBounds(), { padding: [16, 16] });
@@ -199,7 +211,9 @@ function startAutoRefresh() {
 
 async function loadHomeLiveStatus() {
   try {
-    const data = await fetch('/public/live').then((r) => r.json());
+    const response = await fetch('/public/live');
+    const data = await parseJsonResponse(response, '/public/live');
+    if (!response.ok) throw new Error(data?.detail || data?.message || `Erreur API (${response.status})`);
     document.getElementById('home-meteo-state').textContent = normalizeLevel(data.dashboard.vigilance || '-');
     document.getElementById('home-river-state').textContent = normalizeLevel(data.dashboard.crues || '-');
     document.getElementById('home-global-risk').textContent = normalizeLevel(data.dashboard.global_risk || '-');
