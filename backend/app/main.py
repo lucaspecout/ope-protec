@@ -282,6 +282,29 @@ def isere_external_risks(db: Session = Depends(get_db), _: User = Depends(requir
     }
 
 
+@app.get("/api/meteo-france/vigilance")
+def interactive_map_meteo_vigilance():
+    return fetch_meteo_france_isere()
+
+
+@app.get("/api/vigicrues/geojson")
+def interactive_map_vigicrues_geojson():
+    return {
+        "type": "FeatureCollection",
+        "features": [],
+        "source": "https://www.vigicrues.gouv.fr",
+    }
+
+
+@app.get("/api/itinisere/events")
+def interactive_map_itinisere_events():
+    return {
+        "events": [],
+        "source": "https://www.itinisere.fr",
+        "status": "degraded",
+    }
+
+
 @app.post("/weather", response_model=WeatherAlertOut)
 def create_weather_alert(alert: WeatherAlertCreate, db: Session = Depends(get_db), _: User = Depends(require_roles(*EDIT_ROLES))):
     transition = (alert.previous_level.lower(), alert.level.lower())
