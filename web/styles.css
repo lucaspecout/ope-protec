@@ -134,7 +134,9 @@ label { display: block; margin-bottom: .8rem; }
 .meteo-widget { display: block; max-width: 100%; margin-top: .6rem; border: 0; border-radius: 8px; }
 .form { display: grid; gap: .6rem; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: .8rem; }
 
-.map-layout { display: grid; gap: .8rem; grid-template-columns: minmax(290px, 520px) 1fr; }
+.map-toolbar { display: flex; flex-wrap: wrap; gap: .6rem; margin-bottom: .8rem; }
+.map-toolbar input, .map-toolbar select { min-height: 42px; }
+.map-layout { display: grid; gap: .8rem; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); margin-top: .8rem; }
 .isere-map { width: 100%; border-radius: 12px; border: 1px solid #ccdbf4; background: #f3f8ff; }
 #isere-shape { fill: #2eb85c; stroke: #20324e; stroke-width: 4; }
 .river { fill: none; stroke: #3d9de7; stroke-width: 7; stroke-linecap: round; }
@@ -170,4 +172,4 @@ svg text { font-size: 14px; fill: #17335f; }
 
 #map-source { font-size: .86rem; }
 
-.leaflet-map { min-height: 520px; width: 100%; border-radius: 12px; border: 1px solid #ccdbf4; }
+.leaflet-map { min-height: 720px; width: 100%; border-radius: 12px; border: 1px solid #ccdbf4; }

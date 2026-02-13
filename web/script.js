@@ -9,6 +9,13 @@ const PANEL_TITLES = {
   'users-panel': 'Gestion des utilisateurs',
 };
 
+const RESOURCE_POINTS = [
+  { name: 'PC Départemental Grenoble', type: 'poste_commandement', active: true, lat: 45.1885, lon: 5.7245, address: 'Grenoble' },
+  { name: 'Centre hébergement Voiron', type: 'centre_hebergement', active: false, lat: 45.3667, lon: 5.5906, address: 'Voiron' },
+  { name: 'CHU Grenoble Alpes', type: 'hopital', active: true, lat: 45.1899, lon: 5.7428, address: 'La Tronche' },
+  { name: 'Caserne Bourgoin-Jallieu', type: 'caserne', active: true, lat: 45.5866, lon: 5.2732, address: 'Bourgoin-Jallieu' },
+];
+
 let token = localStorage.getItem(STORAGE_KEYS.token);
 let currentUser = null;
 let pendingCurrentPassword = '';
@@ -19,6 +26,11 @@ let leafletMap = null;
 let boundaryLayer = null;
 let hydroLayer = null;
 let pcsLayer = null;
+let resourceLayer = null;
+let searchLayer = null;
+let cachedStations = [];
+let cachedMunicipalities = [];
+let geocodeCache = new Map();
 
 const homeView = document.getElementById('home-view');
 const loginView = document.getElementById('login-view');
@@ -49,7 +61,7 @@ async function api(path, options = {}) {
   const response = await fetch(path, { ...options, headers });
   const payload = await parseJsonResponse(response, path);
   if (!response.ok) {
-    let message = payload?.detail || payload?.message || `Erreur API (${response.status})`;
+    const message = payload?.detail || payload?.message || `Erreur API (${response.status})`;
     if (response.status === 401) logout();
     throw new Error(message);
   }
@@ -82,6 +94,8 @@ function initMap() {
   window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '&copy; OpenStreetMap contributors' }).addTo(leafletMap);
   hydroLayer = window.L.layerGroup().addTo(leafletMap);
   pcsLayer = window.L.layerGroup().addTo(leafletMap);
+  resourceLayer = window.L.layerGroup().addTo(leafletMap);
+  searchLayer = window.L.layerGroup().addTo(leafletMap);
 }
 
 async function loadIsereBoundary() {
@@ -96,9 +110,12 @@ async function loadIsereBoundary() {
 }
 
 function renderStations(stations = []) {
+  cachedStations = stations;
+  const visible = document.getElementById('filter-hydro')?.checked ?? true;
   document.getElementById('hydro-stations-list').innerHTML = stations.slice(0, 12).map((s) => `<li><strong>${s.station || s.code}</strong> · ${s.river || ''} · <span style="color:${levelColor(s.level)}">${normalizeLevel(s.level)}</span> · ${s.height_m} m</li>`).join('') || '<li>Aucune station.</li>';
   if (!hydroLayer) return;
   hydroLayer.clearLayers();
+  if (!visible) return;
   stations.forEach((s) => {
     if (s.lat == null || s.lon == null) return;
     window.L.circleMarker([s.lat, s.lon], { radius: 7, color: '#fff', weight: 1.5, fillColor: levelColor(s.level), fillOpacity: 0.95 })
@@ -107,11 +124,71 @@ function renderStations(stations = []) {
   });
 }
 
-function renderMunicipalitiesOnMap(municipalities = []) {
+async function geocodeMunicipality(municipality) {
+  const key = `${municipality.name}|${municipality.postal_code || ''}`;
+  if (geocodeCache.has(key)) return geocodeCache.get(key);
+  if (!municipality.postal_code) return null;
+  try {
+    const url = `https://geo.api.gouv.fr/communes?nom=${encodeURIComponent(municipality.name)}&codePostal=${encodeURIComponent(municipality.postal_code)}&fields=centre&limit=1`;
+    const response = await fetch(url);
+    const payload = await response.json();
+    const center = payload?.[0]?.centre?.coordinates;
+    if (!Array.isArray(center) || center.length !== 2) return null;
+    const point = { lat: center[1], lon: center[0] };
+    geocodeCache.set(key, point);
+    return point;
+  } catch {
+    return null;
+  }
+}
+
+async function renderMunicipalitiesOnMap(municipalities = []) {
+  cachedMunicipalities = municipalities;
   const pcs = municipalities.filter((m) => m.pcs_active);
-  document.getElementById('pcs-list').innerHTML = pcs.slice(0, 15).map((m) => `<li><strong>${m.name}</strong> · ${m.manager} · ${m.crisis_mode ? 'CRISE' : 'veille'}</li>`).join('') || '<li>Aucune commune PCS.</li>';
+  document.getElementById('pcs-list').innerHTML = pcs.slice(0, 15).map((m) => `<li><strong>${m.name}</strong> · ${m.postal_code || 'CP ?'} · ${m.manager} · ${m.crisis_mode ? 'CRISE' : 'veille'}</li>`).join('') || '<li>Aucune commune PCS.</li>';
   if (!pcsLayer) return;
   pcsLayer.clearLayers();
+  if (!(document.getElementById('filter-pcs')?.checked ?? true)) return;
+  const points = await Promise.all(pcs.map(async (m) => ({ municipality: m, point: await geocodeMunicipality(m) })));
+  points.forEach(({ municipality, point }) => {
+    if (!point) return;
+    window.L.circleMarker([point.lat, point.lon], { radius: 8, color: '#fff', weight: 1.5, fillColor: '#17335f', fillOpacity: 0.9 })
+      .bindPopup(`<strong>${municipality.name}</strong><br>Code postal: ${municipality.postal_code || '-'}<br>Responsable: ${municipality.manager}<br>PCS: actif`)
+      .addTo(pcsLayer);
+  });
+}
+
+function renderResources() {
+  const onlyActive = document.getElementById('filter-resources-active')?.checked ?? false;
+  const type = document.getElementById('resource-type-filter')?.value || 'all';
+  const query = (document.getElementById('map-search')?.value || '').trim().toLowerCase();
+  const resources = RESOURCE_POINTS.filter((r) => (!onlyActive || r.active) && (type === 'all' || r.type === type) && (!query || `${r.name} ${r.address}`.toLowerCase().includes(query)));
+  document.getElementById('resources-list').innerHTML = resources.map((r) => `<li><strong>${r.name}</strong> · ${r.address} · ${r.active ? 'activée' : 'en attente'}</li>`).join('') || '<li>Aucune ressource avec ces filtres.</li>';
+  if (!resourceLayer) return;
+  resourceLayer.clearLayers();
+  resources.forEach((r) => {
+    window.L.circleMarker([r.lat, r.lon], { radius: 7, color: '#fff', weight: 1.5, fillColor: r.active ? '#2f9e44' : '#f59f00', fillOpacity: 0.95 })
+      .bindPopup(`<strong>${r.name}</strong><br>Type: ${r.type.replace('_', ' ')}<br>Adresse: ${r.address}<br>Activation: ${r.active ? 'oui' : 'non'}`)
+      .addTo(resourceLayer);
+  });
+}
+
+async function handleMapSearch() {
+  const query = (document.getElementById('map-search')?.value || '').trim();
+  renderResources();
+  if (!query || !leafletMap) return;
+  try {
+    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query + ', Isère, France')}`);
+    const payload = await response.json();
+    if (!payload?.length) return;
+    const lat = Number(payload[0].lat);
+    const lon = Number(payload[0].lon);
+    searchLayer.clearLayers();
+    window.L.marker([lat, lon]).bindPopup(`Résultat: ${payload[0].display_name}`).addTo(searchLayer).openPopup();
+    leafletMap.setView([lat, lon], 12);
+  } catch {
+    // ignore erreur de recherche externe
+  }
 }
 
 function renderItinisereEvents(events = [], targetId = 'itinerary-list') {
@@ -123,6 +200,7 @@ async function loadDashboard() {
   document.getElementById('vigilance').textContent = normalizeLevel(dashboard.vigilance);
   document.getElementById('crues').textContent = normalizeLevel(dashboard.crues);
   document.getElementById('risk').textContent = normalizeLevel(dashboard.global_risk);
+  document.getElementById('risk').className = normalizeLevel(dashboard.global_risk);
   document.getElementById('crisis').textContent = String(dashboard.communes_crise || 0);
   document.getElementById('latest-logs').innerHTML = (dashboard.latest_logs || []).map((l) => `<li><strong>${l.event_type}</strong> · ${l.description}</li>`).join('') || '<li>Aucun événement récent.</li>';
 }
@@ -131,14 +209,14 @@ async function loadExternalRisks() {
   const data = await api('/external/isere/risks');
   document.getElementById('meteo-status').textContent = `${data.meteo_france.status} · niveau ${normalizeLevel(data.meteo_france.level)}`;
   document.getElementById('meteo-info').textContent = data.meteo_france.info_state || data.meteo_france.bulletin_title || '';
-  document.getElementById('vigicrues-status').textContent = `${data.vigicrues.status} · niveau ${normalizeLevel(data.vigicrues.water_alert_level)}`;
-  document.getElementById('vigicrues-info').textContent = `Stations surveillées: ${(data.vigicrues.stations || []).length}`;
+  document.getElementById('river-status').textContent = `${data.vigicrues.status} · niveau ${normalizeLevel(data.vigicrues.water_alert_level)}`;
   document.getElementById('stations-list').innerHTML = (data.vigicrues.stations || []).slice(0, 10).map((s) => `<li>${s.station || s.code} · ${s.river || ''} · ${normalizeLevel(s.level)} · ${s.height_m} m</li>`).join('') || '<li>Aucune station disponible.</li>';
-
-  renderStations(data.vigicrues.stations || []);
+  document.getElementById('itinisere-status').textContent = `${data.itinisere.status} · ${data.itinisere.events.length} événements`;
   renderItinisereEvents(data.itinisere?.events || []);
   document.getElementById('meteo-level').textContent = normalizeLevel(data.meteo_france.level || 'vert');
+  document.getElementById('meteo-hazards').textContent = (data.meteo_france.hazards || []).join(', ') || 'non précisé';
   document.getElementById('river-level').textContent = normalizeLevel(data.vigicrues.water_alert_level || 'vert');
+  renderStations(data.vigicrues.stations || []);
 }
 
 async function loadSupervision() {
@@ -153,8 +231,8 @@ async function loadSupervision() {
 
 async function loadMunicipalities() {
   const municipalities = await api('/municipalities');
-  document.getElementById('municipalities-list').innerHTML = municipalities.map((m) => `<li><strong>${m.name}</strong> · ${m.manager} · ${m.phone} · ${m.crisis_mode ? 'CRISE' : 'veille'} </li>`).join('') || '<li>Aucune commune.</li>';
-  renderMunicipalitiesOnMap(municipalities);
+  document.getElementById('municipalities-list').innerHTML = municipalities.map((m) => `<li><strong>${m.name}</strong> · ${m.postal_code || 'CP ?'} · ${m.manager} · ${m.phone} · ${m.crisis_mode ? 'CRISE' : 'veille'} </li>`).join('') || '<li>Aucune commune.</li>';
+  await renderMunicipalitiesOnMap(municipalities);
 }
 
 async function loadLogs() {
@@ -171,6 +249,7 @@ async function loadUsers() {
 async function refreshAll() {
   try {
     await Promise.all([loadDashboard(), loadExternalRisks(), loadMunicipalities(), loadLogs(), loadUsers(), loadSupervision()]);
+    renderResources();
     document.getElementById('dashboard-error').textContent = '';
   } catch (error) {
     document.getElementById('dashboard-error').textContent = error.message;
@@ -194,6 +273,15 @@ function bindAppInteractions() {
   document.querySelectorAll('.menu-btn').forEach((button) => button.addEventListener('click', () => setActivePanel(button.dataset.target)));
   document.getElementById('logout-btn').addEventListener('click', logout);
   document.getElementById('refresh-btn').addEventListener('click', refreshAll);
+  document.getElementById('map-search-btn')?.addEventListener('click', handleMapSearch);
+  document.getElementById('map-search')?.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); handleMapSearch(); } });
+  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'resource-type-filter'].forEach((id) => {
+    document.getElementById(id)?.addEventListener('change', async () => {
+      renderStations(cachedStations);
+      await renderMunicipalitiesOnMap(cachedMunicipalities);
+      renderResources();
+    });
+  });
 }
 
 function logout() {
@@ -290,7 +378,13 @@ document.getElementById('municipality-form').addEventListener('submit', async (e
   await api('/municipalities', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: form.get('name'), manager: form.get('manager'), phone: form.get('phone'), email: form.get('email') }),
+    body: JSON.stringify({
+      name: form.get('name'),
+      manager: form.get('manager'),
+      phone: form.get('phone'),
+      email: form.get('email'),
+      postal_code: form.get('postal_code'),
+    }),
   });
   event.target.reset();
   await loadMunicipalities();

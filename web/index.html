@@ -108,7 +108,6 @@
           <button class="menu-btn" data-target="municipalities-panel">Communes</button>
           <button class="menu-btn" data-target="logs-panel">Main courante</button>
           <button class="menu-btn" data-target="map-panel">Carte Isère</button>
-          <a class="menu-link-btn" href="/interactive-map/" target="_blank" rel="noopener noreferrer">Carte Leaflet interactive</a>
           <button class="menu-btn" data-target="users-panel">Utilisateurs</button>
         </nav>
         <button id="logout-btn" class="danger">Déconnexion</button>
@@ -188,6 +187,7 @@
             <input name="manager" placeholder="Responsable" required />
             <input name="phone" placeholder="Téléphone" required />
             <input name="email" placeholder="Email" type="email" required />
+            <input name="postal_code" placeholder="Code postal" pattern="[0-9]{5}" maxlength="5" required />
             <button type="submit">Ajouter</button>
           </form>
           <ul id="municipalities-list" class="list"></ul>
@@ -204,11 +204,26 @@
         </section>
 
         <section id="map-panel" class="panel view hidden" hidden>
-          <h3>Carte stratégique Isère (interactive)</h3>
+          <h3>Carte stratégique Isère</h3>
+          <div class="map-toolbar">
+            <input id="map-search" type="search" placeholder="Rechercher une adresse ou un nom" />
+            <button id="map-search-btn" type="button">Rechercher</button>
+            <label><input id="filter-hydro" type="checkbox" checked /> Stations Vigicrues</label>
+            <label><input id="filter-pcs" type="checkbox" checked /> Communes PCS</label>
+            <label><input id="filter-resources-active" type="checkbox" /> Ressources activées</label>
+            <select id="resource-type-filter">
+              <option value="all">Toutes les ressources</option>
+              <option value="poste_commandement">Postes de commandement</option>
+              <option value="centre_hebergement">Centres d'hébergement</option>
+              <option value="hopital">Hôpitaux</option>
+              <option value="caserne">Casernes</option>
+            </select>
+          </div>
+          <div id="isere-map-leaflet" class="leaflet-map" aria-label="Carte interactive Isère"></div>
           <div class="map-layout">
-            <div id="isere-map-leaflet" class="leaflet-map" aria-label="Carte interactive Isère"></div>
             <div>
               <p>Niveau météo <strong id="meteo-level">-</strong></p>
+              <p>Risques météo concernés <strong id="meteo-hazards">-</strong></p>
               <p>Niveau hydrologique <strong id="river-level">-</strong></p>
               <p class="muted" id="map-source">Source carte: chargement…</p>
               <div class="legend">
@@ -217,10 +232,14 @@
                 <span class="badge orange">Orange</span>
                 <span class="badge red">Rouge</span>
               </div>
-              <h4>Cours d'eau Vigicrues (interactif)</h4>
+            </div>
+            <div>
+              <h4>Cours d'eau Vigicrues</h4>
               <ul id="hydro-stations-list" class="list practical"></ul>
-              <h4>Points PCS partenaires</h4>
+              <h4>Communes avec PCS</h4>
               <ul id="pcs-list" class="list practical"></ul>
+              <h4>Ressources cartographiées</h4>
+              <ul id="resources-list" class="list practical"></ul>
               <h4>Alertes mobilité Itinisère</h4>
               <ul id="itinerary-list" class="list practical"></ul>
             </div>
