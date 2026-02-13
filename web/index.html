@@ -9,9 +9,10 @@
 <body>
   <main class="layout">
     <section id="login-view" class="auth-wrapper">
-      <form id="login-form" class="glass auth-card">
+      <form id="login-form" class="glass auth-card" method="post" action="#" autocomplete="off">
         <p class="eyebrow">Protection Civile de l'Isère</p>
         <h1>Centre de veille opérationnelle</h1>
+        <p class="chip">Interface sécurisée · connexion chiffrée</p>
         <p class="help">Connectez-vous pour accéder au tableau de bord.</p>
         <label>Identifiant<input name="username" required /></label>
         <label>Mot de passe<input name="password" type="password" required /></label>
@@ -19,11 +20,10 @@
         <p id="login-error" class="error"></p>
       </form>
 
-      <form id="password-form" class="glass auth-card hidden" hidden>
+      <form id="password-form" class="glass auth-card hidden" hidden method="post" action="#" autocomplete="off">
         <p class="eyebrow">Sécurité</p>
         <h2>Changement obligatoire</h2>
         <p class="help">Pour continuer, remplacez le mot de passe temporaire.</p>
-        <label>Mot de passe actuel<input name="current_password" type="password" required /></label>
         <label>Nouveau mot de passe<input name="new_password" type="password" minlength="8" required /></label>
         <button type="submit">Mettre à jour</button>
         <p id="password-error" class="error"></p>
@@ -47,6 +47,7 @@
 
       <section class="content-area">
         <header class="hero glass">
+          <p id="dashboard-error" class="error hero-error"></p>
           <h1>Tableau de pilotage en temps réel</h1>
           <p>Suivi synthétique des risques, des communes et des événements en cours.</p>
         </header>
