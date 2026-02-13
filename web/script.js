@@ -57,16 +57,21 @@ function currentUser() {
   return users.find((u) => u.username === token) || null;
 }
 
+function setVisibility(element, isVisible) {
+  element.classList.toggle('hidden', !isVisible);
+  element.hidden = !isVisible;
+}
+
 function showApp() {
-  loginView.classList.add('hidden');
-  appView.classList.remove('hidden');
+  setVisibility(loginView, false);
+  setVisibility(appView, true);
 }
 
 function showLogin() {
-  appView.classList.add('hidden');
-  loginView.classList.remove('hidden');
-  passwordForm.classList.add('hidden');
-  loginForm.classList.remove('hidden');
+  setVisibility(appView, false);
+  setVisibility(loginView, true);
+  setVisibility(passwordForm, false);
+  setVisibility(loginForm, true);
 }
 
 function loadDashboard() {
@@ -128,8 +133,8 @@ function login(username, password) {
   localStorage.setItem(STORAGE_KEYS.token, token);
 
   if (user.mustChangePassword) {
-    loginForm.classList.add('hidden');
-    passwordForm.classList.remove('hidden');
+    setVisibility(loginForm, false);
+    setVisibility(passwordForm, true);
     return;
   }
 
@@ -216,8 +221,8 @@ document.querySelectorAll('.menu-btn').forEach((button) => {
     document.querySelectorAll('.menu-btn').forEach((b) => b.classList.remove('active'));
     button.classList.add('active');
 
-    document.querySelectorAll('.panel').forEach((panel) => panel.classList.add('hidden'));
-    document.getElementById(button.dataset.target).classList.remove('hidden');
+    document.querySelectorAll('.panel').forEach((panel) => setVisibility(panel, false));
+    setVisibility(document.getElementById(button.dataset.target), true);
   });
 });
 

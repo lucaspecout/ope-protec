@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Veille Opérationnelle</title>
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
   <main class="layout">
@@ -19,7 +19,7 @@
         <p id="login-error" class="error"></p>
       </form>
 
-      <form id="password-form" class="glass auth-card hidden">
+      <form id="password-form" class="glass auth-card hidden" hidden>
         <p class="eyebrow">Sécurité</p>
         <h2>Changement obligatoire</h2>
         <p class="help">Pour continuer, remplacez le mot de passe temporaire.</p>
@@ -30,7 +30,7 @@
       </form>
     </section>
 
-    <section id="app-view" class="dashboard-shell hidden">
+    <section id="app-view" class="dashboard-shell hidden" hidden>
       <aside class="sidebar glass">
         <div>
           <p class="eyebrow">Protection Civile 38</p>
@@ -59,7 +59,7 @@
           <article class="card logs"><h2>Dernières entrées main courante</h2><ul id="logs" class="list"></ul></article>
         </section>
 
-        <section id="municipalities-panel" class="panel hidden">
+        <section id="municipalities-panel" class="panel hidden" hidden>
           <article class="card">
             <h2>Ajouter une commune</h2>
             <form id="municipality-form" class="inline-form">
@@ -76,7 +76,7 @@
           </article>
         </section>
 
-        <section id="logs-panel" class="panel hidden">
+        <section id="logs-panel" class="panel hidden" hidden>
           <article class="card">
             <h2>Nouvelle entrée main courante</h2>
             <form id="log-form" class="inline-form">
@@ -87,7 +87,7 @@
           </article>
         </section>
 
-        <section id="map-panel" class="panel hidden">
+        <section id="map-panel" class="panel hidden" hidden>
           <article class="card">
             <h2>Carte opérationnelle</h2>
             <iframe
@@ -101,6 +101,6 @@
     </section>
   </main>
 
-  <script src="script.js"></script>
+  <script src="/script.js"></script>
 </body>
 </html>
