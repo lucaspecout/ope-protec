@@ -54,12 +54,23 @@ const vigicruesLayer = L.geoJSON(null, {
     layer.bindPopup(`<b>${name}</b><br/>Vigilance crue: <b>${level}</b>`);
   }
 });
-const itinisereLayer = L.layerGroup();
+
+const itinisereLayers = {
+  roads: L.layerGroup(),
+  disruptions: L.layerGroup(),
+  stops: L.layerGroup(),
+  pois: L.layerGroup(),
+  lines: L.geoJSON(null, { style: { color: '#3f51b5', weight: 3, opacity: 0.75 } })
+};
 
 const overlays = {
   'Vigilance Météo-France (Isère)': meteoLayer,
   'Vigilance crues (Vigicrues)': vigicruesLayer,
-  'Événements circulation (Itinisère)': itinisereLayer
+  'Itinisère · Routes proches': itinisereLayers.roads,
+  'Itinisère · Perturbations routières': itinisereLayers.disruptions,
+  'Itinisère · Arrêts transport': itinisereLayers.stops,
+  'Itinisère · POI / lieux publics': itinisereLayers.pois,
+  'Itinisère · Tracés des lignes': itinisereLayers.lines
 };
 
 Object.values(overlays).forEach((layer) => layer.addTo(map));
@@ -108,10 +119,34 @@ function extractMeteoInfo(payload) {
     payload?.text ||
     'Bulletin de vigilance indisponible.';
 
-  return {
-    level: normalizeLevel(levelRaw),
-    bulletin
-  };
+  return { level: normalizeLevel(levelRaw), bulletin };
+}
+
+function parseLatLng(item) {
+  if (Array.isArray(item?.geometry?.coordinates)) {
+    const [lng, lat] = item.geometry.coordinates;
+    if (Number.isFinite(lat) && Number.isFinite(lng)) return [lat, lng];
+  }
+
+  const lat = Number(item?.lat ?? item?.latitude ?? item?.y ?? item?.coordY);
+  const lng = Number(item?.lon ?? item?.lng ?? item?.longitude ?? item?.x ?? item?.coordX);
+  if (Number.isFinite(lat) && Number.isFinite(lng)) return [lat, lng];
+  return null;
+}
+
+function getArray(payload) {
+  if (Array.isArray(payload)) return payload;
+  return (
+    payload?.results ||
+    payload?.features ||
+    payload?.events ||
+    payload?.data ||
+    payload?.stops ||
+    payload?.places ||
+    payload?.lines ||
+    payload?.disruptions ||
+    []
+  );
 }
 
 async function loadMeteoVigilance() {
@@ -121,15 +156,15 @@ async function loadMeteoVigilance() {
   const { level, bulletin } = extractMeteoInfo(payload);
 
   meteoLayer.clearLayers();
-  const marker = L.circleMarker(ISERE_CENTER, {
+  L.circleMarker(ISERE_CENTER, {
     radius: 14,
     color: vigilanceColors[level] || '#607d8b',
     fillColor: vigilanceColors[level] || '#607d8b',
     fillOpacity: 0.85,
     weight: 2
-  }).bindPopup(`<b>Isère (38)</b><br/>Niveau: <b>${level}</b><hr/>${bulletin}`);
-
-  marker.addTo(meteoLayer);
+  })
+    .bindPopup(`<b>Isère (38)</b><br/>Niveau: <b>${level}</b><hr/>${bulletin}`)
+    .addTo(meteoLayer);
 }
 
 async function loadVigicrues() {
@@ -140,37 +175,78 @@ async function loadVigicrues() {
   vigicruesLayer.addData(geojson);
 }
 
-function extractCoordinates(event) {
-  if (Array.isArray(event?.geometry?.coordinates)) {
-    const [lng, lat] = event.geometry.coordinates;
-    return [lat, lng];
-  }
-
-  const lat = event?.lat || event?.latitude || event?.y;
-  const lng = event?.lon || event?.lng || event?.longitude || event?.x;
-  if (lat && lng) return [Number(lat), Number(lng)];
-  return null;
+function buildBboxQuery() {
+  const bounds = map.getBounds();
+  return new URLSearchParams({
+    minLon: bounds.getWest().toFixed(6),
+    minLat: bounds.getSouth().toFixed(6),
+    maxLon: bounds.getEast().toFixed(6),
+    maxLat: bounds.getNorth().toFixed(6)
+  });
 }
 
-async function loadItinisere() {
-  const response = await fetch('/api/itinisere/events');
-  if (!response.ok) throw new Error(`Itinisère HTTP ${response.status}`);
-  const payload = await response.json();
+async function fetchItinisere(path, params = new URLSearchParams()) {
+  const response = await fetch(`${path}?${params.toString()}`);
+  if (!response.ok) throw new Error(`Itinisère ${path} HTTP ${response.status}`);
+  return response.json();
+}
 
-  const events = payload?.events || payload?.features || payload?.results || [];
-  itinisereLayer.clearLayers();
+async function loadItinisereLayers() {
+  const bbox = buildBboxQuery();
+  const center = map.getCenter();
 
-  events.forEach((event) => {
-    const coords = extractCoordinates(event);
+  const [nearestRoadPayload, poiPayload, stopsPayload, lineShapesPayload, disruptionsPayload] = await Promise.all([
+    fetchItinisere('/api/itinisere/nearest-road', new URLSearchParams({ lon: center.lng, lat: center.lat })),
+    fetchItinisere('/api/itinisere/places', bbox),
+    fetchItinisere('/api/itinisere/stops', bbox),
+    fetchItinisere('/api/itinisere/line-shapes'),
+    fetchItinisere('/api/itinisere/road-disruptions', bbox)
+  ]);
+
+  Object.values(itinisereLayers).forEach((layer) => {
+    if (layer.clearLayers) layer.clearLayers();
+  });
+
+  const nearestRoad = getArray(nearestRoadPayload)[0] || nearestRoadPayload?.road || nearestRoadPayload;
+  const nearestCoord = parseLatLng(nearestRoad);
+  if (nearestCoord) {
+    L.circleMarker(nearestCoord, { radius: 8, color: '#1e88e5', fillColor: '#1e88e5', fillOpacity: 0.8 })
+      .bindPopup(`<b>Route la plus proche</b><br/>${nearestRoad?.name || nearestRoad?.libelle || 'Route identifiée'}`)
+      .addTo(itinisereLayers.roads);
+  }
+
+  getArray(disruptionsPayload).forEach((event) => {
+    const coords = parseLatLng(event);
     if (!coords) return;
     const type = event.type || event.category || event.nature || 'Perturbation';
-    const title = event.title || event.libelle || event.name || 'Événement circulation';
+    const title = event.title || event.libelle || event.name || 'Perturbation routière';
     const description = event.description || event.comment || event.details || '';
 
     L.marker(coords, { icon: iconForTrafficType(type) })
       .bindPopup(`<b>${title}</b><br/>Type: ${type}<br/>${description}`)
-      .addTo(itinisereLayer);
+      .addTo(itinisereLayers.disruptions);
   });
+
+  getArray(stopsPayload).forEach((stop) => {
+    const coords = parseLatLng(stop);
+    if (!coords) return;
+    L.circleMarker(coords, { radius: 5, color: '#6a1b9a', fillColor: '#ab47bc', fillOpacity: 0.75 })
+      .bindPopup(`<b>Arrêt</b><br/>${stop.name || stop.libelle || stop.stopName || 'Arrêt de transport'}`)
+      .addTo(itinisereLayers.stops);
+  });
+
+  getArray(poiPayload).forEach((poi) => {
+    const coords = parseLatLng(poi);
+    if (!coords) return;
+    L.circleMarker(coords, { radius: 5, color: '#00695c', fillColor: '#26a69a', fillOpacity: 0.75 })
+      .bindPopup(`<b>POI</b><br/>${poi.name || poi.libelle || poi.title || 'Lieu public'}`)
+      .addTo(itinisereLayers.pois);
+  });
+
+  const lineShapesGeoJson = lineShapesPayload?.type
+    ? lineShapesPayload
+    : lineShapesPayload?.geojson || lineShapesPayload?.result || { type: 'FeatureCollection', features: [] };
+  itinisereLayers.lines.addData(lineShapesGeoJson);
 }
 
 async function refreshLayers() {
@@ -180,7 +256,7 @@ async function refreshLayers() {
   await Promise.allSettled([
     loadMeteoVigilance().catch((err) => errors.push(err.message)),
     loadVigicrues().catch((err) => errors.push(err.message)),
-    loadItinisere().catch((err) => errors.push(err.message))
+    loadItinisereLayers().catch(() => errors.push('données mobilité non disponibles'))
   ]);
 
   if (errors.length) {
@@ -188,5 +264,6 @@ async function refreshLayers() {
   }
 }
 
+map.on('moveend', refreshLayers);
 refreshLayers();
 setInterval(refreshLayers, REFRESH_INTERVAL_MS);
