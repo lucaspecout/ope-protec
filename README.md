@@ -1,6 +1,6 @@
 # Protection Civile de l'Isère – Veille Opérationnelle
 
-Application web professionnelle de veille opérationnelle pour la Protection Civile de l'Isère (38).
+Application web de veille opérationnelle (conteneur web unique, sans backend séparé).
 
 ## Démarrage rapide
 
@@ -14,8 +14,9 @@ Ou via script:
 ./scripts/install.sh
 ```
 
+Application disponible sur `http://localhost:1182`.
 
-## Compte par défaut
+## Authentification par défaut
 
 - Utilisateur initial : `admin`
 - Mot de passe initial : `admin`
@@ -23,42 +24,13 @@ Ou via script:
 
 ## Architecture
 
-- `web` : interface dashboard corporate (Nginx + HTML/CSS/JS)
-- `backend` : API FastAPI (auth, vigilance, vigicrues, main courante, PDF, partage public)
-- `db` : PostgreSQL (persistant)
-- `redis` : cache / file de tâches (persistant)
+- `web` : interface dashboard (Nginx + HTML/CSS/JS)
+- Données applicatives stockées dans le navigateur (`localStorage`)
 
 ## Fonctionnalités livrées
 
-- Vigilance météo département 38, transitions couleur, validation PCS, rétention 3 mois.
-- Vigilance crues via stations, gestion commune associée.
-- Main courante horodatée/auteur, pièces jointes filtrées par extension.
-- Cartographie métier via entités communes, mode crise, partage public temporaire protégé.
-- Export PDF institutionnel incluant chronologie.
-- Gestion des utilisateurs (max 20), rôles, mot de passe hashé, sessions JWT.
-
-## Volumes persistants
-
-- `postgres_data`
-- `redis_data`
-- `uploads_data`
-- `reports_data`
-
-## Sécurité
-
-- Hash bcrypt des mots de passe
-- JWT bearer auth
-- Validation minimale des uploads (extensions autorisées)
-- Contrôle d'accès API par authentification
-
-## Endpoints principaux
-
-- `POST /auth/register`
-- `POST /auth/login`
-- `GET /dashboard`
-- `POST /weather` + `POST /weather/{id}/validate`
-- `POST /municipalities` + `POST /municipalities/{id}/crisis`
-- `POST /logs` + `POST /logs/{id}/attachment`
-- `GET /reports/pdf`
-- `POST /shares/{municipality_id}?password=...`
-
+- Connexion locale et changement de mot de passe obligatoire au premier login.
+- Dashboard synthétique (vigilance, crues, risque global, communes en crise, derniers événements).
+- Gestion des communes (ajout + bascule mode crise).
+- Main courante locale (ajout d’évènements horodatés).
+- Carte opérationnelle embarquée (OpenStreetMap).
