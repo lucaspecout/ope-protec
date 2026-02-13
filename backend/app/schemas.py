@@ -56,6 +56,7 @@ class MunicipalityCreate(BaseModel):
     phone: str
     email: EmailStr
     manager: str
+    postal_code: str | None = None
     contacts: str | None = None
     additional_info: str | None = None
 
@@ -66,6 +67,7 @@ class MunicipalityOut(BaseModel):
     phone: str
     email: str
     manager: str
+    postal_code: str | None = None
     contacts: str | None = None
     additional_info: str | None = None
     pcs_active: bool

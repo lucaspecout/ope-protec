@@ -53,6 +53,7 @@ class Municipality(Base):
     phone: Mapped[str] = mapped_column(String(30))
     email: Mapped[str] = mapped_column(String(120))
     manager: Mapped[str] = mapped_column(String(120))
+    postal_code: Mapped[str | None] = mapped_column(String(10), nullable=True)
     contacts: Mapped[str | None] = mapped_column(Text, nullable=True)
     additional_info: Mapped[str | None] = mapped_column(Text, nullable=True)
     pcs_active: Mapped[bool] = mapped_column(Boolean, default=True)

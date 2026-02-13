@@ -75,6 +75,22 @@ def _http_get_text(url: str, timeout: int = 10) -> str:
         return response.read().decode("utf-8", errors="ignore")
 
 
+
+
+def _extract_meteo_hazards(*chunks: str) -> list[str]:
+    blob = " ".join((chunk or "").lower() for chunk in chunks)
+    hazard_map = {
+        "inondation": ["inondation", "pluie-inondation", "pluie"],
+        "vent violent": ["vent"],
+        "neige-verglas": ["neige", "verglas"],
+        "orages": ["orage"],
+        "canicule": ["canicule", "chaleur"],
+        "grand froid": ["froid", "grand froid"],
+        "avalanches": ["avalanche"],
+    }
+    hazards = [label for label, keywords in hazard_map.items() if any(keyword in blob for keyword in keywords)]
+    return hazards
+
 def fetch_meteo_france_isere() -> dict[str, Any]:
     source_url = "https://vigilance.meteofrance.fr/fr/isere"
     try:
@@ -84,14 +100,18 @@ def fetch_meteo_france_isere() -> dict[str, Any]:
         color_match = re.search(r"vigilance (verte|jaune|orange|rouge)", html, re.IGNORECASE)
         level = color_match.group(1).lower() if color_match else "inconnu"
         level = "vert" if level == "verte" else level
+        bulletin_title = title_match.group(1).strip() if title_match else "Vigilance Météo Isère"
+        info_state = desc_match.group(1).replace("&#039;", "'") if desc_match else "Informations disponibles"
+        hazards = _extract_meteo_hazards(bulletin_title, info_state)
         return {
             "service": "Météo-France Vigilance",
             "department": "Isère (38)",
             "status": "online",
             "source": source_url,
             "level": level,
-            "bulletin_title": title_match.group(1).strip() if title_match else "Vigilance Météo Isère",
-            "info_state": desc_match.group(1).replace("&#039;", "'") if desc_match else "Informations disponibles",
+            "bulletin_title": bulletin_title,
+            "info_state": info_state,
+            "hazards": hazards,
             "updated_at": datetime.utcnow().isoformat() + "Z",
         }
     except (HTTPError, URLError, TimeoutError, ValueError) as exc:
@@ -102,6 +122,7 @@ def fetch_meteo_france_isere() -> dict[str, Any]:
             "source": source_url,
             "level": "inconnu",
             "info_state": f"indisponible ({exc})",
+            "hazards": [],
         }
 
 
