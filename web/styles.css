@@ -133,11 +133,13 @@ label { display: block; margin-bottom: .8rem; }
 .form { display: grid; gap: .6rem; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: .8rem; }
 
 .map-layout { display: grid; gap: .8rem; grid-template-columns: minmax(290px, 520px) 1fr; }
-.isere-map { width: 100%; border-radius: 12px; border: 1px solid #ccdbf4; background: #f3f8ff; }
-#isere-shape { fill: #2eb85c; stroke: #20324e; stroke-width: 4; }
-.river { fill: none; stroke: #3d9de7; stroke-width: 7; stroke-linecap: round; }
-.city, #grenoble-dot { fill: #17335f; }
-svg text { font-size: 14px; fill: #17335f; }
+.isere-map { width: 100%; min-height: 560px; border-radius: 12px; border: 1px solid #ccdbf4; background: #f3f8ff; overflow: hidden; }
+.legend { display: flex; flex-wrap: wrap; gap: .4rem; margin: .7rem 0; }
+.badge { display: inline-flex; border-radius: 999px; padding: .15rem .6rem; font-size: .75rem; font-weight: 700; color: #fff; }
+.badge.green { background: #2f9e44; }
+.badge.yellow { background: #f59f00; }
+.badge.orange { background: #f76707; }
+.badge.red { background: #e03131; }
 .practical li { background: #eef4ff; }
 .users-table { width: 100%; border-collapse: collapse; }
 .users-table th, .users-table td { border-bottom: 1px solid var(--line); padding: .58rem; text-align: left; }
