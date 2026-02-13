@@ -14,6 +14,21 @@ const loginError = document.getElementById('login-error');
 const passwordError = document.getElementById('password-error');
 const dashboardError = document.getElementById('dashboard-error');
 
+function sanitizeCredentialParamsFromUrl() {
+  const url = new URL(window.location.href);
+  const sensitiveParams = ['username', 'password', 'token'];
+  const hadSensitiveParams = sensitiveParams.some((param) => url.searchParams.has(param));
+
+  if (!hadSensitiveParams) {
+    return;
+  }
+
+  sensitiveParams.forEach((param) => url.searchParams.delete(param));
+  const safeUrl = `${url.pathname}${url.search}${url.hash}`;
+  window.history.replaceState({}, '', safeUrl);
+  loginError.textContent = 'Pour votre sécurité, saisissez vos identifiants dans le formulaire (pas dans l\'URL).';
+}
+
 function setVisibility(element, isVisible) {
   element.classList.toggle('hidden', !isVisible);
   element.hidden = !isVisible;
@@ -488,6 +503,8 @@ document.querySelectorAll('.menu-btn').forEach((button) => {
 });
 
 (async () => {
+  sanitizeCredentialParamsFromUrl();
+
   if (!token) {
     showLogin();
     return;
