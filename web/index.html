@@ -208,6 +208,7 @@
           <div class="map-toolbar">
             <input id="map-search" type="search" placeholder="Rechercher une adresse ou un nom" />
             <button id="map-search-btn" type="button">Rechercher</button>
+            <button id="map-fit-btn" type="button" class="ghost">Voir tous les points</button>
             <label><input id="filter-hydro" type="checkbox" checked /> Stations Vigicrues</label>
             <label><input id="filter-pcs" type="checkbox" checked /> Communes PCS</label>
             <label><input id="filter-resources-active" type="checkbox" /> Ressources activées</label>
@@ -219,6 +220,7 @@
               <option value="caserne">Casernes</option>
             </select>
           </div>
+          <p id="map-feedback" class="muted"></p>
           <div id="isere-map-leaflet" class="leaflet-map" aria-label="Carte interactive Isère"></div>
           <div class="map-layout">
             <div>
