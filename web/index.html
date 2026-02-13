@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Veille Opérationnelle</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <h1>Protection Civile de l’Isère – Veille Opérationnelle</h1>
+  </header>
+  <main class="dashboard">
+    <section class="card"><h2>Vigilance actuelle</h2><p id="vigilance">-</p></section>
+    <section class="card"><h2>Niveau crues</h2><p id="crues">-</p></section>
+    <section class="card"><h2>Risque global</h2><p id="risk">-</p></section>
+    <section class="card"><h2>Communes en crise</h2><p id="crisis">0</p></section>
+    <section class="card logs"><h2>Dernières entrées main courante</h2><ul id="logs"></ul></section>
+    <button id="crisis-btn">Passer en mode crise</button>
+  </main>
+  <script src="script.js"></script>
+</body>
+</html>

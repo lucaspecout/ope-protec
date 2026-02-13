@@ -1,0 +1,9 @@
+:root { --blue:#0d2b52; --orange:#f58220; --white:#fff; --red:#cf1f1f; }
+body { margin:0; font-family:Arial,sans-serif; background:#f2f5f9; color:#1d2f44; }
+header { background:var(--blue); color:var(--white); padding:1rem 2rem; }
+.dashboard { display:grid; gap:1rem; padding:1rem; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); }
+.card { background:var(--white); border-left:6px solid var(--orange); border-radius:8px; padding:1rem; box-shadow:0 2px 10px rgba(0,0,0,.08); }
+.logs { grid-column:1/-1; }
+#risk.rouge { color:var(--red); font-weight:bold; }
+#risk.orange { color:var(--orange); font-weight:bold; }
+button { grid-column:1/-1; padding:1rem; border:none; background:var(--orange); color:white; font-weight:700; border-radius:6px; cursor:pointer; }
