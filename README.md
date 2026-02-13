@@ -1,11 +1,11 @@
 # Protection Civile de l'Isère – Veille Opérationnelle
 
-Application web de veille opérationnelle (conteneur web unique, sans backend séparé).
+Application web de veille opérationnelle avec un frontend moderne et une stack conteneurisée complète.
 
 ## Démarrage rapide
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
 Ou via script:
@@ -14,7 +14,12 @@ Ou via script:
 ./scripts/install.sh
 ```
 
-Application disponible sur `http://localhost:1182`.
+## Accès aux services
+
+- Interface web : `http://localhost:1182`
+- API backend : `http://localhost:8000`
+- PostgreSQL : `localhost:5432` (base `veille`, utilisateur `postgres`, mot de passe `postgres`)
+- Redis : `localhost:6379`
 
 ## Authentification par défaut
 
@@ -25,12 +30,14 @@ Application disponible sur `http://localhost:1182`.
 ## Architecture
 
 - `web` : interface dashboard (Nginx + HTML/CSS/JS)
-- Données applicatives stockées dans le navigateur (`localStorage`)
+- `backend` : API FastAPI
+- `db` : PostgreSQL 16 avec script d'initialisation
+- `redis` : Redis 7 avec persistance AOF
 
 ## Fonctionnalités livrées
 
 - Connexion locale et changement de mot de passe obligatoire au premier login.
-- Dashboard synthétique (vigilance, crues, risque global, communes en crise, derniers événements).
+- Dashboard synthétique modernisé (vigilance, crues, risque global, communes en crise, derniers événements).
 - Gestion des communes (ajout + bascule mode crise).
 - Main courante locale (ajout d’évènements horodatés).
 - Carte opérationnelle embarquée (OpenStreetMap).
