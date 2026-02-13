@@ -25,7 +25,7 @@ from .schemas import (
     WeatherAlertOut,
 )
 from .security import create_access_token, hash_password, verify_password
-from .services import cleanup_old_weather_alerts, generate_pdf_report
+from .services import cleanup_old_weather_alerts, fetch_meteo_france_isere, fetch_vigicrues_isere, generate_pdf_report
 
 Base.metadata.create_all(bind=engine)
 Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
@@ -131,6 +131,17 @@ def dashboard(db: Session = Depends(get_db), _: User = Depends(get_active_user))
         "global_risk": "rouge" if any(x == "rouge" for x in [latest_alert.level if latest_alert else "vert", river_level.level if river_level else "vert"]) else "orange",
         "communes_crise": crisis_count,
         "latest_logs": [OperationalLogOut.model_validate(log).model_dump() for log in logs],
+    }
+
+
+@app.get("/external/isere/risks")
+def isere_external_risks(_: User = Depends(get_active_user)):
+    meteo = fetch_meteo_france_isere()
+    vigicrues = fetch_vigicrues_isere()
+    return {
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+        "meteo_france": meteo,
+        "vigicrues": vigicrues,
     }
 
 

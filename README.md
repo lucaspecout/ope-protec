@@ -40,3 +40,16 @@ Ou via script:
 - Gestion des communes (ajout + bascule mode crise).
 - Main courante locale (ajout d’évènements horodatés).
 - Carte opérationnelle embarquée (OpenStreetMap).
+- Connexion aux flux externes Isère : Météo-France (état de disponibilité et infos vigilance) et Vigicrues (stations Isère + niveau d'alerte eau calculé).
+
+## Endpoint de surveillance externe (Isère)
+
+Après authentification, l'API expose :
+
+```http
+GET /external/isere/risks
+```
+
+Retourne un bloc consolidé :
+- `meteo_france` : état de connexion au service vigilance Météo-France et bulletin Isère.
+- `vigicrues` : état de connexion, stations détectées en Isère et niveau d'alerte eau courant (`vert`, `jaune`, `orange`, `rouge`).
