@@ -128,6 +128,7 @@ def dashboard(db: Session = Depends(get_db), _: User = Depends(get_active_user))
     return {
         "vigilance": latest_alert.level if latest_alert else "vert",
         "crues": river_level.level if river_level else "vert",
+        "vigilance_risk_type": latest_alert.risk_type if latest_alert else "",
         "global_risk": "rouge" if any(x == "rouge" for x in [latest_alert.level if latest_alert else "vert", river_level.level if river_level else "vert"]) else "orange",
         "communes_crise": crisis_count,
         "latest_logs": [OperationalLogOut.model_validate(log).model_dump() for log in logs],

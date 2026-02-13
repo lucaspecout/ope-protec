@@ -97,6 +97,13 @@ function levelLabel(level) {
   }[level] || 'Vert';
 }
 
+const LEVEL_COLORS = {
+  green: { meteo: '#2eb85c', river: '#2f9e44' },
+  yellow: { meteo: '#ffd43b', river: '#f59f00' },
+  orange: { meteo: '#ff922b', river: '#f76707' },
+  red: { meteo: '#fa5252', river: '#e03131' },
+};
+
 function setMiniMapLevels(meteoValue, riverValue) {
   const meteoLevel = normalizeAlertLevel(meteoValue);
   const riverLevel = normalizeAlertLevel(riverValue);
@@ -111,20 +118,70 @@ function setMiniMapLevels(meteoValue, riverValue) {
 
   isereShape.classList.remove(...meteoClasses);
   isereShape.classList.add(`meteo-${meteoLevel}`);
+  isereShape.style.fill = LEVEL_COLORS[meteoLevel].meteo;
 
   meteoChip.classList.remove(...meteoClasses);
   meteoChip.classList.add(`meteo-${meteoLevel}`);
+  meteoChip.style.backgroundColor = LEVEL_COLORS[meteoLevel].meteo;
 
   riverChip.classList.remove(...riverClasses);
   riverChip.classList.add(`river-${riverLevel}`);
+  riverChip.style.backgroundColor = LEVEL_COLORS[riverLevel].river;
 
   riverPaths.forEach((path) => {
     path.classList.remove(...riverClasses);
     path.classList.add(`river-${riverLevel}`);
+    path.style.stroke = LEVEL_COLORS[riverLevel].river;
   });
 
   document.getElementById('meteo-level').textContent = levelLabel(meteoLevel);
   document.getElementById('river-level').textContent = levelLabel(riverLevel);
+}
+
+function extractMeteoCauses(...values) {
+  const knownCauses = [
+    'pluie-inondation',
+    'pluie',
+    'inondation',
+    'neige-verglas',
+    'neige',
+    'verglas',
+    'orages',
+    'orages violents',
+    'vent violent',
+    'canicule',
+    'grand froid',
+    'avalanches',
+  ];
+
+  const text = values
+    .filter(Boolean)
+    .map((value) => String(value).toLowerCase())
+    .join(' | ');
+
+  const matches = knownCauses.filter((cause) => text.includes(cause));
+  return [...new Set(matches)];
+}
+
+function setMeteoCauseText(causes) {
+  const causeNode = document.getElementById('meteo-cause');
+  if (!causes || causes.length === 0) {
+    causeNode.textContent = 'Aucun phénomène signalé.';
+    return;
+  }
+
+  causeNode.textContent = causes.map((cause) => cause.charAt(0).toUpperCase() + cause.slice(1)).join(' · ');
+}
+
+async function loadExternalRisks() {
+  try {
+    const payload = await api('/external/isere/risks');
+    const meteo = payload?.meteo_france || {};
+    const causes = extractMeteoCauses(meteo.bulletin_title, meteo.info_state);
+    setMeteoCauseText(causes);
+  } catch {
+    setMeteoCauseText([]);
+  }
 }
 
 function renderLogs(logs) {
@@ -140,6 +197,7 @@ async function loadDashboard() {
     document.getElementById('vigilance').textContent = data.vigilance;
     document.getElementById('crues').textContent = data.crues;
     setMiniMapLevels(data.vigilance, data.crues);
+    setMeteoCauseText(extractMeteoCauses(data.vigilance_risk_type));
 
     const riskValue = normalizeRisk(data.global_risk);
     const risk = document.getElementById('risk');
@@ -200,6 +258,7 @@ async function login(username, password) {
 
     showApp();
     await loadDashboard();
+    await loadExternalRisks();
     await loadMunicipalities();
   } catch (error) {
     loginError.textContent = error.message;
@@ -223,6 +282,7 @@ async function updatePassword(newPassword) {
     pendingCurrentPassword = '';
     showApp();
     await loadDashboard();
+    await loadExternalRisks();
     await loadMunicipalities();
   } catch (error) {
     passwordError.textContent = error.message;
@@ -266,6 +326,7 @@ document.getElementById('municipality-form').addEventListener('submit', async (e
     event.target.reset();
     await loadMunicipalities();
     await loadDashboard();
+    await loadExternalRisks();
   } catch (error) {
     dashboardError.textContent = error.message;
   }
@@ -287,6 +348,7 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
     });
     event.target.reset();
     await loadDashboard();
+    await loadExternalRisks();
   } catch (error) {
     dashboardError.textContent = error.message;
   }
@@ -312,5 +374,6 @@ document.querySelectorAll('.menu-btn').forEach((button) => {
 
   showApp();
   await loadDashboard();
+  await loadExternalRisks();
   await loadMunicipalities();
 })();
