@@ -1,12 +1,9 @@
 const STORAGE_KEYS = {
   token: 'token',
-  users: 'vo_users',
-  logs: 'vo_logs',
-  municipalities: 'vo_municipalities',
-  vigilance: 'vo_vigilance',
 };
 
 let token = localStorage.getItem(STORAGE_KEYS.token);
+let pendingCurrentPassword = '';
 
 const loginView = document.getElementById('login-view');
 const appView = document.getElementById('app-view');
@@ -14,48 +11,7 @@ const loginForm = document.getElementById('login-form');
 const passwordForm = document.getElementById('password-form');
 const loginError = document.getElementById('login-error');
 const passwordError = document.getElementById('password-error');
-
-function seedData() {
-  if (!localStorage.getItem(STORAGE_KEYS.users)) {
-    localStorage.setItem(STORAGE_KEYS.users, JSON.stringify([
-      { username: 'admin', password: 'admin', mustChangePassword: true },
-    ]));
-  }
-
-  if (!localStorage.getItem(STORAGE_KEYS.logs)) {
-    localStorage.setItem(STORAGE_KEYS.logs, JSON.stringify([]));
-  }
-
-  if (!localStorage.getItem(STORAGE_KEYS.municipalities)) {
-    localStorage.setItem(STORAGE_KEYS.municipalities, JSON.stringify([]));
-  }
-
-  if (!localStorage.getItem(STORAGE_KEYS.vigilance)) {
-    localStorage.setItem(STORAGE_KEYS.vigilance, JSON.stringify({
-      vigilance: 'Vert',
-      crues: 'Normal',
-      global_risk: 'green',
-    }));
-  }
-}
-
-function readJson(key, fallback) {
-  try {
-    return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback));
-  } catch {
-    return fallback;
-  }
-}
-
-function writeJson(key, value) {
-  localStorage.setItem(key, JSON.stringify(value));
-}
-
-function currentUser() {
-  if (!token) return null;
-  const users = readJson(STORAGE_KEYS.users, []);
-  return users.find((u) => u.username === token) || null;
-}
+const dashboardError = document.getElementById('dashboard-error');
 
 function setVisibility(element, isVisible) {
   element.classList.toggle('hidden', !isVisible);
@@ -72,97 +28,160 @@ function showLogin() {
   setVisibility(loginView, true);
   setVisibility(passwordForm, false);
   setVisibility(loginForm, true);
+  pendingCurrentPassword = '';
 }
 
-function loadDashboard() {
-  const logs = readJson(STORAGE_KEYS.logs, []);
-  const municipalities = readJson(STORAGE_KEYS.municipalities, []);
-  const vigilance = readJson(STORAGE_KEYS.vigilance, {
-    vigilance: 'Vert',
-    crues: 'Normal',
-    global_risk: 'green',
+async function api(path, options = {}) {
+  const headers = {
+    ...(options.headers || {}),
+  };
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const response = await fetch(path, {
+    ...options,
+    headers,
   });
 
-  document.getElementById('vigilance').textContent = vigilance.vigilance;
-  document.getElementById('crues').textContent = vigilance.crues;
-  const risk = document.getElementById('risk');
-  risk.textContent = vigilance.global_risk;
-  risk.className = vigilance.global_risk;
-  document.getElementById('crisis').textContent = municipalities.filter((m) => m.crisis_mode).length;
+  if (response.status === 401) {
+    logout();
+    throw new Error('Session expirée, veuillez vous reconnecter.');
+  }
+
+  if (!response.ok) {
+    let message = 'Une erreur est survenue.';
+    try {
+      const payload = await response.json();
+      message = payload.detail || message;
+    } catch {
+      // Ignore JSON parse errors.
+    }
+    throw new Error(message);
+  }
+
+  if (response.status === 204) {
+    return null;
+  }
+
+  return response.json();
+}
+
+function normalizeRisk(value) {
+  if (!value) return 'vert';
+  const level = String(value).toLowerCase();
+  if (['vert', 'green'].includes(level)) return 'vert';
+  if (['orange', 'amber'].includes(level)) return 'orange';
+  if (['rouge', 'red'].includes(level)) return 'rouge';
+  return level;
+}
+
+function renderLogs(logs) {
   document.getElementById('logs').innerHTML = logs
-    .slice(-10)
-    .reverse()
-    .map((l) => `<li>${new Date(l.created_at).toLocaleString()} - ${l.event_type}</li>`)
+    .map((log) => `<li>${new Date(log.created_at).toLocaleString()} - ${log.event_type}</li>`)
     .join('');
 }
 
-function loadMunicipalities() {
-  const municipalities = readJson(STORAGE_KEYS.municipalities, []);
-  const list = document.getElementById('municipalities-list');
-  list.innerHTML = municipalities.map((m) => `
-    <li>
-      <strong>${m.name}</strong> — ${m.manager} (${m.phone})
-      <button data-id="${m.id}" class="crisis-toggle">${m.crisis_mode ? 'Retirer crise' : 'Mode crise'}</button>
-    </li>
-  `).join('');
+async function loadDashboard() {
+  try {
+    dashboardError.textContent = '';
+    const data = await api('/dashboard');
+    document.getElementById('vigilance').textContent = data.vigilance;
+    document.getElementById('crues').textContent = data.crues;
 
-  document.querySelectorAll('.crisis-toggle').forEach((button) => {
-    button.addEventListener('click', () => {
-      const items = readJson(STORAGE_KEYS.municipalities, []);
-      const next = items.map((m) => (
-        m.id === Number(button.dataset.id) ? { ...m, crisis_mode: !m.crisis_mode } : m
-      ));
-      writeJson(STORAGE_KEYS.municipalities, next);
-      loadMunicipalities();
-      loadDashboard();
+    const riskValue = normalizeRisk(data.global_risk);
+    const risk = document.getElementById('risk');
+    risk.textContent = riskValue;
+    risk.className = riskValue;
+
+    document.getElementById('crisis').textContent = data.communes_crise;
+    renderLogs(data.latest_logs || []);
+  } catch (error) {
+    dashboardError.textContent = error.message;
+  }
+}
+
+async function loadMunicipalities() {
+  try {
+    const municipalities = await api('/municipalities');
+    const list = document.getElementById('municipalities-list');
+    list.innerHTML = municipalities.map((m) => `
+      <li>
+        <strong>${m.name}</strong> — ${m.manager} (${m.phone})
+        <button data-id="${m.id}" class="crisis-toggle">${m.crisis_mode ? 'Retirer crise' : 'Mode crise'}</button>
+      </li>
+    `).join('');
+
+    document.querySelectorAll('.crisis-toggle').forEach((button) => {
+      button.addEventListener('click', async () => {
+        await api(`/municipalities/${button.dataset.id}/crisis`, { method: 'POST' });
+        await loadMunicipalities();
+        await loadDashboard();
+      });
     });
-  });
+  } catch (error) {
+    dashboardError.textContent = error.message;
+  }
 }
 
-function login(username, password) {
-  const users = readJson(STORAGE_KEYS.users, []);
-  const user = users.find((u) => u.username === username && u.password === password);
+async function login(username, password) {
+  try {
+    const payload = new URLSearchParams({ username, password });
+    const data = await api('/auth/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: payload,
+    });
 
-  if (!user) {
-    loginError.textContent = 'Identifiants invalides.';
-    return;
+    loginError.textContent = '';
+    token = data.access_token;
+    localStorage.setItem(STORAGE_KEYS.token, token);
+
+    if (data.must_change_password) {
+      pendingCurrentPassword = password;
+      setVisibility(loginForm, false);
+      setVisibility(passwordForm, true);
+      return;
+    }
+
+    showApp();
+    await loadDashboard();
+    await loadMunicipalities();
+  } catch (error) {
+    loginError.textContent = error.message;
   }
-
-  loginError.textContent = '';
-  token = user.username;
-  localStorage.setItem(STORAGE_KEYS.token, token);
-
-  if (user.mustChangePassword) {
-    setVisibility(loginForm, false);
-    setVisibility(passwordForm, true);
-    return;
-  }
-
-  showApp();
-  loadDashboard();
-  loadMunicipalities();
 }
 
-function updatePassword(currentPassword, newPassword) {
-  const user = currentUser();
-  const users = readJson(STORAGE_KEYS.users, []);
+async function updatePassword(newPassword) {
+  try {
+    await api('/auth/change-password', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        current_password: pendingCurrentPassword,
+        new_password: newPassword,
+      }),
+    });
 
-  if (!user || user.password !== currentPassword) {
-    passwordError.textContent = 'Mot de passe actuel incorrect.';
-    return;
+    passwordError.textContent = '';
+    pendingCurrentPassword = '';
+    showApp();
+    await loadDashboard();
+    await loadMunicipalities();
+  } catch (error) {
+    passwordError.textContent = error.message;
   }
+}
 
-  const nextUsers = users.map((u) => (
-    u.username === user.username
-      ? { ...u, password: newPassword, mustChangePassword: false }
-      : u
-  ));
-
-  writeJson(STORAGE_KEYS.users, nextUsers);
-  passwordError.textContent = '';
-  showApp();
-  loadDashboard();
-  loadMunicipalities();
+function logout() {
+  localStorage.removeItem(STORAGE_KEYS.token);
+  token = null;
+  showLogin();
 }
 
 loginForm.addEventListener('submit', (event) => {
@@ -174,47 +193,55 @@ loginForm.addEventListener('submit', (event) => {
 passwordForm.addEventListener('submit', (event) => {
   event.preventDefault();
   const formData = new FormData(passwordForm);
-  updatePassword(formData.get('current_password'), formData.get('new_password'));
+  updatePassword(formData.get('new_password'));
 });
 
-document.getElementById('municipality-form').addEventListener('submit', (event) => {
+document.getElementById('municipality-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const formData = new FormData(event.target);
-  const items = readJson(STORAGE_KEYS.municipalities, []);
-  items.push({
-    id: Date.now(),
-    name: formData.get('name'),
-    phone: formData.get('phone'),
-    email: formData.get('email'),
-    manager: formData.get('manager'),
-    crisis_mode: false,
-  });
-  writeJson(STORAGE_KEYS.municipalities, items);
-  event.target.reset();
-  loadMunicipalities();
-  loadDashboard();
+  try {
+    await api('/municipalities', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: formData.get('name'),
+        phone: formData.get('phone'),
+        email: formData.get('email'),
+        manager: formData.get('manager'),
+      }),
+    });
+    event.target.reset();
+    await loadMunicipalities();
+    await loadDashboard();
+  } catch (error) {
+    dashboardError.textContent = error.message;
+  }
 });
 
-document.getElementById('log-form').addEventListener('submit', (event) => {
+document.getElementById('log-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const formData = new FormData(event.target);
-  const logs = readJson(STORAGE_KEYS.logs, []);
-  logs.push({
-    id: Date.now(),
-    event_type: formData.get('event_type'),
-    description: formData.get('description'),
-    created_at: new Date().toISOString(),
-  });
-  writeJson(STORAGE_KEYS.logs, logs);
-  event.target.reset();
-  loadDashboard();
+  try {
+    await api('/logs', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        event_type: formData.get('event_type'),
+        description: formData.get('description'),
+      }),
+    });
+    event.target.reset();
+    await loadDashboard();
+  } catch (error) {
+    dashboardError.textContent = error.message;
+  }
 });
 
-document.getElementById('logout-btn').addEventListener('click', () => {
-  localStorage.removeItem(STORAGE_KEYS.token);
-  token = null;
-  showLogin();
-});
+document.getElementById('logout-btn').addEventListener('click', logout);
 
 document.querySelectorAll('.menu-btn').forEach((button) => {
   button.addEventListener('click', () => {
@@ -226,16 +253,13 @@ document.querySelectorAll('.menu-btn').forEach((button) => {
   });
 });
 
-seedData();
-if (token) {
-  const user = currentUser();
-  if (user && !user.mustChangePassword) {
-    showApp();
-    loadDashboard();
-    loadMunicipalities();
-  } else {
+(async () => {
+  if (!token) {
     showLogin();
+    return;
   }
-} else {
-  showLogin();
-}
+
+  showApp();
+  await loadDashboard();
+  await loadMunicipalities();
+})();
