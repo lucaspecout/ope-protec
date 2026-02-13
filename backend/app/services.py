@@ -12,7 +12,7 @@ from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .models import OperationalLog, WeatherAlert
+from .models import Municipality, OperationalLog, WeatherAlert
 
 
 def cleanup_old_weather_alerts(db: Session) -> int:
@@ -28,22 +28,34 @@ def generate_pdf_report(db: Session, report_name: str = "rapport_veille.pdf") ->
     c = canvas.Canvas(report_path, pagesize=A4)
     c.setFont("Helvetica-Bold", 16)
     c.drawString(40, 800, "Protection Civile de l'Isère")
-    c.drawString(40, 780, "Veille Opérationnelle – Isère")
+    c.drawString(40, 780, "Rapport de veille et gestion de crise")
     c.setFont("Helvetica", 10)
     y = 750
+
+    latest_alert = db.query(WeatherAlert).order_by(WeatherAlert.created_at.desc()).first()
+    crisis_count = db.query(Municipality).filter(Municipality.crisis_mode.is_(True)).count()
+    logs = db.query(OperationalLog).order_by(OperationalLog.created_at.desc()).limit(20).all()
+
     c.drawString(40, y, f"Date: {datetime.utcnow().isoformat()}")
+    y -= 20
+    c.drawString(40, y, f"Synthèse: vigilance={latest_alert.level if latest_alert else 'vert'} ; communes en crise={crisis_count}")
+    y -= 20
+    c.drawString(40, y, "Carte: incluse via l'interface web (capture opérationnelle)")
+    y -= 20
+    c.drawString(40, y, "Graphiques: tendances vigilance/crues visualisées dans le tableau de bord")
+
     y -= 30
     c.setFont("Helvetica-Bold", 12)
     c.drawString(40, y, "Chronologie main courante")
     y -= 20
     c.setFont("Helvetica", 10)
-    logs = db.query(OperationalLog).order_by(OperationalLog.created_at.desc()).limit(15).all()
     for log in logs:
-        c.drawString(45, y, f"- {log.created_at:%d/%m %H:%M} {log.event_type}: {log.description[:80]}")
+        c.drawString(45, y, f"- {log.created_at:%d/%m %H:%M} {log.event_type}: {log.description[:78]}")
         y -= 14
         if y < 80:
             c.showPage()
             y = 800
+
     c.drawString(40, 60, "Signature: ____________________")
     c.save()
     return report_path
@@ -95,8 +107,14 @@ def _vigicrues_level_from_delta(delta_m: float) -> str:
     return "vert"
 
 
-def fetch_vigicrues_isere(sample_size: int = 120, station_limit: int = 5) -> dict[str, Any]:
+def fetch_vigicrues_isere(
+    sample_size: int = 240,
+    station_limit: int | None = None,
+    priority_names: list[str] | None = None,
+) -> dict[str, Any]:
     base_url = "https://www.vigicrues.gouv.fr/services"
+    priority_names = [name.lower() for name in (priority_names or [])]
+
     try:
         observations = _http_get_json(f"{base_url}/observations.json?GrdSerie=H&FormatSortie=simple")
         station_codes = [code for _, code in observations.get("Observations", {}).get("ListeStation", [])][:sample_size]
@@ -120,22 +138,30 @@ def fetch_vigicrues_isere(sample_size: int = 120, station_limit: int = 5) -> dic
             latest_ts, latest_h = values[-1]
             old_h = values[0][1] if len(values) > 1 else latest_h
             delta = round(float(latest_h) - float(old_h), 2)
+            station_name = station.get("LbStationHydro", "")
+            river_name = station.get("LbCoursEau", "")
+            station_blob = f"{station_name} {river_name}".lower()
+
+            is_priority = "grenoble" in station_blob or any(name in station_blob for name in priority_names)
             isere_stations.append(
                 {
                     "code": code,
-                    "station": station.get("LbStationHydro"),
-                    "river": station.get("LbCoursEau"),
+                    "station": station_name,
+                    "river": river_name,
                     "height_m": round(float(latest_h), 2),
                     "delta_window_m": delta,
                     "level": _vigicrues_level_from_delta(abs(delta)),
+                    "is_priority": is_priority,
                     "observed_at": datetime.utcfromtimestamp(int(latest_ts) / 1000).isoformat() + "Z",
                 }
             )
-            if len(isere_stations) >= station_limit:
-                break
 
         if not isere_stations:
             raise ValueError("Aucune station Isère détectée sur l'échantillon courant")
+
+        isere_stations.sort(key=lambda station: (not station["is_priority"], station["station"] or ""))
+        if station_limit is not None:
+            isere_stations = isere_stations[:station_limit]
 
         levels = [s["level"] for s in isere_stations]
         global_level = "rouge" if "rouge" in levels else "orange" if "orange" in levels else "jaune" if "jaune" in levels else "vert"

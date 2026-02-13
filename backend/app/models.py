@@ -25,6 +25,8 @@ class WeatherAlert(Base):
     risk_type: Mapped[str] = mapped_column(String(100))
     level: Mapped[str] = mapped_column(String(20))
     previous_level: Mapped[str] = mapped_column(String(20), default="vert")
+    internal_mail_group: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    sent_to_internal_group: Mapped[bool] = mapped_column(Boolean, default=False)
     source: Mapped[str] = mapped_column(String(50), default="Météo-France")
     pcs_validated: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -38,6 +40,7 @@ class RiverStation(Base):
     municipality: Mapped[str] = mapped_column(String(120))
     level: Mapped[str] = mapped_column(String(20), default="vert")
     water_height_cm: Mapped[int] = mapped_column(Integer, default=0)
+    is_priority: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -49,6 +52,8 @@ class Municipality(Base):
     phone: Mapped[str] = mapped_column(String(30))
     email: Mapped[str] = mapped_column(String(120))
     manager: Mapped[str] = mapped_column(String(120))
+    contacts: Mapped[str | None] = mapped_column(Text, nullable=True)
+    additional_info: Mapped[str | None] = mapped_column(Text, nullable=True)
     pcs_active: Mapped[bool] = mapped_column(Boolean, default=True)
     crisis_mode: Mapped[bool] = mapped_column(Boolean, default=False)
     vigilance_color: Mapped[str] = mapped_column(String(20), default="vert")

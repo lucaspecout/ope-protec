@@ -37,7 +37,7 @@ Ou via script:
 
 - Connexion locale et changement de mot de passe obligatoire au premier login.
 - Dashboard synthétique modernisé (vigilance, crues, risque global, communes en crise, derniers événements).
-- Gestion des communes (ajout + bascule mode crise).
+- Gestion des communes (ajout, enrichissement contacts/informations, bascule mode crise, import ORSEC et conventions).
 - Main courante locale (ajout d’évènements horodatés).
 - Carte opérationnelle embarquée (OpenStreetMap).
 - Connexion aux flux externes Isère : Météo-France (état de disponibilité et infos vigilance) et Vigicrues (stations Isère + niveau d'alerte eau calculé).
@@ -53,3 +53,13 @@ GET /external/isere/risks
 Retourne un bloc consolidé :
 - `meteo_france` : état de connexion au service vigilance Météo-France et bulletin Isère.
 - `vigicrues` : état de connexion, stations détectées en Isère et niveau d'alerte eau courant (`vert`, `jaune`, `orange`, `rouge`).
+
+
+## Alignement besoins métier
+
+- Gouvernance: projet validé, périmètre Isère, déploiement Docker, authentification par identifiants.
+- Alertes météo: transitions surveillées `jaune→orange` et `orange→rouge`, historique conservé 3 mois avec purge automatique, alerte différenciée par type de risque, validation avant diffusion manuelle au groupe interne.
+- Vigicrues: collecte stations Isère avec mise en avant Grenoble/communes PCS, données temps réel dans le dashboard.
+- Cartographie/PCS: fiche commune enrichissable (contacts, pièces ORSEC/conventions), mode crise, partage public par lien avec mot de passe et révocation.
+- Rapports: export PDF contenant synthèse, chronologie et rappels carte/graphes.
+- Sécurité: rôles, limite 20 utilisateurs, option d'activation 2FA par utilisateur.

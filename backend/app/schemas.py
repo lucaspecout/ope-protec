@@ -19,6 +19,7 @@ class UserOut(BaseModel):
     id: int
     username: str
     role: str
+    two_factor_enabled: bool
 
     class Config:
         from_attributes = True
@@ -33,6 +34,8 @@ class WeatherAlertCreate(BaseModel):
     risk_type: str
     level: str
     previous_level: str
+    internal_mail_group: str | None = None
+    sent_to_internal_group: bool = False
 
 
 class WeatherAlertOut(WeatherAlertCreate):
@@ -49,6 +52,8 @@ class MunicipalityCreate(BaseModel):
     phone: str
     email: EmailStr
     manager: str
+    contacts: str | None = None
+    additional_info: str | None = None
 
 
 class MunicipalityOut(BaseModel):
@@ -57,6 +62,8 @@ class MunicipalityOut(BaseModel):
     phone: str
     email: str
     manager: str
+    contacts: str | None = None
+    additional_info: str | None = None
     pcs_active: bool
     crisis_mode: bool
     vigilance_color: str
@@ -79,3 +86,11 @@ class OperationalLogOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class ShareAccessRequest(BaseModel):
+    password: str
+
+
+class TwoFactorToggleRequest(BaseModel):
+    enabled: bool
