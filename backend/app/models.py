@@ -13,6 +13,7 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(50), unique=True, index=True)
     hashed_password: Mapped[str] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(20), default="lecture")
+    municipality_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     two_factor_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -70,8 +71,10 @@ class OperationalLog(Base):
     attachment_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    municipality_id: Mapped[int | None] = mapped_column(ForeignKey("municipalities.id"), nullable=True)
 
     created_by = relationship("User")
+    municipality = relationship("Municipality")
 
 
 class PublicShare(Base):
