@@ -111,6 +111,42 @@ function setActivePanel(panelId) {
   menuButton?.setAttribute('aria-expanded', 'false');
 }
 
+
+function geometryToPath(geometry, width = 420, height = 520) {
+  const rings = geometry.type === 'Polygon' ? [geometry.coordinates[0]] : geometry.coordinates.map((poly) => poly[0]);
+  const points = rings.flat();
+  const xs = points.map((pt) => pt[0]);
+  const ys = points.map((pt) => pt[1]);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const pad = 20;
+  const scaleX = (width - 2 * pad) / (maxX - minX || 1);
+  const scaleY = (height - 2 * pad) / (maxY - minY || 1);
+
+  return rings.map((ring) => ring.map((pt, index) => {
+    const x = pad + (pt[0] - minX) * scaleX;
+    const y = height - pad - (pt[1] - minY) * scaleY;
+    return `${index === 0 ? 'M' : 'L'}${x.toFixed(2)} ${y.toFixed(2)}`;
+  }).join(' ') + ' Z').join(' ');
+}
+
+async function loadIsereMap() {
+  try {
+    const response = await fetch('/public/isere-map');
+    if (!response.ok) throw new Error('Carte Isère indisponible');
+    const data = await response.json();
+    const geometry = data.geometry;
+    if (!geometry || !geometry.coordinates) throw new Error('Géométrie invalide');
+    const path = geometryToPath(geometry);
+    document.getElementById('isere-shape').setAttribute('d', path);
+    document.getElementById('map-source').textContent = `Source carte: ${data.source}`;
+  } catch (error) {
+    document.getElementById('map-source').textContent = `Source carte: fallback local (${error.message})`;
+  }
+}
+
 function paintMap(meteo, river) {
   const normalized = {
     green: 'vert',
@@ -157,7 +193,7 @@ async function loadDashboard() {
 async function loadExternalRisks() {
   const data = await api('/external/isere/risks');
 
-  document.getElementById('meteo-status').textContent = `${data.meteo_france.status} · ${data.meteo_france.department}`;
+  document.getElementById('meteo-status').textContent = `${data.meteo_france.status} · ${data.meteo_france.department} · niveau ${data.meteo_france.level || 'inconnu'}`;
   document.getElementById('meteo-info').textContent = data.meteo_france.info_state || data.meteo_france.bulletin_title || 'Pas de détail';
 
   document.getElementById('vigicrues-status').textContent = `${data.vigicrues.status} · niveau ${data.vigicrues.water_alert_level}`;
@@ -396,6 +432,7 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
   bindHomeInteractions();
   bindAppInteractions();
   startHomeLiveRefresh();
+  loadIsereMap();
 
   if (!token) {
     showHome();
