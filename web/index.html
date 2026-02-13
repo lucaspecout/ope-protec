@@ -124,11 +124,17 @@
         </section>
 
         <section id="users-panel" class="panel hidden" hidden>
-          <article class="card">
+          <article class="card users-kpis">
+            <div><p class="kpi-label">Comptes visibles</p><p id="users-total" class="kpi-value">0</p></div>
+            <div><p class="kpi-label">Comptes mairie</p><p id="users-mairie" class="kpi-value">0</p></div>
+            <div><p class="kpi-label">Comptes privilégiés</p><p id="users-privileged" class="kpi-value">0</p></div>
+          </article>
+
+          <article id="users-create-card" class="card">
             <h2>Créer un compte avec droits</h2>
             <form id="user-form" class="inline-form">
               <input name="username" placeholder="Identifiant" required />
-              <input name="password" type="password" placeholder="Mot de passe" required />
+              <input name="password" type="password" minlength="8" placeholder="Mot de passe (8 caractères min.)" required />
               <select id="user-role" name="role" required>
                 <option value="securite">Sécurité (lecture)</option>
                 <option value="visiteur">Visiteur (lecture)</option>
@@ -139,8 +145,29 @@
               <select id="user-mairie-name" name="municipality_name" class="hidden" hidden></select>
               <button type="submit">Créer le compte</button>
             </form>
-            <p class="help">Admin: accès complet · OPE: modification · Sécurité/Visiteur: lecture · Mairie: accès limité à sa commune.</p>
+            <p class="help users-help">Admin: accès complet · OPE: modification · Sécurité/Visiteur: lecture · Mairie: accès limité à sa commune.</p>
             <p id="user-error" class="error"></p>
+          </article>
+
+          <article class="card">
+            <h2>Comptes existants</h2>
+            <p class="help users-help">La liste ci-dessous permet de vérifier immédiatement les comptes créés et leur périmètre.</p>
+            <div class="users-table-wrap">
+              <table class="users-table">
+                <thead>
+                  <tr>
+                    <th>Identifiant</th>
+                    <th>Rôle</th>
+                    <th>Commune</th>
+                    <th>Créé le</th>
+                    <th>Statut</th>
+                  </tr>
+                </thead>
+                <tbody id="users-table">
+                  <tr><td colspan="5" class="muted">Chargement...</td></tr>
+                </tbody>
+              </table>
+            </div>
           </article>
         </section>
       </section>

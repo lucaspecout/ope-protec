@@ -22,6 +22,8 @@ class UserOut(BaseModel):
     role: str
     municipality_name: str | None = None
     two_factor_enabled: bool
+    must_change_password: bool
+    created_at: datetime
 
     class Config:
         from_attributes = True

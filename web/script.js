@@ -27,6 +27,65 @@ function canManageUsers() {
   return ['admin', 'ope'].includes(currentUser?.role);
 }
 
+
+function roleLabel(role) {
+  return {
+    admin: 'Admin',
+    ope: 'Opérateur',
+    securite: 'Sécurité',
+    visiteur: 'Visiteur',
+    mairie: 'Mairie',
+  }[role] || role;
+}
+
+function updateUsersSummary(users = []) {
+  const total = users.length;
+  const mairie = users.filter((user) => user.role === 'mairie').length;
+  const privileged = users.filter((user) => ['admin', 'ope'].includes(user.role)).length;
+  document.getElementById('users-total').textContent = total;
+  document.getElementById('users-mairie').textContent = mairie;
+  document.getElementById('users-privileged').textContent = privileged;
+}
+
+function renderUsers(users = []) {
+  const table = document.getElementById('users-table');
+  if (!table) {
+    return;
+  }
+
+  if (users.length === 0) {
+    table.innerHTML = '<tr><td colspan="5" class="muted">Aucun compte disponible pour votre rôle.</td></tr>';
+    return;
+  }
+
+  table.innerHTML = users
+    .map((user) => `
+      <tr>
+        <td><strong>${user.username}</strong></td>
+        <td>${roleLabel(user.role)}</td>
+        <td>${user.municipality_name || '-'}</td>
+        <td>${new Date(user.created_at).toLocaleDateString()}</td>
+        <td>${user.must_change_password ? '<span class="badge warning">Mot de passe à changer</span>' : '<span class="badge success">Actif</span>'}</td>
+      </tr>
+    `)
+    .join('');
+}
+
+async function loadUsers() {
+  if (!canManageUsers()) {
+    return;
+  }
+
+  try {
+    const users = await api('/auth/users');
+    updateUsersSummary(users);
+    renderUsers(users);
+    document.getElementById('user-error').textContent = '';
+  } catch (error) {
+    document.getElementById('user-error').textContent = error.message;
+  }
+}
+
 function showApp() {
   setVisibility(loginView, false);
   setVisibility(appView, true);
@@ -47,6 +106,7 @@ function applyRoleVisibility() {
   document.querySelectorAll('[data-requires-edit]').forEach((node) => setVisibility(node, canEdit()));
   const usersMenu = document.querySelector('.menu-btn[data-target="users-panel"]');
   setVisibility(usersMenu, canManageUsers());
+  setVisibility(document.getElementById('users-create-card'), canManageUsers());
 }
 
 async function api(path, options = {}) {
@@ -287,6 +347,7 @@ async function login(username, password) {
     await loadDashboard();
     await loadExternalRisks();
     await loadMunicipalities();
+    await loadUsers();
   } catch (error) {
     loginError.textContent = error.message;
   }
@@ -312,6 +373,7 @@ async function updatePassword(newPassword) {
     await loadDashboard();
     await loadExternalRisks();
     await loadMunicipalities();
+    await loadUsers();
   } catch (error) {
     passwordError.textContent = error.message;
   }
@@ -407,6 +469,7 @@ document.getElementById('user-form').addEventListener('submit', async (event) =>
     document.getElementById('user-error').textContent = '';
     event.target.reset();
     setVisibility(document.getElementById('user-mairie-name'), false);
+    await loadUsers();
   } catch (error) {
     document.getElementById('user-error').textContent = error.message;
   }
@@ -436,6 +499,7 @@ document.querySelectorAll('.menu-btn').forEach((button) => {
     await loadDashboard();
     await loadExternalRisks();
     await loadMunicipalities();
+    await loadUsers();
   } catch {
     logout();
   }
