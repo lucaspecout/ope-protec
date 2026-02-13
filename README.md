@@ -17,7 +17,7 @@ Ou via script:
 ## Accès aux services
 
 - Interface web : `http://localhost:1182`
-- API backend : `http://localhost:8000`
+- API backend (via le conteneur web) : `http://localhost:1182`
 - PostgreSQL : `localhost:5432` (base `veille`, utilisateur `postgres`, mot de passe `postgres`)
 - Redis : `localhost:6379`
 
@@ -29,8 +29,7 @@ Ou via script:
 
 ## Architecture
 
-- `web` : interface dashboard (Nginx + HTML/CSS/JS)
-- `backend` : API FastAPI
+- `web` : interface dashboard + API FastAPI (Nginx + HTML/CSS/JS + Uvicorn)
 - `db` : PostgreSQL 16 avec script d'initialisation
 - `redis` : Redis 7 avec persistance AOF
 
