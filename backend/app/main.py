@@ -151,6 +151,14 @@ def register(user: UserCreate, db: Session = Depends(get_db), creator: User = De
     return entity
 
 
+@app.get("/auth/users", response_model=list[UserOut])
+def list_users(db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "ope"))):
+    users_query = db.query(User)
+    if user.role == "ope":
+        users_query = users_query.filter(User.role.in_(["securite", "visiteur", "mairie"]))
+    return users_query.order_by(User.created_at.desc()).all()
+
+
 @app.post("/auth/login", response_model=Token)
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == form_data.username).first()

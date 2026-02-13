@@ -50,7 +50,8 @@ body {
   font-size: .78rem;
 }
 label { display: flex; flex-direction: column; gap: .4rem; margin-bottom: .8rem; }
-input {
+input,
+select {
   transition: border-color .2s ease, box-shadow .2s ease;
   width: 100%;
   background: #edf4ff;
@@ -59,7 +60,8 @@ input {
   border-radius: 10px;
   padding: .75rem .8rem;
 }
-input:focus {
+input:focus,
+select:focus {
   outline: none;
   border-color: #6ea8ff;
   box-shadow: 0 0 0 3px rgba(59,130,246,.2);
@@ -206,3 +208,52 @@ button {
   .sidebar { position: static; }
   .mini-map-card { grid-column: 1 / -1; }
 }
+
+
+.users-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: .9rem;
+}
+.kpi-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: .84rem;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+.kpi-value {
+  margin: .3rem 0 0;
+  font-size: 1.7rem;
+  font-weight: 800;
+}
+.users-help { color: #496489; }
+.users-table-wrap { overflow-x: auto; }
+.users-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .94rem;
+}
+.users-table th,
+.users-table td {
+  text-align: left;
+  padding: .65rem .45rem;
+  border-bottom: 1px solid #e4ecfa;
+}
+.users-table th {
+  color: #48648b;
+  font-size: .8rem;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: .18rem .5rem;
+  font-size: .76rem;
+  font-weight: 700;
+}
+.badge.success { color: #0f7a5f; background: #daf8ef; }
+.badge.warning { color: #9a6300; background: #fff3d6; }
+.muted { color: var(--muted); }
