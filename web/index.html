@@ -3,177 +3,144 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Veille Opérationnelle</title>
+  <title>CRISIS38 · Centre opérationnel Isère</title>
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <main class="layout">
-    <section id="login-view" class="auth-wrapper">
-      <form id="login-form" class="glass auth-card" method="post" action="#" autocomplete="off">
-        <p class="eyebrow">Protection Civile de l'Isère</p>
-        <h1>Centre de veille opérationnelle</h1>
-        <p class="chip">Interface sécurisée · connexion chiffrée</p>
-        <p class="help">Connectez-vous pour accéder au tableau de bord.</p>
+  <main>
+    <section id="login-view" class="auth-wrap">
+      <form id="login-form" class="panel auth-card" method="post" action="#" autocomplete="off">
+        <p class="tag">Protection Civile · Isère</p>
+        <h1>CRISIS38</h1>
+        <p>Application de gestion des opérations de crise départementales.</p>
         <label>Identifiant<input name="username" required /></label>
         <label>Mot de passe<input name="password" type="password" required /></label>
-        <button type="submit">Se connecter</button>
+        <button type="submit">Connexion sécurisée</button>
         <p id="login-error" class="error"></p>
       </form>
 
-      <form id="password-form" class="glass auth-card hidden" hidden method="post" action="#" autocomplete="off">
-        <p class="eyebrow">Sécurité</p>
-        <h2>Changement obligatoire</h2>
-        <p class="help">Pour continuer, remplacez le mot de passe temporaire.</p>
+      <form id="password-form" class="panel auth-card hidden" hidden method="post" action="#" autocomplete="off">
+        <h2>Changement de mot de passe</h2>
+        <p>Le mot de passe temporaire doit être remplacé.</p>
         <label>Nouveau mot de passe<input name="new_password" type="password" minlength="8" required /></label>
-        <button type="submit">Mettre à jour</button>
+        <button type="submit">Valider</button>
         <p id="password-error" class="error"></p>
       </form>
     </section>
 
-    <section id="app-view" class="dashboard-shell hidden" hidden>
-      <aside class="sidebar glass">
+    <section id="app-view" class="app hidden" hidden>
+      <aside class="panel sidebar">
         <div>
-          <p class="eyebrow">Protection Civile 38</p>
-          <h2>Ops Dashboard</h2>
-          <p class="help">Rôle: <strong id="current-role">-</strong></p>
-          <p class="help">Commune: <strong id="current-commune">Toutes</strong></p>
+          <p class="tag">Centre de commandement</p>
+          <h2>Isère · 38</h2>
+          <p class="muted">Rôle: <strong id="current-role">-</strong></p>
+          <p class="muted">Commune: <strong id="current-commune">Toutes</strong></p>
         </div>
-        <nav class="menu">
-          <button class="menu-btn active" data-target="dashboard-panel">Dashboard</button>
+        <nav>
+          <button class="menu-btn active" data-target="situation-panel">Situation</button>
+          <button class="menu-btn" data-target="services-panel">Interconnexions</button>
           <button class="menu-btn" data-target="municipalities-panel">Communes</button>
           <button class="menu-btn" data-target="logs-panel">Main courante</button>
-          <button class="menu-btn" data-target="map-panel">Carte</button>
-          <button class="menu-btn" data-target="users-panel">Comptes et droits</button>
+          <button class="menu-btn" data-target="map-panel">Carte Isère</button>
+          <button class="menu-btn" data-target="users-panel">Utilisateurs</button>
         </nav>
-        <button id="logout-btn" class="logout">Déconnexion</button>
+        <button id="logout-btn" class="danger">Déconnexion</button>
       </aside>
 
-      <section class="content-area">
-        <header class="hero glass">
-          <p id="dashboard-error" class="error hero-error"></p>
-          <h1>Tableau de pilotage en temps réel</h1>
-          <p>Suivi synthétique des risques, des communes et des événements en cours.</p>
+      <section class="content">
+        <header class="panel hero">
+          <h1>Gestion intégrée des opérations de crise</h1>
+          <p id="dashboard-error" class="error"></p>
+          <p class="muted">Surveillance météo, crues, communes et coordination inter-services pour l'Isère.</p>
         </header>
 
-        <section id="dashboard-panel" class="panel dashboard">
-          <article class="card metric"><h2>Vigilance</h2><p id="vigilance">-</p></article>
-          <article class="card metric"><h2>Niveau crues</h2><p id="crues">-</p></article>
-          <article class="card metric"><h2>Risque global</h2><p id="risk">-</p></article>
-          <article class="card metric"><h2>Communes en crise</h2><p id="crisis">0</p></article>
-          <article class="card mini-map-card">
-            <h2>Mini-carte Isère</h2>
-            <p class="map-caption">Fond coloré Météo-France + surcouche cours d'eau Vigicrues.</p>
-            <svg viewBox="0 0 240 240" class="isere-map" role="img" aria-labelledby="isere-map-title isere-map-desc">
-              <title id="isere-map-title">Mini-carte de l'Isère</title>
-              <desc id="isere-map-desc">La couleur de fond montre la vigilance météo, les tracés bleus montrent la vigilance crues.</desc>
-              <path id="isere-shape" class="meteo-green" d="M119 18 146 29 164 42 184 40 201 56 191 80 208 104 188 131 195 153 182 174 158 184 149 207 128 223 102 216 84 201 68 205 49 188 36 166 41 142 26 122 41 99 31 76 52 58 65 36 87 42 103 28z"/>
-              <path id="river-isere" class="river river-green" d="M54 165 C81 151, 98 140, 121 120 S170 90, 197 71"/>
-              <path id="river-roman" class="river river-green" d="M83 181 C102 163, 115 151, 127 139"/>
-              <path id="river-drome" class="river river-green" d="M107 203 C121 182, 132 170, 146 155"/>
+        <section id="situation-panel" class="panel view">
+          <div class="kpis">
+            <article class="tile"><h3>Vigilance météo</h3><p id="vigilance">-</p></article>
+            <article class="tile"><h3>Niveau crues</h3><p id="crues">-</p></article>
+            <article class="tile"><h3>Risque global</h3><p id="risk">-</p></article>
+            <article class="tile"><h3>Communes en crise</h3><p id="crisis">0</p></article>
+          </div>
+          <article>
+            <h3>Derniers évènements</h3>
+            <ul id="latest-logs" class="list"></ul>
+          </article>
+        </section>
+
+        <section id="services-panel" class="panel view hidden" hidden>
+          <h3>Écosystème de données et services connectés (Isère)</h3>
+          <div class="services-grid">
+            <article class="service-card"><h4>Météo-France Vigilance</h4><p id="meteo-status">-</p><p id="meteo-info" class="muted"></p></article>
+            <article class="service-card"><h4>Vigicrues</h4><p id="vigicrues-status">-</p><p id="vigicrues-info" class="muted"></p></article>
+            <article class="service-card"><h4>Préfecture de l'Isère</h4><p>Coordination institutionnelle</p><a href="https://www.isere.gouv.fr" target="_blank" rel="noreferrer">isère.gouv.fr</a></article>
+            <article class="service-card"><h4>Vigicrues Flash / inondation</h4><p>Veille complémentaire pluie-inondation</p><a href="https://www.vigicrues.gouv.fr" target="_blank" rel="noreferrer">vigicrues.gouv.fr</a></article>
+            <article class="service-card"><h4>GEORISQUES</h4><p>Connaissance des aléas locaux</p><a href="https://www.georisques.gouv.fr" target="_blank" rel="noreferrer">georisques.gouv.fr</a></article>
+            <article class="service-card"><h4>Info route Isère</h4><p>Axes coupés et circulation</p><a href="https://www.itinisere.fr" target="_blank" rel="noreferrer">itinisere.fr</a></article>
+          </div>
+          <h4>Stations Vigicrues prioritaires</h4>
+          <ul id="stations-list" class="list"></ul>
+        </section>
+
+        <section id="municipalities-panel" class="panel view hidden" hidden>
+          <h3>Communes & fiches pratiques</h3>
+          <form id="municipality-form" class="form" data-requires-edit>
+            <input name="name" placeholder="Nom commune" required />
+            <input name="manager" placeholder="Responsable" required />
+            <input name="phone" placeholder="Téléphone" required />
+            <input name="email" placeholder="Email" type="email" required />
+            <button type="submit">Ajouter</button>
+          </form>
+          <ul id="municipalities-list" class="list"></ul>
+        </section>
+
+        <section id="logs-panel" class="panel view hidden" hidden>
+          <h3>Main courante</h3>
+          <form id="log-form" class="form" data-requires-edit>
+            <input name="event_type" placeholder="Type d'évènement" required />
+            <input name="description" placeholder="Description opérationnelle" required />
+            <button type="submit">Ajouter</button>
+          </form>
+          <ul id="logs-list" class="list"></ul>
+        </section>
+
+        <section id="map-panel" class="panel view hidden" hidden>
+          <h3>Carte stratégique Isère</h3>
+          <div class="map-layout">
+            <svg class="isere-map" viewBox="0 0 420 520" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Carte stylisée Isère">
+              <path id="isere-shape" d="M143 33l46 26 48-8 29 36 45 17-1 48 36 43-15 56-41 35-2 53-45 31-31 52-56 25-48-31-54-4-32-34 3-44-34-40 11-58 40-32 6-51 35-29 10-47z"/>
+              <path class="river" d="M116 112c58 11 76 29 103 65 23 31 42 70 88 104"/>
+              <path class="river" d="M205 76c-18 58-30 123-26 188"/>
+              <circle id="grenoble-dot" cx="214" cy="230" r="7"/>
+              <text x="225" y="233">Grenoble</text>
+              <circle cx="127" cy="180" r="5" class="city"/><text x="137" y="183">Voiron</text>
+              <circle cx="244" cy="298" r="5" class="city"/><text x="254" y="301">Vizille</text>
+              <circle cx="178" cy="340" r="5" class="city"/><text x="188" y="343">La Mure</text>
             </svg>
-            <ul class="map-legend">
-              <li><span id="meteo-chip" class="legend-chip meteo-green"></span>Météo-France: <strong id="meteo-level">Vert</strong></li>
-              <li><span id="river-chip" class="legend-chip river-green"></span>Vigicrues: <strong id="river-level">Vert</strong></li>
-            </ul>
-            <div class="alert-causes">
-              <p class="alert-causes-title">Vigilance météo (cause)</p>
-              <p id="meteo-cause" class="alert-causes-content">Aucun phénomène signalé.</p>
+            <div>
+              <p>Niveau météo: <strong id="meteo-level">-</strong></p>
+              <p>Niveau hydrologique: <strong id="river-level">-</strong></p>
+              <h4>Infos pratiques</h4>
+              <ul class="list practical">
+                <li>CODIS 38: 18 / 112</li>
+                <li>Préfecture (standard): 04 76 60 34 00</li>
+                <li>SAMU: 15</li>
+                <li>Portail ORSEC: référentiel départemental interne</li>
+              </ul>
             </div>
-          </article>
-          <article class="card logs"><h2>Dernières entrées main courante</h2><ul id="logs" class="list"></ul></article>
+          </div>
         </section>
 
-        <section id="municipalities-panel" class="panel hidden" hidden>
-          <article class="card" data-requires-edit>
-            <h2>Ajouter une commune</h2>
-            <form id="municipality-form" class="inline-form">
-              <input name="name" placeholder="Nom" required />
-              <input name="phone" placeholder="Téléphone" required />
-              <input name="email" type="email" placeholder="Email" required />
-              <input name="manager" placeholder="Responsable" required />
-              <button type="submit">Ajouter</button>
-            </form>
-          </article>
-          <article class="card">
-            <h2>Liste des communes</h2>
-            <ul id="municipalities-list" class="list"></ul>
-          </article>
-        </section>
-
-        <section id="logs-panel" class="panel hidden" hidden>
-          <article class="card" data-requires-edit>
-            <h2>Nouvelle entrée main courante</h2>
-            <form id="log-form" class="inline-form">
-              <input name="event_type" placeholder="Type d'évènement" required />
-              <input name="description" placeholder="Description" required />
-              <select id="log-municipality" name="municipality_id"></select>
-              <button type="submit">Ajouter</button>
-            </form>
-          </article>
-        </section>
-
-        <section id="map-panel" class="panel hidden" hidden>
-          <article class="card">
-            <h2>Carte opérationnelle</h2>
-            <iframe
-              title="Carte des opérations"
-              src="https://www.openstreetmap.org/export/embed.html?bbox=5.3%2C44.8%2C6.7%2C45.7&layer=mapnik"
-              class="map"
-            ></iframe>
-          </article>
-        </section>
-
-        <section id="users-panel" class="panel hidden" hidden>
-          <article class="card users-kpis">
-            <div><p class="kpi-label">Comptes visibles</p><p id="users-total" class="kpi-value">0</p></div>
-            <div><p class="kpi-label">Comptes mairie</p><p id="users-mairie" class="kpi-value">0</p></div>
-            <div><p class="kpi-label">Comptes privilégiés</p><p id="users-privileged" class="kpi-value">0</p></div>
-          </article>
-
-          <article id="users-create-card" class="card">
-            <h2>Créer un compte avec droits</h2>
-            <form id="user-form" class="inline-form">
-              <input name="username" placeholder="Identifiant" required />
-              <input name="password" type="password" minlength="8" placeholder="Mot de passe (8 caractères min.)" required />
-              <select id="user-role" name="role" required>
-                <option value="securite">Sécurité (lecture)</option>
-                <option value="visiteur">Visiteur (lecture)</option>
-                <option value="mairie">Mairie (commune)</option>
-                <option value="ope">Opérateur</option>
-                <option value="admin">Admin</option>
-              </select>
-              <select id="user-mairie-name" name="municipality_name" class="hidden" hidden></select>
-              <button type="submit">Créer le compte</button>
-            </form>
-            <p class="help users-help">Admin: accès complet · OPE: modification · Sécurité/Visiteur: lecture · Mairie: accès limité à sa commune.</p>
-            <p id="user-error" class="error"></p>
-          </article>
-
-          <article class="card">
-            <h2>Comptes existants</h2>
-            <p class="help users-help">La liste ci-dessous permet de vérifier immédiatement les comptes créés et leur périmètre.</p>
-            <div class="users-table-wrap">
-              <table class="users-table">
-                <thead>
-                  <tr>
-                    <th>Identifiant</th>
-                    <th>Rôle</th>
-                    <th>Commune</th>
-                    <th>Créé le</th>
-                    <th>Statut</th>
-                  </tr>
-                </thead>
-                <tbody id="users-table">
-                  <tr><td colspan="5" class="muted">Chargement...</td></tr>
-                </tbody>
-              </table>
-            </div>
-          </article>
+        <section id="users-panel" class="panel view hidden" hidden>
+          <h3>Comptes utilisateurs</h3>
+          <p id="user-error" class="error"></p>
+          <table class="users-table">
+            <thead><tr><th>Utilisateur</th><th>Rôle</th><th>Commune</th><th>Créé le</th><th>Statut</th></tr></thead>
+            <tbody id="users-table"></tbody>
+          </table>
         </section>
       </section>
     </section>
   </main>
-
   <script src="/script.js"></script>
 </body>
 </html>
