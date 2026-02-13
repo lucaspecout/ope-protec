@@ -128,6 +128,7 @@ button {
 .isere-map #isere-shape {
   stroke: #223249;
   stroke-width: 3;
+  fill: #2eb85c;
   transition: fill .25s ease;
 }
 .river {
@@ -164,6 +165,27 @@ button {
   border-radius: 50%;
   border: 1px solid rgba(0, 0, 0, .2);
   display: inline-block;
+}
+
+.alert-causes {
+  margin-top: .8rem;
+  padding: .65rem .75rem;
+  border-radius: 10px;
+  background: #eef4ff;
+  border: 1px solid #d7e4fa;
+}
+.alert-causes-title {
+  margin: 0;
+  font-size: .82rem;
+  font-weight: 700;
+  color: #29456d;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.alert-causes-content {
+  margin: .35rem 0 0;
+  color: #1f3556;
+  font-size: .9rem;
 }
 
 .inline-form { display: grid; gap: .65rem; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
