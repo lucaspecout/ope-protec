@@ -437,6 +437,17 @@ function renderGeorisquesDetails(georisques = {}) {
     return `<li><strong>${escapeHtml(commune.name || commune.commune || 'Commune inconnue')}</strong> (${escapeHtml(commune.code_insee || commune.insee || '-')}) · Sismicité: <strong>${escapeHtml(commune.seismic_zone || commune.zone_sismicite || 'inconnue')}</strong> · Documents inondation: <strong>${Number(commune.flood_documents || commune.nb_documents || 0)}</strong><br>${docsMarkup}</li>`;
   }).join('') || '<li>Aucune commune remontée par Géorisques.</li>';
   setHtml('georisques-communes-list', markup);
+
+  const allDocs = monitored.flatMap((commune) => {
+    const docs = Array.isArray(commune.flood_documents_details) ? commune.flood_documents_details : [];
+    const communeName = commune.name || commune.commune || 'Commune inconnue';
+    return docs.map((doc) => ({ communeName, doc }));
+  });
+
+  const docsListMarkup = allDocs.map(({ communeName, doc }) => (`
+    <li><strong>${escapeHtml(communeName)}</strong> · ${escapeHtml(doc.title || doc.libelle_azi || 'Document inondation')}${doc.code ? ` (${escapeHtml(doc.code)})` : ''}${doc.river_basin ? ` · Bassin: ${escapeHtml(doc.river_basin)}` : ''}${doc.published_at ? ` · Diffusion: ${escapeHtml(doc.published_at)}` : ''}</li>
+  `)).join('') || '<li>Aucun document Géorisques associé affichable.</li>';
+  setHtml('georisques-documents-list', docsListMarkup);
 }
 
 function openMunicipalityEditor(municipality) {
