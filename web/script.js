@@ -279,24 +279,13 @@ async function renderMunicipalitiesOnMap(municipalities = []) {
   points.forEach(({ municipality, point }) => {
     if (!point) return;
     const isInCrisis = Boolean(municipality.crisis_mode);
-    const marker = isInCrisis
-      ? window.L.marker([point.lat, point.lon], {
-          icon: window.L.divIcon({
-            className: 'pcs-crisis-marker',
-            html: '<span>🚨</span>',
-            iconSize: [28, 28],
-            iconAnchor: [14, 14],
-          }),
-        })
-      : window.L.circleMarker([point.lat, point.lon], {
-          radius: 8,
-          color: '#fff',
-          weight: 1.5,
-          fillColor: '#17335f',
-          fillOpacity: 0.95,
-        });
-
-    marker
+    window.L.circleMarker([point.lat, point.lon], {
+      radius: isInCrisis ? 11 : 8,
+      color: isInCrisis ? '#a51111' : '#fff',
+      weight: isInCrisis ? 2.4 : 1.5,
+      fillColor: isInCrisis ? '#e03131' : '#17335f',
+      fillOpacity: 0.95,
+    })
       .bindPopup(`<strong>${municipality.name}</strong><br>Code postal: ${municipality.postal_code || '-'}<br>Responsable: ${municipality.manager}<br>PCS: actif<br>Statut: ${isInCrisis ? 'CRISE' : 'veille'}`)
       .addTo(pcsLayer);
 
@@ -567,6 +556,27 @@ function openMunicipalityDetailsModal(municipality) {
     return;
   }
   modal.setAttribute('open', 'open');
+}
+
+async function pickMunicipalityDocuments(municipalityId) {
+  const picker = document.createElement('input');
+  picker.type = 'file';
+  picker.accept = '.pdf,.png,.jpg,.jpeg';
+  picker.multiple = true;
+  picker.onchange = async () => {
+    const files = Array.from(picker.files || []);
+    if (!files.length) return;
+    const formData = new FormData();
+    if (files[0]) formData.append('orsec_plan', files[0]);
+    if (files[1]) formData.append('convention', files[1]);
+    await api(`/municipalities/${municipalityId}/documents`, { method: 'POST', body: formData });
+    const municipality = cachedMunicipalityRecords.find((m) => String(m.id) === String(municipalityId));
+    document.getElementById('municipality-feedback').textContent = `Documents mis à jour pour ${municipality?.name || 'la commune'}.`;
+    await loadMunicipalities();
+    const refreshed = cachedMunicipalityRecords.find((m) => String(m.id) === String(municipalityId));
+    if (refreshed) openMunicipalityDetailsModal(refreshed);
+  };
+  picker.click();
 }
 
 async function pickMunicipalityDocuments(municipalityId) {
