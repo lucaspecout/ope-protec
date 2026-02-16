@@ -339,6 +339,42 @@ def _commune_center(code_insee: str) -> tuple[float, float] | None:
         return None
 
 
+def _vigicrues_station_control(details: dict[str, Any]) -> str:
+    direct_candidates = [
+        "EtatStationHydro",
+        "EtatControleStationHydro",
+        "EtatStation",
+        "EtatCapteur",
+        "LibelleEtatStationHydro",
+    ]
+    nested_candidates = [
+        ("VigilanceCrues", "EtatStationHydro"),
+        ("VigilanceCrues", "EtatControleStationHydro"),
+        ("VigilanceCrues", "LibelleEtatStationHydro"),
+    ]
+
+    for key in direct_candidates:
+        value = details.get(key)
+        if value not in (None, ""):
+            return str(value)
+
+    for parent_key, child_key in nested_candidates:
+        parent_value = details.get(parent_key)
+        if not isinstance(parent_value, dict):
+            continue
+        value = parent_value.get(child_key)
+        if value not in (None, ""):
+            return str(value)
+
+    for key, value in details.items():
+        if "controle" not in str(key).lower() and "control" not in str(key).lower():
+            continue
+        if isinstance(value, (str, int, float)) and value not in (None, ""):
+            return str(value)
+
+    return "inconnu"
+
+
 def fetch_vigicrues_isere(
     sample_size: int = 1200,
     station_limit: int | None = None,
@@ -497,6 +533,12 @@ def fetch_vigicrues_isere(
             coords = details.get("CoordStationHydro") or {}
             coord_x = coords.get("CoordXStationHydro")
             coord_y = coords.get("CoordYStationHydro")
+            lat = float(coord_y) if coord_y else None
+            lon = float(coord_x) if coord_x else None
+            if lat is None or lon is None:
+                fallback_center = _commune_center(commune_code)
+                if fallback_center:
+                    lat, lon = fallback_center
             text_blob = f"{station.get('station', '')} {station.get('river', '')} {station.get('troncon', '')}".lower()
 
             isere_stations.append(
@@ -507,10 +549,11 @@ def fetch_vigicrues_isere(
                     "height_m": 0.0,
                     "delta_window_m": 0.0,
                     "level": station.get("level", "inconnu"),
+                    "control_status": _vigicrues_station_control(details),
                     "is_priority": ("grenoble" in text_blob or any(name in text_blob for name in priority_names)),
                     "observed_at": "",
-                    "lat": float(coord_y) if coord_y else None,
-                    "lon": float(coord_x) if coord_x else None,
+                    "lat": lat,
+                    "lon": lon,
                     "commune_code": commune_code,
                     "troncon": station.get("troncon", ""),
                     "troncon_code": station.get("troncon_code", ""),
@@ -857,6 +900,7 @@ def vigicrues_geojson_from_stations(stations: list[dict[str, Any]]) -> dict[str,
                     "river": station.get("river"),
                     "level": station.get("level"),
                     "height_m": station.get("height_m"),
+                    "control_status": station.get("control_status", "inconnu"),
                     "is_priority": station.get("is_priority", False),
                     "observed_at": station.get("observed_at"),
                 },

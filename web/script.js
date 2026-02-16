@@ -345,7 +345,7 @@ async function loadIsereBoundary() {
 function renderStations(stations = []) {
   cachedStations = stations;
   const visible = document.getElementById('filter-hydro')?.checked ?? true;
-  document.getElementById('hydro-stations-list').innerHTML = stations.slice(0, 40).map((s) => `<li><strong>${s.station || s.code}</strong> · ${s.river || ''} · <span style="color:${levelColor(s.level)}">${normalizeLevel(s.level)}</span> · ${s.height_m} m</li>`).join('') || '<li>Aucune station.</li>';
+  document.getElementById('hydro-stations-list').innerHTML = stations.slice(0, 40).map((s) => `<li><strong>${s.station || s.code}</strong> · ${s.river || ''} · <span style="color:${levelColor(s.level)}">${normalizeLevel(s.level)}</span> · Contrôle: ${escapeHtml(s.control_status || 'inconnu')} · ${s.height_m} m</li>`).join('') || '<li>Aucune station.</li>';
   if (!hydroLayer || !hydroLineLayer) return;
   hydroLayer.clearLayers();
   hydroLineLayer.clearLayers();
@@ -359,7 +359,7 @@ function renderStations(stations = []) {
   mapStats.stations = stationsWithPoints.length;
   stationsWithPoints.forEach((s) => {
     window.L.circleMarker([s.lat, s.lon], { radius: 7, color: '#fff', weight: 1.5, fillColor: levelColor(s.level), fillOpacity: 0.95 })
-      .bindPopup(`<strong>${s.station || s.code}</strong><br>${s.river || ''}<br>Niveau: ${normalizeLevel(s.level)}<br>Hauteur: ${s.height_m} m`)
+      .bindPopup(`<strong>${s.station || s.code}</strong><br>${s.river || ''}<br>Département: Isère (38)<br>Niveau: ${normalizeLevel(s.level)}<br>Contrôle station: ${escapeHtml(s.control_status || 'inconnu')}<br>Hauteur: ${s.height_m} m`)
       .addTo(hydroLayer);
   });
 
@@ -381,7 +381,7 @@ function renderStations(stations = []) {
   });
 
   updateMapSummary();
-  setMapFeedback(`${stations.length} station(s) Vigicrues chargée(s).`);
+  setMapFeedback(`${stations.length} station(s) Vigicrues Isère chargée(s).`);
 }
 
 async function geocodeMunicipality(municipality) {
@@ -1122,7 +1122,7 @@ async function loadExternalRisks() {
   setText('meteo-info', meteo.info_state || meteo.bulletin_title || '');
   setRiskText('vigicrues-status', `${vigicrues.status || 'inconnu'} · niveau ${normalizeLevel(vigicrues.water_alert_level || 'inconnu')}`, vigicrues.water_alert_level || 'vert');
   setText('vigicrues-info', `${(vigicrues.stations || []).length} station(s) suivie(s)`);
-  setHtml('stations-list', (vigicrues.stations || []).slice(0, 10).map((s) => `<li>${s.station || s.code} · ${s.river || ''} · ${normalizeLevel(s.level)} · ${s.height_m} m</li>`).join('') || '<li>Aucune station disponible.</li>');
+  setHtml('stations-list', (vigicrues.stations || []).slice(0, 10).map((s) => `<li>${s.station || s.code} · ${s.river || ''} · ${normalizeLevel(s.level)} · Contrôle: ${escapeHtml(s.control_status || 'inconnu')} · ${s.height_m} m</li>`).join('') || '<li>Aucune station disponible.</li>');
   setText('itinisere-status', `${itinisere.status || 'inconnu'} · ${(itinisere.events || []).length} événements`);
   renderBisonFuteSummary(bisonFute);
   setRiskText('georisques-status', `${georisques.status || 'inconnu'} · sismicité ${georisques.highest_seismic_zone_label || 'inconnue'}`, georisques.status === 'online' ? 'vert' : 'jaune');
