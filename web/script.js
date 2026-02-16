@@ -30,6 +30,7 @@ let leafletMap = null;
 let boundaryLayer = null;
 let hydroLayer = null;
 let hydroLineLayer = null;
+let pcsBoundaryLayer = null;
 let pcsLayer = null;
 let resourceLayer = null;
 let searchLayer = null;
@@ -39,10 +40,12 @@ let mapTileLayer = null;
 let mapAddPointMode = false;
 let mapPoints = [];
 let pendingMapPointCoords = null;
+let mapIconTouched = false;
 let cachedStations = [];
 let cachedMunicipalities = [];
 let cachedMunicipalityRecords = [];
 let geocodeCache = new Map();
+let municipalityContourCache = new Map();
 let mapStats = { stations: 0, pcs: 0, resources: 0, custom: 0 };
 
 const homeView = document.getElementById('home-view');
@@ -200,6 +203,7 @@ function initMap() {
   applyBasemap(document.getElementById('map-basemap-select')?.value || 'osm');
   hydroLayer = window.L.layerGroup().addTo(leafletMap);
   hydroLineLayer = window.L.layerGroup().addTo(leafletMap);
+  pcsBoundaryLayer = window.L.layerGroup().addTo(leafletMap);
   pcsLayer = window.L.layerGroup().addTo(leafletMap);
   resourceLayer = window.L.layerGroup().addTo(leafletMap);
   searchLayer = window.L.layerGroup().addTo(leafletMap);
@@ -268,7 +272,7 @@ function toggleMapContrast() {
 
 function fitMapToData() {
   if (!leafletMap) return;
-  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsLayer, resourceLayer, searchLayer, customPointsLayer, mapPointsLayer].filter(Boolean);
+  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsBoundaryLayer, pcsLayer, resourceLayer, searchLayer, customPointsLayer, mapPointsLayer].filter(Boolean);
   const bounds = window.L.latLngBounds([]);
   layers.forEach((layer) => {
     if (layer?.getBounds) {
@@ -360,20 +364,67 @@ async function geocodeMunicipality(municipality) {
   }
 }
 
+async function fetchMunicipalityContour(municipality) {
+  const key = `${municipality.name}|${municipality.postal_code || ''}`;
+  if (municipalityContourCache.has(key)) return municipalityContourCache.get(key);
+  try {
+    const queries = municipality.postal_code
+      ? [
+          `https://geo.api.gouv.fr/communes?nom=${encodeURIComponent(municipality.name)}&codePostal=${encodeURIComponent(municipality.postal_code)}&fields=contour&format=geojson&geometry=contour&limit=1`,
+          `https://geo.api.gouv.fr/communes?nom=${encodeURIComponent(municipality.name)}&fields=contour&format=geojson&geometry=contour&limit=1`,
+        ]
+      : [`https://geo.api.gouv.fr/communes?nom=${encodeURIComponent(municipality.name)}&fields=contour&format=geojson&geometry=contour&limit=1`];
+
+    for (const url of queries) {
+      const response = await fetch(url);
+      const payload = await parseJsonResponse(response, url);
+      const geometry = payload?.features?.[0]?.geometry;
+      if (!geometry) continue;
+      municipalityContourCache.set(key, geometry);
+      return geometry;
+    }
+  } catch {
+    // Ne bloque pas l'affichage des points PCS si le contour est indisponible.
+  }
+
+  municipalityContourCache.set(key, null);
+  return null;
+}
+
 async function renderMunicipalitiesOnMap(municipalities = []) {
   cachedMunicipalities = municipalities;
   const pcs = municipalities.filter((m) => m.pcs_active);
   document.getElementById('pcs-list').innerHTML = pcs.slice(0, 15).map((m) => `<li><strong>${m.name}</strong> · ${m.postal_code || 'CP ?'} · ${m.manager} · ${m.crisis_mode ? '🔴 CRISE' : 'veille'}</li>`).join('') || '<li>Aucune commune PCS.</li>';
   if (!pcsLayer) return;
   pcsLayer.clearLayers();
+  if (pcsBoundaryLayer) pcsBoundaryLayer.clearLayers();
   if (!(document.getElementById('filter-pcs')?.checked ?? true)) {
     mapStats.pcs = 0;
     updateMapSummary();
     return;
   }
-  const points = await Promise.all(pcs.map(async (m) => ({ municipality: m, point: await geocodeMunicipality(m) })));
+  const points = await Promise.all(
+    pcs.map(async (m) => ({
+      municipality: m,
+      point: await geocodeMunicipality(m),
+      contour: await fetchMunicipalityContour(m),
+    })),
+  );
   let renderedCount = 0;
-  points.forEach(({ municipality, point }) => {
+  points.forEach(({ municipality, point, contour }) => {
+    if (contour && pcsBoundaryLayer) {
+      const isInCrisis = Boolean(municipality.crisis_mode);
+      window.L.geoJSON({ type: 'Feature', geometry: contour }, {
+        style: {
+          color: isInCrisis ? '#c92a2a' : '#1c4f99',
+          weight: isInCrisis ? 2.4 : 1.6,
+          fillColor: isInCrisis ? '#e03131' : '#2b6cb0',
+          fillOpacity: isInCrisis ? 0.18 : 0.08,
+        },
+      })
+        .bindPopup(`<strong>${municipality.name}</strong><br>Contour communal PCS`)
+        .addTo(pcsBoundaryLayer);
+    }
     if (!point) return;
     const isInCrisis = Boolean(municipality.crisis_mode);
     window.L.circleMarker([point.lat, point.lon], {
@@ -479,12 +530,32 @@ const MAP_POINT_ICONS = {
   autre: '📍',
 };
 
+const MAP_ICON_SUGGESTIONS = {
+  incident: ['🚨', '🔥', '⚠️'],
+  evacuation: ['🏃', '🏘️', '🚌'],
+  water: ['💧', '🌊', '🛶'],
+  roadblock: ['🚧', '⛔', '🚦'],
+  medical: ['🏥', '🚑', '🩺'],
+  logistics: ['📦', '🚛', '🛠️'],
+  command: ['🛰️', '📡', '🧭'],
+  autre: ['📍', '📌', '⭐'],
+};
+
 function iconForCategory(category) {
   return MAP_POINT_ICONS[category] || '📍';
 }
 
 function emojiDivIcon(emoji) {
   return window.L.divIcon({ className: 'map-emoji-icon', html: `<span>${escapeHtml(emoji)}</span>`, iconSize: [30, 30], iconAnchor: [15, 15], popupAnchor: [0, -15] });
+}
+
+function renderMapIconSuggestions(category = 'autre') {
+  const container = document.getElementById('map-icon-suggestions');
+  if (!container) return;
+  const icons = MAP_ICON_SUGGESTIONS[category] || MAP_ICON_SUGGESTIONS.autre;
+  container.innerHTML = `${icons
+    .map((icon) => `<button type="button" class="ghost inline-action map-icon-chip" data-map-icon="${escapeHtml(icon)}">${escapeHtml(icon)}</button>`)
+    .join('')}<span class="muted">ou saisissez votre emoji.</span>`;
 }
 
 async function loadMapPoints() {
@@ -544,6 +615,8 @@ function onMapClickAddPoint(event) {
     form.reset();
     form.elements.namedItem('name').value = `Point ${new Date().toLocaleTimeString()}`;
     form.elements.namedItem('icon').value = iconForCategory('autre');
+    mapIconTouched = false;
+    renderMapIconSuggestions('autre');
   }
   if (typeof modal.showModal === 'function') modal.showModal();
   else modal.setAttribute('open', 'open');
@@ -1087,27 +1160,46 @@ function bindAppInteractions() {
   document.getElementById('map-point-category')?.addEventListener('change', (event) => {
     const category = event.target.value;
     const iconInput = document.getElementById('map-point-icon');
-    if (iconInput && !iconInput.value.trim()) iconInput.value = iconForCategory(category);
+    renderMapIconSuggestions(category);
+    if (iconInput && !mapIconTouched) iconInput.value = iconForCategory(category);
+  });
+  document.getElementById('map-point-icon')?.addEventListener('input', () => {
+    mapIconTouched = true;
+  });
+  document.getElementById('map-icon-suggestions')?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-map-icon]');
+    if (!button) return;
+    const iconInput = document.getElementById('map-point-icon');
+    if (!iconInput) return;
+    iconInput.value = button.getAttribute('data-map-icon') || '📍';
+    mapIconTouched = true;
   });
   document.getElementById('map-point-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
-    if (!pendingMapPointCoords) return;
+    if (!pendingMapPointCoords) {
+      setMapFeedback('Cliquez d\'abord sur la carte pour positionner le point.', true);
+      return;
+    }
     const form = event.target;
     const category = form.elements.category.value || 'autre';
     const icon = form.elements.icon.value.trim() || iconForCategory(category);
-    await saveMapPoint({
-      name: form.elements.name.value.trim(),
-      category,
-      icon,
-      notes: form.elements.notes.value.trim() || null,
-      lat: pendingMapPointCoords.lat,
-      lon: pendingMapPointCoords.lng,
-    });
-    pendingMapPointCoords = null;
-    const modal = document.getElementById('map-point-modal');
-    if (typeof modal?.close === 'function') modal.close();
-    else modal?.removeAttribute('open');
-    setMapFeedback('Point opérationnel enregistré.');
+    try {
+      await saveMapPoint({
+        name: form.elements.name.value.trim(),
+        category,
+        icon,
+        notes: form.elements.notes.value.trim() || null,
+        lat: pendingMapPointCoords.lat,
+        lon: pendingMapPointCoords.lng,
+      });
+      pendingMapPointCoords = null;
+      const modal = document.getElementById('map-point-modal');
+      if (typeof modal?.close === 'function') modal.close();
+      else modal?.removeAttribute('open');
+      setMapFeedback('Point opérationnel enregistré.');
+    } catch (error) {
+      setMapFeedback(`Enregistrement impossible: ${sanitizeErrorMessage(error.message)}`, true);
+    }
   });
   document.getElementById('itinerary-list')?.addEventListener('click', async (event) => {
     const button = event.target.closest('[data-map-query]');
