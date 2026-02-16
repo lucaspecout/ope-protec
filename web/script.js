@@ -1276,7 +1276,7 @@ function setMapControlsCollapsed(collapsed) {
   workspace.classList.toggle('map-workspace--collapsed', mapControlsCollapsed);
   controls.setAttribute('aria-hidden', String(mapControlsCollapsed));
   toggle.setAttribute('aria-expanded', String(!mapControlsCollapsed));
-  toggle.textContent = mapControlsCollapsed ? '☰' : '✕';
+  toggle.textContent = mapControlsCollapsed ? '🧰' : '📌';
   const toggleLabel = mapControlsCollapsed ? 'Afficher les options de la carte' : 'Ranger les options de la carte';
   toggle.title = toggleLabel;
   toggle.setAttribute('aria-label', toggleLabel);
