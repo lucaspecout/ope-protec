@@ -105,6 +105,7 @@
         <nav class="side-nav" aria-label="Menu principal">
           <button class="menu-btn" data-target="situation-panel">Situation</button>
           <button class="menu-btn" data-target="services-panel">Services connectés</button>
+          <button class="menu-btn" data-target="api-panel">Interconnexions API</button>
           <button class="menu-btn" data-target="supervision-panel">Supervision crise</button>
           <button class="menu-btn" data-target="municipalities-panel">Communes</button>
           <button class="menu-btn" data-target="logs-panel">Main courante</button>
@@ -185,6 +186,21 @@
           <ul id="meteo-alerts-list" class="list"></ul>
           <h4>Stations Vigicrues prioritaires</h4>
           <ul id="stations-list" class="list"></ul>
+        </section>
+
+        <section id="api-panel" class="panel view hidden" hidden>
+          <div class="api-headline">
+            <div>
+              <h3>Suivi des interconnexions API</h3>
+              <p class="muted">Visualisez les retours des services externes, les erreurs courantes et le détail brut des réponses.</p>
+            </div>
+            <button id="api-refresh-btn" type="button">Actualiser maintenant</button>
+          </div>
+          <p>Dernière mise à jour <strong id="api-updated-at">-</strong></p>
+          <p id="api-error-banner" class="error"></p>
+          <div id="api-service-grid" class="api-service-grid"></div>
+          <h4>Réponses JSON brutes</h4>
+          <div id="api-raw-list" class="api-raw-list"></div>
         </section>
 
         <section id="municipalities-panel" class="panel view hidden" hidden>
