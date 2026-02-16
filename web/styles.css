@@ -279,7 +279,7 @@ label { display: block; margin-bottom: .8rem; }
 .map-toolbar--compact { flex-direction: column; }
 .map-toolbar input, .map-toolbar select { min-height: 33px; margin-top: 0; padding: .4rem .56rem; font-size: .82rem; }
 .map-toolbar button { min-height: 33px; padding: .35rem .5rem; font-size: .78rem; }
-.map-search-inline { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .45rem; }
+.map-search-inline { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: .45rem; }
 .map-inline-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .45rem; }
 .map-btn-lite { border-radius: 8px; font-weight: 600; }
 .map-toggle-grid { display: grid; gap: .35rem; }
@@ -291,6 +291,10 @@ label { display: block; margin-bottom: .8rem; }
 .map-summary article { border: 1px solid #d5e2fb; border-radius: 9px; padding: .32rem .44rem; background: linear-gradient(180deg, #fff, #f4f8ff); }
 .map-summary p { margin: 0; color: #4f6388; font-size: .74rem; }
 .map-summary strong { font-size: .92rem; color: #163a87; }
+.map-checks-list { margin-top: .45rem; max-height: 150px; overflow: auto; }
+.map-checks-list li { font-size: .82rem; }
+.map-checks-list .ok { color: var(--ok); font-weight: 700; }
+.map-checks-list .ko { color: var(--danger); font-weight: 700; }
 .map-layout { display: grid; gap: .8rem; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); margin-top: .8rem; }
 .isere-map { width: 100%; border-radius: 12px; border: 1px solid #ccdbf4; background: #f3f8ff; }
 #isere-shape { fill: #2eb85c; stroke: #20324e; stroke-width: 4; }

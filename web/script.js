@@ -53,6 +53,8 @@ let municipalityContourCache = new Map();
 let trafficGeocodeCache = new Map();
 let mapStats = { stations: 0, pcs: 0, resources: 0, custom: 0, traffic: 0 };
 let mapControlsCollapsed = false;
+let cachedCrisisPoints = [];
+
 const ISERE_BOUNDARY_STYLE = { color: '#163a87', weight: 2, fillColor: '#63c27d', fillOpacity: 0.2 };
 const TRAFFIC_COMMUNES = ['Grenoble', 'Voiron', 'Vienne', 'Bourgoin-Jallieu', 'Pont-de-Claix', 'Meylan', 'Échirolles', 'L\'Isle-d\'Abeau', 'Saint-Martin-d\'Hères', 'La Tour-du-Pin', 'Rives', 'Sassenage', 'Crolles', 'Tullins'];
 const ITINISERE_ROAD_CORRIDORS = {
@@ -282,21 +284,24 @@ async function resetMapFilters() {
   renderResources();
   await renderMunicipalitiesOnMap(cachedMunicipalities);
   await renderTrafficOnMap();
+  renderMapChecks([]);
   setMapFeedback('Filtres carte réinitialisés.');
 }
 
 function focusOnCrisisAreas() {
-  if (!leafletMap || !pcsLayer || typeof window.L === 'undefined') return;
-  const crisisPoints = cachedMunicipalities.filter((m) => m.pcs_active && m.crisis_mode);
-  if (!crisisPoints.length) {
+  if (!leafletMap || typeof window.L === 'undefined') return;
+  if (!cachedCrisisPoints.length) {
     setMapFeedback('Aucune commune en crise actuellement, vue globale conservée.');
     fitMapToData();
     return;
   }
-  const candidateLayers = pcsLayer.getLayers().filter((layer) => typeof layer.getLatLng === 'function');
-  const bounds = window.L.latLngBounds(candidateLayers.map((layer) => layer.getLatLng()));
-  if (bounds.isValid()) leafletMap.fitBounds(bounds, { padding: [30, 30], maxZoom: 11 });
-  setMapFeedback(`Focus crise: ${crisisPoints.length} commune(s) en mode crise.`);
+  const bounds = window.L.latLngBounds(cachedCrisisPoints.map((point) => [point.lat, point.lon]));
+  if (bounds.isValid()) {
+    leafletMap.fitBounds(bounds, { padding: [34, 34], maxZoom: 11 });
+    setMapFeedback(`Focus crise: ${cachedCrisisPoints.length} commune(s) en mode crise.`);
+    return;
+  }
+  setMapFeedback('Impossible de centrer la carte sur les communes en crise.', true);
 }
 
 function toggleMapContrast() {
@@ -308,7 +313,7 @@ function toggleMapContrast() {
   button.setAttribute('aria-pressed', String(active));
 }
 
-function fitMapToData() {
+function fitMapToData(showFeedback = false) {
   if (!leafletMap) return;
   const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsBoundaryLayer, pcsLayer, resourceLayer, searchLayer, customPointsLayer, mapPointsLayer, itinisereLayer, bisonLayer].filter(Boolean);
   const bounds = window.L.latLngBounds([]);
@@ -318,7 +323,12 @@ function fitMapToData() {
       if (layerBounds?.isValid && layerBounds.isValid()) bounds.extend(layerBounds);
     }
   });
-  if (bounds.isValid()) leafletMap.fitBounds(bounds, { padding: [24, 24] });
+  if (bounds.isValid()) {
+    leafletMap.fitBounds(bounds, { padding: [24, 24] });
+    if (showFeedback) setMapFeedback('Carte recentrée sur les données visibles.');
+    return;
+  }
+  if (showFeedback) setMapFeedback('Aucune donnée cartographique à afficher.', true);
 }
 
 async function loadIsereBoundary() {
@@ -449,6 +459,7 @@ async function renderMunicipalitiesOnMap(municipalities = []) {
     })),
   );
   let renderedCount = 0;
+  cachedCrisisPoints = [];
   points.forEach(({ municipality, point, contour }) => {
     if (contour && pcsBoundaryLayer) {
       window.L.geoJSON({ type: 'Feature', geometry: contour }, {
@@ -470,6 +481,7 @@ async function renderMunicipalitiesOnMap(municipalities = []) {
       .addTo(pcsLayer);
 
     if (isInCrisis) {
+      cachedCrisisPoints.push({ lat: point.lat, lon: point.lon, name: municipality.name });
       window.L.circle([point.lat, point.lon], {
         radius: 1000,
         color: '#e03131',
@@ -503,22 +515,61 @@ function renderResources() {
   setMapFeedback(`${resources.length} ressource(s) affichée(s).`);
 }
 
+function tryLocalMapSearch(query = '') {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return null;
+  const municipality = cachedMunicipalities.find((item) => String(item.name || '').toLowerCase().includes(needle));
+  if (municipality) {
+    const cacheKey = `${municipality.name}|${municipality.postal_code || ''}`;
+    const point = geocodeCache.get(cacheKey);
+    if (point) return { ...point, label: `${municipality.name} (commune)` };
+  }
+  const resource = RESOURCE_POINTS.find((item) => `${item.name} ${item.address}`.toLowerCase().includes(needle));
+  if (resource) return { lat: resource.lat, lon: resource.lon, label: `${resource.name} (${resource.address})` };
+  const point = mapPoints.find((item) => String(item.name || '').toLowerCase().includes(needle));
+  if (point) return { lat: point.lat, lon: point.lon, label: `${point.icon || '📍'} ${point.name} (point opérationnel)` };
+  return null;
+}
+
+function placeSearchResult(lat, lon, label) {
+  if (!leafletMap || !searchLayer) return;
+  searchLayer.clearLayers();
+  window.L.marker([lat, lon]).bindPopup(`Résultat: ${escapeHtml(label)}`).addTo(searchLayer).openPopup();
+  leafletMap.setView([lat, lon], 12);
+}
+
 async function handleMapSearch() {
   const query = (document.getElementById('map-search')?.value || '').trim();
   renderResources();
-  if (!query || !leafletMap) return;
+  if (!query || !leafletMap) {
+    setMapFeedback('Saisissez un lieu ou une commune pour lancer la recherche.');
+    return;
+  }
   try {
     const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query + ', Isère, France')}`);
     const payload = await parseJsonResponse(response, 'nominatim');
-    if (!payload?.length) { setMapFeedback('Aucun résultat de recherche trouvé.'); return; }
+    if (!payload?.length) {
+      const localResult = tryLocalMapSearch(query);
+      if (!localResult) {
+        setMapFeedback('Aucun résultat de recherche trouvé.');
+        return;
+      }
+      placeSearchResult(localResult.lat, localResult.lon, localResult.label);
+      setMapFeedback(`Résultat local: ${localResult.label}`);
+      return;
+    }
     const lat = Number(payload[0].lat);
     const lon = Number(payload[0].lon);
-    searchLayer.clearLayers();
-    window.L.marker([lat, lon]).bindPopup(`Résultat: ${payload[0].display_name}`).addTo(searchLayer).openPopup();
-    leafletMap.setView([lat, lon], 12);
+    placeSearchResult(lat, lon, payload[0].display_name);
     setMapFeedback(`Recherche OK: ${payload[0].display_name}`);
   } catch {
-    setMapFeedback('Service de recherche temporairement indisponible.', true);
+    const localResult = tryLocalMapSearch(query);
+    if (!localResult) {
+      setMapFeedback('Service de recherche temporairement indisponible.', true);
+      return;
+    }
+    placeSearchResult(localResult.lat, localResult.lon, localResult.label);
+    setMapFeedback(`Service externe indisponible, résultat local: ${localResult.label}`);
   }
 }
 
@@ -1286,6 +1337,40 @@ async function handleUsersTableAction(event) {
 }
 
 
+function renderMapChecks(checks = []) {
+  const target = document.getElementById('map-checks-list');
+  if (!target) return;
+  if (!checks.length) {
+    target.innerHTML = '<li>Aucun diagnostic exécuté.</li>';
+    return;
+  }
+  target.innerHTML = checks.map((check) => `<li><span class="${check.ok ? 'ok' : 'ko'}">${check.ok ? 'OK' : 'KO'}</span> · ${escapeHtml(check.label)}${check.detail ? ` — ${escapeHtml(check.detail)}` : ''}</li>`).join('');
+}
+
+async function runMapChecks() {
+  const checks = [];
+  checks.push({ ok: typeof window.L !== 'undefined', label: 'Leaflet chargé', detail: typeof window.L !== 'undefined' ? 'bibliothèque disponible' : 'script Leaflet absent' });
+  checks.push({ ok: Boolean(leafletMap), label: 'Instance carte initialisée', detail: leafletMap ? 'instance active' : 'carte non initialisée' });
+  checks.push({ ok: Boolean(boundaryLayer), label: 'Contour Isère', detail: boundaryLayer ? 'contour affiché' : 'contour non chargé' });
+  checks.push({ ok: cachedStations.length > 0, label: 'Stations Vigicrues', detail: `${cachedStations.length} station(s) en mémoire` });
+  checks.push({ ok: cachedMunicipalities.length > 0, label: 'Communes disponibles', detail: `${cachedMunicipalities.length} commune(s) en mémoire` });
+  checks.push({ ok: mapPoints.length >= 0, label: 'Points opérationnels', detail: `${mapPoints.length} point(s)` });
+  const online = await Promise.allSettled([
+    api('/public/isere-map', { logoutOn401: false }),
+    api('/external/isere/risks', { logoutOn401: false }),
+  ]);
+  checks.push({ ok: online[0].status === 'fulfilled', label: 'API contour Isère', detail: online[0].status === 'fulfilled' ? 'accessible' : sanitizeErrorMessage(online[0].reason?.message) });
+  checks.push({ ok: online[1].status === 'fulfilled', label: 'API risques consolidés', detail: online[1].status === 'fulfilled' ? 'accessible' : sanitizeErrorMessage(online[1].reason?.message) });
+
+  renderMapChecks(checks);
+  const failures = checks.filter((item) => !item.ok).length;
+  if (!failures) {
+    setMapFeedback('Diagnostic carte terminé: tout est opérationnel ✅');
+    return;
+  }
+  setMapFeedback(`Diagnostic carte: ${failures} point(s) à corriger.`, true);
+}
+
 function setMapControlsCollapsed(collapsed) {
   mapControlsCollapsed = Boolean(collapsed);
   const workspace = document.querySelector('#map-panel .map-workspace');
@@ -1342,8 +1427,9 @@ function bindAppInteractions() {
   document.getElementById('map-controls-toggle')?.addEventListener('click', () => {
     setMapControlsCollapsed(!mapControlsCollapsed);
   });
-  document.getElementById('map-fit-btn')?.addEventListener('click', fitMapToData);
+  document.getElementById('map-fit-btn')?.addEventListener('click', () => fitMapToData(true));
   document.getElementById('map-focus-crisis')?.addEventListener('click', focusOnCrisisAreas);
+  document.getElementById('map-run-checks')?.addEventListener('click', runMapChecks);
   document.getElementById('map-toggle-contrast')?.addEventListener('click', toggleMapContrast);
   document.getElementById('map-reset-filters')?.addEventListener('click', async () => {
     try {
@@ -1362,6 +1448,13 @@ function bindAppInteractions() {
     }
   });
   document.getElementById('map-search')?.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); handleMapSearch(); } });
+  document.getElementById('map-search-clear')?.addEventListener('click', () => {
+    const input = document.getElementById('map-search');
+    if (input) input.value = '';
+    if (searchLayer) searchLayer.clearLayers();
+    renderResources();
+    setMapFeedback('Recherche effacée, ressources remises à jour.');
+  });
   document.getElementById('map-add-point-toggle')?.addEventListener('click', () => {
     mapAddPointMode = !mapAddPointMode;
     setText('map-add-point-toggle', `Ajout: ${mapAddPointMode ? 'on' : 'off'}`);
