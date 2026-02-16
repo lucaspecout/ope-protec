@@ -1,4 +1,4 @@
-const STORAGE_KEYS = { token: 'token', activePanel: 'activePanel' };
+const STORAGE_KEYS = { token: 'token', activePanel: 'activePanel', mapPointsCache: 'mapPointsCache' };
 const AUTO_REFRESH_MS = 30000;
 const HOME_LIVE_REFRESH_MS = 30000;
 const PANEL_TITLES = {
@@ -52,6 +52,7 @@ let geocodeCache = new Map();
 let municipalityContourCache = new Map();
 let trafficGeocodeCache = new Map();
 let mapStats = { stations: 0, pcs: 0, resources: 0, custom: 0, traffic: 0 };
+let mapControlsCollapsed = false;
 const ISERE_BOUNDARY_STYLE = { color: '#163a87', weight: 2, fillColor: '#63c27d', fillOpacity: 0.2 };
 const TRAFFIC_COMMUNES = ['Grenoble', 'Voiron', 'Vienne', 'Bourgoin-Jallieu', 'Pont-de-Claix', 'Meylan', 'Échirolles', 'L\'Isle-d\'Abeau', 'Saint-Martin-d\'Hères', 'La Tour-du-Pin', 'Rives', 'Sassenage', 'Crolles', 'Tullins'];
 const ITINISERE_ROAD_CORRIDORS = {
@@ -213,6 +214,10 @@ function applyBasemap(style = 'osm') {
     topo: {
       url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
       options: { maxZoom: 17, attribution: '&copy; OpenTopoMap contributors' },
+    },
+    satellite: {
+      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      options: { maxZoom: 19, attribution: 'Tiles &copy; Esri' },
     },
     light: {
       url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
@@ -728,15 +733,29 @@ function renderMapIconSuggestions(category = 'autre') {
 }
 
 async function loadMapPoints() {
+  let loadedPoints = [];
+  let usedCacheFallback = false;
+
   try {
-    mapPoints = await api('/map/points');
-    renderCustomPoints();
+    const response = await api('/map/points');
+    loadedPoints = Array.isArray(response) ? response : [];
+    localStorage.setItem(STORAGE_KEYS.mapPointsCache, JSON.stringify(loadedPoints));
   } catch (error) {
-    mapPoints = [];
-    renderCustomPoints();
-    setMapFeedback(`Points personnalisés indisponibles: ${sanitizeErrorMessage(error.message)}`, true);
+    usedCacheFallback = true;
+    try {
+      const cached = JSON.parse(localStorage.getItem(STORAGE_KEYS.mapPointsCache) || '[]');
+      loadedPoints = Array.isArray(cached) ? cached : [];
+    } catch (_) {
+      loadedPoints = [];
+    }
+    setMapFeedback(`Points personnalisés indisponibles (API): ${sanitizeErrorMessage(error.message)}. Affichage du cache local (${loadedPoints.length}).`, true);
   }
+
+  mapPoints = loadedPoints;
+  renderCustomPoints(!usedCacheFallback);
+  return { usedCacheFallback, count: loadedPoints.length };
 }
+
 
 async function saveMapPoint(payload) {
   await api('/map/points', {
@@ -752,7 +771,7 @@ async function deleteMapPoint(pointId) {
   await loadMapPoints();
 }
 
-function renderCustomPoints() {
+function renderCustomPoints(showFeedback = true) {
   if (customPointsLayer) customPointsLayer.clearLayers();
   if (mapPointsLayer) mapPointsLayer.clearLayers();
 
@@ -771,7 +790,7 @@ function renderCustomPoints() {
     marker.bindPopup(`<strong>${escapeHtml(point.icon || iconForCategory(point.category))} ${escapeHtml(point.name)}</strong><br/>Catégorie: ${escapeHtml(point.category)}<br/>${escapeHtml(point.notes || 'Sans note')}`);
     marker.addTo(mapPointsLayer);
   });
-  setMapFeedback(`${filteredPoints.length} point(s) opérationnel(s) affiché(s).`);
+  if (showFeedback) setMapFeedback(`${filteredPoints.length} point(s) opérationnel(s) affiché(s).`);
 }
 
 function onMapClickAddPoint(event) {
@@ -1173,30 +1192,35 @@ async function loadUsers() {
 
 async function refreshAll() {
   const loaders = [
-    ['tableau de bord', loadDashboard],
-    ['risques externes', loadExternalRisks],
-    ['communes', loadMunicipalities],
-    ['main courante', loadLogs],
-    ['utilisateurs', loadUsers],
-    ['supervision', loadSupervision],
-    ['interconnexions API', loadApiInterconnections],
-    ['points cartographiques', loadMapPoints],
+    { label: 'tableau de bord', loader: loadDashboard, optional: false },
+    { label: 'risques externes', loader: loadExternalRisks, optional: false },
+    { label: 'communes', loader: loadMunicipalities, optional: false },
+    { label: 'main courante', loader: loadLogs, optional: false },
+    { label: 'utilisateurs', loader: loadUsers, optional: true },
+    { label: 'supervision', loader: loadSupervision, optional: true },
+    { label: 'interconnexions API', loader: loadApiInterconnections, optional: true },
+    { label: 'points cartographiques', loader: loadMapPoints, optional: true },
   ];
 
-  const results = await Promise.allSettled(loaders.map(([, loader]) => loader()));
+  const results = await Promise.allSettled(loaders.map(({ loader }) => loader()));
   const failures = results
-    .map((result, index) => ({ result, label: loaders[index][0] }))
+    .map((result, index) => ({ result, config: loaders[index] }))
     .filter(({ result }) => result.status === 'rejected');
+
+  const blockingFailures = failures.filter(({ config }) => !config.optional);
+  const optionalFailures = failures.filter(({ config }) => config.optional);
 
   renderResources();
   fitMapToData();
 
-  if (!failures.length) {
-    document.getElementById('dashboard-error').textContent = '';
+  if (!blockingFailures.length) {
+    document.getElementById('dashboard-error').textContent = optionalFailures.length
+      ? `Modules secondaires indisponibles: ${optionalFailures.map(({ config, result }) => `${config.label}: ${sanitizeErrorMessage(result.reason?.message || 'erreur')}`).join(' · ')}`
+      : '';
     return;
   }
 
-  const message = failures.map(({ label, result }) => `${label}: ${sanitizeErrorMessage(result.reason?.message || 'erreur')}`).join(' · ');
+  const message = blockingFailures.map(({ config, result }) => `${config.label}: ${sanitizeErrorMessage(result.reason?.message || 'erreur')}`).join(' · ');
   document.getElementById('dashboard-error').textContent = message;
   setMapFeedback(message, true);
 }
@@ -1261,6 +1285,23 @@ async function handleUsersTableAction(event) {
   }
 }
 
+
+function setMapControlsCollapsed(collapsed) {
+  mapControlsCollapsed = Boolean(collapsed);
+  const workspace = document.querySelector('#map-panel .map-workspace');
+  const controls = document.getElementById('map-controls-panel');
+  const toggle = document.getElementById('map-controls-toggle');
+  if (!workspace || !controls || !toggle) return;
+  workspace.classList.toggle('map-workspace--collapsed', mapControlsCollapsed);
+  controls.setAttribute('aria-hidden', String(mapControlsCollapsed));
+  toggle.setAttribute('aria-expanded', String(!mapControlsCollapsed));
+  toggle.textContent = mapControlsCollapsed ? '☰' : '✕';
+  const toggleLabel = mapControlsCollapsed ? 'Afficher les options de la carte' : 'Ranger les options de la carte';
+  toggle.title = toggleLabel;
+  toggle.setAttribute('aria-label', toggleLabel);
+  if (leafletMap) setTimeout(() => leafletMap.invalidateSize(), 160);
+}
+
 function bindHomeInteractions() {
   const openLogin = () => showLogin();
   const mobileMenuButton = document.getElementById('mobile-menu-btn');
@@ -1296,7 +1337,11 @@ function bindAppInteractions() {
     appMenuButton.setAttribute('aria-expanded', String(Boolean(isOpen)));
   });
   document.getElementById('logout-btn').addEventListener('click', logout);
+  setMapControlsCollapsed(false);
   document.getElementById('map-search-btn')?.addEventListener('click', handleMapSearch);
+  document.getElementById('map-controls-toggle')?.addEventListener('click', () => {
+    setMapControlsCollapsed(!mapControlsCollapsed);
+  });
   document.getElementById('map-fit-btn')?.addEventListener('click', fitMapToData);
   document.getElementById('map-focus-crisis')?.addEventListener('click', focusOnCrisisAreas);
   document.getElementById('map-toggle-contrast')?.addEventListener('click', toggleMapContrast);
