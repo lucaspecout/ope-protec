@@ -324,6 +324,7 @@
             <div class="map-quick-actions" role="group" aria-label="Actions rapides carte">
               <button id="map-focus-crisis" type="button" class="ghost">🎯 Focus crise</button>
               <button id="map-reset-filters" type="button" class="ghost">↺ Réinitialiser filtres</button>
+              <button id="map-run-checks" type="button" class="ghost">🧪 Vérifier la carte</button>
               <button id="map-toggle-contrast" type="button" class="ghost" aria-pressed="false">Contraste renforcé: off</button>
             </div>
           </div>
@@ -346,6 +347,7 @@
                 <div class="map-search-inline">
                   <input id="map-search" type="search" placeholder="Adresse, ville, lieu…" aria-label="Recherche sur la carte" />
                   <button id="map-search-btn" type="button" class="map-btn-lite">Rechercher</button>
+                  <button id="map-search-clear" type="button" class="ghost map-btn-lite">Effacer</button>
                 </div>
                 <div class="map-inline-actions">
                   <button id="map-fit-btn" type="button" class="ghost map-btn-lite">Tout voir</button>
@@ -384,6 +386,7 @@
                 </select>
               </div>
               <p id="map-feedback" class="muted"></p>
+              <ul id="map-checks-list" class="list compact map-checks-list"><li>Lancez « Vérifier la carte » pour un diagnostic rapide.</li></ul>
               <div class="map-summary" aria-live="polite">
                 <article><p>Stations</p><strong id="map-summary-stations">0</strong></article>
                 <article><p>PCS</p><strong id="map-summary-pcs">0</strong></article>
