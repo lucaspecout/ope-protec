@@ -364,10 +364,13 @@ function renderHomeMeteoSituation(situations = []) {
 
 function renderGeorisquesDetails(georisques = {}) {
   const monitored = georisques.monitored_communes || [];
+  const errorDetails = Array.isArray(georisques.errors) ? georisques.errors.filter(Boolean) : [];
   setText('georisques-page-status', georisques.status || 'inconnu');
   setText('georisques-page-seismic', georisques.highest_seismic_zone_label || 'inconnue');
   setText('georisques-page-flood-docs', String(georisques.flood_documents_total ?? 0));
-  setText('georisques-page-source', `Source: ${georisques.source || 'inconnue'} · Dernière mise à jour: ${georisques.updated_at ? new Date(georisques.updated_at).toLocaleString() : 'inconnue'}`);
+  const sourceText = `Source: ${georisques.source || 'inconnue'} · Dernière mise à jour: ${georisques.updated_at ? new Date(georisques.updated_at).toLocaleString() : 'inconnue'}`;
+  const errorsText = errorDetails.length ? ` · Anomalies: ${errorDetails.join(' | ')}` : '';
+  setText('georisques-page-source', `${sourceText}${errorsText}`);
 
   const markup = monitored.map((commune) => (
     `<li><strong>${escapeHtml(commune.name || 'Commune inconnue')}</strong> (${escapeHtml(commune.code_insee || '-')}) · Sismicité: <strong>${escapeHtml(commune.seismic_zone || 'inconnue')}</strong> · Documents inondation: <strong>${Number(commune.flood_documents || 0)}</strong></li>`

@@ -562,13 +562,14 @@ def fetch_georisques_isere_summary() -> dict[str, Any]:
         {"name": "Vienne", "code_insee": "38544"},
         {"name": "Voiron", "code_insee": "38563"},
     ]
-    try:
-        monitored: list[dict[str, Any]] = []
-        highest_seismic = 0
-        flood_documents_total = 0
+    monitored: list[dict[str, Any]] = []
+    highest_seismic = 0
+    flood_documents_total = 0
+    errors: list[str] = []
 
-        for commune in communes:
-            code = commune["code_insee"]
+    for commune in communes:
+        code = commune["code_insee"]
+        try:
             seismic = _http_get_json(f"{source}/zonage_sismique?code_insee={quote_plus(code)}")
             flood = _http_get_json(f"{source}/gaspar/azi?code_insee={quote_plus(code)}")
 
@@ -587,30 +588,28 @@ def fetch_georisques_isere_summary() -> dict[str, Any]:
                     "flood_documents": len(flood_data),
                 }
             )
+        except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+            errors.append(f"{commune['name']}: {exc}")
 
-        return {
-            "service": "Géorisques",
-            "status": "online",
-            "source": source,
-            "department": "Isère (38)",
-            "highest_seismic_zone_code": highest_seismic,
-            "highest_seismic_zone_label": f"Zone {highest_seismic}" if highest_seismic else "inconnue",
-            "flood_documents_total": flood_documents_total,
-            "monitored_communes": monitored,
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
-    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
-        return {
-            "service": "Géorisques",
-            "status": "degraded",
-            "source": source,
-            "department": "Isère (38)",
-            "highest_seismic_zone_code": 0,
-            "highest_seismic_zone_label": "inconnue",
-            "flood_documents_total": 0,
-            "monitored_communes": [],
-            "error": str(exc),
-        }
+    status = "online"
+    if errors and monitored:
+        status = "partial"
+    elif errors:
+        status = "degraded"
+
+    return {
+        "service": "Géorisques",
+        "status": status,
+        "source": source,
+        "department": "Isère (38)",
+        "highest_seismic_zone_code": highest_seismic,
+        "highest_seismic_zone_label": f"Zone {highest_seismic}" if highest_seismic else "inconnue",
+        "flood_documents_total": flood_documents_total,
+        "monitored_communes": monitored,
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+        "errors": errors,
+        "error": " ; ".join(errors) if errors else None,
+    }
 
 
 def vigicrues_geojson_from_stations(stations: list[dict[str, Any]]) -> dict[str, Any]:
