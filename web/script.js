@@ -4,6 +4,7 @@ const HOME_LIVE_REFRESH_MS = 30000;
 const PANEL_TITLES = {
   'situation-panel': 'Situation opérationnelle',
   'services-panel': 'Services connectés',
+  'api-panel': 'Interconnexions API',
   'supervision-panel': 'Supervision crise',
   'municipalities-panel': 'Communes partenaires',
   'logs-panel': 'Main courante opérationnelle',
@@ -274,6 +275,14 @@ function setHtml(id, value) {
   if (node) node.innerHTML = value;
 }
 
+function formatApiJson(payload) {
+  return escapeHtml(JSON.stringify(payload, null, 2));
+}
+
+function serviceErrorLabel(service) {
+  return service?.error || (service?.status && service.status !== 'online' ? 'Service indisponible ou dégradé.' : 'Aucune erreur détectée.');
+}
+
 function loadCustomPoints() {
   try {
     const parsed = JSON.parse(localStorage.getItem(STORAGE_KEYS.customPoints) || '[]');
@@ -407,6 +416,40 @@ async function loadSupervision() {
   renderItinisereEvents(data.alerts.itinisere.events || [], 'supervision-itinisere-events');
 }
 
+async function loadApiInterconnections() {
+  const data = await api('/external/isere/risks');
+  const services = [
+    { key: 'meteo_france', label: 'Météo-France', level: normalizeLevel(data.meteo_france?.level || 'inconnu'), details: data.meteo_france?.info_state || data.meteo_france?.bulletin_title || '-' },
+    { key: 'vigicrues', label: 'Vigicrues', level: normalizeLevel(data.vigicrues?.water_alert_level || 'inconnu'), details: `${(data.vigicrues?.stations || []).length} station(s)` },
+    { key: 'itinisere', label: 'Itinisère', level: `${(data.itinisere?.events || []).length} événement(s)`, details: data.itinisere?.source || '-' },
+    { key: 'bison_fute', label: 'Bison Futé', level: data.bison_fute?.today?.isere?.departure || 'inconnu', details: data.bison_fute?.source || '-' },
+    { key: 'georisques', label: 'Géorisques', level: data.georisques?.highest_seismic_zone_label || 'inconnue', details: `${data.georisques?.flood_documents_total ?? 0} document(s) inondation` },
+  ];
+
+  const cards = services.map((service) => {
+    const payload = data[service.key] || {};
+    const status = String(payload.status || 'inconnu');
+    const degraded = status !== 'online' || Boolean(payload.error);
+    const errorLabel = serviceErrorLabel(payload);
+    return `<article class="api-card"><h4>${service.label}</h4><p>Statut: <span class="${degraded ? 'ko' : 'ok'}">${status}</span></p><p>Indicateur: <strong>${escapeHtml(service.level)}</strong></p><p class="muted">${escapeHtml(service.details)}</p><p class="${degraded ? 'ko' : 'muted'}">Erreur actuelle: ${escapeHtml(errorLabel)}</p></article>`;
+  }).join('');
+
+  const rawBlocks = services.map((service) => {
+    const payload = data[service.key] || {};
+    return `<details class="api-raw-item"><summary>${service.label}</summary><pre>${formatApiJson(payload)}</pre></details>`;
+  }).join('');
+
+  const activeErrors = services
+    .map((service) => ({ label: service.label, payload: data[service.key] || {} }))
+    .filter(({ payload }) => payload.status !== 'online' || payload.error)
+    .map(({ label, payload }) => `${label}: ${serviceErrorLabel(payload)}`);
+
+  setText('api-updated-at', data.updated_at ? new Date(data.updated_at).toLocaleString() : 'inconnue');
+  setText('api-error-banner', activeErrors.join(' · ') || 'Aucune erreur active sur les interconnexions.');
+  setHtml('api-service-grid', cards || '<p>Aucun service disponible.</p>');
+  setHtml('api-raw-list', rawBlocks || '<p>Aucun retour JSON disponible.</p>');
+}
+
 async function loadMunicipalities() {
   const municipalities = await api('/municipalities');
   document.getElementById('municipalities-list').innerHTML = municipalities.map((m) => `<li><strong>${m.name}</strong> · ${m.postal_code || 'CP ?'} · ${m.manager} · ${m.phone} · ${m.crisis_mode ? 'CRISE' : 'veille'} </li>`).join('') || '<li>Aucune commune.</li>';
@@ -438,6 +481,7 @@ async function refreshAll() {
     ['main courante', loadLogs],
     ['utilisateurs', loadUsers],
     ['supervision', loadSupervision],
+    ['interconnexions API', loadApiInterconnections],
   ];
 
   const results = await Promise.allSettled(loaders.map(([, loader]) => loader()));
@@ -555,6 +599,14 @@ function bindAppInteractions() {
   document.getElementById('logout-btn').addEventListener('click', logout);
   document.getElementById('map-search-btn')?.addEventListener('click', handleMapSearch);
   document.getElementById('map-fit-btn')?.addEventListener('click', fitMapToData);
+  document.getElementById('api-refresh-btn')?.addEventListener('click', async () => {
+    try {
+      await loadApiInterconnections();
+      document.getElementById('dashboard-error').textContent = '';
+    } catch (error) {
+      document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
+    }
+  });
   document.getElementById('map-search')?.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); handleMapSearch(); } });
   document.getElementById('map-add-point-toggle')?.addEventListener('click', () => {
     mapAddPointMode = !mapAddPointMode;

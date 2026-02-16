@@ -137,6 +137,17 @@ label { display: block; margin-bottom: .8rem; }
 .services-grid { display: grid; gap: .65rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
 .service-card { border: 1px solid var(--line); border-radius: 12px; padding: .8rem; background: linear-gradient(180deg, #fff, #f7faff); }
 .service-card a { color: #0b4daa; font-weight: 600; }
+.api-headline { display: flex; justify-content: space-between; align-items: flex-start; gap: .8rem; flex-wrap: wrap; }
+.api-service-grid { margin-top: .8rem; display: grid; gap: .65rem; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+.api-card { border: 1px solid var(--line); border-radius: 12px; padding: .8rem; background: #f8fbff; }
+.api-card h4 { margin-bottom: .35rem; }
+.api-card .ok { color: var(--ok); font-weight: 700; }
+.api-card .ko { color: var(--danger); font-weight: 700; }
+.api-raw-list { display: grid; gap: .6rem; }
+.api-raw-item { border: 1px solid var(--line); border-radius: 12px; background: #0f1f3e; color: #dbe8ff; overflow: hidden; }
+.api-raw-item summary { cursor: pointer; list-style: none; padding: .65rem .8rem; font-weight: 700; background: #1a3363; }
+.api-raw-item summary::-webkit-details-marker { display: none; }
+.api-raw-item pre { margin: 0; padding: .8rem; font-size: .82rem; line-height: 1.45; overflow-x: auto; }
 .meteo-widget { display: block; max-width: 100%; margin-top: .6rem; border: 0; border-radius: 8px; }
 .form { display: grid; gap: .6rem; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: .8rem; }
 
