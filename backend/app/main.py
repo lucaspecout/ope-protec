@@ -143,11 +143,12 @@ def public_live_status(db: Session = Depends(get_db)):
     latest_station = db.query(RiverStation).order_by(RiverStation.updated_at.desc()).first()
     crisis_count = db.query(Municipality).filter(Municipality.crisis_mode.is_(True)).count()
 
-    meteo_level = (latest_alert.level if latest_alert else "vert").lower()
+    db_meteo_level = (latest_alert.level if latest_alert else "vert").lower()
     crues_level = (latest_station.level if latest_station else "vert").lower()
-    global_risk = "rouge" if "rouge" in [meteo_level, crues_level] else "orange" if "orange" in [meteo_level, crues_level] else "jaune" if "jaune" in [meteo_level, crues_level] else "vert"
 
     meteo = fetch_meteo_france_isere()
+    meteo_level = (meteo.get("level") or db_meteo_level).lower()
+    global_risk = "rouge" if "rouge" in [meteo_level, crues_level] else "orange" if "orange" in [meteo_level, crues_level] else "jaune" if "jaune" in [meteo_level, crues_level] else "vert"
     priority_names = [m.name for m in db.query(Municipality).filter(Municipality.pcs_active.is_(True)).all()]
     vigicrues = fetch_vigicrues_isere(priority_names=priority_names)
     itinisere = fetch_itinisere_disruptions(limit=8)
@@ -268,7 +269,9 @@ def dashboard(db: Session = Depends(get_db), user: User = Depends(require_roles(
 
     logs = logs_query.order_by(OperationalLog.created_at.desc()).limit(5).all()
 
-    meteo_level = latest_alert.level if latest_alert else "vert"
+    meteo = fetch_meteo_france_isere()
+    db_meteo_level = latest_alert.level if latest_alert else "vert"
+    meteo_level = meteo.get("level") or db_meteo_level
     crues_level = river_level.level if river_level else "vert"
 
     return {
