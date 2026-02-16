@@ -4,7 +4,7 @@ import re
 import secrets
 from typing import Callable
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -14,9 +14,12 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import Base, engine, get_db
-from .models import Municipality, OperationalLog, PublicShare, RiverStation, User, WeatherAlert
+from .models import MapPoint, Municipality, MunicipalityDocument, OperationalLog, PublicShare, RiverStation, User, WeatherAlert
 from .schemas import (
+    MapPointCreate,
+    MapPointOut,
     MunicipalityCreate,
+    MunicipalityDocumentOut,
     MunicipalityOut,
     MunicipalityUpdate,
     OperationalLogCreate,
@@ -65,6 +68,32 @@ with engine.begin() as conn:
     conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS municipality_id INTEGER REFERENCES municipalities(id)"))
     conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS danger_level VARCHAR(20) DEFAULT 'vert'"))
     conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS danger_emoji VARCHAR(8) DEFAULT '🟢'"))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS municipality_documents (
+            id SERIAL PRIMARY KEY,
+            municipality_id INTEGER NOT NULL REFERENCES municipalities(id) ON DELETE CASCADE,
+            doc_type VARCHAR(40) NOT NULL DEFAULT 'annexe',
+            title VARCHAR(160) NOT NULL,
+            file_path VARCHAR(255) NOT NULL,
+            uploaded_by_id INTEGER NOT NULL REFERENCES users(id),
+            created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+    """))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_municipality_documents_municipality ON municipality_documents(municipality_id)"))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS map_points (
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(120) NOT NULL,
+            category VARCHAR(40) NOT NULL DEFAULT 'autre',
+            icon VARCHAR(16) NOT NULL DEFAULT '📍',
+            notes TEXT,
+            lat DOUBLE PRECISION NOT NULL,
+            lon DOUBLE PRECISION NOT NULL,
+            municipality_id INTEGER REFERENCES municipalities(id) ON DELETE SET NULL,
+            created_by_id INTEGER NOT NULL REFERENCES users(id),
+            created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+    """))
 
 
 app = FastAPI(title=settings.app_name)
@@ -184,6 +213,30 @@ def get_user_municipality_id(user: User, db: Session) -> int | None:
     return municipality.id if municipality else None
 
 
+def ensure_municipality_scope(user: User, db: Session, municipality_id: int) -> Municipality:
+    municipality = db.get(Municipality, municipality_id)
+    if not municipality:
+        raise HTTPException(404, "Commune introuvable")
+    if user.role == "mairie":
+        user_municipality_id = get_user_municipality_id(user, db)
+        if user_municipality_id != municipality_id:
+            raise HTTPException(403, "Accès refusé à cette commune")
+    return municipality
+
+
+def serialize_document(document: MunicipalityDocument, db: Session) -> MunicipalityDocumentOut:
+    uploader = db.get(User, document.uploaded_by_id)
+    return MunicipalityDocumentOut(
+        id=document.id,
+        municipality_id=document.municipality_id,
+        doc_type=document.doc_type,
+        title=document.title,
+        filename=Path(document.file_path).name,
+        uploaded_by=uploader.username if uploader else "inconnu",
+        created_at=document.created_at,
+    )
+
+
 @app.get("/health")
 def healthcheck():
     return {
@@ -252,6 +305,48 @@ def public_live_status(db: Session = Depends(get_db)):
 @app.get("/public/isere-map")
 def public_isere_map():
     return fetch_isere_boundary_geojson()
+
+
+@app.get("/map/points", response_model=list[MapPointOut])
+def list_map_points(db: Session = Depends(get_db), user: User = Depends(require_roles(*READ_ROLES))):
+    query = db.query(MapPoint)
+    if user.role == "mairie":
+        municipality_id = get_user_municipality_id(user, db)
+        if municipality_id is None:
+            return []
+        query = query.filter((MapPoint.municipality_id == municipality_id) | (MapPoint.municipality_id.is_(None)))
+    return query.order_by(MapPoint.created_at.desc()).all()
+
+
+@app.post("/map/points", response_model=MapPointOut)
+def create_map_point(payload: MapPointCreate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "ope", "mairie"))):
+    if payload.municipality_id:
+        ensure_municipality_scope(user, db, payload.municipality_id)
+
+    if user.role == "mairie" and payload.municipality_id is None:
+        payload = payload.model_copy(update={"municipality_id": get_user_municipality_id(user, db)})
+
+    point = MapPoint(**payload.model_dump(), created_by_id=user.id)
+    db.add(point)
+    db.commit()
+    db.refresh(point)
+    return point
+
+
+@app.delete("/map/points/{point_id}")
+def delete_map_point(point_id: int, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "ope", "mairie"))):
+    point = db.get(MapPoint, point_id)
+    if not point:
+        raise HTTPException(404, "Point introuvable")
+
+    if user.role == "mairie":
+        municipality_id = get_user_municipality_id(user, db)
+        if municipality_id is None or point.municipality_id not in {None, municipality_id}:
+            raise HTTPException(403, "Suppression non autorisée")
+
+    db.delete(point)
+    db.commit()
+    return {"status": "deleted", "id": point_id}
 
 
 @app.post("/auth/register", response_model=UserOut)
@@ -535,11 +630,9 @@ def upload_municipality_docs(
     orsec_plan: UploadFile | None = File(None),
     convention: UploadFile | None = File(None),
     db: Session = Depends(get_db),
-    _: User = Depends(require_roles(*EDIT_ROLES)),
+    user: User = Depends(require_roles("admin", "ope", "mairie")),
 ):
-    municipality = db.get(Municipality, municipality_id)
-    if not municipality:
-        raise HTTPException(404, "Commune introuvable")
+    municipality = ensure_municipality_scope(user, db, municipality_id)
 
     base_dir = Path(settings.upload_dir) / "municipalities"
     base_dir.mkdir(parents=True, exist_ok=True)
@@ -567,11 +660,9 @@ def get_municipality_document(
     municipality_id: int,
     doc_type: str,
     db: Session = Depends(get_db),
-    _: User = Depends(require_roles(*READ_ROLES)),
+    user: User = Depends(require_roles(*READ_ROLES)),
 ):
-    municipality = db.get(Municipality, municipality_id)
-    if not municipality:
-        raise HTTPException(404, "Commune introuvable")
+    municipality = ensure_municipality_scope(user, db, municipality_id)
 
     path = municipality.orsec_plan_file if doc_type == "orsec_plan" else municipality.convention_file if doc_type == "convention" else None
     if not path:
@@ -589,11 +680,9 @@ def delete_municipality_document(
     municipality_id: int,
     doc_type: str,
     db: Session = Depends(get_db),
-    _: User = Depends(require_roles(*EDIT_ROLES)),
+    user: User = Depends(require_roles("admin", "ope", "mairie")),
 ):
-    municipality = db.get(Municipality, municipality_id)
-    if not municipality:
-        raise HTTPException(404, "Commune introuvable")
+    municipality = ensure_municipality_scope(user, db, municipality_id)
 
     if doc_type not in {"orsec_plan", "convention"}:
         raise HTTPException(400, "Type de document invalide")
@@ -613,6 +702,90 @@ def delete_municipality_document(
 
     db.commit()
     return {"status": "deleted", "id": municipality_id, "doc_type": doc_type}
+
+
+@app.get("/municipalities/{municipality_id}/files", response_model=list[MunicipalityDocumentOut])
+def list_municipality_files(
+    municipality_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*READ_ROLES)),
+):
+    ensure_municipality_scope(user, db, municipality_id)
+    docs = db.query(MunicipalityDocument).filter(MunicipalityDocument.municipality_id == municipality_id).order_by(MunicipalityDocument.created_at.desc()).all()
+    return [serialize_document(doc, db) for doc in docs]
+
+
+@app.post("/municipalities/{municipality_id}/files", response_model=MunicipalityDocumentOut)
+def upload_municipality_file(
+    municipality_id: int,
+    file: UploadFile = File(...),
+    title: str = Form(...),
+    doc_type: str = Form("annexe"),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles("admin", "ope", "mairie")),
+):
+    ensure_municipality_scope(user, db, municipality_id)
+
+    safe_name = sanitize_upload_filename(file.filename)
+    ensure_allowed_extension(safe_name)
+    safe_title = title.strip() or safe_name
+    safe_doc_type = re.sub(r"[^a-z0-9_-]", "", doc_type.lower()) or "annexe"
+
+    base_dir = Path(settings.upload_dir) / "municipality-files" / str(municipality_id)
+    base_dir.mkdir(parents=True, exist_ok=True)
+    final_path = base_dir / f"{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{safe_name}"
+    final_path.write_bytes(file.file.read())
+
+    record = MunicipalityDocument(
+        municipality_id=municipality_id,
+        doc_type=safe_doc_type,
+        title=safe_title[:160],
+        file_path=str(final_path),
+        uploaded_by_id=user.id,
+    )
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return serialize_document(record, db)
+
+
+@app.get("/municipalities/{municipality_id}/files/{file_id}")
+def get_municipality_file(
+    municipality_id: int,
+    file_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*READ_ROLES)),
+):
+    ensure_municipality_scope(user, db, municipality_id)
+    record = db.get(MunicipalityDocument, file_id)
+    if not record or record.municipality_id != municipality_id:
+        raise HTTPException(404, "Fichier introuvable")
+
+    file_path = Path(record.file_path)
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(404, "Fichier introuvable")
+    return FileResponse(path=file_path, filename=file_path.name)
+
+
+@app.delete("/municipalities/{municipality_id}/files/{file_id}")
+def delete_municipality_file(
+    municipality_id: int,
+    file_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles("admin", "ope", "mairie")),
+):
+    ensure_municipality_scope(user, db, municipality_id)
+    record = db.get(MunicipalityDocument, file_id)
+    if not record or record.municipality_id != municipality_id:
+        raise HTTPException(404, "Fichier introuvable")
+
+    file_path = Path(record.file_path)
+    if file_path.exists() and file_path.is_file():
+        file_path.unlink()
+
+    db.delete(record)
+    db.commit()
+    return {"status": "deleted", "id": file_id}
 
 
 @app.post("/municipalities/{municipality_id}/crisis")

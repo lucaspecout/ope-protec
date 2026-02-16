@@ -315,6 +315,17 @@
             <button id="map-search-btn" type="button">Rechercher</button>
             <button id="map-fit-btn" type="button" class="ghost">Voir tous les points</button>
             <button id="map-add-point-toggle" type="button" class="ghost">Mode ajout: désactivé</button>
+            <select id="map-point-category-filter">
+              <option value="all">Tous les points opérationnels</option>
+              <option value="incident">Incidents</option>
+              <option value="evacuation">Évacuations</option>
+              <option value="water">Risque eau</option>
+              <option value="roadblock">Barrages</option>
+              <option value="medical">Médical</option>
+              <option value="logistics">Logistique</option>
+              <option value="command">Commandement</option>
+              <option value="autre">Autres</option>
+            </select>
             <label><input id="filter-hydro" type="checkbox" checked /> Stations Vigicrues</label>
             <label><input id="filter-pcs" type="checkbox" checked /> Communes PCS</label>
             <label><input id="filter-resources-active" type="checkbox" /> Ressources activées</label>
@@ -351,7 +362,7 @@
               <ul id="pcs-list" class="list practical"></ul>
               <h4>Ressources cartographiées</h4>
               <ul id="resources-list" class="list practical"></ul>
-              <h4>Points personnalisés</h4>
+              <h4>Points opérationnels personnalisés</h4>
               <ul id="custom-points-list" class="list practical"></ul>
               <h4>Alertes mobilité Itinisère</h4>
               <ul id="itinerary-list" class="list practical"></ul>
@@ -360,6 +371,34 @@
             </div>
           </div>
         </section>
+          <dialog id="map-point-modal" class="municipality-details-modal">
+            <div class="municipality-details-modal__head">
+              <h4>Nouveau point opérationnel</h4>
+              <button type="button" id="map-point-form-cancel" class="ghost">Fermer</button>
+            </div>
+            <form id="map-point-form" class="municipality-edit-form">
+              <label>Nom du point<input name="name" required maxlength="120" /></label>
+              <label>Catégorie
+                <select id="map-point-category" name="category">
+                  <option value="incident">Incident</option>
+                  <option value="evacuation">Évacuation</option>
+                  <option value="water">Risque eau</option>
+                  <option value="roadblock">Barrage</option>
+                  <option value="medical">Médical</option>
+                  <option value="logistics">Logistique</option>
+                  <option value="command">Commandement</option>
+                  <option value="autre">Autre</option>
+                </select>
+              </label>
+              <label>Icône (emoji)<input id="map-point-icon" name="icon" maxlength="4" placeholder="📍" /></label>
+              <label class="span-full">Notes
+                <textarea name="notes" rows="3" placeholder="Ex: route coupée, équipe envoyée, heure de début..."></textarea>
+              </label>
+              <div class="span-full municipality-actions">
+                <button type="submit">Enregistrer le point</button>
+              </div>
+            </form>
+          </dialog>
 
         <section id="users-panel" class="panel view hidden" hidden>
           <h3>Comptes utilisateurs</h3>

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -64,6 +64,39 @@ class Municipality(Base):
     vigilance_color: Mapped[str] = mapped_column(String(20), default="vert")
     orsec_plan_file: Mapped[str | None] = mapped_column(String(255), nullable=True)
     convention_file: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+
+class MunicipalityDocument(Base):
+    __tablename__ = "municipality_documents"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    municipality_id: Mapped[int] = mapped_column(ForeignKey("municipalities.id"), index=True)
+    doc_type: Mapped[str] = mapped_column(String(40), default="annexe")
+    title: Mapped[str] = mapped_column(String(160))
+    file_path: Mapped[str] = mapped_column(String(255))
+    uploaded_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    municipality = relationship("Municipality")
+    uploaded_by = relationship("User")
+
+
+class MapPoint(Base):
+    __tablename__ = "map_points"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    category: Mapped[str] = mapped_column(String(40), default="autre")
+    icon: Mapped[str] = mapped_column(String(16), default="📍")
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    lat: Mapped[float] = mapped_column(Float)
+    lon: Mapped[float] = mapped_column(Float)
+    municipality_id: Mapped[int | None] = mapped_column(ForeignKey("municipalities.id"), nullable=True)
+    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    municipality = relationship("Municipality")
+    created_by = relationship("User")
 
 
 class OperationalLog(Base):

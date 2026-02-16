@@ -142,3 +142,44 @@ class ShareAccessRequest(BaseModel):
 
 class TwoFactorToggleRequest(BaseModel):
     enabled: bool
+
+
+class MunicipalityDocumentOut(BaseModel):
+    id: int
+    municipality_id: int
+    doc_type: str
+    title: str
+    filename: str
+    uploaded_by: str
+    created_at: datetime
+
+
+class MunicipalityDocumentCreate(BaseModel):
+    title: str
+    doc_type: str = "annexe"
+
+
+class MapPointCreate(BaseModel):
+    name: str
+    category: str = "autre"
+    icon: str = "📍"
+    notes: str | None = None
+    lat: float
+    lon: float
+    municipality_id: int | None = None
+
+
+class MapPointOut(BaseModel):
+    id: int
+    name: str
+    category: str
+    icon: str
+    notes: str | None = None
+    lat: float
+    lon: float
+    municipality_id: int | None = None
+    created_by_id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
