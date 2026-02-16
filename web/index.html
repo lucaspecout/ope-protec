@@ -13,7 +13,7 @@
 <body>
   <main class="shell">
     <section id="home-view" class="home-wrap">
-      <header class="home-topbar">
+      <header class="home-topbar panel">
         <div class="brand">
           <p class="tag">Protection Civile · Isère</p>
           <strong>CRISIS38</strong>
@@ -25,24 +25,32 @@
         </nav>
       </header>
 
-      <section class="home-hero">
-        <div>
+      <section class="home-hero panel">
+        <div class="hero-main">
           <p class="tag">Poste de commandement numérique</p>
-          <h1>Un outil opérationnel clair, accessible et connecté</h1>
-          <p class="lead">Tableau de bord unifié pour la vigilance météo, les crues, la coordination des communes et la gestion des actions terrain en Isère.</p>
+          <h1>Pilotage de crise rapide, lisible et coordonné</h1>
+          <p class="lead">CRISIS38 centralise l’alerte météo, le suivi des crues, la coordination des communes et le déclenchement des actions terrain dans une interface pensée pour l’opérationnel.</p>
           <div class="hero-actions">
-            <button id="hero-login-btn" type="button">Se connecter</button>
-            <button id="scroll-actions-btn" type="button" class="ghost">Voir les indicateurs</button>
+            <button id="hero-login-btn" type="button">Accéder à l’espace sécurisé</button>
+            <button id="scroll-actions-btn" type="button" class="ghost">Consulter les indicateurs</button>
+          </div>
+          <div class="hero-badges">
+            <span>🛰️ Données temps réel</span>
+            <span>🏛️ Coordination intercommunale</span>
+            <span>🚨 Suivi multi-risques</span>
           </div>
         </div>
+
         <article class="hero-status panel">
           <h3>Données temps réel · Isère</h3>
-          <p>Niveau météo <strong id="home-meteo-state">-</strong></p>
-          <p>Niveau crues <strong id="home-river-state">-</strong></p>
-          <p>Risque global <strong id="home-global-risk">-</strong></p>
-          <p>Communes en crise <strong id="home-crisis-count">0</strong></p>
-          <p>Sismicité max (Géorisques) <strong id="home-seismic-state">-</strong></p>
-          <p>Documents inondation (Géorisques) <strong id="home-flood-docs">0</strong></p>
+          <div class="status-grid">
+            <p>Niveau météo <strong id="home-meteo-state">-</strong></p>
+            <p>Niveau crues <strong id="home-river-state">-</strong></p>
+            <p>Risque global <strong id="home-global-risk">-</strong></p>
+            <p>Communes en crise <strong id="home-crisis-count">0</strong></p>
+            <p>Sismicité max <strong id="home-seismic-state">-</strong></p>
+            <p>Docs inondation <strong id="home-flood-docs">0</strong></p>
+          </div>
           <h4>Situation météo en cours</h4>
           <ul id="home-meteo-situation" class="list compact"></ul>
           <p class="muted" id="home-live-updated">Dernière mise à jour: -</p>
@@ -52,23 +60,23 @@
 
       <section id="home-features" class="home-grid">
         <article class="panel feature-card">
-          <h3>Risques du département</h3>
-          <p>Risque global: <strong id="home-feature-global-risk">-</strong></p>
-          <p>Crues: <strong id="home-feature-river-risk">-</strong></p>
-          <p>Sismicité max: <strong id="home-feature-seismic-risk">-</strong></p>
+          <h3>Risques départementaux</h3>
+          <p>Risque global <strong id="home-feature-global-risk">-</strong></p>
+          <p>Crues <strong id="home-feature-river-risk">-</strong></p>
+          <p>Sismicité max <strong id="home-feature-seismic-risk">-</strong></p>
         </article>
         <article class="panel feature-card">
           <h3>Vigilance actuelle</h3>
-          <p>Météo-France: <strong id="home-feature-meteo">-</strong></p>
-          <p>Vigicrues: <strong id="home-feature-vigicrues">-</strong></p>
-          <p>Communes en crise: <strong id="home-feature-crisis-count">0</strong></p>
+          <p>Météo-France <strong id="home-feature-meteo">-</strong></p>
+          <p>Vigicrues <strong id="home-feature-vigicrues">-</strong></p>
+          <p>Communes en crise <strong id="home-feature-crisis-count">0</strong></p>
         </article>
         <article class="panel feature-card">
-          <h3>Info Itinisère</h3>
-          <p>Statut: <strong id="home-feature-itinisere-status">-</strong></p>
-          <p>Événements en cours: <strong id="home-feature-itinisere-events">0</strong></p>
-          <p>Bison Futé (Isère): <strong id="home-feature-bison-isere">-</strong></p>
-          <p class="muted">Perturbations routières signalées sur le réseau isérois + tendance Bison Futé.</p>
+          <h3>Mobilité & voirie</h3>
+          <p>Statut Itinisère <strong id="home-feature-itinisere-status">-</strong></p>
+          <p>Événements en cours <strong id="home-feature-itinisere-events">0</strong></p>
+          <p>Bison Futé (38) <strong id="home-feature-bison-isere">-</strong></p>
+          <p class="muted">Vue consolidée des perturbations routières et tendances trafic en Isère.</p>
         </article>
       </section>
 
