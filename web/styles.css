@@ -46,12 +46,15 @@ button {
 button:hover { filter: brightness(1.05); }
 .ghost { background: #edf2ff; color: var(--primary-2); border: 1px solid #cad8f8; }
 
-input {
+input,
+textarea,
+select {
   width: 100%;
   border: 1px solid #cbd8ef;
   border-radius: 11px;
   padding: .72rem .8rem;
   margin-top: .4rem;
+  font: inherit;
 }
 label { display: block; margin-bottom: .8rem; }
 
@@ -167,6 +170,30 @@ label { display: block; margin-bottom: .8rem; }
 
 .municipality-actions { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .45rem; }
 .inline-action.danger { border-color: #ca3a3a; color: #a31515; }
+.municipality-grid { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.municipality-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: .9rem;
+  background: linear-gradient(180deg, #ffffff, #f5f9ff);
+}
+.municipality-card header { display: flex; justify-content: space-between; gap: .5rem; align-items: center; }
+.municipality-card h4 { margin: 0; }
+.municipality-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .45rem; margin-top: .6rem; }
+.municipality-stats p { margin: 0; font-size: .88rem; }
+.municipality-docs { margin: .55rem 0 0; color: var(--muted); font-size: .85rem; }
+
+.municipality-editor {
+  margin-top: 1rem;
+  border: 1px solid #c8dafb;
+  border-radius: 14px;
+  background: #f2f7ff;
+  padding: .9rem;
+}
+.municipality-editor__head { display: flex; justify-content: space-between; align-items: center; gap: .8rem; }
+.municipality-edit-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: .6rem; }
+.municipality-edit-form label:last-of-type { display: flex; align-items: center; gap: .5rem; }
+.municipality-edit-form label:last-of-type input { width: auto; margin-top: 0; }
 .services-grid { display: grid; gap: .65rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
 .service-card { border: 1px solid var(--line); border-radius: 12px; padding: .8rem; background: linear-gradient(180deg, #fff, #f7faff); }
 .service-card a { color: #0b4daa; font-weight: 600; }
