@@ -26,6 +26,7 @@ Ou via script:
 - Utilisateur initial : `admin`
 - Mot de passe initial : `admin`
 - Le changement du mot de passe est obligatoire à la première connexion.
+- Le token de connexion est conservé côté navigateur et reste valide 7 jours par défaut (`ACCESS_TOKEN_EXPIRE_MINUTES=10080`).
 
 ## Architecture
 
