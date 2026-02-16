@@ -177,8 +177,10 @@
             <article class="service-card"><h4>Préfecture de l'Isère</h4><p>Coordination institutionnelle</p><a href="https://www.isere.gouv.fr" target="_blank" rel="noreferrer">isère.gouv.fr</a></article>
             <article class="service-card"><h4>Vigicrues Flash</h4><p>Veille pluie-inondation</p><a href="https://www.vigicrues.gouv.fr" target="_blank" rel="noreferrer">vigicrues.gouv.fr</a></article>
             <article class="service-card"><h4>GEORISQUES</h4><p id="georisques-status">-</p><p id="georisques-info" class="muted"></p><a href="https://www.georisques.gouv.fr" target="_blank" rel="noreferrer">georisques.gouv.fr</a></article>
-            <article class="service-card"><h4>Info route Isère</h4><p>Axes coupés et circulation</p><a href="https://www.itinisere.fr" target="_blank" rel="noreferrer">itinisere.fr</a></article>
+            <article class="service-card"><h4>Info route Isère</h4><p id="itinisere-status">-</p><a href="https://www.itinisere.fr" target="_blank" rel="noreferrer">itinisere.fr</a></article>
           </div>
+          <h4>Alertes météo Isère (en cours / demain)</h4>
+          <ul id="meteo-alerts-list" class="list"></ul>
           <h4>Stations Vigicrues prioritaires</h4>
           <ul id="stations-list" class="list"></ul>
         </section>
@@ -212,6 +214,7 @@
             <input id="map-search" type="search" placeholder="Rechercher une adresse ou un nom" />
             <button id="map-search-btn" type="button">Rechercher</button>
             <button id="map-fit-btn" type="button" class="ghost">Voir tous les points</button>
+            <button id="map-add-point-toggle" type="button" class="ghost">Mode ajout: désactivé</button>
             <label><input id="filter-hydro" type="checkbox" checked /> Stations Vigicrues</label>
             <label><input id="filter-pcs" type="checkbox" checked /> Communes PCS</label>
             <label><input id="filter-resources-active" type="checkbox" /> Ressources activées</label>
@@ -247,6 +250,8 @@
               <ul id="pcs-list" class="list practical"></ul>
               <h4>Ressources cartographiées</h4>
               <ul id="resources-list" class="list practical"></ul>
+              <h4>Points personnalisés</h4>
+              <ul id="custom-points-list" class="list practical"></ul>
               <h4>Alertes mobilité Itinisère</h4>
               <ul id="itinerary-list" class="list practical"></ul>
             </div>

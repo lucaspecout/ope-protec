@@ -1,4 +1,4 @@
-const STORAGE_KEYS = { token: 'token', activePanel: 'activePanel' };
+const STORAGE_KEYS = { token: 'token', activePanel: 'activePanel', customPoints: 'customPoints' };
 const PANEL_TITLES = {
   'situation-panel': 'Situation opérationnelle',
   'services-panel': 'Services connectés',
@@ -28,6 +28,9 @@ let hydroLayer = null;
 let pcsLayer = null;
 let resourceLayer = null;
 let searchLayer = null;
+let customPointsLayer = null;
+let customPoints = [];
+let mapAddPointMode = false;
 let cachedStations = [];
 let cachedMunicipalities = [];
 let geocodeCache = new Map();
@@ -129,6 +132,10 @@ function initMap() {
   pcsLayer = window.L.layerGroup().addTo(leafletMap);
   resourceLayer = window.L.layerGroup().addTo(leafletMap);
   searchLayer = window.L.layerGroup().addTo(leafletMap);
+  customPointsLayer = window.L.layerGroup().addTo(leafletMap);
+  customPoints = loadCustomPoints();
+  renderCustomPoints();
+  leafletMap.on('click', onMapClickAddPoint);
 }
 
 function setMapFeedback(message = '', isError = false) {
@@ -140,7 +147,7 @@ function setMapFeedback(message = '', isError = false) {
 
 function fitMapToData() {
   if (!leafletMap) return;
-  const layers = [boundaryLayer, hydroLayer, pcsLayer, resourceLayer, searchLayer].filter(Boolean);
+  const layers = [boundaryLayer, hydroLayer, pcsLayer, resourceLayer, searchLayer, customPointsLayer].filter(Boolean);
   const bounds = window.L.latLngBounds([]);
   layers.forEach((layer) => {
     if (layer?.getBounds) {
@@ -250,6 +257,58 @@ async function handleMapSearch() {
 }
 
 
+
+function setText(id, value) {
+  const node = document.getElementById(id);
+  if (node) node.textContent = value;
+}
+
+function setHtml(id, value) {
+  const node = document.getElementById(id);
+  if (node) node.innerHTML = value;
+}
+
+function loadCustomPoints() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEYS.customPoints) || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveCustomPoints() {
+  localStorage.setItem(STORAGE_KEYS.customPoints, JSON.stringify(customPoints));
+}
+
+function renderCustomPoints() {
+  if (customPointsLayer) customPointsLayer.clearLayers();
+  const listMarkup = customPoints.map((point) => `<li><strong>${point.name}</strong> · ${point.lat.toFixed(4)}, ${point.lon.toFixed(4)} <button type="button" data-remove-point="${point.id}">Supprimer</button></li>`).join('') || '<li>Aucun point personnalisé.</li>';
+  setHtml('custom-points-list', listMarkup);
+  if (!customPointsLayer) return;
+  customPoints.forEach((point) => {
+    window.L.marker([point.lat, point.lon]).bindPopup(`<strong>${point.name}</strong><br/>Point personnalisé`).addTo(customPointsLayer);
+  });
+}
+
+function onMapClickAddPoint(event) {
+  if (!mapAddPointMode) return;
+  const defaultName = `Point ${new Date().toLocaleTimeString()}`;
+  const label = window.prompt('Nom du point personnalisé', defaultName);
+  if (!label) return;
+  customPoints.push({ id: String(Date.now()) + String(Math.random()).slice(2, 6), name: label.trim(), lat: event.latlng.lat, lon: event.latlng.lng });
+  saveCustomPoints();
+  renderCustomPoints();
+  setMapFeedback(`Point personnalisé ajouté: ${label.trim()}`);
+}
+
+function renderMeteoAlerts(meteo = {}) {
+  const current = meteo.current_alerts || [];
+  const tomorrow = meteo.tomorrow_alerts || [];
+  const section = (title, alerts) => `<li><strong>${title}</strong><ul>${alerts.map((alert) => `<li><strong>${alert.phenomenon}</strong> · <span style="color:${levelColor(alert.level)}">${normalizeLevel(alert.level)}</span>${(alert.details || []).length ? `<br>${alert.details[0]}` : ''}</li>`).join('') || '<li>Aucune alerte significative.</li>'}</ul></li>`;
+  setHtml('meteo-alerts-list', `${section('En cours (J0)', current)}${section('Demain (J1)', tomorrow)}`);
+}
+
 function renderItinisereEvents(events = [], targetId = 'itinerary-list') {
   document.getElementById(targetId).innerHTML = events.slice(0, 8).map((e) => `<li><strong>${e.title}</strong><br>${e.description || ''}<br><a href="${e.link}" target="_blank" rel="noreferrer">Détail</a></li>`).join('') || '<li>Aucune perturbation publiée.</li>';
 }
@@ -266,19 +325,21 @@ async function loadDashboard() {
 
 async function loadExternalRisks() {
   const data = await api('/external/isere/risks');
-  document.getElementById('meteo-status').textContent = `${data.meteo_france.status} · niveau ${normalizeLevel(data.meteo_france.level)}`;
-  document.getElementById('meteo-info').textContent = data.meteo_france.info_state || data.meteo_france.bulletin_title || '';
-  document.getElementById('river-status').textContent = `${data.vigicrues.status} · niveau ${normalizeLevel(data.vigicrues.water_alert_level)}`;
-  document.getElementById('stations-list').innerHTML = (data.vigicrues.stations || []).slice(0, 10).map((s) => `<li>${s.station || s.code} · ${s.river || ''} · ${normalizeLevel(s.level)} · ${s.height_m} m</li>`).join('') || '<li>Aucune station disponible.</li>';
-  document.getElementById('itinisere-status').textContent = `${data.itinisere.status} · ${data.itinisere.events.length} événements`;
-  document.getElementById('georisques-status').textContent = `${data.georisques.status} · sismicité ${data.georisques.highest_seismic_zone_label || 'inconnue'}`;
-  document.getElementById('georisques-info').textContent = `${data.georisques.flood_documents_total ?? 0} document(s) inondation suivis`;
+  setText('meteo-status', `${data.meteo_france.status} · niveau ${normalizeLevel(data.meteo_france.level)}`);
+  setText('meteo-info', data.meteo_france.info_state || data.meteo_france.bulletin_title || '');
+  setText('vigicrues-status', `${data.vigicrues.status} · niveau ${normalizeLevel(data.vigicrues.water_alert_level)}`);
+  setText('vigicrues-info', `${(data.vigicrues.stations || []).length} station(s) suivie(s)`);
+  setHtml('stations-list', (data.vigicrues.stations || []).slice(0, 10).map((s) => `<li>${s.station || s.code} · ${s.river || ''} · ${normalizeLevel(s.level)} · ${s.height_m} m</li>`).join('') || '<li>Aucune station disponible.</li>');
+  setText('itinisere-status', `${data.itinisere.status} · ${data.itinisere.events.length} événements`);
+  setText('georisques-status', `${data.georisques.status} · sismicité ${data.georisques.highest_seismic_zone_label || 'inconnue'}`);
+  setText('georisques-info', `${data.georisques.flood_documents_total ?? 0} document(s) inondation suivis`);
+  renderMeteoAlerts(data.meteo_france || {});
   renderItinisereEvents(data.itinisere?.events || []);
-  document.getElementById('meteo-level').textContent = normalizeLevel(data.meteo_france.level || 'vert');
-  document.getElementById('meteo-hazards').textContent = (data.meteo_france.hazards || []).join(', ') || 'non précisé';
-  document.getElementById('river-level').textContent = normalizeLevel(data.vigicrues.water_alert_level || 'vert');
-  document.getElementById('map-seismic-level').textContent = data.georisques.highest_seismic_zone_label || 'inconnue';
-  document.getElementById('map-flood-docs').textContent = String(data.georisques.flood_documents_total ?? 0);
+  setText('meteo-level', normalizeLevel(data.meteo_france.level || 'vert'));
+  setText('meteo-hazards', (data.meteo_france.hazards || []).join(', ') || 'non précisé');
+  setText('river-level', normalizeLevel(data.vigicrues.water_alert_level || 'vert'));
+  setText('map-seismic-level', data.georisques.highest_seismic_zone_label || 'inconnue');
+  setText('map-flood-docs', String(data.georisques.flood_documents_total ?? 0));
   renderStations(data.vigicrues.stations || []);
 }
 
@@ -342,6 +403,20 @@ function bindAppInteractions() {
   document.getElementById('map-search-btn')?.addEventListener('click', handleMapSearch);
   document.getElementById('map-fit-btn')?.addEventListener('click', fitMapToData);
   document.getElementById('map-search')?.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); handleMapSearch(); } });
+  document.getElementById('map-add-point-toggle')?.addEventListener('click', () => {
+    mapAddPointMode = !mapAddPointMode;
+    setText('map-add-point-toggle', `Mode ajout: ${mapAddPointMode ? 'activé' : 'désactivé'}`);
+    setMapFeedback(mapAddPointMode ? 'Cliquez sur la carte pour ajouter un point personnalisé.' : 'Mode ajout désactivé.');
+  });
+  document.getElementById('custom-points-list')?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-remove-point]');
+    if (!button) return;
+    const targetId = button.getAttribute('data-remove-point');
+    customPoints = customPoints.filter((point) => point.id !== targetId);
+    saveCustomPoints();
+    renderCustomPoints();
+    setMapFeedback('Point personnalisé supprimé.');
+  });
   ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'resource-type-filter'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       renderStations(cachedStations);
