@@ -578,8 +578,23 @@ async function loadMunicipalityFiles(municipalityId) {
 
 function municipalityFilesMarkup(files = [], municipalityId) {
   const canManage = canMunicipalityFiles();
-  const list = files.map((file) => `<li><strong>${escapeHtml(file.title)}</strong> · ${escapeHtml(file.doc_type)} · ${new Date(file.created_at).toLocaleDateString()} · par ${escapeHtml(file.uploaded_by)} <a href="/municipalities/${municipalityId}/files/${file.id}" target="_blank" rel="noreferrer">Consulter</a> ${canManage ? `<button type="button" class="ghost inline-action danger" data-muni-file-delete="${file.id}" data-muni-id="${municipalityId}">Supprimer</button>` : ''}</li>`).join('');
+  const list = files.map((file) => `<li><strong>${escapeHtml(file.title)}</strong> · ${escapeHtml(file.doc_type)} · ${new Date(file.created_at).toLocaleDateString()} · par ${escapeHtml(file.uploaded_by)} <button type="button" class="ghost inline-action" data-muni-file-open="${file.id}" data-muni-id="${municipalityId}">Consulter</button> ${canManage ? `<button type="button" class="ghost inline-action danger" data-muni-file-delete="${file.id}" data-muni-id="${municipalityId}">Supprimer</button>` : ''}</li>`).join('');
   return list || '<li>Aucun fichier opérationnel.</li>';
+}
+
+async function openMunicipalityFile(municipalityId, fileId) {
+  const { blob } = await apiFile(`/municipalities/${municipalityId}/files/${fileId}`);
+  const objectUrl = URL.createObjectURL(blob);
+  const tab = window.open(objectUrl, '_blank', 'noopener,noreferrer');
+  if (!tab) {
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.download = `document-${fileId}`;
+    link.click();
+  }
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
 }
 
 function closeMunicipalityDetailsModal() {
@@ -1065,9 +1080,10 @@ function bindAppInteractions() {
   document.getElementById('municipality-details-content')?.addEventListener('click', async (event) => {
     const editButton = event.target.closest('[data-muni-detail-edit]');
     const crisisButton = event.target.closest('[data-muni-detail-crisis]');
+    const openFileButton = event.target.closest('[data-muni-file-open]');
     const uploadFileButton = event.target.closest('[data-muni-file-upload]');
     const deleteFileButton = event.target.closest('[data-muni-file-delete]');
-    if (!editButton && !crisisButton && !uploadFileButton && !deleteFileButton) return;
+    if (!editButton && !crisisButton && !openFileButton && !uploadFileButton && !deleteFileButton) return;
 
     const getMunicipality = (id) => cachedMunicipalityRecords.find((m) => String(m.id) === String(id));
 
@@ -1089,6 +1105,14 @@ function bindAppInteractions() {
         const municipality = getMunicipality(municipalityId);
         document.getElementById('municipality-feedback').textContent = `${municipality?.name || 'Commune'}: ${result.crisis_mode ? 'mode crise activé' : 'retour en veille'}.`;
         if (municipality) await openMunicipalityDetailsModal(municipality);
+        return;
+      }
+
+      if (openFileButton) {
+        if (!canMunicipalityFiles()) return;
+        const municipalityId = openFileButton.getAttribute('data-muni-id');
+        const fileId = openFileButton.getAttribute('data-muni-file-open');
+        await openMunicipalityFile(municipalityId, fileId);
         return;
       }
 
