@@ -569,6 +569,15 @@ def fetch_georisques_isere_summary() -> dict[str, Any]:
             zone_code = int((seismic_data[0] if seismic_data else {}).get("code_zone", 0) or 0)
             highest_seismic = max(highest_seismic, zone_code)
             flood_documents_total += len(flood_data)
+            flood_documents_details = [
+                {
+                    "code": item.get("code_national_azi"),
+                    "title": item.get("libelle_azi"),
+                    "river_basin": item.get("libelle_bassin_risques"),
+                    "published_at": item.get("date_diffusion") or item.get("date_publication_web"),
+                }
+                for item in flood_data
+            ]
 
             monitored.append(
                 {
@@ -576,6 +585,7 @@ def fetch_georisques_isere_summary() -> dict[str, Any]:
                     "code_insee": code,
                     "seismic_zone": seismic_label,
                     "flood_documents": len(flood_data),
+                    "flood_documents_details": flood_documents_details,
                 }
             )
         except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:

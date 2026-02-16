@@ -5,6 +5,7 @@ import secrets
 from typing import Callable
 
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
@@ -559,6 +560,31 @@ def upload_municipality_docs(
 
     db.commit()
     return {"status": "uploaded", "orsec_plan_file": municipality.orsec_plan_file, "convention_file": municipality.convention_file}
+
+
+@app.get("/municipalities/{municipality_id}/documents/{doc_type}")
+def get_municipality_document(
+    municipality_id: int,
+    doc_type: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*READ_ROLES)),
+):
+    municipality = db.get(Municipality, municipality_id)
+    if not municipality:
+        raise HTTPException(404, "Commune introuvable")
+
+    if user.role == "mairie" and user.municipality_name != municipality.name:
+        raise HTTPException(403, "Accès interdit à ce document")
+
+    path = municipality.orsec_plan_file if doc_type == "orsec_plan" else municipality.convention_file if doc_type == "convention" else None
+    if not path:
+        raise HTTPException(404, "Document introuvable")
+
+    file_path = Path(path)
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(404, "Document introuvable")
+
+    return FileResponse(path=file_path, filename=file_path.name)
 
 
 @app.post("/municipalities/{municipality_id}/crisis")
