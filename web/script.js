@@ -429,7 +429,12 @@ function renderGeorisquesDetails(georisques = {}) {
   setText('georisques-page-debug', monitored.length ? '' : `Aucune commune détaillée reçue (clés: ${Object.keys(georisques || {}).join(', ') || 'aucune'}).`);
 
   const markup = monitored.map((commune) => {
-    return `<li><strong>${escapeHtml(commune.name || commune.commune || 'Commune inconnue')}</strong> (${escapeHtml(commune.code_insee || commune.insee || '-')}) · Sismicité: <strong>${escapeHtml(commune.seismic_zone || commune.zone_sismicite || 'inconnue')}</strong> · Documents inondation: <strong>${Number(commune.flood_documents || commune.nb_documents || 0)}</strong></li>`;
+    const docs = Array.isArray(commune.flood_documents_details) ? commune.flood_documents_details : [];
+    const docsMarkup = docs.length
+      ? `<ul class="list compact">${docs.slice(0, 6).map((doc) => `<li><strong>${escapeHtml(doc.title || doc.libelle_azi || 'Document inondation')}</strong>${doc.code ? ` (${escapeHtml(doc.code)})` : ''}${doc.river_basin ? ` · Bassin: ${escapeHtml(doc.river_basin)}` : ''}${doc.published_at ? ` · Diffusion: ${escapeHtml(doc.published_at)}` : ''}</li>`).join('')}</ul>`
+      : '<span class="muted">Aucun détail de document remonté.</span>';
+
+    return `<li><strong>${escapeHtml(commune.name || commune.commune || 'Commune inconnue')}</strong> (${escapeHtml(commune.code_insee || commune.insee || '-')}) · Sismicité: <strong>${escapeHtml(commune.seismic_zone || commune.zone_sismicite || 'inconnue')}</strong> · Documents inondation: <strong>${Number(commune.flood_documents || commune.nb_documents || 0)}</strong><br>${docsMarkup}</li>`;
   }).join('') || '<li>Aucune commune remontée par Géorisques.</li>';
   setHtml('georisques-communes-list', markup);
 
@@ -483,12 +488,8 @@ function openMunicipalityDetailsModal(municipality) {
   if (!modal || !content || !municipality) return;
 
   const docs = [
-    municipality.orsec_plan_file
-      ? `<li>Plan ORSEC · <button type="button" class="ghost inline-action" data-open-muni-doc="orsec_plan" data-open-muni-id="${municipality.id}">Voir le document</button></li>`
-      : '<li>Plan ORSEC: non renseigné</li>',
-    municipality.convention_file
-      ? `<li>Convention · <button type="button" class="ghost inline-action" data-open-muni-doc="convention" data-open-muni-id="${municipality.id}">Voir le document</button></li>`
-      : '<li>Convention: non renseignée</li>',
+    municipality.orsec_plan_file ? `<li><a href="/municipalities/${municipality.id}/documents/orsec_plan" target="_blank" rel="noreferrer">Plan ORSEC</a></li>` : '<li>Plan ORSEC: non renseigné</li>',
+    municipality.convention_file ? `<li><a href="/municipalities/${municipality.id}/documents/convention" target="_blank" rel="noreferrer">Convention</a></li>` : '<li>Convention: non renseignée</li>',
   ].join('');
 
   content.innerHTML = `
@@ -506,18 +507,6 @@ function openMunicipalityDetailsModal(municipality) {
   `;
 
   if (typeof modal.showModal === 'function') modal.showModal();
-}
-
-async function openMunicipalityDocument(municipalityId, docType) {
-  try {
-    const { blob, contentType } = await apiFile(`/municipalities/${municipalityId}/documents/${docType}`);
-    const fileBlob = new Blob([blob], { type: contentType });
-    const url = URL.createObjectURL(fileBlob);
-    window.open(url, '_blank', 'noopener,noreferrer');
-    setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  } catch (error) {
-    document.getElementById('municipality-feedback').textContent = sanitizeErrorMessage(error.message);
-  }
 }
 
 function renderCriticalRisks(meteo = {}) {
@@ -629,13 +618,13 @@ async function loadMunicipalities() {
     if (m.convention_file) docs.push('Convention');
     const actions = canEdit()
       ? `<div class="municipality-actions">
-           <button type="button" class="inline-action primary" data-muni-view="${m.id}">Voir la fiche complète</button>
+           <button type="button" class="ghost inline-action" data-muni-view="${m.id}">Voir</button>
            <button type="button" class="ghost inline-action" data-muni-edit="${m.id}">Éditer</button>
            <button type="button" class="ghost inline-action" data-muni-crisis="${m.id}">${m.crisis_mode ? 'Sortir de crise' : 'Passer en crise'}</button>
            <button type="button" class="ghost inline-action" data-muni-docs="${m.id}">Documents</button>
            <button type="button" class="ghost inline-action danger" data-muni-delete="${m.id}">Supprimer</button>
          </div>`
-      : `<div class="municipality-actions"><button type="button" class="inline-action primary" data-muni-view="${m.id}">Voir la fiche complète</button></div>`;
+      : `<div class="municipality-actions"><button type="button" class="ghost inline-action" data-muni-view="${m.id}">Voir</button></div>`;
     return `<article class="municipality-card">
       <header>
         <h4>${escapeHtml(m.name)}</h4>
@@ -901,11 +890,6 @@ function bindAppInteractions() {
   document.getElementById('user-create-role')?.addEventListener('change', syncUserCreateMunicipalityVisibility);
   document.getElementById('municipality-editor-close')?.addEventListener('click', closeMunicipalityEditor);
   document.getElementById('municipality-details-close')?.addEventListener('click', closeMunicipalityDetailsModal);
-  document.getElementById('municipality-details-content')?.addEventListener('click', async (event) => {
-    const docButton = event.target.closest('[data-open-muni-doc]');
-    if (!docButton) return;
-    await openMunicipalityDocument(docButton.getAttribute('data-open-muni-id'), docButton.getAttribute('data-open-muni-doc'));
-  });
   document.getElementById('municipality-edit-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!canEdit()) return;
