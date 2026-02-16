@@ -52,6 +52,7 @@ let geocodeCache = new Map();
 let municipalityContourCache = new Map();
 let trafficGeocodeCache = new Map();
 let mapStats = { stations: 0, pcs: 0, resources: 0, custom: 0, traffic: 0 };
+let mapControlsCollapsed = false;
 const ISERE_BOUNDARY_STYLE = { color: '#163a87', weight: 2, fillColor: '#63c27d', fillOpacity: 0.2 };
 const TRAFFIC_COMMUNES = ['Grenoble', 'Voiron', 'Vienne', 'Bourgoin-Jallieu', 'Pont-de-Claix', 'Meylan', 'Échirolles', 'L\'Isle-d\'Abeau', 'Saint-Martin-d\'Hères', 'La Tour-du-Pin', 'Rives', 'Sassenage', 'Crolles', 'Tullins'];
 const ITINISERE_ROAD_CORRIDORS = {
@@ -213,6 +214,10 @@ function applyBasemap(style = 'osm') {
     topo: {
       url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
       options: { maxZoom: 17, attribution: '&copy; OpenTopoMap contributors' },
+    },
+    satellite: {
+      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      options: { maxZoom: 19, attribution: 'Tiles &copy; Esri' },
     },
     light: {
       url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
@@ -1261,6 +1266,23 @@ async function handleUsersTableAction(event) {
   }
 }
 
+
+function setMapControlsCollapsed(collapsed) {
+  mapControlsCollapsed = Boolean(collapsed);
+  const workspace = document.querySelector('#map-panel .map-workspace');
+  const controls = document.getElementById('map-controls-panel');
+  const toggle = document.getElementById('map-controls-toggle');
+  if (!workspace || !controls || !toggle) return;
+  workspace.classList.toggle('map-workspace--collapsed', mapControlsCollapsed);
+  controls.setAttribute('aria-hidden', String(mapControlsCollapsed));
+  toggle.setAttribute('aria-expanded', String(!mapControlsCollapsed));
+  toggle.textContent = mapControlsCollapsed ? '☰' : '✕';
+  const toggleLabel = mapControlsCollapsed ? 'Afficher les options de la carte' : 'Ranger les options de la carte';
+  toggle.title = toggleLabel;
+  toggle.setAttribute('aria-label', toggleLabel);
+  if (leafletMap) setTimeout(() => leafletMap.invalidateSize(), 160);
+}
+
 function bindHomeInteractions() {
   const openLogin = () => showLogin();
   const mobileMenuButton = document.getElementById('mobile-menu-btn');
@@ -1296,7 +1318,11 @@ function bindAppInteractions() {
     appMenuButton.setAttribute('aria-expanded', String(Boolean(isOpen)));
   });
   document.getElementById('logout-btn').addEventListener('click', logout);
+  setMapControlsCollapsed(false);
   document.getElementById('map-search-btn')?.addEventListener('click', handleMapSearch);
+  document.getElementById('map-controls-toggle')?.addEventListener('click', () => {
+    setMapControlsCollapsed(!mapControlsCollapsed);
+  });
   document.getElementById('map-fit-btn')?.addEventListener('click', fitMapToData);
   document.getElementById('map-focus-crisis')?.addEventListener('click', focusOnCrisisAreas);
   document.getElementById('map-toggle-contrast')?.addEventListener('click', toggleMapContrast);
