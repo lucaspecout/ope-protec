@@ -1,6 +1,12 @@
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
+
+
+ALLOWED_ROLES = {"admin", "ope", "securite", "visiteur", "mairie"}
+ALLOWED_WEATHER_LEVELS = {"vert", "jaune", "orange", "rouge"}
+ALLOWED_VIGILANCE_COLORS = {"vert", "jaune", "orange", "rouge"}
+ALLOWED_DANGER_LEVELS = {"vert", "jaune", "orange", "rouge"}
 
 
 class Token(BaseModel):
@@ -14,6 +20,30 @@ class UserCreate(BaseModel):
     password: str
     role: str
     municipality_name: str | None = None
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, value: str) -> str:
+        sanitized = value.strip()
+        if len(sanitized) < 3:
+            raise ValueError("Le nom d'utilisateur doit contenir au moins 3 caractères")
+        return sanitized
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, value: str) -> str:
+        normalized = value.lower().strip()
+        if normalized not in ALLOWED_ROLES:
+            raise ValueError("Rôle invalide")
+        return normalized
+
+    @field_validator("municipality_name")
+    @classmethod
+    def normalize_municipality_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        sanitized = value.strip()
+        return sanitized or None
 
 
 class UserOut(BaseModel):
@@ -38,6 +68,22 @@ class UserUpdate(BaseModel):
     role: str
     municipality_name: str | None = None
 
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, value: str) -> str:
+        normalized = value.lower().strip()
+        if normalized not in ALLOWED_ROLES:
+            raise ValueError("Rôle invalide")
+        return normalized
+
+    @field_validator("municipality_name")
+    @classmethod
+    def normalize_municipality_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        sanitized = value.strip()
+        return sanitized or None
+
 
 class UserPasswordResetRequest(BaseModel):
     new_password: str | None = None
@@ -55,6 +101,30 @@ class WeatherAlertCreate(BaseModel):
     previous_level: str
     internal_mail_group: str | None = None
     sent_to_internal_group: bool = False
+
+    @field_validator("risk_type")
+    @classmethod
+    def normalize_risk_type(cls, value: str) -> str:
+        sanitized = value.strip().lower()
+        if not sanitized:
+            raise ValueError("Le type de risque est obligatoire")
+        return sanitized
+
+    @field_validator("level", "previous_level")
+    @classmethod
+    def validate_alert_level(cls, value: str) -> str:
+        normalized = value.lower().strip()
+        if normalized not in ALLOWED_WEATHER_LEVELS:
+            raise ValueError("Niveau de vigilance invalide")
+        return normalized
+
+    @field_validator("internal_mail_group")
+    @classmethod
+    def normalize_internal_mail_group(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        sanitized = value.strip()
+        return sanitized or None
 
 
 class WeatherAlertOut(WeatherAlertCreate):
@@ -78,6 +148,29 @@ class MunicipalityCreate(BaseModel):
     shelter_capacity: int | None = None
     radio_channel: str | None = None
 
+    @field_validator("name", "manager")
+    @classmethod
+    def validate_required_text_fields(cls, value: str) -> str:
+        sanitized = value.strip()
+        if not sanitized:
+            raise ValueError("Ce champ est obligatoire")
+        return sanitized
+
+    @field_validator("contacts", "additional_info", "radio_channel")
+    @classmethod
+    def strip_text_fields(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        sanitized = value.strip()
+        return sanitized or None
+
+    @field_validator("population", "shelter_capacity")
+    @classmethod
+    def validate_non_negative_numbers(cls, value: int | None) -> int | None:
+        if value is not None and value < 0:
+            raise ValueError("La valeur ne peut pas être négative")
+        return value
+
 
 class MunicipalityUpdate(BaseModel):
     manager: str | None = None
@@ -91,6 +184,31 @@ class MunicipalityUpdate(BaseModel):
     radio_channel: str | None = None
     vigilance_color: str | None = None
     pcs_active: bool | None = None
+
+    @field_validator("manager", "phone", "postal_code", "contacts", "additional_info", "radio_channel")
+    @classmethod
+    def strip_optional_text_fields(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        sanitized = value.strip()
+        return sanitized or None
+
+    @field_validator("population", "shelter_capacity")
+    @classmethod
+    def validate_non_negative_numbers(cls, value: int | None) -> int | None:
+        if value is not None and value < 0:
+            raise ValueError("La valeur ne peut pas être négative")
+        return value
+
+    @field_validator("vigilance_color")
+    @classmethod
+    def validate_vigilance_color(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.lower().strip()
+        if normalized not in ALLOWED_VIGILANCE_COLORS:
+            raise ValueError("Couleur de vigilance invalide")
+        return normalized
 
 
 class MunicipalityOut(BaseModel):
@@ -121,6 +239,22 @@ class OperationalLogCreate(BaseModel):
     danger_level: str = "vert"
     danger_emoji: str = "🟢"
     municipality_id: int | None = None
+
+    @field_validator("event_type", "description")
+    @classmethod
+    def validate_required_text(cls, value: str) -> str:
+        sanitized = value.strip()
+        if not sanitized:
+            raise ValueError("Ce champ est obligatoire")
+        return sanitized
+
+    @field_validator("danger_level")
+    @classmethod
+    def validate_danger_level(cls, value: str) -> str:
+        normalized = value.lower().strip()
+        if normalized not in ALLOWED_DANGER_LEVELS:
+            raise ValueError("Niveau de danger invalide")
+        return normalized
 
 
 class OperationalLogOut(BaseModel):
@@ -158,6 +292,14 @@ class MunicipalityDocumentCreate(BaseModel):
     title: str
     doc_type: str = "annexe"
 
+    @field_validator("title", "doc_type")
+    @classmethod
+    def validate_document_fields(cls, value: str) -> str:
+        sanitized = value.strip()
+        if not sanitized:
+            raise ValueError("Ce champ est obligatoire")
+        return sanitized
+
 
 class MapPointCreate(BaseModel):
     name: str
@@ -167,6 +309,36 @@ class MapPointCreate(BaseModel):
     lat: float
     lon: float
     municipality_id: int | None = None
+
+    @field_validator("name", "category", "icon")
+    @classmethod
+    def validate_required_map_point_text(cls, value: str) -> str:
+        sanitized = value.strip()
+        if not sanitized:
+            raise ValueError("Ce champ est obligatoire")
+        return sanitized
+
+    @field_validator("notes")
+    @classmethod
+    def normalize_map_point_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        sanitized = value.strip()
+        return sanitized or None
+
+    @field_validator("lat")
+    @classmethod
+    def validate_latitude(cls, value: float) -> float:
+        if value < -90 or value > 90:
+            raise ValueError("Latitude invalide")
+        return value
+
+    @field_validator("lon")
+    @classmethod
+    def validate_longitude(cls, value: float) -> float:
+        if value < -180 or value > 180:
+            raise ValueError("Longitude invalide")
+        return value
 
 
 class MapPointOut(BaseModel):
