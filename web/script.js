@@ -47,6 +47,7 @@ let cachedMunicipalityRecords = [];
 let geocodeCache = new Map();
 let municipalityContourCache = new Map();
 let mapStats = { stations: 0, pcs: 0, resources: 0, custom: 0 };
+const ISERE_BOUNDARY_STYLE = { color: '#163a87', weight: 2, fillColor: '#63c27d', fillOpacity: 0.2 };
 
 const homeView = document.getElementById('home-view');
 const loginView = document.getElementById('login-view');
@@ -287,7 +288,7 @@ async function loadIsereBoundary() {
   initMap();
   const data = await api('/public/isere-map');
   if (boundaryLayer) leafletMap.removeLayer(boundaryLayer);
-  boundaryLayer = window.L.geoJSON({ type: 'Feature', geometry: data.geometry }, { style: { color: '#163a87', weight: 2, fillColor: '#63c27d', fillOpacity: 0.2 } }).addTo(leafletMap);
+  boundaryLayer = window.L.geoJSON({ type: 'Feature', geometry: data.geometry }, { style: ISERE_BOUNDARY_STYLE }).addTo(leafletMap);
   leafletMap.fitBounds(boundaryLayer.getBounds(), { padding: [16, 16] });
   document.getElementById('map-source').textContent = `Source carte: ${data.source}`;
   setMapFeedback('Fond de carte et contour Isère chargés.');
@@ -413,14 +414,8 @@ async function renderMunicipalitiesOnMap(municipalities = []) {
   let renderedCount = 0;
   points.forEach(({ municipality, point, contour }) => {
     if (contour && pcsBoundaryLayer) {
-      const isInCrisis = Boolean(municipality.crisis_mode);
       window.L.geoJSON({ type: 'Feature', geometry: contour }, {
-        style: {
-          color: isInCrisis ? '#c92a2a' : '#1c4f99',
-          weight: isInCrisis ? 2.4 : 1.6,
-          fillColor: isInCrisis ? '#e03131' : '#2b6cb0',
-          fillOpacity: isInCrisis ? 0.18 : 0.08,
-        },
+        style: ISERE_BOUNDARY_STYLE,
       })
         .bindPopup(`<strong>${municipality.name}</strong><br>Contour communal PCS`)
         .addTo(pcsBoundaryLayer);
