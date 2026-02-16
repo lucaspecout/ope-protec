@@ -74,6 +74,23 @@ class MunicipalityCreate(BaseModel):
     postal_code: str | None = None
     contacts: str | None = None
     additional_info: str | None = None
+    population: int | None = None
+    shelter_capacity: int | None = None
+    radio_channel: str | None = None
+
+
+class MunicipalityUpdate(BaseModel):
+    manager: str | None = None
+    phone: str | None = None
+    email: EmailStr | None = None
+    postal_code: str | None = None
+    contacts: str | None = None
+    additional_info: str | None = None
+    population: int | None = None
+    shelter_capacity: int | None = None
+    radio_channel: str | None = None
+    vigilance_color: str | None = None
+    pcs_active: bool | None = None
 
 
 class MunicipalityOut(BaseModel):
@@ -85,6 +102,9 @@ class MunicipalityOut(BaseModel):
     postal_code: str | None = None
     contacts: str | None = None
     additional_info: str | None = None
+    population: int | None = None
+    shelter_capacity: int | None = None
+    radio_channel: str | None = None
     pcs_active: bool
     crisis_mode: bool
     vigilance_color: str
@@ -96,6 +116,8 @@ class MunicipalityOut(BaseModel):
 class OperationalLogCreate(BaseModel):
     event_type: str
     description: str
+    danger_level: str = "vert"
+    danger_emoji: str = "🟢"
     municipality_id: int | None = None
 
 
@@ -103,6 +125,8 @@ class OperationalLogOut(BaseModel):
     id: int
     event_type: str
     description: str
+    danger_level: str
+    danger_emoji: str
     created_at: datetime
     created_by_id: int
 

@@ -17,6 +17,7 @@ from .models import Municipality, OperationalLog, PublicShare, RiverStation, Use
 from .schemas import (
     MunicipalityCreate,
     MunicipalityOut,
+    MunicipalityUpdate,
     OperationalLogCreate,
     OperationalLogOut,
     PasswordChangeRequest,
@@ -56,8 +57,13 @@ with engine.begin() as conn:
     conn.execute(text("ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS contacts TEXT"))
     conn.execute(text("ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS postal_code VARCHAR(10)"))
     conn.execute(text("ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS additional_info TEXT"))
+    conn.execute(text("ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS population INTEGER"))
+    conn.execute(text("ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS shelter_capacity INTEGER"))
+    conn.execute(text("ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS radio_channel VARCHAR(80)"))
     conn.execute(text("ALTER TABLE river_stations ADD COLUMN IF NOT EXISTS is_priority BOOLEAN DEFAULT FALSE"))
     conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS municipality_id INTEGER REFERENCES municipalities(id)"))
+    conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS danger_level VARCHAR(20) DEFAULT 'vert'"))
+    conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS danger_emoji VARCHAR(8) DEFAULT '🟢'"))
 
 
 app = FastAPI(title=settings.app_name)
@@ -501,6 +507,25 @@ def list_municipalities(db: Session = Depends(get_db), user: User = Depends(requ
             return []
         return db.query(Municipality).filter(Municipality.name == user.municipality_name).all()
     return db.query(Municipality).order_by(Municipality.name).all()
+
+
+@app.patch("/municipalities/{municipality_id}", response_model=MunicipalityOut)
+def update_municipality(
+    municipality_id: int,
+    data: MunicipalityUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(*EDIT_ROLES)),
+):
+    municipality = db.get(Municipality, municipality_id)
+    if not municipality:
+        raise HTTPException(404, "Commune introuvable")
+
+    for key, value in data.model_dump(exclude_unset=True).items():
+        setattr(municipality, key, value)
+
+    db.commit()
+    db.refresh(municipality)
+    return municipality
 
 
 @app.post("/municipalities/{municipality_id}/documents")

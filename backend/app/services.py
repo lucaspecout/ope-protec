@@ -339,12 +339,12 @@ def _commune_center(code_insee: str) -> tuple[float, float] | None:
 
 
 def fetch_vigicrues_isere(
-    sample_size: int = 220,
+    sample_size: int = 1200,
     station_limit: int | None = None,
     priority_names: list[str] | None = None,
 ) -> dict[str, Any]:
     rss_source = "https://www.vigicrues.gouv.fr/territoire/rss"
-    isere_territory_codes = {"18"}
+    isere_territory_codes = {"18", "17", "16", "15", "14"}
     priority_names = [name.lower() for name in (priority_names or [])]
 
     try:
@@ -362,11 +362,11 @@ def fetch_vigicrues_isere(
 
             territory_match = re.search(r"CdEntVigiCru=(\d+)", link)
             territory_code = territory_match.group(1) if territory_match else ""
-            if territory_code and territory_code not in isere_territory_codes:
+            text_blob = f"{title} {description}".lower()
+            if territory_code and territory_code not in isere_territory_codes and "isere" not in text_blob and "isère" not in text_blob and "grenoble" not in text_blob:
                 continue
 
-            text_blob = f"{title} {description}".lower()
-            if "isère" not in text_blob and "isere" not in text_blob:
+            if "isère" not in text_blob and "isere" not in text_blob and "grenoble" not in text_blob:
                 continue
 
             level_match = re.search(r":\s*(vert|jaune|orange|rouge)\s*$", title, re.IGNORECASE)
@@ -380,6 +380,11 @@ def fetch_vigicrues_isere(
             code_match = re.search(r"\(([A-Z]{1,3}\d{1,4})\)", description)
             station_code = code_match.group(1) if code_match else (item.findtext("guid") or link)
 
+            commune_code_match = re.search(r"\b(38\d{3})\b", description)
+            commune_code = commune_code_match.group(1) if commune_code_match else ""
+            center = _commune_center(commune_code) if commune_code else None
+            lat, lon = center if center else (None, None)
+
             is_priority = "grenoble" in text_blob or any(name in text_blob for name in priority_names)
             isere_stations.append(
                 {
@@ -391,9 +396,9 @@ def fetch_vigicrues_isere(
                     "level": level,
                     "is_priority": is_priority,
                     "observed_at": published,
-                    "lat": None,
-                    "lon": None,
-                    "commune_code": "",
+                    "lat": lat,
+                    "lon": lon,
+                    "commune_code": commune_code,
                     "source_link": link,
                 }
             )
