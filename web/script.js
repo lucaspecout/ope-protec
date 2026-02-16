@@ -401,25 +401,31 @@ async function loadDashboard() {
 
 async function loadExternalRisks() {
   const data = await api('/external/isere/risks');
-  setText('meteo-status', `${data.meteo_france.status} · niveau ${normalizeLevel(data.meteo_france.level)}`);
-  setText('meteo-info', data.meteo_france.info_state || data.meteo_france.bulletin_title || '');
-  setText('vigicrues-status', `${data.vigicrues.status} · niveau ${normalizeLevel(data.vigicrues.water_alert_level)}`);
-  setText('vigicrues-info', `${(data.vigicrues.stations || []).length} station(s) suivie(s)`);
-  setHtml('stations-list', (data.vigicrues.stations || []).slice(0, 10).map((s) => `<li>${s.station || s.code} · ${s.river || ''} · ${normalizeLevel(s.level)} · ${s.height_m} m</li>`).join('') || '<li>Aucune station disponible.</li>');
-  setText('itinisere-status', `${data.itinisere.status} · ${data.itinisere.events.length} événements`);
-  renderBisonFuteSummary(data.bison_fute || {});
-  setText('georisques-status', `${data.georisques.status} · sismicité ${data.georisques.highest_seismic_zone_label || 'inconnue'}`);
-  setText('georisques-info', `${data.georisques.flood_documents_total ?? 0} document(s) inondation suivis`);
-  renderGeorisquesDetails(data.georisques || {});
-  renderCriticalRisks(data.meteo_france || {});
-  renderMeteoAlerts(data.meteo_france || {});
-  renderItinisereEvents(data.itinisere?.events || []);
-  setText('meteo-level', normalizeLevel(data.meteo_france.level || 'vert'));
-  setText('meteo-hazards', (data.meteo_france.hazards || []).join(', ') || 'non précisé');
-  setText('river-level', normalizeLevel(data.vigicrues.water_alert_level || 'vert'));
-  setText('map-seismic-level', data.georisques.highest_seismic_zone_label || 'inconnue');
-  setText('map-flood-docs', String(data.georisques.flood_documents_total ?? 0));
-  renderStations(data.vigicrues.stations || []);
+  const meteo = data?.meteo_france || {};
+  const vigicrues = data?.vigicrues || {};
+  const itinisere = data?.itinisere || {};
+  const bisonFute = data?.bison_fute || {};
+  const georisques = data?.georisques || {};
+
+  setText('meteo-status', `${meteo.status || 'inconnu'} · niveau ${normalizeLevel(meteo.level || 'inconnu')}`);
+  setText('meteo-info', meteo.info_state || meteo.bulletin_title || '');
+  setText('vigicrues-status', `${vigicrues.status || 'inconnu'} · niveau ${normalizeLevel(vigicrues.water_alert_level || 'inconnu')}`);
+  setText('vigicrues-info', `${(vigicrues.stations || []).length} station(s) suivie(s)`);
+  setHtml('stations-list', (vigicrues.stations || []).slice(0, 10).map((s) => `<li>${s.station || s.code} · ${s.river || ''} · ${normalizeLevel(s.level)} · ${s.height_m} m</li>`).join('') || '<li>Aucune station disponible.</li>');
+  setText('itinisere-status', `${itinisere.status || 'inconnu'} · ${(itinisere.events || []).length} événements`);
+  renderBisonFuteSummary(bisonFute);
+  setText('georisques-status', `${georisques.status || 'inconnu'} · sismicité ${georisques.highest_seismic_zone_label || 'inconnue'}`);
+  setText('georisques-info', `${georisques.flood_documents_total ?? 0} document(s) inondation suivis`);
+  renderGeorisquesDetails(georisques);
+  renderCriticalRisks(meteo);
+  renderMeteoAlerts(meteo);
+  renderItinisereEvents(itinisere.events || []);
+  setText('meteo-level', normalizeLevel(meteo.level || 'vert'));
+  setText('meteo-hazards', (meteo.hazards || []).join(', ') || 'non précisé');
+  setText('river-level', normalizeLevel(vigicrues.water_alert_level || 'vert'));
+  setText('map-seismic-level', georisques.highest_seismic_zone_label || 'inconnue');
+  setText('map-flood-docs', String(georisques.flood_documents_total ?? 0));
+  renderStations(vigicrues.stations || []);
 }
 
 async function loadSupervision() {
