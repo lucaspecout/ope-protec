@@ -1,4 +1,4 @@
-const STORAGE_KEYS = { token: 'token', activePanel: 'activePanel', customPoints: 'customPoints' };
+const STORAGE_KEYS = { token: 'token', activePanel: 'activePanel' };
 const AUTO_REFRESH_MS = 30000;
 const HOME_LIVE_REFRESH_MS = 30000;
 const PANEL_TITLES = {
@@ -34,8 +34,10 @@ let pcsLayer = null;
 let resourceLayer = null;
 let searchLayer = null;
 let customPointsLayer = null;
-let customPoints = [];
+let mapPointsLayer = null;
 let mapAddPointMode = false;
+let mapPoints = [];
+let pendingMapPointCoords = null;
 let cachedStations = [];
 let cachedMunicipalities = [];
 let cachedMunicipalityRecords = [];
@@ -57,6 +59,7 @@ function setVisibility(node, visible) {
 }
 
 function canEdit() { return ['admin', 'ope'].includes(currentUser?.role); }
+function canMunicipalityFiles() { return ['admin', 'ope', 'mairie'].includes(currentUser?.role); }
 function canManageUsers() { return ['admin', 'ope'].includes(currentUser?.role); }
 function roleLabel(role) { return { admin: 'Admin', ope: 'Opérateur', securite: 'Sécurité', visiteur: 'Visiteur', mairie: 'Mairie' }[role] || role; }
 function escapeHtml(value) {
@@ -167,8 +170,7 @@ function initMap() {
   resourceLayer = window.L.layerGroup().addTo(leafletMap);
   searchLayer = window.L.layerGroup().addTo(leafletMap);
   customPointsLayer = window.L.layerGroup().addTo(leafletMap);
-  customPoints = loadCustomPoints();
-  renderCustomPoints();
+  mapPointsLayer = window.L.layerGroup().addTo(leafletMap);
   leafletMap.on('click', onMapClickAddPoint);
 }
 
@@ -181,7 +183,7 @@ function setMapFeedback(message = '', isError = false) {
 
 function fitMapToData() {
   if (!leafletMap) return;
-  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsLayer, resourceLayer, searchLayer, customPointsLayer].filter(Boolean);
+  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsLayer, resourceLayer, searchLayer, customPointsLayer, mapPointsLayer].filter(Boolean);
   const bounds = window.L.latLngBounds([]);
   layers.forEach((layer) => {
     if (layer?.getBounds) {
@@ -367,40 +369,78 @@ function serviceErrorLabel(service) {
   return service?.error || (service?.status && service.status !== 'online' ? 'Service indisponible ou dégradé.' : 'Aucune erreur détectée.');
 }
 
-function loadCustomPoints() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEYS.customPoints) || '[]');
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+const MAP_POINT_ICONS = {
+  incident: '🚨',
+  evacuation: '🏃',
+  water: '💧',
+  roadblock: '🚧',
+  medical: '🏥',
+  logistics: '📦',
+  command: '🛰️',
+  autre: '📍',
+};
+
+function iconForCategory(category) {
+  return MAP_POINT_ICONS[category] || '📍';
 }
 
-function saveCustomPoints() {
-  localStorage.setItem(STORAGE_KEYS.customPoints, JSON.stringify(customPoints));
+function emojiDivIcon(emoji) {
+  return window.L.divIcon({ className: 'map-emoji-icon', html: `<span>${escapeHtml(emoji)}</span>`, iconSize: [30, 30], iconAnchor: [15, 15], popupAnchor: [0, -15] });
+}
+
+async function loadMapPoints() {
+  mapPoints = await api('/map/points');
+  renderCustomPoints();
+}
+
+async function saveMapPoint(payload) {
+  await api('/map/points', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  await loadMapPoints();
+}
+
+async function deleteMapPoint(pointId) {
+  await api(`/map/points/${pointId}`, { method: 'DELETE' });
+  await loadMapPoints();
 }
 
 function renderCustomPoints() {
   if (customPointsLayer) customPointsLayer.clearLayers();
-  const listMarkup = customPoints.map((point) => `<li><strong>${point.name}</strong> · ${point.lat.toFixed(4)}, ${point.lon.toFixed(4)} <button type="button" data-remove-point="${point.id}">Supprimer</button></li>`).join('') || '<li>Aucun point personnalisé.</li>';
+  if (mapPointsLayer) mapPointsLayer.clearLayers();
+
+  const selectedCategory = document.getElementById('map-point-category-filter')?.value || 'all';
+  const filteredPoints = mapPoints.filter((point) => selectedCategory === 'all' || point.category === selectedCategory);
+  const listMarkup = filteredPoints
+    .map((point) => `<li><strong>${escapeHtml(point.icon || iconForCategory(point.category))} ${escapeHtml(point.name)}</strong> · ${point.lat.toFixed(4)}, ${point.lon.toFixed(4)} <button type="button" data-remove-point="${point.id}">Supprimer</button></li>`)
+    .join('') || '<li>Aucun point personnalisé.</li>';
   setHtml('custom-points-list', listMarkup);
-  if (!customPointsLayer) return;
-  customPoints.forEach((point) => {
-    window.L.marker([point.lat, point.lon]).bindPopup(`<strong>${point.name}</strong><br/>Point personnalisé`).addTo(customPointsLayer);
+
+  if (!mapPointsLayer) return;
+  filteredPoints.forEach((point) => {
+    const marker = window.L.marker([point.lat, point.lon], { icon: emojiDivIcon(point.icon || iconForCategory(point.category)) });
+    marker.bindPopup(`<strong>${escapeHtml(point.icon || iconForCategory(point.category))} ${escapeHtml(point.name)}</strong><br/>Catégorie: ${escapeHtml(point.category)}<br/>${escapeHtml(point.notes || 'Sans note')}`);
+    marker.addTo(mapPointsLayer);
   });
+  setMapFeedback(`${filteredPoints.length} point(s) opérationnel(s) affiché(s).`);
 }
 
 function onMapClickAddPoint(event) {
   if (!mapAddPointMode) return;
-  const defaultName = `Point ${new Date().toLocaleTimeString()}`;
-  const label = window.prompt('Nom du point personnalisé', defaultName);
-  if (!label) return;
-  customPoints.push({ id: String(Date.now()) + String(Math.random()).slice(2, 6), name: label.trim(), lat: event.latlng.lat, lon: event.latlng.lng });
-  saveCustomPoints();
-  renderCustomPoints();
-  setMapFeedback(`Point personnalisé ajouté: ${label.trim()}`);
+  pendingMapPointCoords = event.latlng;
+  const modal = document.getElementById('map-point-modal');
+  if (!modal) return;
+  const form = document.getElementById('map-point-form');
+  if (form) {
+    form.reset();
+    form.elements.namedItem('name').value = `Point ${new Date().toLocaleTimeString()}`;
+    form.elements.namedItem('icon').value = iconForCategory('autre');
+  }
+  if (typeof modal.showModal === 'function') modal.showModal();
+  else modal.setAttribute('open', 'open');
 }
-
 function renderMeteoAlerts(meteo = {}) {
   const current = meteo.current_alerts || [];
   const tomorrow = meteo.tomorrow_alerts || [];
@@ -504,6 +544,17 @@ function closeMunicipalityEditor() {
   setVisibility(panel, false);
 }
 
+async function loadMunicipalityFiles(municipalityId) {
+  const files = await api(`/municipalities/${municipalityId}/files`);
+  return Array.isArray(files) ? files : [];
+}
+
+function municipalityFilesMarkup(files = [], municipalityId) {
+  const canManage = canMunicipalityFiles();
+  const list = files.map((file) => `<li><strong>${escapeHtml(file.title)}</strong> · ${escapeHtml(file.doc_type)} · ${new Date(file.created_at).toLocaleDateString()} · par ${escapeHtml(file.uploaded_by)} <a href="/municipalities/${municipalityId}/files/${file.id}" target="_blank" rel="noreferrer">Consulter</a> ${canManage ? `<button type="button" class="ghost inline-action danger" data-muni-file-delete="${file.id}" data-muni-id="${municipalityId}">Supprimer</button>` : ''}</li>`).join('');
+  return list || '<li>Aucun fichier opérationnel.</li>';
+}
+
 function closeMunicipalityDetailsModal() {
   const modal = document.getElementById('municipality-details-modal');
   if (!modal) return;
@@ -514,25 +565,27 @@ function closeMunicipalityDetailsModal() {
   modal.removeAttribute('open');
 }
 
-function openMunicipalityDetailsModal(municipality) {
+async function openMunicipalityDetailsModal(municipality) {
   const modal = document.getElementById('municipality-details-modal');
   const content = document.getElementById('municipality-details-content');
   if (!modal || !content || !municipality) return;
 
   const docs = [
     municipality.orsec_plan_file
-      ? `<li><a href="/municipalities/${municipality.id}/documents/orsec_plan" target="_blank" rel="noreferrer">Plan ORSEC</a> ${canEdit() ? `<button type="button" class="ghost inline-action danger" data-muni-detail-remove-doc="${municipality.id}" data-doc-type="orsec_plan">Supprimer</button>` : ''}</li>`
+      ? `<li><a href="/municipalities/${municipality.id}/documents/orsec_plan" target="_blank" rel="noreferrer">Plan ORSEC</a> ${canMunicipalityFiles() ? `<button type="button" class="ghost inline-action danger" data-muni-detail-remove-doc="${municipality.id}" data-doc-type="orsec_plan">Supprimer</button>` : ''}</li>`
       : '<li>Plan ORSEC: non renseigné</li>',
     municipality.convention_file
-      ? `<li><a href="/municipalities/${municipality.id}/documents/convention" target="_blank" rel="noreferrer">Convention</a> ${canEdit() ? `<button type="button" class="ghost inline-action danger" data-muni-detail-remove-doc="${municipality.id}" data-doc-type="convention">Supprimer</button>` : ''}</li>`
+      ? `<li><a href="/municipalities/${municipality.id}/documents/convention" target="_blank" rel="noreferrer">Convention</a> ${canMunicipalityFiles() ? `<button type="button" class="ghost inline-action danger" data-muni-detail-remove-doc="${municipality.id}" data-doc-type="convention">Supprimer</button>` : ''}</li>`
       : '<li>Convention: non renseignée</li>',
   ].join('');
 
-  const quickActions = canEdit()
+  const files = await loadMunicipalityFiles(municipality.id).catch(() => []);
+  const quickActions = canMunicipalityFiles()
     ? `<div class="municipality-actions municipality-actions--modal">
-         <button type="button" class="ghost inline-action" data-muni-detail-crisis="${municipality.id}">${municipality.crisis_mode ? 'Sortir de crise' : 'Passer en crise'}</button>
-         <button type="button" class="ghost inline-action" data-muni-detail-edit="${municipality.id}">Éditer la fiche</button>
-         <button type="button" class="ghost inline-action" data-muni-detail-docs="${municipality.id}">Ajouter/mettre à jour les documents</button>
+         ${canEdit() ? `<button type="button" class="ghost inline-action" data-muni-detail-crisis="${municipality.id}">${municipality.crisis_mode ? 'Sortir de crise' : 'Passer en crise'}</button>
+         <button type="button" class="ghost inline-action" data-muni-detail-edit="${municipality.id}">Éditer la fiche</button>` : ''}
+         <button type="button" class="ghost inline-action" data-muni-detail-docs="${municipality.id}">Mettre à jour ORSEC/Convention</button>
+         <button type="button" class="ghost inline-action" data-muni-file-upload="${municipality.id}">Ajouter un fichier</button>
        </div>`
     : '';
 
@@ -546,8 +599,10 @@ function openMunicipalityDetailsModal(municipality) {
     <p><strong>Canal radio:</strong> ${escapeHtml(municipality.radio_channel || '-')}</p>
     <p><strong>Contacts d'astreinte:</strong><br>${escapeHtml(municipality.contacts || 'Aucun')}</p>
     <p><strong>Informations complémentaires:</strong><br>${escapeHtml(municipality.additional_info || 'Aucune')}</p>
-    <h5>Documents enregistrés</h5>
+    <h5>Documents réglementaires</h5>
     <ul class="list compact">${docs}</ul>
+    <h5>Fichiers opérationnels partagés</h5>
+    <ul class="list compact">${municipalityFilesMarkup(files, municipality.id)}</ul>
     ${quickActions}
   `;
 
@@ -574,28 +629,28 @@ async function pickMunicipalityDocuments(municipalityId) {
     document.getElementById('municipality-feedback').textContent = `Documents mis à jour pour ${municipality?.name || 'la commune'}.`;
     await loadMunicipalities();
     const refreshed = cachedMunicipalityRecords.find((m) => String(m.id) === String(municipalityId));
-    if (refreshed) openMunicipalityDetailsModal(refreshed);
+    if (refreshed) await openMunicipalityDetailsModal(refreshed);
   };
   picker.click();
 }
 
-async function pickMunicipalityDocuments(municipalityId) {
+async function pickMunicipalityFile(municipalityId) {
   const picker = document.createElement('input');
   picker.type = 'file';
   picker.accept = '.pdf,.png,.jpg,.jpeg';
-  picker.multiple = true;
   picker.onchange = async () => {
-    const files = Array.from(picker.files || []);
-    if (!files.length) return;
+    const file = picker.files?.[0];
+    if (!file) return;
+    const title = window.prompt('Titre du fichier', file.name) || file.name;
+    const docType = (window.prompt('Type du fichier (compte_rendu, carte, consigne, annexe)', 'annexe') || 'annexe').trim();
     const formData = new FormData();
-    if (files[0]) formData.append('orsec_plan', files[0]);
-    if (files[1]) formData.append('convention', files[1]);
-    await api(`/municipalities/${municipalityId}/documents`, { method: 'POST', body: formData });
-    const municipality = cachedMunicipalityRecords.find((m) => String(m.id) === String(municipalityId));
-    document.getElementById('municipality-feedback').textContent = `Documents mis à jour pour ${municipality?.name || 'la commune'}.`;
+    formData.append('file', file);
+    formData.append('title', title);
+    formData.append('doc_type', docType);
+    await api(`/municipalities/${municipalityId}/files`, { method: 'POST', body: formData });
     await loadMunicipalities();
     const refreshed = cachedMunicipalityRecords.find((m) => String(m.id) === String(municipalityId));
-    if (refreshed) openMunicipalityDetailsModal(refreshed);
+    if (refreshed) await openMunicipalityDetailsModal(refreshed);
   };
   picker.click();
 }
@@ -712,10 +767,13 @@ async function loadMunicipalities() {
            <button type="button" class="ghost inline-action" data-muni-view="${m.id}">Voir</button>
            <button type="button" class="ghost inline-action" data-muni-edit="${m.id}">Éditer</button>
            <button type="button" class="ghost inline-action" data-muni-crisis="${m.id}">${m.crisis_mode ? 'Sortir de crise' : 'Passer en crise'}</button>
-           <button type="button" class="ghost inline-action" data-muni-docs="${m.id}">Documents</button>
+           <button type="button" class="ghost inline-action" data-muni-docs="${m.id}">ORSEC/Convention</button>
+           <button type="button" class="ghost inline-action" data-muni-files="${m.id}">Fichiers</button>
            <button type="button" class="ghost inline-action danger" data-muni-delete="${m.id}">Supprimer</button>
          </div>`
-      : `<div class="municipality-actions"><button type="button" class="ghost inline-action" data-muni-view="${m.id}">Voir</button></div>`;
+      : canMunicipalityFiles()
+        ? `<div class="municipality-actions"><button type="button" class="ghost inline-action" data-muni-view="${m.id}">Voir</button><button type="button" class="ghost inline-action" data-muni-files="${m.id}">Fichiers</button></div>`
+        : `<div class="municipality-actions"><button type="button" class="ghost inline-action" data-muni-view="${m.id}">Voir</button></div>`;
     return `<article class="municipality-card" data-muni-id="${m.id}">
       <header>
         <h4>${escapeHtml(m.name)}</h4>
@@ -764,6 +822,7 @@ async function refreshAll() {
     ['utilisateurs', loadUsers],
     ['supervision', loadSupervision],
     ['interconnexions API', loadApiInterconnections],
+    ['points cartographiques', loadMapPoints],
   ];
 
   const results = await Promise.allSettled(loaders.map(([, loader]) => loader()));
@@ -893,7 +952,38 @@ function bindAppInteractions() {
   document.getElementById('map-add-point-toggle')?.addEventListener('click', () => {
     mapAddPointMode = !mapAddPointMode;
     setText('map-add-point-toggle', `Mode ajout: ${mapAddPointMode ? 'activé' : 'désactivé'}`);
-    setMapFeedback(mapAddPointMode ? 'Cliquez sur la carte pour ajouter un point personnalisé.' : 'Mode ajout désactivé.');
+    setMapFeedback(mapAddPointMode ? 'Cliquez sur la carte pour ajouter un point opérationnel avec icône.' : 'Mode ajout désactivé.');
+  });
+  document.getElementById('map-point-category-filter')?.addEventListener('change', renderCustomPoints);
+  document.getElementById('map-point-form-cancel')?.addEventListener('click', () => {
+    const modal = document.getElementById('map-point-modal');
+    if (typeof modal?.close === 'function') modal.close();
+    else modal?.removeAttribute('open');
+  });
+  document.getElementById('map-point-category')?.addEventListener('change', (event) => {
+    const category = event.target.value;
+    const iconInput = document.getElementById('map-point-icon');
+    if (iconInput && !iconInput.value.trim()) iconInput.value = iconForCategory(category);
+  });
+  document.getElementById('map-point-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!pendingMapPointCoords) return;
+    const form = event.target;
+    const category = form.elements.category.value || 'autre';
+    const icon = form.elements.icon.value.trim() || iconForCategory(category);
+    await saveMapPoint({
+      name: form.elements.name.value.trim(),
+      category,
+      icon,
+      notes: form.elements.notes.value.trim() || null,
+      lat: pendingMapPointCoords.lat,
+      lon: pendingMapPointCoords.lng,
+    });
+    pendingMapPointCoords = null;
+    const modal = document.getElementById('map-point-modal');
+    if (typeof modal?.close === 'function') modal.close();
+    else modal?.removeAttribute('open');
+    setMapFeedback('Point opérationnel enregistré.');
   });
   document.getElementById('itinerary-list')?.addEventListener('click', async (event) => {
     const button = event.target.closest('[data-map-query]');
@@ -901,24 +991,27 @@ function bindAppInteractions() {
     document.getElementById('map-search').value = button.getAttribute('data-map-query') || '';
     await handleMapSearch();
   });
-  document.getElementById('custom-points-list')?.addEventListener('click', (event) => {
+  document.getElementById('custom-points-list')?.addEventListener('click', async (event) => {
     const button = event.target.closest('[data-remove-point]');
     if (!button) return;
     const targetId = button.getAttribute('data-remove-point');
-    customPoints = customPoints.filter((point) => point.id !== targetId);
-    saveCustomPoints();
-    renderCustomPoints();
-    setMapFeedback('Point personnalisé supprimé.');
+    try {
+      await deleteMapPoint(targetId);
+      setMapFeedback('Point opérationnel supprimé.');
+    } catch (error) {
+      setMapFeedback(sanitizeErrorMessage(error.message), true);
+    }
   });
   document.getElementById('municipalities-list')?.addEventListener('click', async (event) => {
     const viewButton = event.target.closest('[data-muni-view], [data-muni-detail]');
     const editButton = event.target.closest('[data-muni-edit]');
     const crisisButton = event.target.closest('[data-muni-crisis]');
     const docsButton = event.target.closest('[data-muni-docs]');
+    const filesButton = event.target.closest('[data-muni-files]');
     const deleteButton = event.target.closest('[data-muni-delete]');
     const card = event.target.closest('.municipality-card');
     const fallbackId = card?.getAttribute('data-muni-id');
-    if (!viewButton && !editButton && !crisisButton && !docsButton && !deleteButton && !fallbackId) return;
+    if (!viewButton && !editButton && !crisisButton && !docsButton && !filesButton && !deleteButton && !fallbackId) return;
     try {
       const getMunicipality = (id) => cachedMunicipalityRecords.find((m) => String(m.id) === String(id));
 
@@ -931,7 +1024,7 @@ function bindAppInteractions() {
         return;
       }
 
-      if (!editButton && !crisisButton && !docsButton && !deleteButton && fallbackId) {
+      if (!editButton && !crisisButton && !docsButton && !filesButton && !deleteButton && fallbackId) {
         const municipality = getMunicipality(fallbackId);
         if (!municipality) return;
         document.getElementById('municipality-feedback').textContent = `Commune ${municipality.name}: ${municipality.crisis_mode ? 'en crise' : 'en veille'} · vigilance ${normalizeLevel(municipality.vigilance_color)}.`;
@@ -961,6 +1054,13 @@ function bindAppInteractions() {
         return;
       }
 
+      if (filesButton) {
+        const municipalityId = filesButton.getAttribute('data-muni-files');
+        const municipality = getMunicipality(municipalityId);
+        if (municipality) await openMunicipalityDetailsModal(municipality);
+        return;
+      }
+
       if (deleteButton) {
         const municipalityId = deleteButton.getAttribute('data-muni-delete');
         const municipality = getMunicipality(municipalityId);
@@ -983,13 +1083,15 @@ function bindAppInteractions() {
     const crisisButton = event.target.closest('[data-muni-detail-crisis]');
     const docsButton = event.target.closest('[data-muni-detail-docs]');
     const removeDocButton = event.target.closest('[data-muni-detail-remove-doc]');
-    if (!editButton && !crisisButton && !docsButton && !removeDocButton) return;
-    if (!canEdit()) return;
+    const uploadFileButton = event.target.closest('[data-muni-file-upload]');
+    const deleteFileButton = event.target.closest('[data-muni-file-delete]');
+    if (!editButton && !crisisButton && !docsButton && !removeDocButton && !uploadFileButton && !deleteFileButton) return;
 
     const getMunicipality = (id) => cachedMunicipalityRecords.find((m) => String(m.id) === String(id));
 
     try {
       if (editButton) {
+        if (!canEdit()) return;
         const municipality = getMunicipality(editButton.getAttribute('data-muni-detail-edit'));
         if (!municipality) return;
         closeMunicipalityDetailsModal();
@@ -998,22 +1100,41 @@ function bindAppInteractions() {
       }
 
       if (crisisButton) {
+        if (!canEdit()) return;
         const municipalityId = crisisButton.getAttribute('data-muni-detail-crisis');
         const result = await api(`/municipalities/${municipalityId}/crisis`, { method: 'POST' });
         await loadMunicipalities();
         const municipality = getMunicipality(municipalityId);
         document.getElementById('municipality-feedback').textContent = `${municipality?.name || 'Commune'}: ${result.crisis_mode ? 'mode crise activé' : 'retour en veille'}.`;
-        if (municipality) openMunicipalityDetailsModal(municipality);
+        if (municipality) await openMunicipalityDetailsModal(municipality);
         return;
       }
 
       if (docsButton) {
+        if (!canMunicipalityFiles()) return;
         const municipalityId = docsButton.getAttribute('data-muni-detail-docs');
         await pickMunicipalityDocuments(municipalityId);
         return;
       }
 
+      if (uploadFileButton) {
+        if (!canMunicipalityFiles()) return;
+        await pickMunicipalityFile(uploadFileButton.getAttribute('data-muni-file-upload'));
+        return;
+      }
+
+      if (deleteFileButton) {
+        if (!canMunicipalityFiles()) return;
+        const municipalityId = deleteFileButton.getAttribute('data-muni-id');
+        const fileId = deleteFileButton.getAttribute('data-muni-file-delete');
+        await api(`/municipalities/${municipalityId}/files/${fileId}`, { method: 'DELETE' });
+        const municipality = getMunicipality(municipalityId);
+        if (municipality) await openMunicipalityDetailsModal(municipality);
+        return;
+      }
+
       if (removeDocButton) {
+        if (!canMunicipalityFiles()) return;
         const municipalityId = removeDocButton.getAttribute('data-muni-detail-remove-doc');
         const docType = removeDocButton.getAttribute('data-doc-type');
         const label = docType === 'orsec_plan' ? 'le plan ORSEC' : 'la convention';
@@ -1023,7 +1144,7 @@ function bindAppInteractions() {
         await loadMunicipalities();
         const municipality = getMunicipality(municipalityId);
         document.getElementById('municipality-feedback').textContent = `Document supprimé pour ${municipality?.name || 'la commune'}.`;
-        if (municipality) openMunicipalityDetailsModal(municipality);
+        if (municipality) await openMunicipalityDetailsModal(municipality);
       }
     } catch (error) {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
