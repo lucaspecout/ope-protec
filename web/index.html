@@ -265,8 +265,25 @@
 
         <section id="users-panel" class="panel view hidden" hidden>
           <h3>Comptes utilisateurs</h3>
+          <form id="user-create-form" class="form" data-admin-only>
+            <label>Identifiant<input name="username" required minlength="3" /></label>
+            <label>Mot de passe initial<input name="password" type="password" minlength="8" required /></label>
+            <label>Rôle
+              <select name="role" id="user-create-role" required>
+                <option value="visiteur">Visiteur</option>
+                <option value="securite">Sécurité</option>
+                <option value="mairie">Mairie</option>
+                <option value="ope">Opérateur</option>
+                <option value="admin">Admin</option>
+              </select>
+            </label>
+            <label id="user-create-municipality-wrap" class="hidden" hidden>Commune (si rôle mairie)<input name="municipality_name" /></label>
+            <button type="submit">Créer l'utilisateur</button>
+          </form>
+          <p id="users-success" class="tag"></p>
+          <p id="users-error" class="error"></p>
           <table class="users-table">
-            <thead><tr><th>Utilisateur</th><th>Rôle</th><th>Commune</th><th>Créé le</th><th>Statut</th></tr></thead>
+            <thead><tr><th>Utilisateur</th><th>Rôle</th><th>Commune</th><th>Créé le</th><th>Statut</th><th>Actions</th></tr></thead>
             <tbody id="users-table"></tbody>
           </table>
         </section>

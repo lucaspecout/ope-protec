@@ -55,6 +55,9 @@ function setVisibility(node, visible) {
 function canEdit() { return ['admin', 'ope'].includes(currentUser?.role); }
 function canManageUsers() { return ['admin', 'ope'].includes(currentUser?.role); }
 function roleLabel(role) { return { admin: 'Admin', ope: 'Opérateur', securite: 'Sécurité', visiteur: 'Visiteur', mairie: 'Mairie' }[role] || role; }
+function escapeHtml(value) {
+  return String(value || '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+}
 
 function showHome() { setVisibility(homeView, true); setVisibility(loginView, false); setVisibility(appView, false); }
 function showLogin() { setVisibility(homeView, false); setVisibility(loginView, true); setVisibility(appView, false); setVisibility(passwordForm, false); setVisibility(loginForm, true); }
@@ -82,18 +85,19 @@ function sanitizeErrorMessage(message) {
 }
 
 async function api(path, options = {}) {
-  const headers = { ...(options.headers || {}) };
-  if (token) headers.Authorization = `Bearer ${token}`;
+  const { logoutOn401 = true, omitAuth = false, ...fetchOptions } = options;
+  const headers = { ...(fetchOptions.headers || {}) };
+  if (token && !omitAuth) headers.Authorization = `Bearer ${token}`;
 
   let lastError = null;
   for (const origin of apiOrigins()) {
     const url = buildApiUrl(path, origin);
     try {
-      const response = await fetch(url, { ...options, headers });
+      const response = await fetch(url, { ...fetchOptions, headers });
       const payload = await parseJsonResponse(response, path);
       if (!response.ok) {
         const message = payload?.detail || payload?.message || `Erreur API (${response.status})`;
-        if (response.status === 401) logout();
+        if (response.status === 401 && logoutOn401) logout();
         throw new Error(message);
       }
       return payload;
@@ -409,24 +413,101 @@ async function loadLogs() {
 async function loadUsers() {
   if (!canManageUsers()) return;
   const users = await api('/auth/users');
-  document.getElementById('users-table').innerHTML = users.map((u) => `<tr><td>${u.username}</td><td>${roleLabel(u.role)}</td><td>${u.municipality_name || '-'}</td><td>${new Date(u.created_at).toLocaleDateString()}</td><td>${u.must_change_password ? 'Changement requis' : 'Actif'}</td></tr>`).join('');
+  const isAdmin = currentUser?.role === 'admin';
+  document.getElementById('users-table').innerHTML = users.map((u) => {
+    const actionButtons = isAdmin
+      ? `<div class="users-actions"><button type="button" data-user-edit="${u.id}">Modifier</button><button type="button" data-user-reset="${u.id}">Réinitialiser mot de passe</button><button type="button" class="ghost" data-user-delete="${u.id}">Supprimer</button></div>`
+      : '-';
+    return `<tr><td>${escapeHtml(u.username)}</td><td>${roleLabel(u.role)}</td><td>${escapeHtml(u.municipality_name || '-')}</td><td>${new Date(u.created_at).toLocaleDateString()}</td><td>${u.must_change_password ? 'Changement requis' : 'Actif'}</td><td>${actionButtons}</td></tr>`;
+  }).join('') || '<tr><td colspan="6">Aucun utilisateur.</td></tr>';
 }
 
 async function refreshAll() {
-  try {
-    await Promise.all([loadDashboard(), loadExternalRisks(), loadMunicipalities(), loadLogs(), loadUsers(), loadSupervision()]);
-    renderResources();
-    fitMapToData();
+  const loaders = [
+    ['tableau de bord', loadDashboard],
+    ['risques externes', loadExternalRisks],
+    ['communes', loadMunicipalities],
+    ['main courante', loadLogs],
+    ['utilisateurs', loadUsers],
+    ['supervision', loadSupervision],
+  ];
+
+  const results = await Promise.allSettled(loaders.map(([, loader]) => loader()));
+  const failures = results
+    .map((result, index) => ({ result, label: loaders[index][0] }))
+    .filter(({ result }) => result.status === 'rejected');
+
+  renderResources();
+  fitMapToData();
+
+  if (!failures.length) {
     document.getElementById('dashboard-error').textContent = '';
-  } catch (error) {
-    document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
-    setMapFeedback(sanitizeErrorMessage(error.message), true);
+    return;
   }
+
+  const message = failures.map(({ label, result }) => `${label}: ${sanitizeErrorMessage(result.reason?.message || 'erreur')}`).join(' · ');
+  document.getElementById('dashboard-error').textContent = message;
+  setMapFeedback(message, true);
 }
 
 function applyRoleVisibility() {
   document.querySelectorAll('[data-requires-edit]').forEach((node) => setVisibility(node, canEdit()));
+  document.querySelectorAll('[data-admin-only]').forEach((node) => setVisibility(node, currentUser?.role === 'admin'));
   setVisibility(document.querySelector('[data-target="users-panel"]'), canManageUsers());
+}
+
+
+function syncUserCreateMunicipalityVisibility() {
+  const role = document.getElementById('user-create-role')?.value;
+  setVisibility(document.getElementById('user-create-municipality-wrap'), role === 'mairie');
+}
+
+async function handleUsersTableAction(event) {
+  const editButton = event.target.closest('[data-user-edit]');
+  const resetButton = event.target.closest('[data-user-reset]');
+  const deleteButton = event.target.closest('[data-user-delete]');
+  if (!editButton && !resetButton && !deleteButton) return;
+
+  document.getElementById('users-error').textContent = '';
+  document.getElementById('users-success').textContent = '';
+
+  try {
+    if (editButton) {
+      const userId = editButton.getAttribute('data-user-edit');
+      const role = window.prompt('Nouveau rôle (admin, ope, securite, visiteur, mairie)');
+      if (!role) return;
+      const municipalityName = role === 'mairie' ? window.prompt('Nom de la commune associée') : null;
+      await api(`/auth/users/${userId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: role.trim().toLowerCase(), municipality_name: municipalityName || null }),
+      });
+      document.getElementById('users-success').textContent = 'Utilisateur mis à jour.';
+    }
+
+    if (resetButton) {
+      const userId = resetButton.getAttribute('data-user-reset');
+      const customPassword = window.prompt('Nouveau mot de passe temporaire (laisser vide pour générer automatiquement)', '');
+      const payload = customPassword ? { new_password: customPassword } : {};
+      const result = await api(`/auth/users/${userId}/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      document.getElementById('users-success').textContent = `Mot de passe temporaire pour ${result.username}: ${result.temporary_password}`;
+    }
+
+    if (deleteButton) {
+      const userId = deleteButton.getAttribute('data-user-delete');
+      if (!window.confirm('Confirmer la suppression de cet utilisateur ?')) return;
+      await api(`/auth/users/${userId}`, { method: 'DELETE' });
+      document.getElementById('users-success').textContent = 'Utilisateur supprimé.';
+    }
+
+    await loadUsers();
+  } catch (error) {
+    document.getElementById('users-error').textContent = sanitizeErrorMessage(error.message);
+  }
 }
 
 function bindHomeInteractions() {
@@ -463,6 +544,36 @@ function bindAppInteractions() {
     renderCustomPoints();
     setMapFeedback('Point personnalisé supprimé.');
   });
+  document.getElementById('user-create-role')?.addEventListener('change', syncUserCreateMunicipalityVisibility);
+  syncUserCreateMunicipalityVisibility();
+  document.getElementById('users-table')?.addEventListener('click', handleUsersTableAction);
+  document.getElementById('user-create-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    document.getElementById('users-error').textContent = '';
+    document.getElementById('users-success').textContent = '';
+    const form = new FormData(event.target);
+    const role = String(form.get('role') || '').trim();
+    const municipalityName = role === 'mairie' ? String(form.get('municipality_name') || '').trim() : null;
+
+    try {
+      await api('/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: String(form.get('username') || '').trim(),
+          password: String(form.get('password') || ''),
+          role,
+          municipality_name: municipalityName || null,
+        }),
+      });
+      event.target.reset();
+      syncUserCreateMunicipalityVisibility();
+      document.getElementById('users-success').textContent = 'Utilisateur créé avec succès.';
+      await loadUsers();
+    } catch (error) {
+      document.getElementById('users-error').textContent = sanitizeErrorMessage(error.message);
+    }
+  });
   ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'resource-type-filter'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       renderStations(cachedStations);
@@ -489,7 +600,7 @@ function startAutoRefresh() {
 
 async function loadHomeLiveStatus() {
   try {
-    const data = await api('/public/live');
+    const data = await api('/public/live', { logoutOn401: false, omitAuth: true });
     document.getElementById('home-meteo-state').textContent = normalizeLevel(data.dashboard.vigilance || '-');
     document.getElementById('home-river-state').textContent = normalizeLevel(data.dashboard.crues || '-');
     document.getElementById('home-global-risk').textContent = normalizeLevel(data.dashboard.global_risk || '-');
@@ -531,7 +642,7 @@ loginForm.addEventListener('submit', async (event) => {
 
   try {
     const payload = new URLSearchParams({ username, password });
-    const result = await api('/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: payload });
+    const result = await api('/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: payload, logoutOn401: false, omitAuth: true });
     token = result.access_token;
     localStorage.setItem(STORAGE_KEYS.token, token);
     pendingCurrentPassword = password;
@@ -610,6 +721,15 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
   bindHomeInteractions();
   bindAppInteractions();
   startHomeLiveRefresh();
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    loadHomeLiveStatus();
+    if (token) refreshAll();
+  });
+  window.addEventListener('focus', () => {
+    loadHomeLiveStatus();
+    if (token) refreshAll();
+  });
 
   if (!token) return showHome();
   try {

@@ -34,6 +34,21 @@ class PasswordChangeRequest(BaseModel):
     new_password: str
 
 
+class UserUpdate(BaseModel):
+    role: str
+    municipality_name: str | None = None
+
+
+class UserPasswordResetRequest(BaseModel):
+    new_password: str | None = None
+
+
+class UserPasswordResetResponse(BaseModel):
+    username: str
+    temporary_password: str
+    must_change_password: bool
+
+
 class WeatherAlertCreate(BaseModel):
     risk_type: str
     level: str
