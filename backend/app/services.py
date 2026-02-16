@@ -4,7 +4,7 @@ from pathlib import Path
 import re
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlencode
 from urllib.request import Request, urlopen
 import xml.etree.ElementTree as ET
 
@@ -91,6 +91,95 @@ def _extract_meteo_hazards(*chunks: str) -> list[str]:
     hazards = [label for label, keywords in hazard_map.items() if any(keyword in blob for keyword in keywords)]
     return hazards
 
+
+def _rot13_letters(value: str) -> str:
+    transformed: list[str] = []
+    for char in value:
+        if "a" <= char <= "z":
+            transformed.append(chr((ord(char) - ord("a") + 13) % 26 + ord("a")))
+        elif "A" <= char <= "Z":
+            transformed.append(chr((ord(char) - ord("A") + 13) % 26 + ord("A")))
+        else:
+            transformed.append(char)
+    return "".join(transformed)
+
+
+def _extract_mf_token_from_page() -> str:
+    request = Request("https://vigilance.meteofrance.fr/fr/isere", headers={"User-Agent": "ope-protec/1.0"})
+    with urlopen(request, timeout=15) as response:
+        cookie_headers = response.headers.get_all("Set-Cookie") or []
+    joined = "; ".join(cookie_headers)
+    match = re.search(r"mfsession=([^;]+)", joined)
+    if not match:
+        raise ValueError("Cookie mfsession introuvable")
+    return _rot13_letters(match.group(1))
+
+
+def _meteo_france_wsft_get(path: str, token: str, params: dict[str, Any], version: str = "v3") -> dict[str, Any]:
+    query = urlencode(params)
+    url = f"https://rwg.meteofrance.com/wsft/{version}/{path}?{query}"
+    request = Request(url, headers={"User-Agent": "ope-protec/1.0", "Authorization": f"Bearer {token}"})
+    with urlopen(request, timeout=20) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _parse_mf_bulletin_items(bulletin_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for block in bulletin_payload.get("text_bloc_item") or []:
+        for bloc_item in block.get("bloc_items") or []:
+            for text_item in bloc_item.get("text_items") or []:
+                details: list[str] = []
+                for term in text_item.get("term_items") or []:
+                    for subdivision in term.get("subdivision_text") or []:
+                        snippets = subdivision.get("text") or []
+                        if snippets:
+                            details.append(" ".join(str(part).strip() for part in snippets if str(part).strip()))
+
+                cleaned_details = " ".join(chunk for chunk in details if chunk).strip()
+                if not cleaned_details:
+                    continue
+
+                items.append(
+                    {
+                        "section": bloc_item.get("type_name") or "Information",
+                        "phenomenon": text_item.get("hazard_name") or "Tous aléas",
+                        "detail": cleaned_details,
+                    }
+                )
+    return items
+
+
+def _build_mf_alerts(
+    warning_payload: dict[str, Any],
+    phenomenon_names: dict[str, str],
+    color_names: dict[int, str],
+    bulletin_items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    bulletin_by_phenomenon: dict[str, list[str]] = {}
+    for entry in bulletin_items:
+        key = str(entry.get("phenomenon") or "").lower()
+        if key:
+            bulletin_by_phenomenon.setdefault(key, []).append(entry.get("detail", ""))
+
+    alerts: list[dict[str, Any]] = []
+    for item in warning_payload.get("phenomenons_max_colors") or []:
+        phenomenon_id = str(item.get("phenomenon_id") or "")
+        color_id = int(item.get("phenomenon_max_color_id") or 1)
+        phenomenon_name = phenomenon_names.get(phenomenon_id, f"Phénomène {phenomenon_id}")
+        color_name = color_names.get(color_id, "inconnu").lower()
+        details = bulletin_by_phenomenon.get(phenomenon_name.lower(), [])
+        alerts.append(
+            {
+                "phenomenon": phenomenon_name,
+                "level": color_name,
+                "is_warning": color_id >= 2,
+                "details": details[:2],
+            }
+        )
+
+    alerts.sort(key=lambda alert: {"rouge": 4, "orange": 3, "jaune": 2, "vert": 1}.get(alert["level"], 0), reverse=True)
+    return alerts
+
 def fetch_meteo_france_isere() -> dict[str, Any]:
     source_url = "https://vigilance.meteofrance.fr/fr/isere"
     try:
@@ -103,6 +192,41 @@ def fetch_meteo_france_isere() -> dict[str, Any]:
         bulletin_title = title_match.group(1).strip() if title_match else "Vigilance Météo Isère"
         info_state = desc_match.group(1).replace("&#039;", "'") if desc_match else "Informations disponibles"
         hazards = _extract_meteo_hazards(bulletin_title, info_state)
+
+        token = _extract_mf_token_from_page()
+        dictionary = _meteo_france_wsft_get("warning/dictionary", token, {"domain": "FRA", "warning_type": "vigilance"})
+        warning_today = _meteo_france_wsft_get(
+            "warning/currentphenomenons",
+            token,
+            {"domain": "38", "warning_type": "vigilance", "formatDate": "timestamp", "echeance": "J0", "depth": 1},
+        )
+        warning_tomorrow = _meteo_france_wsft_get(
+            "warning/currentphenomenons",
+            token,
+            {"domain": "38", "warning_type": "vigilance", "formatDate": "timestamp", "echeance": "J1", "depth": 1},
+        )
+        bulletin_today = _meteo_france_wsft_get(
+            "report",
+            token,
+            {"domain": "38", "report_type": "vigilanceV6", "report_subtype": "Bulletin de suivi", "echeance": "J0"},
+            version="v2",
+        )
+        bulletin_tomorrow = _meteo_france_wsft_get(
+            "report",
+            token,
+            {"domain": "38", "report_type": "vigilanceV6", "report_subtype": "Bulletin de suivi", "echeance": "J1"},
+            version="v2",
+        )
+
+        phenomenon_names = {str(item.get("id")): item.get("name", "") for item in dictionary.get("phenomenons") or []}
+        color_names = {int(item.get("id")): item.get("name", "inconnu") for item in dictionary.get("colors") or []}
+        today_bulletin_items = _parse_mf_bulletin_items(bulletin_today)
+        tomorrow_bulletin_items = _parse_mf_bulletin_items(bulletin_tomorrow)
+        current_alerts = _build_mf_alerts(warning_today, phenomenon_names, color_names, today_bulletin_items)
+        tomorrow_alerts = _build_mf_alerts(warning_tomorrow, phenomenon_names, color_names, tomorrow_bulletin_items)
+        monitored_hazards = [alert["phenomenon"].lower() for alert in current_alerts + tomorrow_alerts]
+        hazards = sorted(set(hazards + [hazard for hazard in monitored_hazards if hazard]))
+
         return {
             "service": "Météo-France Vigilance",
             "department": "Isère (38)",
@@ -112,6 +236,10 @@ def fetch_meteo_france_isere() -> dict[str, Any]:
             "bulletin_title": bulletin_title,
             "info_state": info_state,
             "hazards": hazards,
+            "current_alerts": current_alerts,
+            "tomorrow_alerts": tomorrow_alerts,
+            "bulletin_today": today_bulletin_items[:4],
+            "bulletin_tomorrow": tomorrow_bulletin_items[:4],
             "updated_at": datetime.utcnow().isoformat() + "Z",
         }
     except (HTTPError, URLError, TimeoutError, ValueError) as exc:
@@ -123,6 +251,10 @@ def fetch_meteo_france_isere() -> dict[str, Any]:
             "level": "inconnu",
             "info_state": f"indisponible ({exc})",
             "hazards": [],
+            "current_alerts": [],
+            "tomorrow_alerts": [],
+            "bulletin_today": [],
+            "bulletin_tomorrow": [],
         }
 
 
