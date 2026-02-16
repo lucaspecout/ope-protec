@@ -87,6 +87,9 @@ function buildApiUrl(path, origin) {
 
 function sanitizeErrorMessage(message) {
   if (!message) return 'Erreur inconnue';
+  if (message.includes('Failed to fetch') || message.includes('NetworkError')) {
+    return "Connexion API indisponible (Failed to fetch). Vérifiez le backend, le port 1182 et le proxy web.";
+  }
   if (message.includes('<!doctype') || message.includes('<html')) {
     return "L'API renvoie une page HTML au lieu d'un JSON. Vérifiez que le backend tourne bien sur le même hôte (docker compose up -d).";
   }
@@ -485,8 +488,14 @@ function emojiDivIcon(emoji) {
 }
 
 async function loadMapPoints() {
-  mapPoints = await api('/map/points');
-  renderCustomPoints();
+  try {
+    mapPoints = await api('/map/points');
+    renderCustomPoints();
+  } catch (error) {
+    mapPoints = [];
+    renderCustomPoints();
+    setMapFeedback(`Points personnalisés indisponibles: ${sanitizeErrorMessage(error.message)}`, true);
+  }
 }
 
 async function saveMapPoint(payload) {
@@ -1065,7 +1074,7 @@ function bindAppInteractions() {
   document.getElementById('map-search')?.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); handleMapSearch(); } });
   document.getElementById('map-add-point-toggle')?.addEventListener('click', () => {
     mapAddPointMode = !mapAddPointMode;
-    setText('map-add-point-toggle', `Mode ajout: ${mapAddPointMode ? 'activé' : 'désactivé'}`);
+    setText('map-add-point-toggle', `Ajout: ${mapAddPointMode ? 'on' : 'off'}`);
     document.getElementById('map-add-point-toggle')?.setAttribute('aria-pressed', String(mapAddPointMode));
     setMapFeedback(mapAddPointMode ? 'Cliquez sur la carte pour ajouter un point opérationnel avec icône.' : 'Mode ajout désactivé.');
   });

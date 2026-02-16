@@ -327,46 +327,56 @@
               <button id="map-toggle-contrast" type="button" class="ghost" aria-pressed="false">Contraste renforcé: off</button>
             </div>
           </div>
-          <div class="map-toolbar">
-            <input id="map-search" type="search" placeholder="Rechercher une adresse ou un nom" aria-label="Recherche sur la carte" />
-            <button id="map-search-btn" type="button">Rechercher</button>
-            <button id="map-fit-btn" type="button" class="ghost">Voir tous les points</button>
-            <button id="map-add-point-toggle" type="button" class="ghost">Mode ajout: désactivé</button>
-            <select id="map-basemap-select" aria-label="Choisir le fond de carte">
-              <option value="osm">Fond standard (OSM)</option>
-              <option value="topo">Relief (topographique)</option>
-              <option value="light">Fond clair (lisible)</option>
-            </select>
-            <select id="map-point-category-filter">
-              <option value="all">Tous les points opérationnels</option>
-              <option value="incident">Incidents</option>
-              <option value="evacuation">Évacuations</option>
-              <option value="water">Risque eau</option>
-              <option value="roadblock">Barrages</option>
-              <option value="medical">Médical</option>
-              <option value="logistics">Logistique</option>
-              <option value="command">Commandement</option>
-              <option value="autre">Autres</option>
-            </select>
-            <label><input id="filter-hydro" type="checkbox" checked /> Stations Vigicrues</label>
-            <label><input id="filter-pcs" type="checkbox" checked /> Communes PCS</label>
-            <label><input id="filter-resources-active" type="checkbox" /> Ressources activées</label>
-            <select id="resource-type-filter">
-              <option value="all">Toutes les ressources</option>
-              <option value="poste_commandement">Postes de commandement</option>
-              <option value="centre_hebergement">Centres d'hébergement</option>
-              <option value="hopital">Hôpitaux</option>
-              <option value="caserne">Casernes</option>
-            </select>
+          <div class="map-workspace">
+            <div id="isere-map-leaflet" class="leaflet-map" aria-label="Carte interactive Isère"></div>
+            <aside class="map-controls" aria-label="Options de la carte">
+              <div class="map-toolbar map-toolbar--compact">
+                <div class="map-search-inline">
+                  <input id="map-search" type="search" placeholder="Adresse, ville, lieu…" aria-label="Recherche sur la carte" />
+                  <button id="map-search-btn" type="button" class="map-btn-lite">Rechercher</button>
+                </div>
+                <div class="map-inline-actions">
+                  <button id="map-fit-btn" type="button" class="ghost map-btn-lite">Tout voir</button>
+                  <button id="map-add-point-toggle" type="button" class="ghost map-btn-lite">Ajout: off</button>
+                </div>
+                <select id="map-basemap-select" aria-label="Choisir le fond de carte">
+                  <option value="osm">Fond standard (OSM)</option>
+                  <option value="topo">Relief (topographique)</option>
+                  <option value="light">Fond clair (lisible)</option>
+                </select>
+                <select id="map-point-category-filter">
+                  <option value="all">Tous les points opérationnels</option>
+                  <option value="incident">Incidents</option>
+                  <option value="evacuation">Évacuations</option>
+                  <option value="water">Risque eau</option>
+                  <option value="roadblock">Barrages</option>
+                  <option value="medical">Médical</option>
+                  <option value="logistics">Logistique</option>
+                  <option value="command">Commandement</option>
+                  <option value="autre">Autres</option>
+                </select>
+                <div class="map-toggle-grid">
+                  <label><input id="filter-hydro" type="checkbox" checked /> Vigicrues</label>
+                  <label><input id="filter-pcs" type="checkbox" checked /> Communes PCS</label>
+                  <label><input id="filter-resources-active" type="checkbox" /> Ressources actives</label>
+                </div>
+                <select id="resource-type-filter">
+                  <option value="all">Toutes les ressources</option>
+                  <option value="poste_commandement">Postes de commandement</option>
+                  <option value="centre_hebergement">Centres d'hébergement</option>
+                  <option value="hopital">Hôpitaux</option>
+                  <option value="caserne">Casernes</option>
+                </select>
+              </div>
+              <p id="map-feedback" class="muted"></p>
+              <div class="map-summary" aria-live="polite">
+                <article><p>Stations</p><strong id="map-summary-stations">0</strong></article>
+                <article><p>PCS</p><strong id="map-summary-pcs">0</strong></article>
+                <article><p>Ressources</p><strong id="map-summary-resources">0</strong></article>
+                <article><p>Points</p><strong id="map-summary-custom">0</strong></article>
+              </div>
+            </aside>
           </div>
-          <p id="map-feedback" class="muted"></p>
-          <div class="map-summary" aria-live="polite">
-            <article><p>Stations visibles</p><strong id="map-summary-stations">0</strong></article>
-            <article><p>Communes PCS visibles</p><strong id="map-summary-pcs">0</strong></article>
-            <article><p>Ressources visibles</p><strong id="map-summary-resources">0</strong></article>
-            <article><p>Points personnalisés</p><strong id="map-summary-custom">0</strong></article>
-          </div>
-          <div id="isere-map-leaflet" class="leaflet-map" aria-label="Carte interactive Isère"></div>
           <div class="map-layout">
             <div>
               <p>Niveau météo <strong id="meteo-level">-</strong></p>
