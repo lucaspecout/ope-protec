@@ -381,12 +381,14 @@ def fetch_vigicrues_isere(
     priority_names: list[str] | None = None,
 ) -> dict[str, Any]:
     source = "https://www.vigicrues.gouv.fr"
+    sandre_reference = "https://www.sandre.eaufrance.fr/definition/VIC/1.1/EntVigiCru"
     default_territory_codes = {"18", "17", "16", "15", "14"}
     priority_names = [name.lower() for name in (priority_names or [])]
 
     try:
         home_html = _http_get_text(source)
-        isere_territory_codes = set(re.findall(r'href="/territoire/(\d+)"', home_html)) or default_territory_codes
+        discovered_codes = set(re.findall(r'href="/territoire/(\d+)"', home_html))
+        isere_territory_codes = (discovered_codes & default_territory_codes) or default_territory_codes
     except (HTTPError, URLError, TimeoutError):
         isere_territory_codes = default_territory_codes
 
@@ -489,8 +491,11 @@ def fetch_vigicrues_isere(
             raise ValueError("Aucune station détectée sur les territoires Vigicrues de l'Isère")
 
         details_cache: dict[str, dict[str, Any]] = {}
+        isere_detail_codes: set[str] = set()
         pending_codes = list(stations_index.keys())
-        while pending_codes and len(details_cache) < sample_size:
+        target_isere_matches = max(station_limit or 0, 30)
+        max_detail_lookups = max(sample_size, target_isere_matches * 20)
+        while pending_codes and len(details_cache) < max_detail_lookups and (len(details_cache) < sample_size or len(isere_detail_codes) < target_isere_matches):
             current_code = pending_codes.pop(0)
             if current_code in details_cache:
                 continue
@@ -499,6 +504,8 @@ def fetch_vigicrues_isere(
             except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
                 continue
             details_cache[current_code] = details
+            if str(details.get("CdCommune") or "").startswith("38"):
+                isere_detail_codes.add(current_code)
 
             current = stations_index.get(current_code) or {}
             for linked in (details.get("VigilanceCrues") or {}).get("StationsBassin") or []:
@@ -594,6 +601,7 @@ def fetch_vigicrues_isere(
             "department": "Isère (38)",
             "status": "online",
             "source": source,
+            "sandre_reference": sandre_reference,
             "water_alert_level": global_level,
             "stations": isere_stations,
             "troncons": troncons,
@@ -605,6 +613,7 @@ def fetch_vigicrues_isere(
             "department": "Isère (38)",
             "status": "degraded",
             "source": source,
+            "sandre_reference": sandre_reference,
             "water_alert_level": "inconnu",
             "stations": [],
             "troncons": [],
