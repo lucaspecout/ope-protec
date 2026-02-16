@@ -597,22 +597,12 @@ async function openMunicipalityDetailsModal(municipality) {
   const content = document.getElementById('municipality-details-content');
   if (!modal || !content || !municipality) return;
 
-  const docs = [
-    municipality.orsec_plan_file
-      ? `<li><a href="/municipalities/${municipality.id}/documents/orsec_plan" target="_blank" rel="noreferrer">Plan ORSEC</a> ${canMunicipalityFiles() ? `<button type="button" class="ghost inline-action danger" data-muni-detail-remove-doc="${municipality.id}" data-doc-type="orsec_plan">Supprimer</button>` : ''}</li>`
-      : '<li>Plan ORSEC: non renseigné</li>',
-    municipality.convention_file
-      ? `<li><a href="/municipalities/${municipality.id}/documents/convention" target="_blank" rel="noreferrer">Convention</a> ${canMunicipalityFiles() ? `<button type="button" class="ghost inline-action danger" data-muni-detail-remove-doc="${municipality.id}" data-doc-type="convention">Supprimer</button>` : ''}</li>`
-      : '<li>Convention: non renseignée</li>',
-  ].join('');
-
   const files = await loadMunicipalityFiles(municipality.id).catch(() => []);
   const quickActions = canMunicipalityFiles()
     ? `<div class="municipality-actions municipality-actions--modal">
          ${canEdit() ? `<button type="button" class="ghost inline-action" data-muni-detail-crisis="${municipality.id}">${municipality.crisis_mode ? 'Sortir de crise' : 'Passer en crise'}</button>
          <button type="button" class="ghost inline-action" data-muni-detail-edit="${municipality.id}">Éditer la fiche</button>` : ''}
-         <button type="button" class="ghost inline-action" data-muni-detail-docs="${municipality.id}">Mettre à jour ORSEC/Convention</button>
-         <button type="button" class="ghost inline-action" data-muni-file-upload="${municipality.id}">Ajouter un fichier</button>
+         <button type="button" class="ghost inline-action" data-muni-file-upload="${municipality.id}">Ajouter un document</button>
        </div>`
     : '';
 
@@ -626,9 +616,7 @@ async function openMunicipalityDetailsModal(municipality) {
     <p><strong>Canal radio:</strong> ${escapeHtml(municipality.radio_channel || '-')}</p>
     <p><strong>Contacts d'astreinte:</strong><br>${escapeHtml(municipality.contacts || 'Aucun')}</p>
     <p><strong>Informations complémentaires:</strong><br>${escapeHtml(municipality.additional_info || 'Aucune')}</p>
-    <h5>Documents réglementaires</h5>
-    <ul class="list compact">${docs}</ul>
-    <h5>Fichiers opérationnels partagés</h5>
+    <h5>Documents partagés</h5>
     <ul class="list compact">${municipalityFilesMarkup(files, municipality.id)}</ul>
     ${quickActions}
   `;
@@ -640,27 +628,6 @@ async function openMunicipalityDetailsModal(municipality) {
   modal.setAttribute('open', 'open');
 }
 
-async function pickMunicipalityDocuments(municipalityId) {
-  const picker = document.createElement('input');
-  picker.type = 'file';
-  picker.accept = '.pdf,.png,.jpg,.jpeg';
-  picker.multiple = true;
-  picker.onchange = async () => {
-    const files = Array.from(picker.files || []);
-    if (!files.length) return;
-    const formData = new FormData();
-    if (files[0]) formData.append('orsec_plan', files[0]);
-    if (files[1]) formData.append('convention', files[1]);
-    await api(`/municipalities/${municipalityId}/documents`, { method: 'POST', body: formData });
-    const municipality = cachedMunicipalityRecords.find((m) => String(m.id) === String(municipalityId));
-    document.getElementById('municipality-feedback').textContent = `Documents mis à jour pour ${municipality?.name || 'la commune'}.`;
-    await loadMunicipalities();
-    const refreshed = cachedMunicipalityRecords.find((m) => String(m.id) === String(municipalityId));
-    if (refreshed) await openMunicipalityDetailsModal(refreshed);
-  };
-  picker.click();
-}
-
 async function pickMunicipalityFile(municipalityId) {
   const picker = document.createElement('input');
   picker.type = 'file';
@@ -668,12 +635,13 @@ async function pickMunicipalityFile(municipalityId) {
   picker.onchange = async () => {
     const file = picker.files?.[0];
     if (!file) return;
-    const title = window.prompt('Titre du fichier', file.name) || file.name;
-    const docType = (window.prompt('Type du fichier (compte_rendu, carte, consigne, annexe)', 'annexe') || 'annexe').trim();
+    const titlePrompt = window.prompt('Nom du document', file.name);
+    if (titlePrompt === null) return;
+    const title = titlePrompt.trim() || file.name;
     const formData = new FormData();
     formData.append('file', file);
     formData.append('title', title);
-    formData.append('doc_type', docType);
+    formData.append('doc_type', 'document');
     await api(`/municipalities/${municipalityId}/files`, { method: 'POST', body: formData });
     await loadMunicipalities();
     const refreshed = cachedMunicipalityRecords.find((m) => String(m.id) === String(municipalityId));
@@ -786,20 +754,16 @@ async function loadMunicipalities() {
   cachedMunicipalityRecords = municipalities;
   document.getElementById('municipalities-list').innerHTML = municipalities.map((m) => {
     const dangerColor = levelColor(m.vigilance_color || 'vert');
-    const docs = [];
-    if (m.orsec_plan_file) docs.push('Plan ORSEC');
-    if (m.convention_file) docs.push('Convention');
     const actions = canEdit()
       ? `<div class="municipality-actions">
            <button type="button" class="ghost inline-action" data-muni-view="${m.id}">Voir</button>
            <button type="button" class="ghost inline-action" data-muni-edit="${m.id}">Éditer</button>
            <button type="button" class="ghost inline-action" data-muni-crisis="${m.id}">${m.crisis_mode ? 'Sortir de crise' : 'Passer en crise'}</button>
-           <button type="button" class="ghost inline-action" data-muni-docs="${m.id}">ORSEC/Convention</button>
-           <button type="button" class="ghost inline-action" data-muni-files="${m.id}">Fichiers</button>
+           <button type="button" class="ghost inline-action" data-muni-files="${m.id}">Documents</button>
            <button type="button" class="ghost inline-action danger" data-muni-delete="${m.id}">Supprimer</button>
          </div>`
       : canMunicipalityFiles()
-        ? `<div class="municipality-actions"><button type="button" class="ghost inline-action" data-muni-view="${m.id}">Voir</button><button type="button" class="ghost inline-action" data-muni-files="${m.id}">Fichiers</button></div>`
+        ? `<div class="municipality-actions"><button type="button" class="ghost inline-action" data-muni-view="${m.id}">Voir</button><button type="button" class="ghost inline-action" data-muni-files="${m.id}">Documents</button></div>`
         : `<div class="municipality-actions"><button type="button" class="ghost inline-action" data-muni-view="${m.id}">Voir</button></div>`;
     return `<article class="municipality-card" data-muni-id="${m.id}">
       <header>
@@ -814,7 +778,7 @@ async function loadMunicipalities() {
         <p>Radio<br><strong>${escapeHtml(m.radio_channel || '-')}</strong></p>
         <p>Contacts<br><strong>${escapeHtml(m.contacts || '-')}</strong></p>
       </div>
-      <p class="municipality-docs">Documents: ${docs.join(', ') || 'Aucun'}</p>
+      <p class="municipality-docs">Documents: personnalisés</p>
       <p class="muted">${escapeHtml(m.additional_info || 'Aucune information complémentaire')}</p>
       ${actions}
     </article>`;
@@ -1033,12 +997,11 @@ function bindAppInteractions() {
     const viewButton = event.target.closest('[data-muni-view], [data-muni-detail]');
     const editButton = event.target.closest('[data-muni-edit]');
     const crisisButton = event.target.closest('[data-muni-crisis]');
-    const docsButton = event.target.closest('[data-muni-docs]');
     const filesButton = event.target.closest('[data-muni-files]');
     const deleteButton = event.target.closest('[data-muni-delete]');
     const card = event.target.closest('.municipality-card');
     const fallbackId = card?.getAttribute('data-muni-id');
-    if (!viewButton && !editButton && !crisisButton && !docsButton && !filesButton && !deleteButton && !fallbackId) return;
+    if (!viewButton && !editButton && !crisisButton && !filesButton && !deleteButton && !fallbackId) return;
     try {
       const getMunicipality = (id) => cachedMunicipalityRecords.find((m) => String(m.id) === String(id));
 
@@ -1051,7 +1014,7 @@ function bindAppInteractions() {
         return;
       }
 
-      if (!editButton && !crisisButton && !docsButton && !filesButton && !deleteButton && fallbackId) {
+      if (!editButton && !crisisButton && !filesButton && !deleteButton && fallbackId) {
         const municipality = getMunicipality(fallbackId);
         if (!municipality) return;
         document.getElementById('municipality-feedback').textContent = `Commune ${municipality.name}: ${municipality.crisis_mode ? 'en crise' : 'en veille'} · vigilance ${normalizeLevel(municipality.vigilance_color)}.`;
@@ -1073,12 +1036,6 @@ function bindAppInteractions() {
         const result = await api(`/municipalities/${municipalityId}/crisis`, { method: 'POST' });
         const municipality = getMunicipality(municipalityId);
         document.getElementById('municipality-feedback').textContent = `${municipality?.name || 'Commune'}: ${result.crisis_mode ? 'mode crise activé' : 'retour en veille'}.`;
-      }
-
-      if (docsButton) {
-        const municipalityId = docsButton.getAttribute('data-muni-docs');
-        await pickMunicipalityDocuments(municipalityId);
-        return;
       }
 
       if (filesButton) {
@@ -1108,11 +1065,9 @@ function bindAppInteractions() {
   document.getElementById('municipality-details-content')?.addEventListener('click', async (event) => {
     const editButton = event.target.closest('[data-muni-detail-edit]');
     const crisisButton = event.target.closest('[data-muni-detail-crisis]');
-    const docsButton = event.target.closest('[data-muni-detail-docs]');
-    const removeDocButton = event.target.closest('[data-muni-detail-remove-doc]');
     const uploadFileButton = event.target.closest('[data-muni-file-upload]');
     const deleteFileButton = event.target.closest('[data-muni-file-delete]');
-    if (!editButton && !crisisButton && !docsButton && !removeDocButton && !uploadFileButton && !deleteFileButton) return;
+    if (!editButton && !crisisButton && !uploadFileButton && !deleteFileButton) return;
 
     const getMunicipality = (id) => cachedMunicipalityRecords.find((m) => String(m.id) === String(id));
 
@@ -1137,13 +1092,6 @@ function bindAppInteractions() {
         return;
       }
 
-      if (docsButton) {
-        if (!canMunicipalityFiles()) return;
-        const municipalityId = docsButton.getAttribute('data-muni-detail-docs');
-        await pickMunicipalityDocuments(municipalityId);
-        return;
-      }
-
       if (uploadFileButton) {
         if (!canMunicipalityFiles()) return;
         await pickMunicipalityFile(uploadFileButton.getAttribute('data-muni-file-upload'));
@@ -1160,19 +1108,6 @@ function bindAppInteractions() {
         return;
       }
 
-      if (removeDocButton) {
-        if (!canMunicipalityFiles()) return;
-        const municipalityId = removeDocButton.getAttribute('data-muni-detail-remove-doc');
-        const docType = removeDocButton.getAttribute('data-doc-type');
-        const label = docType === 'orsec_plan' ? 'le plan ORSEC' : 'la convention';
-        const confirmed = window.confirm(`Voulez-vous supprimer ${label} ?`);
-        if (!confirmed) return;
-        await api(`/municipalities/${municipalityId}/documents/${docType}`, { method: 'DELETE' });
-        await loadMunicipalities();
-        const municipality = getMunicipality(municipalityId);
-        document.getElementById('municipality-feedback').textContent = `Document supprimé pour ${municipality?.name || 'la commune'}.`;
-        if (municipality) await openMunicipalityDetailsModal(municipality);
-      }
     } catch (error) {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
     }
