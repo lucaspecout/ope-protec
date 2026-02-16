@@ -328,8 +328,20 @@
             </div>
           </div>
           <div class="map-workspace">
-            <div id="isere-map-leaflet" class="leaflet-map" aria-label="Carte interactive Isère"></div>
-            <aside class="map-controls" aria-label="Options de la carte">
+            <div class="map-canvas-wrap">
+              <div id="isere-map-leaflet" class="leaflet-map" aria-label="Carte interactive Isère"></div>
+              <button
+                id="map-controls-toggle"
+                class="map-controls-toggle"
+                type="button"
+                aria-expanded="true"
+                aria-controls="map-controls-panel"
+                title="Ranger les options de la carte" aria-label="Ranger les options de la carte"
+              >
+                🧰
+              </button>
+            </div>
+            <aside id="map-controls-panel" class="map-controls" aria-label="Options de la carte">
               <div class="map-toolbar map-toolbar--compact">
                 <div class="map-search-inline">
                   <input id="map-search" type="search" placeholder="Adresse, ville, lieu…" aria-label="Recherche sur la carte" />
