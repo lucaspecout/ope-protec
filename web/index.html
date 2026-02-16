@@ -209,6 +209,8 @@
           <p id="georisques-page-debug" class="muted"></p>
           <h4>Communes suivies</h4>
           <ul id="georisques-communes-list" class="list"></ul>
+          <h4>Documents associés Géorisques (visibles par commune)</h4>
+          <ul id="georisques-documents-list" class="list"></ul>
         </section>
 
         <section id="api-panel" class="panel view hidden" hidden>
@@ -244,6 +246,15 @@
           </form>
           <p id="municipality-feedback" class="muted"></p>
           <div id="municipalities-list" class="municipality-grid"></div>
+
+
+          <dialog id="municipality-details-modal" class="municipality-details-modal">
+            <div class="municipality-details-modal__head">
+              <h4>Détail commune</h4>
+              <button type="button" id="municipality-details-close" class="ghost">Fermer</button>
+            </div>
+            <div id="municipality-details-content"></div>
+          </dialog>
 
           <aside id="municipality-editor" class="municipality-editor hidden" hidden>
             <div class="municipality-editor__head">
