@@ -55,6 +55,7 @@ GET /external/isere/risks
 Retourne un bloc consolidé :
 - `meteo_france` : état de connexion au service vigilance Météo-France et bulletin Isère.
 - `vigicrues` : état de connexion, stations détectées en Isère et niveau d'alerte eau courant (`vert`, `jaune`, `orange`, `rouge`).
+- `georisques` : synthèse multi-communes Isère (sismicité max et nombre de documents inondation).
 
 
 ## Alignement besoins métier
@@ -69,6 +70,6 @@ Retourne un bloc consolidé :
 
 ## Nouveaux flux de supervision
 
-- `GET /supervision/overview` : consolidation prête à l'emploi (Météo-France + Vigicrues + Itinisère + communes en crise + timeline).
+- `GET /supervision/overview` : consolidation prête à l'emploi (Météo-France + Vigicrues + Itinisère + Géorisques + communes en crise + timeline).
 - `GET /api/vigicrues/geojson` : stations Vigicrues Isère en GeoJSON pour cartographie interactive.
 - `GET /api/itinisere/events` : perturbations Itinisère en direct via le flux RSS officiel.

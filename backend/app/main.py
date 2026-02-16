@@ -30,6 +30,7 @@ from .schemas import (
 from .security import create_access_token, hash_password, verify_password
 from .services import (
     cleanup_old_weather_alerts,
+    fetch_georisques_isere_summary,
     fetch_isere_boundary_geojson,
     fetch_meteo_france_isere,
     fetch_itinisere_disruptions,
@@ -149,6 +150,7 @@ def public_live_status(db: Session = Depends(get_db)):
     meteo = fetch_meteo_france_isere()
     priority_names = [m.name for m in db.query(Municipality).filter(Municipality.pcs_active.is_(True)).all()]
     vigicrues = fetch_vigicrues_isere(priority_names=priority_names)
+    georisques = fetch_georisques_isere_summary()
 
     return {
         "updated_at": datetime.utcnow().isoformat() + "Z",
@@ -169,6 +171,7 @@ def public_live_status(db: Session = Depends(get_db)):
             "water_alert_level": vigicrues.get("water_alert_level", "vert"),
             "station_count": len(vigicrues.get("stations", [])),
         },
+        "georisques": georisques,
     }
 
 
@@ -279,11 +282,13 @@ def isere_external_risks(db: Session = Depends(get_db), _: User = Depends(requir
     priority_names = [m.name for m in db.query(Municipality).filter(Municipality.pcs_active.is_(True)).all()]
     vigicrues = fetch_vigicrues_isere(priority_names=priority_names)
     itinisere = fetch_itinisere_disruptions()
+    georisques = fetch_georisques_isere_summary()
     return {
         "updated_at": datetime.utcnow().isoformat() + "Z",
         "meteo_france": meteo,
         "vigicrues": vigicrues,
         "itinisere": itinisere,
+        "georisques": georisques,
     }
 
 
@@ -310,6 +315,7 @@ def supervision_overview(db: Session = Depends(get_db), _: User = Depends(requir
     priority_names = [m.name for m in db.query(Municipality).filter(Municipality.pcs_active.is_(True)).all()]
     vigicrues = fetch_vigicrues_isere(priority_names=priority_names, station_limit=12)
     itinisere = fetch_itinisere_disruptions(limit=8)
+    georisques = fetch_georisques_isere_summary()
     crisis = db.query(Municipality).filter(Municipality.crisis_mode.is_(True)).all()
     latest_logs = db.query(OperationalLog).order_by(OperationalLog.created_at.desc()).limit(10).all()
     return {
@@ -318,6 +324,7 @@ def supervision_overview(db: Session = Depends(get_db), _: User = Depends(requir
             "meteo": meteo,
             "vigicrues": vigicrues,
             "itinisere": itinisere,
+            "georisques": georisques,
         },
         "crisis_municipalities": [MunicipalityOut.model_validate(c).model_dump() for c in crisis],
         "timeline": [OperationalLogOut.model_validate(log).model_dump() for log in latest_logs],

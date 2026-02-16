@@ -43,6 +43,8 @@
           <p>Niveau crues <strong id="home-river-state">-</strong></p>
           <p>Risque global <strong id="home-global-risk">-</strong></p>
           <p>Communes en crise <strong id="home-crisis-count">0</strong></p>
+          <p>Sismicité max (Géorisques) <strong id="home-seismic-state">-</strong></p>
+          <p>Documents inondation (Géorisques) <strong id="home-flood-docs">0</strong></p>
           <p class="muted" id="home-live-updated">Dernière mise à jour: -</p>
           <p class="error" id="home-live-error"></p>
         </article>
@@ -143,6 +145,7 @@
             <article class="tile"><h3>Météo-France</h3><p id="supervision-meteo">-</p></article>
             <article class="tile"><h3>Vigicrues</h3><p id="supervision-vigicrues">-</p></article>
             <article class="tile"><h3>Itinisère</h3><p id="supervision-itinisere">-</p></article>
+            <article class="tile"><h3>Géorisques</h3><p id="supervision-georisques">-</p></article>
             <article class="tile"><h3>Communes en crise</h3><p id="supervision-crisis-count">0</p></article>
           </div>
           <h4>Historique opérationnel récent</h4>
@@ -173,7 +176,7 @@
             <article class="service-card"><h4>Vigicrues</h4><p id="vigicrues-status">-</p><p id="vigicrues-info" class="muted"></p></article>
             <article class="service-card"><h4>Préfecture de l'Isère</h4><p>Coordination institutionnelle</p><a href="https://www.isere.gouv.fr" target="_blank" rel="noreferrer">isère.gouv.fr</a></article>
             <article class="service-card"><h4>Vigicrues Flash</h4><p>Veille pluie-inondation</p><a href="https://www.vigicrues.gouv.fr" target="_blank" rel="noreferrer">vigicrues.gouv.fr</a></article>
-            <article class="service-card"><h4>GEORISQUES</h4><p>Connaissance des aléas locaux</p><a href="https://www.georisques.gouv.fr" target="_blank" rel="noreferrer">georisques.gouv.fr</a></article>
+            <article class="service-card"><h4>GEORISQUES</h4><p id="georisques-status">-</p><p id="georisques-info" class="muted"></p><a href="https://www.georisques.gouv.fr" target="_blank" rel="noreferrer">georisques.gouv.fr</a></article>
             <article class="service-card"><h4>Info route Isère</h4><p>Axes coupés et circulation</p><a href="https://www.itinisere.fr" target="_blank" rel="noreferrer">itinisere.fr</a></article>
           </div>
           <h4>Stations Vigicrues prioritaires</h4>
@@ -227,6 +230,8 @@
               <p>Niveau météo <strong id="meteo-level">-</strong></p>
               <p>Risques météo concernés <strong id="meteo-hazards">-</strong></p>
               <p>Niveau hydrologique <strong id="river-level">-</strong></p>
+              <p>Sismicité max <strong id="map-seismic-level">-</strong></p>
+              <p>Docs inondation suivis <strong id="map-flood-docs">0</strong></p>
               <p class="muted" id="map-source">Source carte: chargement…</p>
               <div class="legend">
                 <span class="badge green">Vert</span>

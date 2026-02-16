@@ -303,6 +303,65 @@ def fetch_itinisere_disruptions(limit: int = 20) -> dict[str, Any]:
         }
 
 
+def fetch_georisques_isere_summary() -> dict[str, Any]:
+    source = "https://www.georisques.gouv.fr/api/v1"
+    communes = [
+        {"name": "Grenoble", "code_insee": "38185"},
+        {"name": "Bourgoin-Jallieu", "code_insee": "38053"},
+        {"name": "Vienne", "code_insee": "38544"},
+        {"name": "Voiron", "code_insee": "38563"},
+    ]
+    try:
+        monitored: list[dict[str, Any]] = []
+        highest_seismic = 0
+        flood_documents_total = 0
+
+        for commune in communes:
+            code = commune["code_insee"]
+            seismic = _http_get_json(f"{source}/zonage_sismique?code_insee={quote_plus(code)}")
+            flood = _http_get_json(f"{source}/gaspar/azi?code_insee={quote_plus(code)}")
+
+            seismic_data = (seismic or {}).get("data") or []
+            flood_data = (flood or {}).get("data") or []
+            seismic_label = (seismic_data[0] if seismic_data else {}).get("zone_sismicite", "inconnue")
+            zone_code = int((seismic_data[0] if seismic_data else {}).get("code_zone", 0) or 0)
+            highest_seismic = max(highest_seismic, zone_code)
+            flood_documents_total += len(flood_data)
+
+            monitored.append(
+                {
+                    "name": commune["name"],
+                    "code_insee": code,
+                    "seismic_zone": seismic_label,
+                    "flood_documents": len(flood_data),
+                }
+            )
+
+        return {
+            "service": "Géorisques",
+            "status": "online",
+            "source": source,
+            "department": "Isère (38)",
+            "highest_seismic_zone_code": highest_seismic,
+            "highest_seismic_zone_label": f"Zone {highest_seismic}" if highest_seismic else "inconnue",
+            "flood_documents_total": flood_documents_total,
+            "monitored_communes": monitored,
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+        return {
+            "service": "Géorisques",
+            "status": "degraded",
+            "source": source,
+            "department": "Isère (38)",
+            "highest_seismic_zone_code": 0,
+            "highest_seismic_zone_label": "inconnue",
+            "flood_documents_total": 0,
+            "monitored_communes": [],
+            "error": str(exc),
+        }
+
+
 def vigicrues_geojson_from_stations(stations: list[dict[str, Any]]) -> dict[str, Any]:
     features = []
     for station in stations:
