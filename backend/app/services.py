@@ -555,19 +555,36 @@ def fetch_georisques_isere_summary() -> dict[str, Any]:
     monitored: list[dict[str, Any]] = []
     highest_seismic = 0
     flood_documents_total = 0
+    ppr_total = 0
+    ground_movement_total = 0
+    cavity_total = 0
+    communes_with_radon_moderate_or_high = 0
+    movement_types: dict[str, int] = {}
+    recent_movements: list[dict[str, Any]] = []
     errors: list[str] = []
+
+    radon_labels = {
+        "1": "Faible",
+        "2": "Moyen",
+        "3": "Élevé",
+    }
 
     for commune in communes:
         code = commune["code_insee"]
+        commune_errors: list[str] = []
         try:
             seismic = _http_get_json(f"{source}/zonage_sismique?code_insee={quote_plus(code)}")
-            flood = _http_get_json(f"{source}/gaspar/azi?code_insee={quote_plus(code)}")
-
             seismic_data = (seismic or {}).get("data") or []
-            flood_data = (flood or {}).get("data") or []
             seismic_label = (seismic_data[0] if seismic_data else {}).get("zone_sismicite", "inconnue")
             zone_code = int((seismic_data[0] if seismic_data else {}).get("code_zone", 0) or 0)
             highest_seismic = max(highest_seismic, zone_code)
+
+            flood_data = []
+            try:
+                flood = _http_get_json(f"{source}/gaspar/azi?code_insee={quote_plus(code)}")
+                flood_data = (flood or {}).get("data") or []
+            except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+                commune_errors.append(f"AZI: {exc}")
             flood_documents_total += len(flood_data)
             flood_documents_details = [
                 {
@@ -579,6 +596,59 @@ def fetch_georisques_isere_summary() -> dict[str, Any]:
                 for item in flood_data
             ]
 
+            ppr_data = []
+            ppr_by_risk: dict[str, int] = {}
+            try:
+                ppr = _http_get_json(f"{source}/ppr?code_insee={quote_plus(code)}")
+                ppr_data = (ppr or {}).get("data") or []
+                for item in ppr_data:
+                    risk_name = str(item.get("risque") or "Non précisé").strip()
+                    ppr_by_risk[risk_name] = ppr_by_risk.get(risk_name, 0) + 1
+                ppr_total += len(ppr_data)
+            except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+                commune_errors.append(f"PPR: {exc}")
+
+            ground_movement_data = []
+            try:
+                movements = _http_get_json(f"{source}/mvt?code_insee={quote_plus(code)}")
+                ground_movement_data = (movements or {}).get("data") or []
+                ground_movement_total += len(ground_movement_data)
+                for item in ground_movement_data:
+                    movement_type = str(item.get("type") or "Type non renseigné").strip()
+                    movement_types[movement_type] = movement_types.get(movement_type, 0) + 1
+                    recent_movements.append(
+                        {
+                            "commune": commune["name"],
+                            "type": movement_type,
+                            "date": item.get("date_debut") or item.get("date_maj"),
+                            "location": item.get("lieu"),
+                            "identifier": item.get("identifiant"),
+                            "reliability": item.get("fiabilite"),
+                        }
+                    )
+            except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+                commune_errors.append(f"MVT: {exc}")
+
+            cavity_data = []
+            try:
+                cavites = _http_get_json(f"{source}/cavites?code_insee={quote_plus(code)}")
+                cavity_data = (cavites or {}).get("data") or []
+                cavity_total += len(cavity_data)
+            except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+                commune_errors.append(f"Cavités: {exc}")
+
+            radon_class_value = None
+            radon_label = "inconnu"
+            try:
+                radon = _http_get_json(f"{source}/radon?code_insee={quote_plus(code)}")
+                radon_data = (radon or {}).get("data") or []
+                radon_class_value = str((radon_data[0] if radon_data else {}).get("classe_potentiel") or "")
+                radon_label = radon_labels.get(radon_class_value, "inconnu")
+                if radon_class_value in {"2", "3"}:
+                    communes_with_radon_moderate_or_high += 1
+            except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+                commune_errors.append(f"Radon: {exc}")
+
             monitored.append(
                 {
                     "name": commune["name"],
@@ -586,10 +656,21 @@ def fetch_georisques_isere_summary() -> dict[str, Any]:
                     "seismic_zone": seismic_label,
                     "flood_documents": len(flood_data),
                     "flood_documents_details": flood_documents_details,
+                    "ppr_total": len(ppr_data),
+                    "ppr_by_risk": ppr_by_risk,
+                    "ground_movements_total": len(ground_movement_data),
+                    "cavities_total": len(cavity_data),
+                    "radon_class": radon_class_value,
+                    "radon_label": radon_label,
+                    "errors": commune_errors,
                 }
             )
         except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
             errors.append(f"{commune['name']}: {exc}")
+            continue
+
+        if commune_errors:
+            errors.append(f"{commune['name']}: {' | '.join(commune_errors)}")
 
     status = "online"
     if errors and monitored:
@@ -605,6 +686,16 @@ def fetch_georisques_isere_summary() -> dict[str, Any]:
         "highest_seismic_zone_code": highest_seismic,
         "highest_seismic_zone_label": f"Zone {highest_seismic}" if highest_seismic else "inconnue",
         "flood_documents_total": flood_documents_total,
+        "ppr_total": ppr_total,
+        "ground_movements_total": ground_movement_total,
+        "cavities_total": cavity_total,
+        "communes_with_radon_moderate_or_high": communes_with_radon_moderate_or_high,
+        "movement_types": movement_types,
+        "recent_ground_movements": sorted(
+            recent_movements,
+            key=lambda item: item.get("date") or "",
+            reverse=True,
+        )[:12],
         "monitored_communes": monitored,
         "updated_at": datetime.utcnow().isoformat() + "Z",
         "errors": errors,
