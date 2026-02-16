@@ -236,6 +236,12 @@ label { display: block; margin-bottom: .8rem; }
 .map-toolbar { display: flex; flex-wrap: wrap; gap: .6rem; margin-bottom: .8rem; }
 .map-toolbar input, .map-toolbar select { min-height: 42px; }
 .map-toolbar button { min-height: 42px; }
+.map-panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: .8rem; flex-wrap: wrap; }
+.map-quick-actions { display: flex; flex-wrap: wrap; gap: .45rem; }
+.map-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: .55rem; margin: 0 0 .8rem; }
+.map-summary article { border: 1px solid #d5e2fb; border-radius: 12px; padding: .55rem .7rem; background: linear-gradient(180deg, #fff, #f4f8ff); }
+.map-summary p { margin: 0; color: #4f6388; font-size: .8rem; }
+.map-summary strong { font-size: 1.15rem; color: #163a87; }
 .map-layout { display: grid; gap: .8rem; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); margin-top: .8rem; }
 .isere-map { width: 100%; border-radius: 12px; border: 1px solid #ccdbf4; background: #f3f8ff; }
 #isere-shape { fill: #2eb85c; stroke: #20324e; stroke-width: 4; }
@@ -274,12 +280,18 @@ svg text { font-size: 14px; fill: #17335f; }
   .home-topbar { flex-wrap: wrap; }
   .sidebar { position: fixed; left: 0; top: 0; bottom: 0; z-index: 20; width: min(390px, 100vw); transform: translateX(-120%); transition: transform .2s ease; border-radius: 0; }
   .sidebar.open { transform: translateX(0); }
+  .map-panel-head { flex-direction: column; }
 }
 
 #map-source { font-size: .86rem; }
 #map-feedback { min-height: 1rem; margin: 0 0 .6rem; font-size: .9rem; }
 
 .leaflet-map { min-height: 720px; width: 100%; border-radius: 12px; border: 1px solid #ccdbf4; }
+.map-panel--high-contrast .leaflet-map { border-width: 2px; border-color: #10284f; }
+.map-panel--high-contrast .map-summary article { background: #fff; border-color: #163a87; }
+.map-panel--high-contrast .map-summary strong,
+.map-panel--high-contrast h3,
+.map-panel--high-contrast h4 { color: #0d295e; }
 
 .pcs-crisis-marker {
   display: grid;
