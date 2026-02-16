@@ -488,21 +488,47 @@ function renderHomeMeteoSituation(situations = []) {
 function renderGeorisquesDetails(georisques = {}) {
   const monitored = georisques.monitored_communes || georisques.monitored_municipalities || georisques.communes || [];
   const errorDetails = Array.isArray(georisques.errors) ? georisques.errors.filter(Boolean) : [];
+  const movementTypes = georisques.movement_types && typeof georisques.movement_types === 'object' ? georisques.movement_types : {};
+  const recentMovements = Array.isArray(georisques.recent_ground_movements) ? georisques.recent_ground_movements : [];
+
   setText('georisques-page-status', georisques.status || 'inconnu');
   setText('georisques-page-seismic', georisques.highest_seismic_zone_label || 'inconnue');
   setText('georisques-page-flood-docs', String(georisques.flood_documents_total ?? 0));
+  setText('georisques-page-ppr-total', String(georisques.ppr_total ?? 0));
+  setText('georisques-page-ground-movements', String(georisques.ground_movements_total ?? 0));
+  setText('georisques-page-radon-alert', String(georisques.communes_with_radon_moderate_or_high ?? 0));
+
   const sourceText = `Source: ${georisques.source || 'inconnue'} · Dernière mise à jour: ${georisques.updated_at ? new Date(georisques.updated_at).toLocaleString() : 'inconnue'}`;
   const errorsText = errorDetails.length ? ` · Anomalies: ${errorDetails.join(' | ')}` : '';
   setText('georisques-page-source', `${sourceText}${errorsText}`);
   setText('georisques-page-debug', monitored.length ? '' : `Aucune commune détaillée reçue (clés: ${Object.keys(georisques || {}).join(', ') || 'aucune'}).`);
 
+  const movementTypesMarkup = Object.entries(movementTypes)
+    .sort((a, b) => Number(b[1]) - Number(a[1]))
+    .map(([type, count]) => `<li><strong>${escapeHtml(type)}</strong> · ${Number(count || 0)} signalement(s)</li>`)
+    .join('') || '<li>Aucune répartition disponible.</li>';
+  setHtml('georisques-movement-types-list', movementTypesMarkup);
+
+  const recentMovementsMarkup = recentMovements.map((event) => {
+    const dateText = event.date ? new Date(event.date).toLocaleDateString() : 'Date inconnue';
+    const reliability = event.reliability ? ` · Fiabilité: ${escapeHtml(String(event.reliability))}` : '';
+    const identifier = event.identifier ? ` · ID: ${escapeHtml(String(event.identifier))}` : '';
+    const location = event.location ? `<br>Lieu: ${escapeHtml(String(event.location))}` : '';
+    return `<li><strong>${escapeHtml(event.commune || 'Commune inconnue')}</strong> · ${escapeHtml(event.type || 'Mouvement de terrain')} · ${dateText}${reliability}${identifier}${location}</li>`;
+  }).join('') || '<li>Aucun mouvement de terrain récent exploitable.</li>';
+  setHtml('georisques-recent-movements-list', recentMovementsMarkup);
+
   const markup = monitored.map((commune) => {
     const docs = Array.isArray(commune.flood_documents_details) ? commune.flood_documents_details : [];
+    const pprByRisk = commune.ppr_by_risk && typeof commune.ppr_by_risk === 'object' ? commune.ppr_by_risk : {};
+    const pprText = Object.entries(pprByRisk).map(([risk, count]) => `${escapeHtml(risk)} (${Number(count || 0)})`).join(', ') || 'Aucun PPR détaillé';
+    const communeErrors = Array.isArray(commune.errors) ? commune.errors.filter(Boolean) : [];
+
     const docsMarkup = docs.length
       ? `<ul class="list compact">${docs.slice(0, 6).map((doc) => `<li><strong>${escapeHtml(doc.title || doc.libelle_azi || 'Document inondation')}</strong>${doc.code ? ` (${escapeHtml(doc.code)})` : ''}${doc.river_basin ? ` · Bassin: ${escapeHtml(doc.river_basin)}` : ''}${doc.published_at ? ` · Diffusion: ${escapeHtml(doc.published_at)}` : ''}</li>`).join('')}</ul>`
       : '<span class="muted">Aucun détail de document remonté.</span>';
 
-    return `<li><strong>${escapeHtml(commune.name || commune.commune || 'Commune inconnue')}</strong> (${escapeHtml(commune.code_insee || commune.insee || '-')}) · Sismicité: <strong>${escapeHtml(commune.seismic_zone || commune.zone_sismicite || 'inconnue')}</strong> · Documents inondation: <strong>${Number(commune.flood_documents || commune.nb_documents || 0)}</strong><br>${docsMarkup}</li>`;
+    return `<li><strong>${escapeHtml(commune.name || commune.commune || 'Commune inconnue')}</strong> (${escapeHtml(commune.code_insee || commune.insee || '-')})<br>Sismicité: <strong>${escapeHtml(commune.seismic_zone || commune.zone_sismicite || 'inconnue')}</strong> · Radon: <strong>${escapeHtml(commune.radon_label || 'inconnu')}</strong><br>Inondation (AZI): <strong>${Number(commune.flood_documents || commune.nb_documents || 0)}</strong> · PPR: <strong>${Number(commune.ppr_total || 0)}</strong> · Mouvements: <strong>${Number(commune.ground_movements_total || 0)}</strong> · Cavités: <strong>${Number(commune.cavities_total || 0)}</strong><br>PPR par risque: ${pprText}${communeErrors.length ? `<br><span class="muted">Anomalies commune: ${escapeHtml(communeErrors.join(' | '))}</span>` : ''}<br>${docsMarkup}</li>`;
   }).join('') || '<li>Aucune commune remontée par Géorisques.</li>';
   setHtml('georisques-communes-list', markup);
 
@@ -517,6 +543,7 @@ function renderGeorisquesDetails(georisques = {}) {
   `)).join('') || '<li>Aucun document Géorisques associé affichable.</li>';
   setHtml('georisques-documents-list', docsListMarkup);
 }
+
 
 function openMunicipalityEditor(municipality) {
   const panel = document.getElementById('municipality-editor');
@@ -695,7 +722,7 @@ async function loadExternalRisks() {
   setText('itinisere-status', `${itinisere.status || 'inconnu'} · ${(itinisere.events || []).length} événements`);
   renderBisonFuteSummary(bisonFute);
   setRiskText('georisques-status', `${georisques.status || 'inconnu'} · sismicité ${georisques.highest_seismic_zone_label || 'inconnue'}`, georisques.status === 'online' ? 'vert' : 'jaune');
-  setText('georisques-info', `${georisques.flood_documents_total ?? 0} document(s) inondation suivis`);
+  setText('georisques-info', `${georisques.flood_documents_total ?? 0} AZI · ${georisques.ppr_total ?? 0} PPR · ${georisques.ground_movements_total ?? 0} mouvements`);
   renderGeorisquesDetails(georisques);
   renderCriticalRisks(meteo);
   renderMeteoAlerts(meteo);
