@@ -38,6 +38,7 @@ let customPoints = [];
 let mapAddPointMode = false;
 let cachedStations = [];
 let cachedMunicipalities = [];
+let cachedMunicipalityRecords = [];
 let geocodeCache = new Map();
 
 const homeView = document.getElementById('home-view');
@@ -393,7 +394,7 @@ function renderHomeMeteoSituation(situations = []) {
 }
 
 function renderGeorisquesDetails(georisques = {}) {
-  const monitored = georisques.monitored_communes || [];
+  const monitored = georisques.monitored_communes || georisques.monitored_municipalities || georisques.communes || [];
   const errorDetails = Array.isArray(georisques.errors) ? georisques.errors.filter(Boolean) : [];
   setText('georisques-page-status', georisques.status || 'inconnu');
   setText('georisques-page-seismic', georisques.highest_seismic_zone_label || 'inconnue');
@@ -401,11 +402,38 @@ function renderGeorisquesDetails(georisques = {}) {
   const sourceText = `Source: ${georisques.source || 'inconnue'} · Dernière mise à jour: ${georisques.updated_at ? new Date(georisques.updated_at).toLocaleString() : 'inconnue'}`;
   const errorsText = errorDetails.length ? ` · Anomalies: ${errorDetails.join(' | ')}` : '';
   setText('georisques-page-source', `${sourceText}${errorsText}`);
+  setText('georisques-page-debug', monitored.length ? '' : `Aucune commune détaillée reçue (clés: ${Object.keys(georisques || {}).join(', ') || 'aucune'}).`);
 
   const markup = monitored.map((commune) => (
-    `<li><strong>${escapeHtml(commune.name || 'Commune inconnue')}</strong> (${escapeHtml(commune.code_insee || '-')}) · Sismicité: <strong>${escapeHtml(commune.seismic_zone || 'inconnue')}</strong> · Documents inondation: <strong>${Number(commune.flood_documents || 0)}</strong></li>`
+    `<li><strong>${escapeHtml(commune.name || commune.commune || 'Commune inconnue')}</strong> (${escapeHtml(commune.code_insee || commune.insee || '-')}) · Sismicité: <strong>${escapeHtml(commune.seismic_zone || commune.zone_sismicite || 'inconnue')}</strong> · Documents inondation: <strong>${Number(commune.flood_documents || commune.nb_documents || 0)}</strong></li>`
   )).join('') || '<li>Aucune commune remontée par Géorisques.</li>';
   setHtml('georisques-communes-list', markup);
+}
+
+function openMunicipalityEditor(municipality) {
+  const panel = document.getElementById('municipality-editor');
+  const form = document.getElementById('municipality-edit-form');
+  if (!panel || !form || !municipality) return;
+  form.elements.id.value = municipality.id;
+  form.elements.manager.value = municipality.manager || '';
+  form.elements.phone.value = municipality.phone || '';
+  form.elements.email.value = municipality.email || '';
+  form.elements.postal_code.value = municipality.postal_code || '';
+  form.elements.contacts.value = municipality.contacts || '';
+  form.elements.additional_info.value = municipality.additional_info || '';
+  form.elements.population.value = municipality.population ?? '';
+  form.elements.shelter_capacity.value = municipality.shelter_capacity ?? '';
+  form.elements.radio_channel.value = municipality.radio_channel || '';
+  form.elements.vigilance_color.value = normalizeLevel(municipality.vigilance_color || 'vert');
+  form.elements.pcs_active.checked = Boolean(municipality.pcs_active);
+  setText('municipality-editor-title', `Éditer ${municipality.name}`);
+  setVisibility(panel, true);
+}
+
+function closeMunicipalityEditor() {
+  const panel = document.getElementById('municipality-editor');
+  if (!panel) return;
+  setVisibility(panel, false);
 }
 
 function renderCriticalRisks(meteo = {}) {
@@ -435,7 +463,10 @@ async function loadExternalRisks() {
   const vigicrues = data?.vigicrues || {};
   const itinisere = data?.itinisere || {};
   const bisonFute = data?.bison_fute || {};
-  const georisques = data?.georisques || {};
+  const georisquesPayload = data?.georisques || {};
+  const georisques = georisquesPayload?.data && typeof georisquesPayload.data === 'object'
+    ? { ...georisquesPayload.data, ...georisquesPayload }
+    : georisquesPayload;
 
   setRiskText('meteo-status', `${meteo.status || 'inconnu'} · niveau ${normalizeLevel(meteo.level || 'inconnu')}`, meteo.level || 'vert');
   setText('meteo-info', meteo.info_state || meteo.bulletin_title || '');
@@ -506,6 +537,7 @@ async function loadApiInterconnections() {
 
 async function loadMunicipalities() {
   const municipalities = await api('/municipalities');
+  cachedMunicipalityRecords = municipalities;
   document.getElementById('municipalities-list').innerHTML = municipalities.map((m) => {
     const dangerColor = levelColor(m.vigilance_color || 'vert');
     const docs = [];
@@ -513,23 +545,31 @@ async function loadMunicipalities() {
     if (m.convention_file) docs.push('Convention');
     const actions = canEdit()
       ? `<div class="municipality-actions">
-           <button type="button" class="ghost inline-action" data-muni-view="${m.id}">Voir fiche</button>
-           <button type="button" class="ghost inline-action" data-muni-edit="${m.id}">Modifier</button>
+           <button type="button" class="ghost inline-action" data-muni-view="${m.id}">Détail</button>
+           <button type="button" class="ghost inline-action" data-muni-edit="${m.id}">Éditer</button>
            <button type="button" class="ghost inline-action" data-muni-crisis="${m.id}">${m.crisis_mode ? 'Sortir de crise' : 'Passer en crise'}</button>
-           <button type="button" class="ghost inline-action" data-muni-docs="${m.id}">Ajouter documents/photos/plans</button>
+           <button type="button" class="ghost inline-action" data-muni-docs="${m.id}">Documents</button>
            <button type="button" class="ghost inline-action danger" data-muni-delete="${m.id}">Supprimer</button>
          </div>`
-      : `<div class="municipality-actions"><button type="button" class="ghost inline-action" data-muni-view="${m.id}">Voir fiche</button></div>`;
-    return `<li>
-      <strong>${m.name}</strong> · ${m.postal_code || 'CP ?'} · ${m.manager} · ${m.phone}
-      <br><span style="color:${dangerColor}">Statut: ${m.crisis_mode ? 'CRISE' : 'veille'} · Vigilance ${normalizeLevel(m.vigilance_color || 'vert')}</span>
-      <br>Contacts: ${escapeHtml(m.contacts || 'Non renseignés')}
-      <br>Infos: ${escapeHtml(m.additional_info || 'Aucune')}
-      <br>Population: ${m.population ?? '-'} · Capacité accueil: ${m.shelter_capacity ?? '-'} · Canal radio: ${escapeHtml(m.radio_channel || '-')}
-      <br>Documents: ${docs.join(', ') || 'Aucun document ajouté'}
+      : `<div class="municipality-actions"><button type="button" class="ghost inline-action" data-muni-view="${m.id}">Détail</button></div>`;
+    return `<article class="municipality-card">
+      <header>
+        <h4>${escapeHtml(m.name)}</h4>
+        <span class="badge ${normalizeLevel(m.vigilance_color || 'vert') === 'rouge' ? 'red' : normalizeLevel(m.vigilance_color || 'vert') === 'orange' ? 'orange' : normalizeLevel(m.vigilance_color || 'vert') === 'jaune' ? 'yellow' : 'green'}">${normalizeLevel(m.vigilance_color || 'vert')}</span>
+      </header>
+      <p><strong>${escapeHtml(m.manager)}</strong> · ${escapeHtml(m.phone)} · ${escapeHtml(m.email)}</p>
+      <p style="color:${dangerColor}">Statut: ${m.crisis_mode ? 'CRISE' : 'veille'} · PCS ${m.pcs_active ? 'actif' : 'inactif'} · ${m.postal_code || 'CP ?'}</p>
+      <div class="municipality-stats">
+        <p>Population<br><strong>${m.population ?? '-'}</strong></p>
+        <p>Accueil<br><strong>${m.shelter_capacity ?? '-'}</strong></p>
+        <p>Radio<br><strong>${escapeHtml(m.radio_channel || '-')}</strong></p>
+        <p>Contacts<br><strong>${escapeHtml(m.contacts || '-')}</strong></p>
+      </div>
+      <p class="municipality-docs">Documents: ${docs.join(', ') || 'Aucun'}</p>
+      <p class="muted">${escapeHtml(m.additional_info || 'Aucune information complémentaire')}</p>
       ${actions}
-    </li>`;
-  }).join('') || '<li>Aucune commune.</li>';
+    </article>`;
+  }).join('') || '<p class="muted">Aucune commune.</p>';
   await renderMunicipalitiesOnMap(municipalities);
 }
 
@@ -714,25 +754,13 @@ function bindAppInteractions() {
     const deleteButton = event.target.closest('[data-muni-delete]');
     if (!viewButton && !editButton && !crisisButton && !docsButton && !deleteButton) return;
     try {
-      const municipalities = await api('/municipalities');
-      const getMunicipality = (id) => municipalities.find((m) => String(m.id) === String(id));
+      const getMunicipality = (id) => cachedMunicipalityRecords.find((m) => String(m.id) === String(id));
 
       if (viewButton) {
         const municipality = getMunicipality(viewButton.getAttribute('data-muni-view'));
         if (!municipality) return;
-        window.alert(`Fiche commune: ${municipality.name}
-
-Responsable: ${municipality.manager}
-Téléphone: ${municipality.phone}
-Email: ${municipality.email}
-Code postal: ${municipality.postal_code || '-'}
-Contacts: ${municipality.contacts || '-'}
-Infos: ${municipality.additional_info || '-'}
-Population: ${municipality.population ?? '-'}
-Capacité accueil: ${municipality.shelter_capacity ?? '-'}
-Canal radio: ${municipality.radio_channel || '-'}
-Crise: ${municipality.crisis_mode ? 'Oui' : 'Non'}
-Documents: ${municipality.orsec_plan_file ? 'Plan ORSEC ' : ''}${municipality.convention_file ? 'Convention' : ''}`);
+        document.getElementById('municipality-feedback').textContent = `Commune ${municipality.name}: ${municipality.crisis_mode ? 'en crise' : 'en veille'} · vigilance ${normalizeLevel(municipality.vigilance_color)}.`;
+        openMunicipalityEditor(municipality);
         return;
       }
 
@@ -740,26 +768,15 @@ Documents: ${municipality.orsec_plan_file ? 'Plan ORSEC ' : ''}${municipality.co
         const municipalityId = editButton.getAttribute('data-muni-edit');
         const municipality = getMunicipality(municipalityId);
         if (!municipality) return;
-        const payload = {
-          manager: window.prompt(`Responsable (${municipality.name})`, municipality.manager) ?? municipality.manager,
-          phone: window.prompt(`Téléphone (${municipality.name})`, municipality.phone) ?? municipality.phone,
-          email: window.prompt(`Email (${municipality.name})`, municipality.email) ?? municipality.email,
-          postal_code: window.prompt(`Code postal (${municipality.name})`, municipality.postal_code || '') ?? municipality.postal_code,
-          contacts: window.prompt(`Contacts d'astreinte (${municipality.name})`, municipality.contacts || '') ?? municipality.contacts,
-          additional_info: window.prompt(`Infos complémentaires (${municipality.name})`, municipality.additional_info || '') ?? municipality.additional_info,
-          population: Number(window.prompt(`Population (${municipality.name})`, municipality.population ?? '') || 0) || null,
-          shelter_capacity: Number(window.prompt(`Capacité d'accueil (${municipality.name})`, municipality.shelter_capacity ?? '') || 0) || null,
-          radio_channel: window.prompt(`Canal radio (${municipality.name})`, municipality.radio_channel || '') ?? municipality.radio_channel,
-        };
-        await api(`/municipalities/${municipalityId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
+        openMunicipalityEditor(municipality);
+        return;
       }
 
       if (crisisButton) {
-        await api(`/municipalities/${crisisButton.getAttribute('data-muni-crisis')}/crisis`, { method: 'POST' });
+        const municipalityId = crisisButton.getAttribute('data-muni-crisis');
+        const result = await api(`/municipalities/${municipalityId}/crisis`, { method: 'POST' });
+        const municipality = getMunicipality(municipalityId);
+        document.getElementById('municipality-feedback').textContent = `${municipality?.name || 'Commune'}: ${result.crisis_mode ? 'mode crise activé' : 'retour en veille'}.`;
       }
 
       if (docsButton) {
@@ -775,6 +792,8 @@ Documents: ${municipality.orsec_plan_file ? 'Plan ORSEC ' : ''}${municipality.co
           if (files[0]) formData.append('orsec_plan', files[0]);
           if (files[1]) formData.append('convention', files[1]);
           await api(`/municipalities/${municipalityId}/documents`, { method: 'POST', body: formData });
+          const municipality = getMunicipality(municipalityId);
+          document.getElementById('municipality-feedback').textContent = `Documents mis à jour pour ${municipality?.name || 'la commune'}.`;
           await loadMunicipalities();
         };
         picker.click();
@@ -787,6 +806,7 @@ Documents: ${municipality.orsec_plan_file ? 'Plan ORSEC ' : ''}${municipality.co
         const confirmed = window.confirm(`Supprimer définitivement la commune ${municipality?.name || municipalityId} ?`);
         if (!confirmed) return;
         await api(`/municipalities/${municipalityId}`, { method: 'DELETE' });
+        document.getElementById('municipality-feedback').textContent = `Commune ${municipality?.name || municipalityId} supprimée.`;
       }
 
       await loadMunicipalities();
@@ -795,6 +815,38 @@ Documents: ${municipality.orsec_plan_file ? 'Plan ORSEC ' : ''}${municipality.co
     }
   });
   document.getElementById('user-create-role')?.addEventListener('change', syncUserCreateMunicipalityVisibility);
+  document.getElementById('municipality-editor-close')?.addEventListener('click', closeMunicipalityEditor);
+  document.getElementById('municipality-edit-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!canEdit()) return;
+    const form = event.target;
+    const municipalityId = form.elements.id.value;
+    const payload = {
+      manager: form.elements.manager.value.trim(),
+      phone: form.elements.phone.value.trim(),
+      email: form.elements.email.value.trim(),
+      postal_code: form.elements.postal_code.value.trim() || null,
+      contacts: form.elements.contacts.value.trim() || null,
+      additional_info: form.elements.additional_info.value.trim() || null,
+      population: Number(form.elements.population.value || 0) || null,
+      shelter_capacity: Number(form.elements.shelter_capacity.value || 0) || null,
+      radio_channel: form.elements.radio_channel.value.trim() || null,
+      vigilance_color: normalizeLevel(form.elements.vigilance_color.value || 'vert'),
+      pcs_active: Boolean(form.elements.pcs_active.checked),
+    };
+    try {
+      await api(`/municipalities/${municipalityId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      document.getElementById('municipality-feedback').textContent = 'Fiche commune enregistrée.';
+      closeMunicipalityEditor();
+      await loadMunicipalities();
+    } catch (error) {
+      document.getElementById('municipality-feedback').textContent = sanitizeErrorMessage(error.message);
+    }
+  });
   syncUserCreateMunicipalityVisibility();
   document.getElementById('users-table')?.addEventListener('click', handleUsersTableAction);
   document.getElementById('user-create-form')?.addEventListener('submit', async (event) => {
@@ -961,6 +1013,7 @@ document.getElementById('municipality-form').addEventListener('submit', async (e
     });
     event.target.reset();
     if (errorTarget) errorTarget.textContent = '';
+    document.getElementById('municipality-feedback').textContent = 'Commune créée avec succès. Vous pouvez maintenant lancer des actions depuis la fiche.';
     await loadMunicipalities();
   } catch (error) {
     if (errorTarget) errorTarget.textContent = sanitizeErrorMessage(error.message);

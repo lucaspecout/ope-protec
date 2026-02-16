@@ -206,6 +206,7 @@
             <article class="tile"><h3>Documents inondation</h3><p id="georisques-page-flood-docs">0</p></article>
           </div>
           <p id="georisques-page-source" class="muted">Source: -</p>
+          <p id="georisques-page-debug" class="muted"></p>
           <h4>Communes suivies</h4>
           <ul id="georisques-communes-list" class="list"></ul>
         </section>
@@ -227,6 +228,7 @@
 
         <section id="municipalities-panel" class="panel view hidden" hidden>
           <h3>Communes & fiches pratiques</h3>
+          <p class="muted">Créez vos communes PCS, puis utilisez les actions rapides pour basculer en crise, enrichir la fiche et joindre des documents.</p>
           <form id="municipality-form" class="form" data-requires-edit>
             <input name="name" placeholder="Nom commune" required />
             <input name="manager" placeholder="Responsable" required />
@@ -240,7 +242,37 @@
             <input name="radio_channel" placeholder="Canal radio / fréquence" />
             <button type="submit">Ajouter</button>
           </form>
-          <ul id="municipalities-list" class="list"></ul>
+          <p id="municipality-feedback" class="muted"></p>
+          <div id="municipalities-list" class="municipality-grid"></div>
+
+          <aside id="municipality-editor" class="municipality-editor hidden" hidden>
+            <div class="municipality-editor__head">
+              <h4 id="municipality-editor-title">Fiche commune</h4>
+              <button type="button" id="municipality-editor-close" class="ghost">Fermer</button>
+            </div>
+            <form id="municipality-edit-form" class="municipality-edit-form">
+              <input type="hidden" name="id" />
+              <label>Responsable<input name="manager" required /></label>
+              <label>Téléphone<input name="phone" required /></label>
+              <label>Email<input name="email" type="email" required /></label>
+              <label>Code postal<input name="postal_code" maxlength="5" pattern="[0-9]{5}" /></label>
+              <label>Contacts d'astreinte<textarea name="contacts" rows="2"></textarea></label>
+              <label>Informations complémentaires<textarea name="additional_info" rows="3"></textarea></label>
+              <label>Population<input name="population" type="number" min="0" /></label>
+              <label>Capacité d'accueil<input name="shelter_capacity" type="number" min="0" /></label>
+              <label>Canal radio<input name="radio_channel" /></label>
+              <label>Vigilance
+                <select name="vigilance_color">
+                  <option value="vert">Vert</option>
+                  <option value="jaune">Jaune</option>
+                  <option value="orange">Orange</option>
+                  <option value="rouge">Rouge</option>
+                </select>
+              </label>
+              <label><input name="pcs_active" type="checkbox" /> PCS actif</label>
+              <button type="submit">Enregistrer la fiche</button>
+            </form>
+          </aside>
         </section>
 
         <section id="logs-panel" class="panel view hidden" hidden>
