@@ -236,7 +236,11 @@ label { display: block; margin-bottom: .8rem; }
 .map-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: .8rem; align-items: start; margin-bottom: .8rem; position: relative; }
 .map-canvas-wrap { position: relative; }
 .map-controls {
-  border: 1px solid #d5e2fb;
+  position: absolute;
+  top: .65rem;
+  right: .65rem;
+  z-index: 9;
+  border: 1px solid #c8dbff;
   border-radius: 12px;
   background: linear-gradient(180deg, #fff, #f7faff);
   padding: .55rem;

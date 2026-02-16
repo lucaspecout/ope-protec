@@ -215,6 +215,10 @@ function applyBasemap(style = 'osm') {
       url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
       options: { maxZoom: 17, attribution: '&copy; OpenTopoMap contributors' },
     },
+    satellite: {
+      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      options: { maxZoom: 19, attribution: 'Tiles &copy; Esri' },
+    },
     light: {
       url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
       options: { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors &copy; CARTO' },
