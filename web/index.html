@@ -233,6 +233,11 @@
             <input name="phone" placeholder="Téléphone" required />
             <input name="email" placeholder="Email" type="email" required />
             <input name="postal_code" placeholder="Code postal" pattern="[0-9]{5}" maxlength="5" required />
+            <input name="contacts" placeholder="Contacts d'astreinte (tel, mails)" />
+            <input name="additional_info" placeholder="Infos complémentaires (zones sensibles, écoles...)" />
+            <input name="population" type="number" placeholder="Population" min="0" />
+            <input name="shelter_capacity" type="number" placeholder="Capacité d'accueil" min="0" />
+            <input name="radio_channel" placeholder="Canal radio / fréquence" />
             <button type="submit">Ajouter</button>
           </form>
           <ul id="municipalities-list" class="list"></ul>
@@ -243,6 +248,18 @@
           <form id="log-form" class="form" data-requires-edit>
             <input name="event_type" placeholder="Type d'évènement" required />
             <input name="description" placeholder="Description opérationnelle" required />
+            <select name="danger_level">
+              <option value="vert">🟢 Vert</option>
+              <option value="jaune">🟡 Jaune</option>
+              <option value="orange">🟠 Orange</option>
+              <option value="rouge">🔴 Rouge</option>
+            </select>
+            <select name="danger_emoji">
+              <option value="🟢">🟢 Stable</option>
+              <option value="🟡">🟡 À surveiller</option>
+              <option value="🟠">🟠 Tension</option>
+              <option value="🔴">🔴 Critique</option>
+            </select>
             <button type="submit">Ajouter</button>
           </form>
           <ul id="logs-list" class="list"></ul>

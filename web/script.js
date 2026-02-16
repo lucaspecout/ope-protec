@@ -29,6 +29,7 @@ let homeLiveTimer = null;
 let leafletMap = null;
 let boundaryLayer = null;
 let hydroLayer = null;
+let hydroLineLayer = null;
 let pcsLayer = null;
 let resourceLayer = null;
 let searchLayer = null;
@@ -137,6 +138,7 @@ function initMap() {
   leafletMap = window.L.map('isere-map-leaflet', { zoomControl: true }).setView([45.2, 5.72], 9);
   window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '&copy; OpenStreetMap contributors' }).addTo(leafletMap);
   hydroLayer = window.L.layerGroup().addTo(leafletMap);
+  hydroLineLayer = window.L.layerGroup().addTo(leafletMap);
   pcsLayer = window.L.layerGroup().addTo(leafletMap);
   resourceLayer = window.L.layerGroup().addTo(leafletMap);
   searchLayer = window.L.layerGroup().addTo(leafletMap);
@@ -155,7 +157,7 @@ function setMapFeedback(message = '', isError = false) {
 
 function fitMapToData() {
   if (!leafletMap) return;
-  const layers = [boundaryLayer, hydroLayer, pcsLayer, resourceLayer, searchLayer, customPointsLayer].filter(Boolean);
+  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsLayer, resourceLayer, searchLayer, customPointsLayer].filter(Boolean);
   const bounds = window.L.latLngBounds([]);
   layers.forEach((layer) => {
     if (layer?.getBounds) {
@@ -180,19 +182,38 @@ async function loadIsereBoundary() {
 function renderStations(stations = []) {
   cachedStations = stations;
   const visible = document.getElementById('filter-hydro')?.checked ?? true;
-  document.getElementById('hydro-stations-list').innerHTML = stations.slice(0, 12).map((s) => `<li><strong>${s.station || s.code}</strong> · ${s.river || ''} · <span style="color:${levelColor(s.level)}">${normalizeLevel(s.level)}</span> · ${s.height_m} m</li>`).join('') || '<li>Aucune station.</li>';
-  if (!hydroLayer) return;
+  document.getElementById('hydro-stations-list').innerHTML = stations.slice(0, 40).map((s) => `<li><strong>${s.station || s.code}</strong> · ${s.river || ''} · <span style="color:${levelColor(s.level)}">${normalizeLevel(s.level)}</span> · ${s.height_m} m</li>`).join('') || '<li>Aucune station.</li>';
+  if (!hydroLayer || !hydroLineLayer) return;
   hydroLayer.clearLayers();
+  hydroLineLayer.clearLayers();
   if (!visible) return;
-  stations.forEach((s) => {
-    if (s.lat == null || s.lon == null) return;
+
+  const stationsWithPoints = stations.filter((s) => s.lat != null && s.lon != null);
+  stationsWithPoints.forEach((s) => {
     window.L.circleMarker([s.lat, s.lon], { radius: 7, color: '#fff', weight: 1.5, fillColor: levelColor(s.level), fillOpacity: 0.95 })
       .bindPopup(`<strong>${s.station || s.code}</strong><br>${s.river || ''}<br>Niveau: ${normalizeLevel(s.level)}<br>Hauteur: ${s.height_m} m`)
       .addTo(hydroLayer);
   });
+
+  const byRiver = new Map();
+  stationsWithPoints.forEach((s) => {
+    const key = s.river || s.station || 'Isère';
+    if (!byRiver.has(key)) byRiver.set(key, []);
+    byRiver.get(key).push(s);
+  });
+  byRiver.forEach((group) => {
+    if (group.length < 2) return;
+    const sorted = group.slice().sort((a, b) => String(a.station || '').localeCompare(String(b.station || '')));
+    const maxLevel = sorted.some((s) => normalizeLevel(s.level) === 'rouge') ? 'rouge'
+      : sorted.some((s) => normalizeLevel(s.level) === 'orange') ? 'orange'
+      : sorted.some((s) => normalizeLevel(s.level) === 'jaune') ? 'jaune' : 'vert';
+    window.L.polyline(sorted.map((s) => [s.lat, s.lon]), { color: levelColor(maxLevel), weight: 4, opacity: 0.75 })
+      .bindPopup(`Cours d'eau: ${escapeHtml(sorted[0].river || sorted[0].station || 'Isère')} · Niveau max: ${maxLevel}`)
+      .addTo(hydroLineLayer);
+  });
+
   setMapFeedback(`${stations.length} station(s) Vigicrues chargée(s).`);
 }
-
 
 async function geocodeMunicipality(municipality) {
   const key = `${municipality.name}|${municipality.postal_code || ''}`;
@@ -265,6 +286,15 @@ async function handleMapSearch() {
 }
 
 
+
+
+function setRiskText(id, value, level = null) {
+  const node = document.getElementById(id);
+  if (!node) return;
+  const normalized = normalizeLevel(level || value);
+  node.textContent = value;
+  node.style.color = levelColor(normalized);
+}
 
 function setText(id, value) {
   const node = document.getElementById(id);
@@ -391,12 +421,12 @@ function renderCriticalRisks(meteo = {}) {
 
 async function loadDashboard() {
   const dashboard = await api('/dashboard');
-  document.getElementById('vigilance').textContent = normalizeLevel(dashboard.vigilance);
-  document.getElementById('crues').textContent = normalizeLevel(dashboard.crues);
-  document.getElementById('risk').textContent = normalizeLevel(dashboard.global_risk);
+  setRiskText('vigilance', normalizeLevel(dashboard.vigilance), dashboard.vigilance);
+  setRiskText('crues', normalizeLevel(dashboard.crues), dashboard.crues);
+  setRiskText('risk', normalizeLevel(dashboard.global_risk), dashboard.global_risk);
   document.getElementById('risk').className = normalizeLevel(dashboard.global_risk);
   document.getElementById('crisis').textContent = String(dashboard.communes_crise || 0);
-  document.getElementById('latest-logs').innerHTML = (dashboard.latest_logs || []).map((l) => `<li><strong>${l.event_type}</strong> · ${l.description}</li>`).join('') || '<li>Aucun événement récent.</li>';
+  document.getElementById('latest-logs').innerHTML = (dashboard.latest_logs || []).map((l) => `<li>${l.danger_emoji || ''} <strong style="color:${levelColor(l.danger_level)}">${l.event_type}</strong> · ${l.description}</li>`).join('') || '<li>Aucun événement récent.</li>';
 }
 
 async function loadExternalRisks() {
@@ -407,14 +437,14 @@ async function loadExternalRisks() {
   const bisonFute = data?.bison_fute || {};
   const georisques = data?.georisques || {};
 
-  setText('meteo-status', `${meteo.status || 'inconnu'} · niveau ${normalizeLevel(meteo.level || 'inconnu')}`);
+  setRiskText('meteo-status', `${meteo.status || 'inconnu'} · niveau ${normalizeLevel(meteo.level || 'inconnu')}`, meteo.level || 'vert');
   setText('meteo-info', meteo.info_state || meteo.bulletin_title || '');
-  setText('vigicrues-status', `${vigicrues.status || 'inconnu'} · niveau ${normalizeLevel(vigicrues.water_alert_level || 'inconnu')}`);
+  setRiskText('vigicrues-status', `${vigicrues.status || 'inconnu'} · niveau ${normalizeLevel(vigicrues.water_alert_level || 'inconnu')}`, vigicrues.water_alert_level || 'vert');
   setText('vigicrues-info', `${(vigicrues.stations || []).length} station(s) suivie(s)`);
   setHtml('stations-list', (vigicrues.stations || []).slice(0, 10).map((s) => `<li>${s.station || s.code} · ${s.river || ''} · ${normalizeLevel(s.level)} · ${s.height_m} m</li>`).join('') || '<li>Aucune station disponible.</li>');
   setText('itinisere-status', `${itinisere.status || 'inconnu'} · ${(itinisere.events || []).length} événements`);
   renderBisonFuteSummary(bisonFute);
-  setText('georisques-status', `${georisques.status || 'inconnu'} · sismicité ${georisques.highest_seismic_zone_label || 'inconnue'}`);
+  setRiskText('georisques-status', `${georisques.status || 'inconnu'} · sismicité ${georisques.highest_seismic_zone_label || 'inconnue'}`, georisques.status === 'online' ? 'vert' : 'jaune');
   setText('georisques-info', `${georisques.flood_documents_total ?? 0} document(s) inondation suivis`);
   renderGeorisquesDetails(georisques);
   renderCriticalRisks(meteo);
@@ -430,8 +460,8 @@ async function loadExternalRisks() {
 
 async function loadSupervision() {
   const data = await api('/supervision/overview');
-  document.getElementById('supervision-meteo').textContent = `${data.alerts.meteo.status} · ${normalizeLevel(data.alerts.meteo.level || 'inconnu')}`;
-  document.getElementById('supervision-vigicrues').textContent = `${data.alerts.vigicrues.status} · ${normalizeLevel(data.alerts.vigicrues.water_alert_level || 'inconnu')}`;
+  setRiskText('supervision-meteo', `${data.alerts.meteo.status} · ${normalizeLevel(data.alerts.meteo.level || 'inconnu')}`, data.alerts.meteo.level || 'vert');
+  setRiskText('supervision-vigicrues', `${data.alerts.vigicrues.status} · ${normalizeLevel(data.alerts.vigicrues.water_alert_level || 'inconnu')}`, data.alerts.vigicrues.water_alert_level || 'vert');
   document.getElementById('supervision-itinisere').textContent = `${data.alerts.itinisere.status} · ${data.alerts.itinisere.events.length} alertes`;
   document.getElementById('supervision-bison').textContent = `${data.alerts.bison_fute.status} · Isère départ ${data.alerts.bison_fute.today?.isere?.departure || 'inconnu'}`;
   document.getElementById('supervision-georisques').textContent = `${data.alerts.georisques.status} · ${data.alerts.georisques.highest_seismic_zone_label || 'inconnue'}`;
@@ -476,13 +506,27 @@ async function loadApiInterconnections() {
 
 async function loadMunicipalities() {
   const municipalities = await api('/municipalities');
-  document.getElementById('municipalities-list').innerHTML = municipalities.map((m) => `<li><strong>${m.name}</strong> · ${m.postal_code || 'CP ?'} · ${m.manager} · ${m.phone} · ${m.crisis_mode ? 'CRISE' : 'veille'} </li>`).join('') || '<li>Aucune commune.</li>';
+  document.getElementById('municipalities-list').innerHTML = municipalities.map((m) => {
+    const dangerColor = levelColor(m.vigilance_color || 'vert');
+    const actions = canEdit()
+      ? `<button type="button" class="ghost inline-action" data-muni-crisis="${m.id}">${m.crisis_mode ? 'Sortir de crise' : 'Passer en crise'}</button>
+         <button type="button" class="ghost inline-action" data-muni-docs="${m.id}">Ajouter documents</button>`
+      : '';
+    return `<li>
+      <strong>${m.name}</strong> · ${m.postal_code || 'CP ?'} · ${m.manager} · ${m.phone}
+      <br><span style="color:${dangerColor}">Statut: ${m.crisis_mode ? 'CRISE' : 'veille'} · Vigilance ${normalizeLevel(m.vigilance_color || 'vert')}</span>
+      <br>Contacts: ${escapeHtml(m.contacts || 'Non renseignés')}
+      <br>Infos: ${escapeHtml(m.additional_info || 'Aucune')}
+      <br>Population: ${m.population ?? '-'} · Capacité accueil: ${m.shelter_capacity ?? '-'} · Canal radio: ${escapeHtml(m.radio_channel || '-')}
+      <br>${actions}
+    </li>`;
+  }).join('') || '<li>Aucune commune.</li>';
   await renderMunicipalitiesOnMap(municipalities);
 }
 
 async function loadLogs() {
   const dashboard = await api('/dashboard');
-  document.getElementById('logs-list').innerHTML = (dashboard.latest_logs || []).map((l) => `<li>${new Date(l.created_at).toLocaleString()} · <strong>${l.event_type}</strong> · ${l.description}</li>`).join('') || '<li>Aucun log.</li>';
+  document.getElementById('logs-list').innerHTML = (dashboard.latest_logs || []).map((l) => `<li>${new Date(l.created_at).toLocaleString()} · ${l.danger_emoji || ''} <strong style="color:${levelColor(l.danger_level)}">${l.event_type}</strong> · ${l.description}</li>`).join('') || '<li>Aucun log.</li>';
 }
 
 async function loadUsers() {
@@ -652,6 +696,37 @@ function bindAppInteractions() {
     renderCustomPoints();
     setMapFeedback('Point personnalisé supprimé.');
   });
+  document.getElementById('municipalities-list')?.addEventListener('click', async (event) => {
+    const crisisButton = event.target.closest('[data-muni-crisis]');
+    const docsButton = event.target.closest('[data-muni-docs]');
+    if (!crisisButton && !docsButton) return;
+    try {
+      if (crisisButton) {
+        await api(`/municipalities/${crisisButton.getAttribute('data-muni-crisis')}/crisis`, { method: 'POST' });
+      }
+      if (docsButton) {
+        const municipalityId = docsButton.getAttribute('data-muni-docs');
+        const picker = document.createElement('input');
+        picker.type = 'file';
+        picker.accept = '.pdf,.png,.jpg,.jpeg';
+        picker.multiple = true;
+        picker.onchange = async () => {
+          const files = Array.from(picker.files || []);
+          if (!files.length) return;
+          const formData = new FormData();
+          if (files[0]) formData.append('orsec_plan', files[0]);
+          if (files[1]) formData.append('convention', files[1]);
+          await api(`/municipalities/${municipalityId}/documents`, { method: 'POST', body: formData });
+          await loadMunicipalities();
+        };
+        picker.click();
+        return;
+      }
+      await loadMunicipalities();
+    } catch (error) {
+      document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
+    }
+  });
   document.getElementById('user-create-role')?.addEventListener('change', syncUserCreateMunicipalityVisibility);
   syncUserCreateMunicipalityVisibility();
   document.getElementById('users-table')?.addEventListener('click', handleUsersTableAction);
@@ -710,9 +785,9 @@ async function loadHomeLiveStatus() {
   try {
     const data = await api('/public/live', { logoutOn401: false, omitAuth: true });
     const dashboard = data?.dashboard || {};
-    document.getElementById('home-meteo-state').textContent = normalizeLevel(dashboard.vigilance || '-');
-    document.getElementById('home-river-state').textContent = normalizeLevel(dashboard.crues || '-');
-    document.getElementById('home-global-risk').textContent = normalizeLevel(dashboard.global_risk || '-');
+    setRiskText('home-meteo-state', normalizeLevel(dashboard.vigilance || '-'), dashboard.vigilance || 'vert');
+    setRiskText('home-river-state', normalizeLevel(dashboard.crues || '-'), dashboard.crues || 'vert');
+    setRiskText('home-global-risk', normalizeLevel(dashboard.global_risk || '-'), dashboard.global_risk || 'vert');
     document.getElementById('home-crisis-count').textContent = String(dashboard.communes_crise ?? 0);
     document.getElementById('home-seismic-state').textContent = data.georisques?.highest_seismic_zone_label || 'inconnue';
     document.getElementById('home-flood-docs').textContent = String(data.georisques?.flood_documents_total ?? 0);
@@ -721,8 +796,8 @@ async function loadHomeLiveStatus() {
     document.getElementById('home-feature-river-risk').textContent = normalizeLevel(dashboard.crues || '-');
     document.getElementById('home-feature-seismic-risk').textContent = data.georisques?.highest_seismic_zone_label || 'inconnue';
 
-    document.getElementById('home-feature-meteo').textContent = normalizeLevel(dashboard.vigilance || '-');
-    document.getElementById('home-feature-vigicrues').textContent = normalizeLevel(data.vigicrues?.water_alert_level || '-');
+    setRiskText('home-feature-meteo', normalizeLevel(dashboard.vigilance || '-'), dashboard.vigilance || 'vert');
+    setRiskText('home-feature-vigicrues', normalizeLevel(data.vigicrues?.water_alert_level || '-'), data.vigicrues?.water_alert_level || 'vert');
     document.getElementById('home-feature-crisis-count').textContent = String(dashboard.communes_crise ?? 0);
 
     document.getElementById('home-feature-itinisere-status').textContent = data.itinisere?.status || 'inconnu';
@@ -810,6 +885,11 @@ document.getElementById('municipality-form').addEventListener('submit', async (e
         phone: form.get('phone'),
         email: form.get('email'),
         postal_code: form.get('postal_code'),
+        contacts: form.get('contacts'),
+        additional_info: form.get('additional_info'),
+        population: Number(form.get('population') || 0) || null,
+        shelter_capacity: Number(form.get('shelter_capacity') || 0) || null,
+        radio_channel: form.get('radio_channel'),
       }),
     });
     event.target.reset();
@@ -829,7 +909,7 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
     await api('/logs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ event_type: form.get('event_type'), description: form.get('description') }),
+      body: JSON.stringify({ event_type: form.get('event_type'), description: form.get('description'), danger_level: form.get('danger_level'), danger_emoji: form.get('danger_emoji') }),
     });
     event.target.reset();
     if (errorTarget) errorTarget.textContent = '';
