@@ -716,7 +716,7 @@ async function loadMunicipalities() {
            <button type="button" class="ghost inline-action danger" data-muni-delete="${m.id}">Supprimer</button>
          </div>`
       : `<div class="municipality-actions"><button type="button" class="ghost inline-action" data-muni-view="${m.id}">Voir</button></div>`;
-    return `<article class="municipality-card">
+    return `<article class="municipality-card" data-muni-id="${m.id}">
       <header>
         <h4>${escapeHtml(m.name)}</h4>
         <span class="badge ${normalizeLevel(m.vigilance_color || 'vert') === 'rouge' ? 'red' : normalizeLevel(m.vigilance_color || 'vert') === 'orange' ? 'orange' : normalizeLevel(m.vigilance_color || 'vert') === 'jaune' ? 'yellow' : 'green'}">${normalizeLevel(m.vigilance_color || 'vert')}</span>
@@ -911,20 +911,32 @@ function bindAppInteractions() {
     setMapFeedback('Point personnalisé supprimé.');
   });
   document.getElementById('municipalities-list')?.addEventListener('click', async (event) => {
-    const viewButton = event.target.closest('[data-muni-view]');
+    const viewButton = event.target.closest('[data-muni-view], [data-muni-detail]');
     const editButton = event.target.closest('[data-muni-edit]');
     const crisisButton = event.target.closest('[data-muni-crisis]');
     const docsButton = event.target.closest('[data-muni-docs]');
     const deleteButton = event.target.closest('[data-muni-delete]');
-    if (!viewButton && !editButton && !crisisButton && !docsButton && !deleteButton) return;
+    const card = event.target.closest('.municipality-card');
+    const fallbackId = card?.getAttribute('data-muni-id');
+    if (!viewButton && !editButton && !crisisButton && !docsButton && !deleteButton && !fallbackId) return;
     try {
       const getMunicipality = (id) => cachedMunicipalityRecords.find((m) => String(m.id) === String(id));
 
       if (viewButton) {
-        const municipality = getMunicipality(viewButton.getAttribute('data-muni-view'));
+        const municipality = getMunicipality(viewButton.getAttribute('data-muni-view') || viewButton.getAttribute('data-muni-detail'));
         if (!municipality) return;
         document.getElementById('municipality-feedback').textContent = `Commune ${municipality.name}: ${municipality.crisis_mode ? 'en crise' : 'en veille'} · vigilance ${normalizeLevel(municipality.vigilance_color)}.`;
         openMunicipalityDetailsModal(municipality);
+        openMunicipalityDetailsInlineFallback(municipality);
+        return;
+      }
+
+      if (!editButton && !crisisButton && !docsButton && !deleteButton && fallbackId) {
+        const municipality = getMunicipality(fallbackId);
+        if (!municipality) return;
+        document.getElementById('municipality-feedback').textContent = `Commune ${municipality.name}: ${municipality.crisis_mode ? 'en crise' : 'en veille'} · vigilance ${normalizeLevel(municipality.vigilance_color)}.`;
+        openMunicipalityDetailsModal(municipality);
+        openMunicipalityDetailsInlineFallback(municipality);
         return;
       }
 
