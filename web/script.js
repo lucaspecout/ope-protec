@@ -1,4 +1,6 @@
 const STORAGE_KEYS = { token: 'token', activePanel: 'activePanel', customPoints: 'customPoints' };
+const AUTO_REFRESH_MS = 30000;
+const HOME_LIVE_REFRESH_MS = 30000;
 const PANEL_TITLES = {
   'situation-panel': 'Situation opérationnelle',
   'services-panel': 'Services connectés',
@@ -405,13 +407,12 @@ function bindHomeInteractions() {
   document.getElementById('open-login-btn')?.addEventListener('click', openLogin);
   document.getElementById('hero-login-btn')?.addEventListener('click', openLogin);
   document.getElementById('back-home-btn')?.addEventListener('click', showHome);
-  document.getElementById('scroll-actions-btn')?.addEventListener('click', () => document.getElementById('home-actions')?.scrollIntoView({ behavior: 'smooth' }));
+  document.getElementById('scroll-actions-btn')?.addEventListener('click', () => document.getElementById('home-features')?.scrollIntoView({ behavior: 'smooth' }));
 }
 
 function bindAppInteractions() {
   document.querySelectorAll('.menu-btn').forEach((button) => button.addEventListener('click', () => setActivePanel(button.dataset.target)));
   document.getElementById('logout-btn').addEventListener('click', logout);
-  document.getElementById('refresh-btn').addEventListener('click', refreshAll);
   document.getElementById('map-search-btn')?.addEventListener('click', handleMapSearch);
   document.getElementById('map-fit-btn')?.addEventListener('click', fitMapToData);
   document.getElementById('map-search')?.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); handleMapSearch(); } });
@@ -450,7 +451,7 @@ function logout() {
 
 function startAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
-  refreshTimer = setInterval(() => token && refreshAll(), 120000);
+  refreshTimer = setInterval(() => token && refreshAll(), AUTO_REFRESH_MS);
 }
 
 async function loadHomeLiveStatus() {
@@ -483,7 +484,7 @@ async function loadHomeLiveStatus() {
 function startHomeLiveRefresh() {
   if (homeLiveTimer) clearInterval(homeLiveTimer);
   loadHomeLiveStatus();
-  homeLiveTimer = setInterval(loadHomeLiveStatus, 60000);
+  homeLiveTimer = setInterval(loadHomeLiveStatus, HOME_LIVE_REFRESH_MS);
 }
 
 loginForm.addEventListener('submit', async (event) => {

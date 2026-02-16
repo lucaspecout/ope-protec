@@ -21,8 +21,6 @@
         <button id="mobile-menu-btn" class="menu-toggle" type="button" aria-expanded="false" aria-controls="home-nav">☰</button>
         <nav id="home-nav" class="home-nav">
           <a href="#home-features">Fonctionnalités</a>
-          <a href="#home-connectors">Interconnexions</a>
-          <a href="#home-actions">Actions</a>
           <button id="open-login-btn" type="button">Espace sécurisé</button>
         </nav>
       </header>
@@ -34,7 +32,7 @@
           <p class="lead">Tableau de bord unifié pour la vigilance météo, les crues, la coordination des communes et la gestion des actions terrain en Isère.</p>
           <div class="hero-actions">
             <button id="hero-login-btn" type="button">Se connecter</button>
-            <button id="scroll-actions-btn" type="button" class="ghost">Voir les procédures rapides</button>
+            <button id="scroll-actions-btn" type="button" class="ghost">Voir les indicateurs</button>
           </div>
         </div>
         <article class="hero-status panel">
@@ -71,23 +69,6 @@
         </article>
       </section>
 
-      <section id="home-connectors" class="panel connectors">
-        <h2>Écosystème interconnecté</h2>
-        <p class="muted">Sources exploitables via API, flux institutionnels et portails métiers.</p>
-        <div class="connector-grid">
-          <article><h4>Météo-France Vigilance</h4><p>Bulletins et niveaux de vigilance départementale.</p></article>
-          <article><h4>Vigicrues</h4><p>Stations hydrologiques et niveaux d'alerte eau.</p></article>
-          <article><h4>Préfecture de l'Isère</h4><p>Coordination institutionnelle et informations officielles.</p></article>
-          <article><h4>Géorisques</h4><p>Connaissance des aléas naturels locaux.</p></article>
-          <article><h4>Info Route Isère</h4><p>Suivi de circulation et coupures d'axes.</p></article>
-          <article><h4>PCS / ORSEC</h4><p>Référentiels internes pour la réponse opérationnelle.</p></article>
-        </div>
-      </section>
-
-      <section id="home-actions" class="panel quick-actions">
-        <h2>Vue opérationnelle immédiate</h2>
-        <p class="muted">L'accueil affiche uniquement des données réelles consolidées (base locale + services institutionnels). Connectez-vous pour la main courante, les communes et les documents ORSEC.</p>
-      </section>
     </section>
 
     <section id="login-view" class="auth-wrap hidden" hidden>
@@ -138,7 +119,6 @@
             <h1 id="panel-title">Situation opérationnelle</h1>
           </div>
           <div class="header-actions">
-            <button id="refresh-btn" class="ghost" type="button">Actualiser</button>
             <p id="dashboard-error" class="error"></p>
           </div>
         </header>
