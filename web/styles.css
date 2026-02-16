@@ -194,6 +194,25 @@ label { display: block; margin-bottom: .8rem; }
 .municipality-edit-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: .6rem; }
 .municipality-edit-form label:last-of-type { display: flex; align-items: center; gap: .5rem; }
 .municipality-edit-form label:last-of-type input { width: auto; margin-top: 0; }
+
+.municipality-details-modal {
+  width: min(760px, 92vw);
+  border: 1px solid #c8dafb;
+  border-radius: 14px;
+  padding: 0;
+}
+.municipality-details-modal::backdrop { background: rgba(7, 24, 52, .45); }
+.municipality-details-modal__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: .8rem;
+  padding: .85rem 1rem;
+  border-bottom: 1px solid var(--line);
+}
+#municipality-details-content { padding: .9rem 1rem 1rem; }
+#municipality-details-content h4 { margin: 0 0 .45rem; }
+#municipality-details-content p { margin: .4rem 0; }
 .services-grid { display: grid; gap: .65rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
 .service-card { border: 1px solid var(--line); border-radius: 12px; padding: .8rem; background: linear-gradient(180deg, #fff, #f7faff); }
 .service-card a { color: #0b4daa; font-weight: 600; }
