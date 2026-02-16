@@ -43,6 +43,8 @@
           <p>Communes en crise <strong id="home-crisis-count">0</strong></p>
           <p>Sismicité max (Géorisques) <strong id="home-seismic-state">-</strong></p>
           <p>Documents inondation (Géorisques) <strong id="home-flood-docs">0</strong></p>
+          <h4>Situation météo en cours</h4>
+          <ul id="home-meteo-situation" class="list compact"></ul>
           <p class="muted" id="home-live-updated">Dernière mise à jour: -</p>
           <p class="error" id="home-live-error"></p>
         </article>
@@ -65,7 +67,8 @@
           <h3>Info Itinisère</h3>
           <p>Statut: <strong id="home-feature-itinisere-status">-</strong></p>
           <p>Événements en cours: <strong id="home-feature-itinisere-events">0</strong></p>
-          <p class="muted">Perturbations routières signalées sur le réseau isérois.</p>
+          <p>Bison Futé (Isère): <strong id="home-feature-bison-isere">-</strong></p>
+          <p class="muted">Perturbations routières signalées sur le réseau isérois + tendance Bison Futé.</p>
         </article>
       </section>
 
@@ -142,6 +145,7 @@
             <article class="tile"><h3>Météo-France</h3><p id="supervision-meteo">-</p></article>
             <article class="tile"><h3>Vigicrues</h3><p id="supervision-vigicrues">-</p></article>
             <article class="tile"><h3>Itinisère</h3><p id="supervision-itinisere">-</p></article>
+            <article class="tile"><h3>Bison Futé</h3><p id="supervision-bison">-</p></article>
             <article class="tile"><h3>Géorisques</h3><p id="supervision-georisques">-</p></article>
             <article class="tile"><h3>Communes en crise</h3><p id="supervision-crisis-count">0</p></article>
           </div>
@@ -175,6 +179,7 @@
             <article class="service-card"><h4>Vigicrues Flash</h4><p>Veille pluie-inondation</p><a href="https://www.vigicrues.gouv.fr" target="_blank" rel="noreferrer">vigicrues.gouv.fr</a></article>
             <article class="service-card"><h4>GEORISQUES</h4><p id="georisques-status">-</p><p id="georisques-info" class="muted"></p><a href="https://www.georisques.gouv.fr" target="_blank" rel="noreferrer">georisques.gouv.fr</a></article>
             <article class="service-card"><h4>Info route Isère</h4><p id="itinisere-status">-</p><a href="https://www.itinisere.fr" target="_blank" rel="noreferrer">itinisere.fr</a></article>
+            <article class="service-card"><h4>Bison Futé</h4><p id="bison-status">-</p><p id="bison-info" class="muted"></p><a href="https://www.bison-fute.gouv.fr" target="_blank" rel="noreferrer">bison-fute.gouv.fr</a></article>
           </div>
           <h4>Alertes météo Isère (en cours / demain)</h4>
           <ul id="meteo-alerts-list" class="list"></ul>
@@ -230,6 +235,7 @@
               <p>Niveau météo <strong id="meteo-level">-</strong></p>
               <p>Risques météo concernés <strong id="meteo-hazards">-</strong></p>
               <p>Niveau hydrologique <strong id="river-level">-</strong></p>
+              <p>Bison Futé Isère (départs) <strong id="map-bison-isere">-</strong></p>
               <p>Sismicité max <strong id="map-seismic-level">-</strong></p>
               <p>Docs inondation suivis <strong id="map-flood-docs">0</strong></p>
               <p class="muted" id="map-source">Source carte: chargement…</p>
@@ -251,6 +257,8 @@
               <ul id="custom-points-list" class="list practical"></ul>
               <h4>Alertes mobilité Itinisère</h4>
               <ul id="itinerary-list" class="list practical"></ul>
+              <h4>Tendance Bison Futé</h4>
+              <ul id="bison-list" class="list practical"></ul>
             </div>
           </div>
         </section>
