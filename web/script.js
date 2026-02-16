@@ -4,6 +4,7 @@ const HOME_LIVE_REFRESH_MS = 30000;
 const PANEL_TITLES = {
   'situation-panel': 'Situation opérationnelle',
   'services-panel': 'Services connectés',
+  'georisques-panel': 'Page Géorisques',
   'api-panel': 'Interconnexions API',
   'supervision-panel': 'Supervision crise',
   'municipalities-panel': 'Communes partenaires',
@@ -361,6 +362,19 @@ function renderHomeMeteoSituation(situations = []) {
   setHtml('home-meteo-situation', markup);
 }
 
+function renderGeorisquesDetails(georisques = {}) {
+  const monitored = georisques.monitored_communes || [];
+  setText('georisques-page-status', georisques.status || 'inconnu');
+  setText('georisques-page-seismic', georisques.highest_seismic_zone_label || 'inconnue');
+  setText('georisques-page-flood-docs', String(georisques.flood_documents_total ?? 0));
+  setText('georisques-page-source', `Source: ${georisques.source || 'inconnue'} · Dernière mise à jour: ${georisques.updated_at ? new Date(georisques.updated_at).toLocaleString() : 'inconnue'}`);
+
+  const markup = monitored.map((commune) => (
+    `<li><strong>${escapeHtml(commune.name || 'Commune inconnue')}</strong> (${escapeHtml(commune.code_insee || '-')}) · Sismicité: <strong>${escapeHtml(commune.seismic_zone || 'inconnue')}</strong> · Documents inondation: <strong>${Number(commune.flood_documents || 0)}</strong></li>`
+  )).join('') || '<li>Aucune commune remontée par Géorisques.</li>';
+  setHtml('georisques-communes-list', markup);
+}
+
 function renderCriticalRisks(meteo = {}) {
   const criticalLevels = new Set(['orange', 'rouge']);
   const currentAlerts = (meteo.current_alerts || []).filter((alert) => criticalLevels.has(normalizeLevel(alert.level)));
@@ -393,6 +407,7 @@ async function loadExternalRisks() {
   renderBisonFuteSummary(data.bison_fute || {});
   setText('georisques-status', `${data.georisques.status} · sismicité ${data.georisques.highest_seismic_zone_label || 'inconnue'}`);
   setText('georisques-info', `${data.georisques.flood_documents_total ?? 0} document(s) inondation suivis`);
+  renderGeorisquesDetails(data.georisques || {});
   renderCriticalRisks(data.meteo_france || {});
   renderMeteoAlerts(data.meteo_france || {});
   renderItinisereEvents(data.itinisere?.events || []);

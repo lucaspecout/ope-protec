@@ -82,6 +82,13 @@ label { display: block; margin-bottom: .8rem; }
   padding: 1.35rem;
 }
 .hero-status { padding: 1rem; background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.25); }
+.hero-status .list li {
+  background: rgba(255, 255, 255, .18);
+  border-color: rgba(255, 255, 255, .28);
+  color: #f4f8ff;
+}
+.hero-status .muted { color: #d9e5ff; }
+.hero-status .error { color: #ffd9df; }
 .hero-actions { display: flex; flex-wrap: wrap; gap: .65rem; margin-top: 1rem; }
 .simulator-controls { display: grid; grid-template-columns: repeat(4, 1fr); gap: .45rem; }
 .alert-btn { background: rgba(255,255,255,.15); }
