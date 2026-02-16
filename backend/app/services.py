@@ -348,56 +348,70 @@ def fetch_vigicrues_isere(
 
     try:
         observations = _http_get_json(f"{base_url}/observations.json?GrdSerie=H&FormatSortie=simple")
-        station_codes = [code for _, code in observations.get("Observations", {}).get("ListeStation", [])][:sample_size]
+        all_station_codes = [code for _, code in observations.get("Observations", {}).get("ListeStation", [])]
+        initial_station_codes = all_station_codes[:sample_size]
+        fallback_station_codes = all_station_codes if sample_size < len(all_station_codes) else []
+
         isere_stations: list[dict[str, Any]] = []
         commune_cache: dict[str, tuple[float, float] | None] = {}
+        explored_codes: set[str] = set()
 
-        for code in station_codes:
-            try:
-                station = _http_get_json(f"{base_url}/station.json?CdStationHydro={code}")
-            except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
+        for station_codes in [initial_station_codes, fallback_station_codes]:
+            if not station_codes:
                 continue
 
-            commune_code = str(station.get("CdCommune", ""))
-            if not commune_code.startswith("38"):
-                continue
+            for code in station_codes:
+                if code in explored_codes:
+                    continue
+                explored_codes.add(code)
+                try:
+                    station = _http_get_json(f"{base_url}/station.json?CdStationHydro={code}")
+                except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
+                    continue
 
-            try:
-                series = _http_get_json(f"{base_url}/observations.json?CdStationHydro={code}&GrdSerie=H&FormatSortie=simple")
-            except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
-                continue
+                commune_code = str(station.get("CdCommune", ""))
+                if not commune_code.startswith("38"):
+                    continue
 
-            values = series.get("Serie", {}).get("ObssHydro", [])
-            if not values:
-                continue
+                try:
+                    series = _http_get_json(f"{base_url}/observations.json?CdStationHydro={code}&GrdSerie=H&FormatSortie=simple")
+                except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
+                    continue
 
-            latest_ts, latest_h = values[-1]
-            old_h = values[0][1] if len(values) > 1 else latest_h
-            delta = round(float(latest_h) - float(old_h), 2)
-            station_name = station.get("LbStationHydro", "")
-            river_name = station.get("LbCoursEau", "")
-            station_blob = f"{station_name} {river_name}".lower()
+                values = series.get("Serie", {}).get("ObssHydro", [])
+                if not values:
+                    continue
 
-            if commune_code not in commune_cache:
-                commune_cache[commune_code] = _commune_center(commune_code)
-            commune_center = commune_cache[commune_code]
+                latest_ts, latest_h = values[-1]
+                old_h = values[0][1] if len(values) > 1 else latest_h
+                delta = round(float(latest_h) - float(old_h), 2)
+                station_name = station.get("LbStationHydro", "")
+                river_name = station.get("LbCoursEau", "")
+                station_blob = f"{station_name} {river_name}".lower()
 
-            is_priority = "grenoble" in station_blob or any(name in station_blob for name in priority_names)
-            isere_stations.append(
-                {
-                    "code": code,
-                    "station": station_name,
-                    "river": river_name,
-                    "height_m": round(float(latest_h), 2),
-                    "delta_window_m": delta,
-                    "level": _vigicrues_level_from_delta(abs(delta)),
-                    "is_priority": is_priority,
-                    "observed_at": datetime.utcfromtimestamp(int(latest_ts) / 1000).isoformat() + "Z",
-                    "lat": commune_center[0] if commune_center else None,
-                    "lon": commune_center[1] if commune_center else None,
-                    "commune_code": commune_code,
-                }
-            )
+                if commune_code not in commune_cache:
+                    commune_cache[commune_code] = _commune_center(commune_code)
+                commune_center = commune_cache[commune_code]
+
+                is_priority = "grenoble" in station_blob or any(name in station_blob for name in priority_names)
+                isere_stations.append(
+                    {
+                        "code": code,
+                        "station": station_name,
+                        "river": river_name,
+                        "height_m": round(float(latest_h), 2),
+                        "delta_window_m": delta,
+                        "level": _vigicrues_level_from_delta(abs(delta)),
+                        "is_priority": is_priority,
+                        "observed_at": datetime.utcfromtimestamp(int(latest_ts) / 1000).isoformat() + "Z",
+                        "lat": commune_center[0] if commune_center else None,
+                        "lon": commune_center[1] if commune_center else None,
+                        "commune_code": commune_code,
+                    }
+                )
+
+            if isere_stations:
+                break
 
         if not isere_stations:
             raise ValueError("Aucune station Isère détectée sur l'échantillon courant")

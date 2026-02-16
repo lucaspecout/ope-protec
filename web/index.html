@@ -105,6 +105,7 @@
         <nav class="side-nav" aria-label="Menu principal">
           <button class="menu-btn" data-target="situation-panel">Situation</button>
           <button class="menu-btn" data-target="services-panel">Services connectés</button>
+          <button class="menu-btn" data-target="georisques-panel">Page Géorisques</button>
           <button class="menu-btn" data-target="api-panel">Interconnexions API</button>
           <button class="menu-btn" data-target="supervision-panel">Supervision crise</button>
           <button class="menu-btn" data-target="municipalities-panel">Communes</button>
@@ -186,6 +187,19 @@
           <ul id="meteo-alerts-list" class="list"></ul>
           <h4>Stations Vigicrues prioritaires</h4>
           <ul id="stations-list" class="list"></ul>
+        </section>
+
+        <section id="georisques-panel" class="panel view hidden" hidden>
+          <h3>Page Géorisques · Synthèse Isère</h3>
+          <p class="muted">Données issues de l'API Géorisques pour les communes suivies (sismicité et documents inondation).</p>
+          <div class="kpis">
+            <article class="tile"><h3>Statut service</h3><p id="georisques-page-status">-</p></article>
+            <article class="tile"><h3>Sismicité max</h3><p id="georisques-page-seismic">-</p></article>
+            <article class="tile"><h3>Documents inondation</h3><p id="georisques-page-flood-docs">0</p></article>
+          </div>
+          <p id="georisques-page-source" class="muted">Source: -</p>
+          <h4>Communes suivies</h4>
+          <ul id="georisques-communes-list" class="list"></ul>
         </section>
 
         <section id="api-panel" class="panel view hidden" hidden>
