@@ -343,78 +343,63 @@ def fetch_vigicrues_isere(
     station_limit: int | None = None,
     priority_names: list[str] | None = None,
 ) -> dict[str, Any]:
-    base_url = "https://www.vigicrues.gouv.fr/services"
+    rss_source = "https://www.vigicrues.gouv.fr/territoire/rss"
+    isere_territory_codes = {"18"}
     priority_names = [name.lower() for name in (priority_names or [])]
 
     try:
-        observations = _http_get_json(f"{base_url}/observations.json?GrdSerie=H&FormatSortie=simple")
-        all_station_codes = [code for _, code in observations.get("Observations", {}).get("ListeStation", [])]
-        initial_station_codes = all_station_codes[:sample_size]
-        fallback_station_codes = all_station_codes if sample_size < len(all_station_codes) else []
-
+        xml_payload = _http_get_text(rss_source)
+        root = ET.fromstring(xml_payload)
         isere_stations: list[dict[str, Any]] = []
-        commune_cache: dict[str, tuple[float, float] | None] = {}
-        explored_codes: set[str] = set()
 
-        for station_codes in [initial_station_codes, fallback_station_codes]:
-            if not station_codes:
+        for item in root.findall(".//item")[:sample_size]:
+            title = (item.findtext("title") or "").strip()
+            description_html = (item.findtext("description") or "").strip()
+            description = re.sub(r"<[^>]+>", " ", description_html)
+            description = re.sub(r"\s+", " ", description).strip()
+            link = (item.findtext("link") or "https://www.vigicrues.gouv.fr").strip()
+            published = (item.findtext("pubDate") or "").strip()
+
+            territory_match = re.search(r"CdEntVigiCru=(\d+)", link)
+            territory_code = territory_match.group(1) if territory_match else ""
+            if territory_code and territory_code not in isere_territory_codes:
                 continue
 
-            for code in station_codes:
-                if code in explored_codes:
-                    continue
-                explored_codes.add(code)
-                try:
-                    station = _http_get_json(f"{base_url}/station.json?CdStationHydro={code}")
-                except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
-                    continue
+            text_blob = f"{title} {description}".lower()
+            if "isère" not in text_blob and "isere" not in text_blob:
+                continue
 
-                commune_code = str(station.get("CdCommune", ""))
-                if not commune_code.startswith("38"):
-                    continue
+            level_match = re.search(r":\s*(vert|jaune|orange|rouge)\s*$", title, re.IGNORECASE)
+            if not level_match:
+                level_match = re.search(r"Couleur de vigilance crues du tronçon\s*:\s*(vert|jaune|orange|rouge)", description, re.IGNORECASE)
+            level = (level_match.group(1).lower() if level_match else "inconnu").replace("verte", "vert")
 
-                try:
-                    series = _http_get_json(f"{base_url}/observations.json?CdStationHydro={code}&GrdSerie=H&FormatSortie=simple")
-                except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
-                    continue
+            troncon_match = re.search(r"Nom du tronçon\s*:\s*([^\(]+)", description, re.IGNORECASE)
+            station_name = troncon_match.group(1).strip() if troncon_match else (title.split(":", 1)[0].strip() if title else "Tronçon Vigicrues")
 
-                values = series.get("Serie", {}).get("ObssHydro", [])
-                if not values:
-                    continue
+            code_match = re.search(r"\(([A-Z]{1,3}\d{1,4})\)", description)
+            station_code = code_match.group(1) if code_match else (item.findtext("guid") or link)
 
-                latest_ts, latest_h = values[-1]
-                old_h = values[0][1] if len(values) > 1 else latest_h
-                delta = round(float(latest_h) - float(old_h), 2)
-                station_name = station.get("LbStationHydro", "")
-                river_name = station.get("LbCoursEau", "")
-                station_blob = f"{station_name} {river_name}".lower()
-
-                if commune_code not in commune_cache:
-                    commune_cache[commune_code] = _commune_center(commune_code)
-                commune_center = commune_cache[commune_code]
-
-                is_priority = "grenoble" in station_blob or any(name in station_blob for name in priority_names)
-                isere_stations.append(
-                    {
-                        "code": code,
-                        "station": station_name,
-                        "river": river_name,
-                        "height_m": round(float(latest_h), 2),
-                        "delta_window_m": delta,
-                        "level": _vigicrues_level_from_delta(abs(delta)),
-                        "is_priority": is_priority,
-                        "observed_at": datetime.utcfromtimestamp(int(latest_ts) / 1000).isoformat() + "Z",
-                        "lat": commune_center[0] if commune_center else None,
-                        "lon": commune_center[1] if commune_center else None,
-                        "commune_code": commune_code,
-                    }
-                )
-
-            if isere_stations:
-                break
+            is_priority = "grenoble" in text_blob or any(name in text_blob for name in priority_names)
+            isere_stations.append(
+                {
+                    "code": station_code,
+                    "station": station_name,
+                    "river": "",
+                    "height_m": 0.0,
+                    "delta_window_m": 0.0,
+                    "level": level,
+                    "is_priority": is_priority,
+                    "observed_at": published,
+                    "lat": None,
+                    "lon": None,
+                    "commune_code": "",
+                    "source_link": link,
+                }
+            )
 
         if not isere_stations:
-            raise ValueError("Aucune station Isère détectée sur l'échantillon courant")
+            raise ValueError("Aucune alerte Isère trouvée dans le flux RSS Vigicrues")
 
         isere_stations.sort(key=lambda station: (not station["is_priority"], station["station"] or ""))
         if station_limit is not None:
@@ -426,17 +411,17 @@ def fetch_vigicrues_isere(
             "service": "Vigicrues",
             "department": "Isère (38)",
             "status": "online",
-            "source": "https://www.vigicrues.gouv.fr",
+            "source": rss_source,
             "water_alert_level": global_level,
             "stations": isere_stations,
             "updated_at": datetime.utcnow().isoformat() + "Z",
         }
-    except (HTTPError, URLError, TimeoutError, ValueError) as exc:
+    except (ET.ParseError, HTTPError, URLError, TimeoutError, ValueError) as exc:
         return {
             "service": "Vigicrues",
             "department": "Isère (38)",
             "status": "degraded",
-            "source": "https://www.vigicrues.gouv.fr",
+            "source": rss_source,
             "water_alert_level": "inconnu",
             "stations": [],
             "error": str(exc),
