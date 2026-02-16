@@ -567,14 +567,11 @@ def get_municipality_document(
     municipality_id: int,
     doc_type: str,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(*READ_ROLES)),
+    _: User = Depends(require_roles(*READ_ROLES)),
 ):
     municipality = db.get(Municipality, municipality_id)
     if not municipality:
         raise HTTPException(404, "Commune introuvable")
-
-    if user.role == "mairie" and user.municipality_name != municipality.name:
-        raise HTTPException(403, "Accès interdit à ce document")
 
     path = municipality.orsec_plan_file if doc_type == "orsec_plan" else municipality.convention_file if doc_type == "convention" else None
     if not path:

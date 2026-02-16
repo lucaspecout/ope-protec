@@ -477,12 +477,8 @@ function openMunicipalityDetailsModal(municipality) {
   if (!modal || !content || !municipality) return;
 
   const docs = [
-    municipality.orsec_plan_file
-      ? `<li>Plan ORSEC · <button type="button" class="ghost inline-action" data-open-muni-doc="orsec_plan" data-open-muni-id="${municipality.id}">Voir le document</button></li>`
-      : '<li>Plan ORSEC: non renseigné</li>',
-    municipality.convention_file
-      ? `<li>Convention · <button type="button" class="ghost inline-action" data-open-muni-doc="convention" data-open-muni-id="${municipality.id}">Voir le document</button></li>`
-      : '<li>Convention: non renseignée</li>',
+    municipality.orsec_plan_file ? `<li><a href="/municipalities/${municipality.id}/documents/orsec_plan" target="_blank" rel="noreferrer">Plan ORSEC</a></li>` : '<li>Plan ORSEC: non renseigné</li>',
+    municipality.convention_file ? `<li><a href="/municipalities/${municipality.id}/documents/convention" target="_blank" rel="noreferrer">Convention</a></li>` : '<li>Convention: non renseignée</li>',
   ].join('');
 
   content.innerHTML = `
@@ -500,18 +496,6 @@ function openMunicipalityDetailsModal(municipality) {
   `;
 
   if (typeof modal.showModal === 'function') modal.showModal();
-}
-
-async function openMunicipalityDocument(municipalityId, docType) {
-  try {
-    const { blob, contentType } = await apiFile(`/municipalities/${municipalityId}/documents/${docType}`);
-    const fileBlob = new Blob([blob], { type: contentType });
-    const url = URL.createObjectURL(fileBlob);
-    window.open(url, '_blank', 'noopener,noreferrer');
-    setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  } catch (error) {
-    document.getElementById('municipality-feedback').textContent = sanitizeErrorMessage(error.message);
-  }
 }
 
 function renderCriticalRisks(meteo = {}) {
@@ -895,11 +879,6 @@ function bindAppInteractions() {
   document.getElementById('user-create-role')?.addEventListener('change', syncUserCreateMunicipalityVisibility);
   document.getElementById('municipality-editor-close')?.addEventListener('click', closeMunicipalityEditor);
   document.getElementById('municipality-details-close')?.addEventListener('click', closeMunicipalityDetailsModal);
-  document.getElementById('municipality-details-content')?.addEventListener('click', async (event) => {
-    const docButton = event.target.closest('[data-open-muni-doc]');
-    if (!docButton) return;
-    await openMunicipalityDocument(docButton.getAttribute('data-open-muni-id'), docButton.getAttribute('data-open-muni-doc'));
-  });
   document.getElementById('municipality-edit-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!canEdit()) return;
