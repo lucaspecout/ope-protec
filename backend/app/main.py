@@ -584,6 +584,37 @@ def get_municipality_document(
     return FileResponse(path=file_path, filename=file_path.name)
 
 
+@app.delete("/municipalities/{municipality_id}/documents/{doc_type}")
+def delete_municipality_document(
+    municipality_id: int,
+    doc_type: str,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(*EDIT_ROLES)),
+):
+    municipality = db.get(Municipality, municipality_id)
+    if not municipality:
+        raise HTTPException(404, "Commune introuvable")
+
+    if doc_type not in {"orsec_plan", "convention"}:
+        raise HTTPException(400, "Type de document invalide")
+
+    current_path = municipality.orsec_plan_file if doc_type == "orsec_plan" else municipality.convention_file
+    if not current_path:
+        raise HTTPException(404, "Document introuvable")
+
+    file_path = Path(current_path)
+    if file_path.exists() and file_path.is_file():
+        file_path.unlink()
+
+    if doc_type == "orsec_plan":
+        municipality.orsec_plan_file = None
+    else:
+        municipality.convention_file = None
+
+    db.commit()
+    return {"status": "deleted", "id": municipality_id, "doc_type": doc_type}
+
+
 @app.post("/municipalities/{municipality_id}/crisis")
 def toggle_crisis(municipality_id: int, db: Session = Depends(get_db), _: User = Depends(require_roles(*EDIT_ROLES))):
     municipality = db.get(Municipality, municipality_id)

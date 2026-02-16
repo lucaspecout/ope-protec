@@ -170,6 +170,7 @@ label { display: block; margin-bottom: .8rem; }
 .inline-action.primary { background: #123b80; color: #fff; border-color: #123b80; }
 
 .municipality-actions { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .45rem; }
+.municipality-actions--modal { margin-top: .8rem; }
 .inline-action.danger { border-color: #ca3a3a; color: #a31515; }
 .municipality-grid { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
 .municipality-card {
@@ -214,6 +215,7 @@ label { display: block; margin-bottom: .8rem; }
 #municipality-details-content { padding: .9rem 1rem 1rem; }
 #municipality-details-content h4 { margin: 0 0 .45rem; }
 #municipality-details-content p { margin: .4rem 0; }
+#municipality-details-content .list li .inline-action { margin-top: 0; margin-left: .45rem; }
 .services-grid { display: grid; gap: .65rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
 .service-card { border: 1px solid var(--line); border-radius: 12px; padding: .8rem; background: linear-gradient(180deg, #fff, #f7faff); }
 .service-card a { color: #0b4daa; font-weight: 600; }
