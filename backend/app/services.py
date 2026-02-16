@@ -465,6 +465,81 @@ def fetch_itinisere_disruptions(limit: int = 20) -> dict[str, Any]:
         }
 
 
+def _bison_color_label(code: str) -> str:
+    mapping = {
+        "V": "vert",
+        "J": "jaune",
+        "O": "orange",
+        "R": "rouge",
+        "N": "noir",
+    }
+    return mapping.get((code or "").strip().upper(), "inconnu")
+
+
+def _parse_bison_segment(segment: str) -> dict[str, str]:
+    departure_code, _, return_code = (segment or "V,V").partition(",")
+    return {
+        "departure": _bison_color_label(departure_code),
+        "return": _bison_color_label(return_code),
+    }
+
+
+def fetch_bison_fute_traffic() -> dict[str, Any]:
+    source = "https://www.bison-fute.gouv.fr/previsions/previsions.json"
+    try:
+        payload = _http_get_json(source)
+        days = payload.get("days") or []
+        national = payload.get("national") or []
+        depts = payload.get("deptsLine") or []
+        values = payload.get("values") or []
+
+        if not days or not national:
+            raise ValueError("Prévisions Bison Futé vides")
+
+        today = datetime.utcnow().strftime("%d/%m/%Y")
+        day_index = days.index(today) if today in days else 0
+        tomorrow_index = min(day_index + 1, len(days) - 1)
+
+        isere_index = depts.index("38") if "38" in depts else None
+
+        def pick_entry(index: int) -> dict[str, Any]:
+            national_segment = _parse_bison_segment(national[index] if index < len(national) else "V,V")
+            isere_segment = {"departure": "inconnu", "return": "inconnu"}
+            if isere_index is not None and index < len(values) and isere_index < len(values[index]):
+                isere_segment = _parse_bison_segment(values[index][isere_index])
+            return {
+                "date": days[index],
+                "national": national_segment,
+                "isere": isere_segment,
+            }
+
+        return {
+            "service": "Bison Futé",
+            "status": "online",
+            "source": source,
+            "today": pick_entry(day_index),
+            "tomorrow": pick_entry(tomorrow_index),
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+        return {
+            "service": "Bison Futé",
+            "status": "degraded",
+            "source": source,
+            "today": {
+                "date": "-",
+                "national": {"departure": "inconnu", "return": "inconnu"},
+                "isere": {"departure": "inconnu", "return": "inconnu"},
+            },
+            "tomorrow": {
+                "date": "-",
+                "national": {"departure": "inconnu", "return": "inconnu"},
+                "isere": {"departure": "inconnu", "return": "inconnu"},
+            },
+            "error": str(exc),
+        }
+
+
 def fetch_georisques_isere_summary() -> dict[str, Any]:
     source = "https://www.georisques.gouv.fr/api/v1"
     communes = [

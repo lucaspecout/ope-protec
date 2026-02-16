@@ -130,6 +130,10 @@ label { display: block; margin-bottom: .8rem; }
 
 .list { list-style: none; margin: .6rem 0 0; padding: 0; display: grid; gap: .45rem; }
 .list li { background: #f7faff; border: 1px solid var(--line); border-radius: 11px; padding: .63rem .75rem; }
+
+.list.compact { margin-top: .35rem; gap: .35rem; }
+.list.compact li { padding: .45rem .6rem; font-size: .9rem; }
+.inline-action { margin-top: .4rem; padding: .35rem .6rem; border-radius: 8px; font-size: .78rem; }
 .services-grid { display: grid; gap: .65rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
 .service-card { border: 1px solid var(--line); border-radius: 12px; padding: .8rem; background: linear-gradient(180deg, #fff, #f7faff); }
 .service-card a { color: #0b4daa; font-weight: 600; }

@@ -312,7 +312,32 @@ function renderMeteoAlerts(meteo = {}) {
 }
 
 function renderItinisereEvents(events = [], targetId = 'itinerary-list') {
-  document.getElementById(targetId).innerHTML = events.slice(0, 8).map((e) => `<li><strong>${e.title}</strong><br>${e.description || ''}<br><a href="${e.link}" target="_blank" rel="noreferrer">Détail</a></li>`).join('') || '<li>Aucune perturbation publiée.</li>';
+  document.getElementById(targetId).innerHTML = events.slice(0, 8).map((e) => `<li><strong>${e.title}</strong><br>${e.description || ''}<br><a href="${e.link}" target="_blank" rel="noreferrer">Détail</a><br><button type="button" class="ghost inline-action" data-map-query="${(e.title || '').replace(/"/g, '&quot;')}">Voir sur la carte</button></li>`).join('') || '<li>Aucune perturbation publiée.</li>';
+}
+
+function renderBisonFuteSummary(bison = {}) {
+  const today = bison.today || {};
+  const tomorrow = bison.tomorrow || {};
+  const isereToday = today.isere || {};
+  const isereTomorrow = tomorrow.isere || {};
+  const nationalToday = today.national || {};
+  const nationalTomorrow = tomorrow.national || {};
+
+  setText('bison-status', `${bison.status || 'inconnu'} · Isère départ ${isereToday.departure || 'inconnu'} / retour ${isereToday.return || 'inconnu'}`);
+  setText('bison-info', `National J0: ${nationalToday.departure || 'inconnu'} / ${nationalToday.return || 'inconnu'} · J1: ${nationalTomorrow.departure || 'inconnu'} / ${nationalTomorrow.return || 'inconnu'}`);
+  setText('map-bison-isere', `${isereToday.departure || 'inconnu'} (retour ${isereToday.return || 'inconnu'})`);
+  setText('home-feature-bison-isere', `${isereToday.departure || 'inconnu'} / ${isereToday.return || 'inconnu'}`);
+
+  const bisonMarkup = [
+    `<li><strong>Aujourd'hui (${today.date || '-'})</strong><br>Isère départ: ${isereToday.departure || 'inconnu'} · Isère retour: ${isereToday.return || 'inconnu'}<br>National départ: ${nationalToday.departure || 'inconnu'} · National retour: ${nationalToday.return || 'inconnu'}<br><a href="https://www.bison-fute.gouv.fr" target="_blank" rel="noreferrer">Voir la carte Bison Futé</a></li>`,
+    `<li><strong>Demain (${tomorrow.date || '-'})</strong><br>Isère départ: ${isereTomorrow.departure || 'inconnu'} · Isère retour: ${isereTomorrow.return || 'inconnu'}<br>National départ: ${nationalTomorrow.departure || 'inconnu'} · National retour: ${nationalTomorrow.return || 'inconnu'}</li>`,
+  ].join('');
+  setHtml('bison-list', bisonMarkup);
+}
+
+function renderHomeMeteoSituation(situations = []) {
+  const markup = situations.map((item) => `<li>${item.label}: <strong>${normalizeLevel(item.level)}</strong></li>`).join('') || '<li>Aucune vigilance significative en cours.</li>';
+  setHtml('home-meteo-situation', markup);
 }
 
 function renderCriticalRisks(meteo = {}) {
@@ -344,6 +369,7 @@ async function loadExternalRisks() {
   setText('vigicrues-info', `${(data.vigicrues.stations || []).length} station(s) suivie(s)`);
   setHtml('stations-list', (data.vigicrues.stations || []).slice(0, 10).map((s) => `<li>${s.station || s.code} · ${s.river || ''} · ${normalizeLevel(s.level)} · ${s.height_m} m</li>`).join('') || '<li>Aucune station disponible.</li>');
   setText('itinisere-status', `${data.itinisere.status} · ${data.itinisere.events.length} événements`);
+  renderBisonFuteSummary(data.bison_fute || {});
   setText('georisques-status', `${data.georisques.status} · sismicité ${data.georisques.highest_seismic_zone_label || 'inconnue'}`);
   setText('georisques-info', `${data.georisques.flood_documents_total ?? 0} document(s) inondation suivis`);
   renderCriticalRisks(data.meteo_france || {});
@@ -362,6 +388,7 @@ async function loadSupervision() {
   document.getElementById('supervision-meteo').textContent = `${data.alerts.meteo.status} · ${normalizeLevel(data.alerts.meteo.level || 'inconnu')}`;
   document.getElementById('supervision-vigicrues').textContent = `${data.alerts.vigicrues.status} · ${normalizeLevel(data.alerts.vigicrues.water_alert_level || 'inconnu')}`;
   document.getElementById('supervision-itinisere').textContent = `${data.alerts.itinisere.status} · ${data.alerts.itinisere.events.length} alertes`;
+  document.getElementById('supervision-bison').textContent = `${data.alerts.bison_fute.status} · Isère départ ${data.alerts.bison_fute.today?.isere?.departure || 'inconnu'}`;
   document.getElementById('supervision-georisques').textContent = `${data.alerts.georisques.status} · ${data.alerts.georisques.highest_seismic_zone_label || 'inconnue'}`;
   document.getElementById('supervision-crisis-count').textContent = String(data.crisis_municipalities.length || 0);
   document.getElementById('supervision-timeline').innerHTML = (data.timeline || []).map((l) => `<li>${new Date(l.created_at).toLocaleString()} · <strong>${l.event_type}</strong> · ${l.description}</li>`).join('') || '<li>Aucun historique.</li>';
@@ -421,6 +448,12 @@ function bindAppInteractions() {
     setText('map-add-point-toggle', `Mode ajout: ${mapAddPointMode ? 'activé' : 'désactivé'}`);
     setMapFeedback(mapAddPointMode ? 'Cliquez sur la carte pour ajouter un point personnalisé.' : 'Mode ajout désactivé.');
   });
+  document.getElementById('itinerary-list')?.addEventListener('click', async (event) => {
+    const button = event.target.closest('[data-map-query]');
+    if (!button) return;
+    document.getElementById('map-search').value = button.getAttribute('data-map-query') || '';
+    await handleMapSearch();
+  });
   document.getElementById('custom-points-list')?.addEventListener('click', (event) => {
     const button = event.target.closest('[data-remove-point]');
     if (!button) return;
@@ -474,6 +507,8 @@ async function loadHomeLiveStatus() {
 
     document.getElementById('home-feature-itinisere-status').textContent = data.itinisere?.status || 'inconnu';
     document.getElementById('home-feature-itinisere-events').textContent = String(data.itinisere?.events_count ?? 0);
+    document.getElementById('home-feature-bison-isere').textContent = `${data.bison_fute?.today?.isere?.departure || 'inconnu'} / ${data.bison_fute?.today?.isere?.return || 'inconnu'}`;
+    renderHomeMeteoSituation(data.meteo_france?.current_situation || []);
     document.getElementById('home-live-updated').textContent = `Dernière mise à jour: ${new Date(data.updated_at).toLocaleString()}`;
     document.getElementById('home-live-error').textContent = '';
   } catch (error) {

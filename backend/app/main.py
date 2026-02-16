@@ -29,6 +29,7 @@ from .schemas import (
 )
 from .security import create_access_token, hash_password, verify_password
 from .services import (
+    fetch_bison_fute_traffic,
     cleanup_old_weather_alerts,
     fetch_georisques_isere_summary,
     fetch_isere_boundary_geojson,
@@ -152,7 +153,15 @@ def public_live_status(db: Session = Depends(get_db)):
     priority_names = [m.name for m in db.query(Municipality).filter(Municipality.pcs_active.is_(True)).all()]
     vigicrues = fetch_vigicrues_isere(priority_names=priority_names)
     itinisere = fetch_itinisere_disruptions(limit=8)
+    bison_fute = fetch_bison_fute_traffic()
     georisques = fetch_georisques_isere_summary()
+    weather_situation = [
+        {
+            "label": alert.get("phenomenon", "Risque météo"),
+            "level": (alert.get("level") or "inconnu").lower(),
+        }
+        for alert in (meteo.get("current_alerts") or [])
+    ]
 
     return {
         "updated_at": datetime.utcnow().isoformat() + "Z",
@@ -167,6 +176,7 @@ def public_live_status(db: Session = Depends(get_db)):
             "department": meteo.get("department", "Isère"),
             "level": meteo.get("level", "n/a"),
             "title": meteo.get("bulletin_title", ""),
+            "current_situation": weather_situation,
         },
         "vigicrues": {
             "status": vigicrues.get("status", "unknown"),
@@ -177,6 +187,7 @@ def public_live_status(db: Session = Depends(get_db)):
             "status": itinisere.get("status", "unknown"),
             "events_count": len(itinisere.get("events", [])),
         },
+        "bison_fute": bison_fute,
         "georisques": georisques,
     }
 
@@ -290,12 +301,14 @@ def isere_external_risks(db: Session = Depends(get_db), _: User = Depends(requir
     priority_names = [m.name for m in db.query(Municipality).filter(Municipality.pcs_active.is_(True)).all()]
     vigicrues = fetch_vigicrues_isere(priority_names=priority_names)
     itinisere = fetch_itinisere_disruptions()
+    bison_fute = fetch_bison_fute_traffic()
     georisques = fetch_georisques_isere_summary()
     return {
         "updated_at": datetime.utcnow().isoformat() + "Z",
         "meteo_france": meteo,
         "vigicrues": vigicrues,
         "itinisere": itinisere,
+        "bison_fute": bison_fute,
         "georisques": georisques,
     }
 
@@ -323,6 +336,7 @@ def supervision_overview(db: Session = Depends(get_db), _: User = Depends(requir
     priority_names = [m.name for m in db.query(Municipality).filter(Municipality.pcs_active.is_(True)).all()]
     vigicrues = fetch_vigicrues_isere(priority_names=priority_names, station_limit=12)
     itinisere = fetch_itinisere_disruptions(limit=8)
+    bison_fute = fetch_bison_fute_traffic()
     georisques = fetch_georisques_isere_summary()
     crisis = db.query(Municipality).filter(Municipality.crisis_mode.is_(True)).all()
     latest_logs = db.query(OperationalLog).order_by(OperationalLog.created_at.desc()).limit(10).all()
@@ -332,6 +346,7 @@ def supervision_overview(db: Session = Depends(get_db), _: User = Depends(requir
             "meteo": meteo,
             "vigicrues": vigicrues,
             "itinisere": itinisere,
+            "bison_fute": bison_fute,
             "georisques": georisques,
         },
         "crisis_municipalities": [MunicipalityOut.model_validate(c).model_dump() for c in crisis],
