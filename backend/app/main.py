@@ -24,6 +24,9 @@ from .schemas import (
     TwoFactorToggleRequest,
     UserCreate,
     UserOut,
+    UserPasswordResetRequest,
+    UserPasswordResetResponse,
+    UserUpdate,
     WeatherAlertCreate,
     WeatherAlertOut,
 )
@@ -81,6 +84,18 @@ def bootstrap_default_admin() -> None:
         )
         db.add(entity)
         db.commit()
+
+
+def validate_user_payload(user_payload: UserCreate | UserUpdate, actor: User | None = None) -> tuple[str, str | None]:
+    allowed_roles = {"admin", "ope", "securite", "visiteur", "mairie"}
+    if user_payload.role not in allowed_roles:
+        raise HTTPException(400, "Rôle invalide")
+    if actor and actor.role == "ope" and user_payload.role not in {"securite", "visiteur", "mairie"}:
+        raise HTTPException(403, "Un opérateur ne peut créer que sécurité, visiteur ou mairie")
+    if user_payload.role == "mairie" and not user_payload.municipality_name:
+        raise HTTPException(400, "Le rôle mairie nécessite le nom de la commune")
+    municipality_name = user_payload.municipality_name if user_payload.role == "mairie" else None
+    return user_payload.role, municipality_name
 
 
 bootstrap_default_admin()
@@ -199,13 +214,7 @@ def public_isere_map():
 
 @app.post("/auth/register", response_model=UserOut)
 def register(user: UserCreate, db: Session = Depends(get_db), creator: User = Depends(require_roles("admin", "ope"))):
-    allowed_roles = {"admin", "ope", "securite", "visiteur", "mairie"}
-    if user.role not in allowed_roles:
-        raise HTTPException(400, "Rôle invalide")
-    if creator.role == "ope" and user.role not in {"securite", "visiteur", "mairie"}:
-        raise HTTPException(403, "Un opérateur ne peut créer que sécurité, visiteur ou mairie")
-    if user.role == "mairie" and not user.municipality_name:
-        raise HTTPException(400, "Le rôle mairie nécessite le nom de la commune")
+    role, municipality_name = validate_user_payload(user, actor=creator)
 
     if db.query(User).count() >= 20:
         raise HTTPException(400, "Limite de 20 utilisateurs atteinte")
@@ -215,8 +224,8 @@ def register(user: UserCreate, db: Session = Depends(get_db), creator: User = De
     entity = User(
         username=user.username,
         hashed_password=hash_password(user.password),
-        role=user.role,
-        municipality_name=user.municipality_name if user.role == "mairie" else None,
+        role=role,
+        municipality_name=municipality_name,
     )
     db.add(entity)
     db.commit()
@@ -230,6 +239,62 @@ def list_users(db: Session = Depends(get_db), user: User = Depends(require_roles
     if user.role == "ope":
         users_query = users_query.filter(User.role.in_(["securite", "visiteur", "mairie"]))
     return users_query.order_by(User.created_at.desc()).all()
+
+
+@app.patch("/auth/users/{user_id}", response_model=UserOut)
+def update_user(user_id: int, payload: UserUpdate, db: Session = Depends(get_db), _: User = Depends(require_roles("admin"))):
+    target = db.get(User, user_id)
+    if not target:
+        raise HTTPException(404, "Utilisateur introuvable")
+    if target.username == "admin" and payload.role != "admin":
+        raise HTTPException(400, "Le compte admin principal doit conserver le rôle admin")
+
+    role, municipality_name = validate_user_payload(payload)
+    target.role = role
+    target.municipality_name = municipality_name
+    db.commit()
+    db.refresh(target)
+    return target
+
+
+@app.post("/auth/users/{user_id}/reset-password", response_model=UserPasswordResetResponse)
+def reset_user_password(
+    user_id: int,
+    payload: UserPasswordResetRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles("admin")),
+):
+    target = db.get(User, user_id)
+    if not target:
+        raise HTTPException(404, "Utilisateur introuvable")
+
+    temporary_password = payload.new_password or secrets.token_urlsafe(10)
+    if len(temporary_password) < 8:
+        raise HTTPException(400, "Le mot de passe doit contenir au moins 8 caractères")
+
+    target.hashed_password = hash_password(temporary_password)
+    target.must_change_password = True
+    db.commit()
+    return {
+        "username": target.username,
+        "temporary_password": temporary_password,
+        "must_change_password": True,
+    }
+
+
+@app.delete("/auth/users/{user_id}")
+def delete_user(user_id: int, db: Session = Depends(get_db), actor: User = Depends(require_roles("admin"))):
+    target = db.get(User, user_id)
+    if not target:
+        raise HTTPException(404, "Utilisateur introuvable")
+    if target.id == actor.id:
+        raise HTTPException(400, "Vous ne pouvez pas supprimer votre propre compte")
+    if target.username == "admin":
+        raise HTTPException(400, "Le compte admin principal ne peut pas être supprimé")
+
+    db.delete(target)
+    db.commit()
+    return {"status": "deleted", "id": user_id}
 
 
 @app.post("/auth/login", response_model=Token)
