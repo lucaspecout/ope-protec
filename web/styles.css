@@ -280,3 +280,19 @@ svg text { font-size: 14px; fill: #17335f; }
 #map-feedback { min-height: 1rem; margin: 0 0 .6rem; font-size: .9rem; }
 
 .leaflet-map { min-height: 720px; width: 100%; border-radius: 12px; border: 1px solid #ccdbf4; }
+
+.pcs-crisis-marker {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: #e03131;
+  border: 2px solid #8f1010;
+  box-shadow: 0 0 0 6px rgba(224, 49, 49, .18);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.pcs-crisis-marker span { line-height: 1; }
