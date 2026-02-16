@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from copy import deepcopy
+from html import unescape
 import json
 from pathlib import Path
 import re
@@ -343,70 +344,203 @@ def fetch_vigicrues_isere(
     station_limit: int | None = None,
     priority_names: list[str] | None = None,
 ) -> dict[str, Any]:
-    rss_source = "https://www.vigicrues.gouv.fr/territoire/rss"
-    isere_territory_codes = {"18", "17", "16", "15", "14"}
+    source = "https://www.vigicrues.gouv.fr"
+    default_territory_codes = {"18", "17", "16", "15", "14"}
     priority_names = [name.lower() for name in (priority_names or [])]
 
     try:
-        xml_payload = _http_get_text(rss_source)
-        root = ET.fromstring(xml_payload)
+        home_html = _http_get_text(source)
+        isere_territory_codes = set(re.findall(r'href="/territoire/(\d+)"', home_html)) or default_territory_codes
+    except (HTTPError, URLError, TimeoutError):
+        isere_territory_codes = default_territory_codes
+
+    color_map = {
+        "green": "vert",
+        "yellow": "jaune",
+        "orange": "orange",
+        "red": "rouge",
+        "vert": "vert",
+        "jaune": "jaune",
+        "rouge": "rouge",
+    }
+
+    try:
+        troncons_by_code: dict[str, dict[str, Any]] = {}
+        stations_index: dict[str, dict[str, Any]] = {}
+
+        for territory_code in sorted(isere_territory_codes):
+            try:
+                territory_html = _http_get_text(f"{source}/territoire/{territory_code}")
+            except (HTTPError, URLError, TimeoutError):
+                continue
+
+            table_rows = list(re.finditer(r"<tr[^>]*>(.*?)</tr>", territory_html, re.IGNORECASE | re.DOTALL))
+            for row_match in table_rows:
+                row_html = row_match.group(1)
+                if "basin-item-hi" not in row_html or "aria-controls=\"accordion-" not in row_html:
+                    continue
+
+                troncon_code_match = re.search(r'id="(RS\d+)"', row_html)
+                troncon_name_match = re.search(r"announceMapDisplay\('([^']+)'\)", row_html)
+                accordion_match = re.search(r'aria-controls="(accordion-\d+)"', row_html)
+                level_match = re.search(r'basin-item-vigilance\s+([a-z]+)"', row_html)
+                rss_match = re.search(r"CdEntVigiCru=(RS\d+)", row_html)
+                if not troncon_code_match or not troncon_name_match or not accordion_match:
+                    continue
+
+                troncon_code = troncon_code_match.group(1)
+                troncon_name = unescape(troncon_name_match.group(1)).strip()
+                try:
+                    troncon_name = troncon_name.encode("utf-8").decode("unicode_escape")
+                except UnicodeDecodeError:
+                    pass
+                level = color_map.get(level_match.group(1).lower(), "inconnu") if level_match else "inconnu"
+                rss_code = rss_match.group(1) if rss_match else troncon_code
+
+                troncon = troncons_by_code.setdefault(
+                    troncon_code,
+                    {
+                        "code": troncon_code,
+                        "name": troncon_name,
+                        "level": level,
+                        "territory": territory_code,
+                        "rss": f"{source}/territoire/rss/?CdEntVigiCru={rss_code}",
+                        "stations": [],
+                    },
+                )
+                if troncon.get("level") in {"vert", "inconnu"} and level in {"jaune", "orange", "rouge"}:
+                    troncon["level"] = level
+
+                accordion_id = accordion_match.group(1)
+                accordion_block = re.search(
+                    rf'<tr>\s*<td[^>]+id="{re.escape(accordion_id)}"[^>]*>(.*?)</tr>',
+                    territory_html,
+                    re.IGNORECASE | re.DOTALL,
+                )
+                if not accordion_block:
+                    continue
+
+                station_pairs: list[tuple[str, str, str]] = []
+                for station_code, button_html in re.findall(
+                    r"window\.location\.href='/station/([A-Z0-9]+)'.*?>(.*?)</button>",
+                    accordion_block.group(1),
+                    re.IGNORECASE | re.DOTALL,
+                ):
+                    cleaned = unescape(re.sub(r"<[^>]+>", " ", button_html)).replace("\xa0", " ")
+                    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+                    name, _, river = cleaned.partition("(")
+                    station_pairs.append((station_code, name.strip(), river.replace(")", "").strip()))
+
+                for station_code, station_name_raw, river_raw in station_pairs:
+                    station_name = unescape(station_name_raw).replace("\xa0", " ").strip()
+                    river_name = unescape(river_raw).replace("\xa0", " ").strip()
+                    if not any(s.get("code") == station_code for s in troncon["stations"]):
+                        troncon["stations"].append({"code": station_code, "station": station_name, "river": river_name})
+                    stations_index.setdefault(
+                        station_code,
+                        {
+                            "code": station_code,
+                            "station": station_name,
+                            "river": river_name,
+                            "level": level,
+                            "troncon": troncon_name,
+                            "troncon_code": troncon_code,
+                            "source_link": f"{source}/station/{station_code}",
+                        },
+                    )
+
+        if not stations_index:
+            raise ValueError("Aucune station détectée sur les territoires Vigicrues de l'Isère")
+
+        details_cache: dict[str, dict[str, Any]] = {}
+        pending_codes = list(stations_index.keys())
+        while pending_codes and len(details_cache) < sample_size:
+            current_code = pending_codes.pop(0)
+            if current_code in details_cache:
+                continue
+            try:
+                details = _http_get_json(f"{source}/services/station.json?CdStationHydro={current_code}")
+            except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
+                continue
+            details_cache[current_code] = details
+
+            current = stations_index.get(current_code) or {}
+            for linked in (details.get("VigilanceCrues") or {}).get("StationsBassin") or []:
+                linked_code = str(linked.get("CdStationHydro") or "").strip()
+                if not linked_code:
+                    continue
+                stations_index.setdefault(
+                    linked_code,
+                    {
+                        "code": linked_code,
+                        "station": linked.get("LbStationHydro") or current.get("station") or "",
+                        "river": linked.get("LbCoursEau") or current.get("river") or "",
+                        "level": current.get("level", "inconnu"),
+                        "troncon": current.get("troncon", ""),
+                        "troncon_code": current.get("troncon_code", ""),
+                        "source_link": f"{source}/station/{linked_code}",
+                    },
+                )
+                if linked_code not in details_cache and linked_code not in pending_codes and len(details_cache) + len(pending_codes) < sample_size:
+                    pending_codes.append(linked_code)
+
         isere_stations: list[dict[str, Any]] = []
-
-        for item in root.findall(".//item")[:sample_size]:
-            title = (item.findtext("title") or "").strip()
-            description_html = (item.findtext("description") or "").strip()
-            description = re.sub(r"<[^>]+>", " ", description_html)
-            description = re.sub(r"\s+", " ", description).strip()
-            link = (item.findtext("link") or "https://www.vigicrues.gouv.fr").strip()
-            published = (item.findtext("pubDate") or "").strip()
-
-            territory_match = re.search(r"CdEntVigiCru=(\d+)", link)
-            territory_code = territory_match.group(1) if territory_match else ""
-            text_blob = f"{title} {description}".lower()
-            if territory_code and territory_code not in isere_territory_codes and "isere" not in text_blob and "isère" not in text_blob and "grenoble" not in text_blob:
+        for station_code, station in stations_index.items():
+            details = details_cache.get(station_code)
+            if not details:
                 continue
 
-            if "isère" not in text_blob and "isere" not in text_blob and "grenoble" not in text_blob:
+            commune_code = str(details.get("CdCommune") or "")
+            if not commune_code.startswith("38"):
                 continue
 
-            level_match = re.search(r":\s*(vert|jaune|orange|rouge)\s*$", title, re.IGNORECASE)
-            if not level_match:
-                level_match = re.search(r"Couleur de vigilance crues du tronçon\s*:\s*(vert|jaune|orange|rouge)", description, re.IGNORECASE)
-            level = (level_match.group(1).lower() if level_match else "inconnu").replace("verte", "vert")
+            coords = details.get("CoordStationHydro") or {}
+            coord_x = coords.get("CoordXStationHydro")
+            coord_y = coords.get("CoordYStationHydro")
+            text_blob = f"{station.get('station', '')} {station.get('river', '')} {station.get('troncon', '')}".lower()
 
-            troncon_match = re.search(r"Nom du tronçon\s*:\s*([^\(]+)", description, re.IGNORECASE)
-            station_name = troncon_match.group(1).strip() if troncon_match else (title.split(":", 1)[0].strip() if title else "Tronçon Vigicrues")
-
-            code_match = re.search(r"\(([A-Z]{1,3}\d{1,4})\)", description)
-            station_code = code_match.group(1) if code_match else (item.findtext("guid") or link)
-
-            commune_code_match = re.search(r"\b(38\d{3})\b", description)
-            commune_code = commune_code_match.group(1) if commune_code_match else ""
-            center = _commune_center(commune_code) if commune_code else None
-            lat, lon = center if center else (None, None)
-
-            is_priority = "grenoble" in text_blob or any(name in text_blob for name in priority_names)
             isere_stations.append(
                 {
                     "code": station_code,
-                    "station": station_name,
-                    "river": "",
+                    "station": details.get("LbStationHydro") or station.get("station") or "Station Vigicrues",
+                    "river": details.get("LbCoursEau") or station.get("river") or "",
                     "height_m": 0.0,
                     "delta_window_m": 0.0,
-                    "level": level,
-                    "is_priority": is_priority,
-                    "observed_at": published,
-                    "lat": lat,
-                    "lon": lon,
+                    "level": station.get("level", "inconnu"),
+                    "is_priority": ("grenoble" in text_blob or any(name in text_blob for name in priority_names)),
+                    "observed_at": "",
+                    "lat": float(coord_y) if coord_y else None,
+                    "lon": float(coord_x) if coord_x else None,
                     "commune_code": commune_code,
-                    "source_link": link,
+                    "troncon": station.get("troncon", ""),
+                    "troncon_code": station.get("troncon_code", ""),
+                    "source_link": station.get("source_link", f"{source}/station/{station_code}"),
                 }
             )
 
         if not isere_stations:
-            raise ValueError("Aucune alerte Isère trouvée dans le flux RSS Vigicrues")
+            raise ValueError("Aucune station du département de l'Isère trouvée")
+
+        isere_codes = {station["code"] for station in isere_stations}
+        troncons: list[dict[str, Any]] = []
+        for troncon in troncons_by_code.values():
+            kept_stations = [s for s in troncon.get("stations", []) if s.get("code") in isere_codes]
+            if not kept_stations and "isere" not in (troncon.get("name") or "").lower() and "isère" not in (troncon.get("name") or "").lower():
+                continue
+            troncons.append(
+                {
+                    "code": troncon.get("code"),
+                    "name": troncon.get("name"),
+                    "level": troncon.get("level", "inconnu"),
+                    "territory": troncon.get("territory"),
+                    "rss": troncon.get("rss"),
+                    "stations": kept_stations,
+                }
+            )
 
         isere_stations.sort(key=lambda station: (not station["is_priority"], station["station"] or ""))
+        troncons.sort(key=lambda troncon: troncon.get("name") or "")
+
         if station_limit is not None:
             isere_stations = isere_stations[:station_limit]
 
@@ -416,9 +550,10 @@ def fetch_vigicrues_isere(
             "service": "Vigicrues",
             "department": "Isère (38)",
             "status": "online",
-            "source": rss_source,
+            "source": source,
             "water_alert_level": global_level,
             "stations": isere_stations,
+            "troncons": troncons,
             "updated_at": datetime.utcnow().isoformat() + "Z",
         }
     except (ET.ParseError, HTTPError, URLError, TimeoutError, ValueError) as exc:
@@ -426,9 +561,10 @@ def fetch_vigicrues_isere(
             "service": "Vigicrues",
             "department": "Isère (38)",
             "status": "degraded",
-            "source": rss_source,
+            "source": source,
             "water_alert_level": "inconnu",
             "stations": [],
+            "troncons": [],
             "error": str(exc),
         }
 
