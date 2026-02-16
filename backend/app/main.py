@@ -150,6 +150,7 @@ def public_live_status(db: Session = Depends(get_db)):
     meteo = fetch_meteo_france_isere()
     priority_names = [m.name for m in db.query(Municipality).filter(Municipality.pcs_active.is_(True)).all()]
     vigicrues = fetch_vigicrues_isere(priority_names=priority_names)
+    itinisere = fetch_itinisere_disruptions(limit=8)
     georisques = fetch_georisques_isere_summary()
 
     return {
@@ -170,6 +171,10 @@ def public_live_status(db: Session = Depends(get_db)):
             "status": vigicrues.get("status", "unknown"),
             "water_alert_level": vigicrues.get("water_alert_level", "vert"),
             "station_count": len(vigicrues.get("stations", [])),
+        },
+        "itinisere": {
+            "status": itinisere.get("status", "unknown"),
+            "events_count": len(itinisere.get("events", [])),
         },
         "georisques": georisques,
     }
