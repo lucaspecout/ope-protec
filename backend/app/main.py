@@ -571,6 +571,20 @@ def toggle_crisis(municipality_id: int, db: Session = Depends(get_db), _: User =
     return {"id": municipality_id, "crisis_mode": municipality.crisis_mode}
 
 
+@app.delete("/municipalities/{municipality_id}")
+def delete_municipality(
+    municipality_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(*EDIT_ROLES)),
+):
+    municipality = db.get(Municipality, municipality_id)
+    if not municipality:
+        raise HTTPException(404, "Commune introuvable")
+    db.delete(municipality)
+    db.commit()
+    return {"status": "deleted", "id": municipality_id}
+
+
 @app.post("/logs", response_model=OperationalLogOut)
 def create_log(data: OperationalLogCreate, db: Session = Depends(get_db), user: User = Depends(require_roles(*EDIT_ROLES))):
     entry = OperationalLog(**data.model_dump(), created_by_id=user.id)

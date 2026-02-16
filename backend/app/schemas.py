@@ -108,6 +108,8 @@ class MunicipalityOut(BaseModel):
     pcs_active: bool
     crisis_mode: bool
     vigilance_color: str
+    orsec_plan_file: str | None = None
+    convention_file: str | None = None
 
     class Config:
         from_attributes = True
