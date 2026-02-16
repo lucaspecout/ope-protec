@@ -271,10 +271,14 @@ async function loadExternalRisks() {
   document.getElementById('river-status').textContent = `${data.vigicrues.status} · niveau ${normalizeLevel(data.vigicrues.water_alert_level)}`;
   document.getElementById('stations-list').innerHTML = (data.vigicrues.stations || []).slice(0, 10).map((s) => `<li>${s.station || s.code} · ${s.river || ''} · ${normalizeLevel(s.level)} · ${s.height_m} m</li>`).join('') || '<li>Aucune station disponible.</li>';
   document.getElementById('itinisere-status').textContent = `${data.itinisere.status} · ${data.itinisere.events.length} événements`;
+  document.getElementById('georisques-status').textContent = `${data.georisques.status} · sismicité ${data.georisques.highest_seismic_zone_label || 'inconnue'}`;
+  document.getElementById('georisques-info').textContent = `${data.georisques.flood_documents_total ?? 0} document(s) inondation suivis`;
   renderItinisereEvents(data.itinisere?.events || []);
   document.getElementById('meteo-level').textContent = normalizeLevel(data.meteo_france.level || 'vert');
   document.getElementById('meteo-hazards').textContent = (data.meteo_france.hazards || []).join(', ') || 'non précisé';
   document.getElementById('river-level').textContent = normalizeLevel(data.vigicrues.water_alert_level || 'vert');
+  document.getElementById('map-seismic-level').textContent = data.georisques.highest_seismic_zone_label || 'inconnue';
+  document.getElementById('map-flood-docs').textContent = String(data.georisques.flood_documents_total ?? 0);
   renderStations(data.vigicrues.stations || []);
 }
 
@@ -283,6 +287,7 @@ async function loadSupervision() {
   document.getElementById('supervision-meteo').textContent = `${data.alerts.meteo.status} · ${normalizeLevel(data.alerts.meteo.level || 'inconnu')}`;
   document.getElementById('supervision-vigicrues').textContent = `${data.alerts.vigicrues.status} · ${normalizeLevel(data.alerts.vigicrues.water_alert_level || 'inconnu')}`;
   document.getElementById('supervision-itinisere').textContent = `${data.alerts.itinisere.status} · ${data.alerts.itinisere.events.length} alertes`;
+  document.getElementById('supervision-georisques').textContent = `${data.alerts.georisques.status} · ${data.alerts.georisques.highest_seismic_zone_label || 'inconnue'}`;
   document.getElementById('supervision-crisis-count').textContent = String(data.crisis_municipalities.length || 0);
   document.getElementById('supervision-timeline').innerHTML = (data.timeline || []).map((l) => `<li>${new Date(l.created_at).toLocaleString()} · <strong>${l.event_type}</strong> · ${l.description}</li>`).join('') || '<li>Aucun historique.</li>';
   renderItinisereEvents(data.alerts.itinisere.events || [], 'supervision-itinisere-events');
@@ -368,6 +373,8 @@ async function loadHomeLiveStatus() {
     document.getElementById('home-river-state').textContent = normalizeLevel(data.dashboard.crues || '-');
     document.getElementById('home-global-risk').textContent = normalizeLevel(data.dashboard.global_risk || '-');
     document.getElementById('home-crisis-count').textContent = String(data.dashboard.communes_crise ?? 0);
+    document.getElementById('home-seismic-state').textContent = data.georisques?.highest_seismic_zone_label || 'inconnue';
+    document.getElementById('home-flood-docs').textContent = String(data.georisques?.flood_documents_total ?? 0);
     document.getElementById('home-live-updated').textContent = `Dernière mise à jour: ${new Date(data.updated_at).toLocaleString()}`;
     document.getElementById('home-live-error').textContent = '';
   } catch (error) {
