@@ -344,6 +344,21 @@ svg text { font-size: 14px; fill: #17335f; }
   .map-panel-head { flex-direction: column; }
 }
 
+@media (max-width: 760px) {
+  .map-controls,
+  .map-workspace.map-workspace--collapsed .map-controls {
+    position: static;
+    width: 100%;
+    max-height: none;
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+    margin-top: .6rem;
+  }
+  .map-workspace:not(.map-workspace--collapsed) .map-controls-toggle { right: .65rem; }
+}
+
+
 #map-source { font-size: .86rem; }
 #map-feedback { min-height: 1rem; margin: 0 0 .6rem; font-size: .9rem; }
 

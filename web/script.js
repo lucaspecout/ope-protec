@@ -1,4 +1,4 @@
-const STORAGE_KEYS = { token: 'token', activePanel: 'activePanel' };
+const STORAGE_KEYS = { token: 'token', activePanel: 'activePanel', mapPointsCache: 'mapPointsCache' };
 const AUTO_REFRESH_MS = 30000;
 const HOME_LIVE_REFRESH_MS = 30000;
 const PANEL_TITLES = {
@@ -733,15 +733,29 @@ function renderMapIconSuggestions(category = 'autre') {
 }
 
 async function loadMapPoints() {
+  let loadedPoints = [];
+  let usedCacheFallback = false;
+
   try {
-    mapPoints = await api('/map/points');
-    renderCustomPoints();
+    const response = await api('/map/points');
+    loadedPoints = Array.isArray(response) ? response : [];
+    localStorage.setItem(STORAGE_KEYS.mapPointsCache, JSON.stringify(loadedPoints));
   } catch (error) {
-    mapPoints = [];
-    renderCustomPoints();
-    setMapFeedback(`Points personnalisés indisponibles: ${sanitizeErrorMessage(error.message)}`, true);
+    usedCacheFallback = true;
+    try {
+      const cached = JSON.parse(localStorage.getItem(STORAGE_KEYS.mapPointsCache) || '[]');
+      loadedPoints = Array.isArray(cached) ? cached : [];
+    } catch (_) {
+      loadedPoints = [];
+    }
+    setMapFeedback(`Points personnalisés indisponibles (API): ${sanitizeErrorMessage(error.message)}. Affichage du cache local (${loadedPoints.length}).`, true);
   }
+
+  mapPoints = loadedPoints;
+  renderCustomPoints(!usedCacheFallback);
+  return { usedCacheFallback, count: loadedPoints.length };
 }
+
 
 async function saveMapPoint(payload) {
   await api('/map/points', {
@@ -757,7 +771,7 @@ async function deleteMapPoint(pointId) {
   await loadMapPoints();
 }
 
-function renderCustomPoints() {
+function renderCustomPoints(showFeedback = true) {
   if (customPointsLayer) customPointsLayer.clearLayers();
   if (mapPointsLayer) mapPointsLayer.clearLayers();
 
@@ -776,7 +790,7 @@ function renderCustomPoints() {
     marker.bindPopup(`<strong>${escapeHtml(point.icon || iconForCategory(point.category))} ${escapeHtml(point.name)}</strong><br/>Catégorie: ${escapeHtml(point.category)}<br/>${escapeHtml(point.notes || 'Sans note')}`);
     marker.addTo(mapPointsLayer);
   });
-  setMapFeedback(`${filteredPoints.length} point(s) opérationnel(s) affiché(s).`);
+  if (showFeedback) setMapFeedback(`${filteredPoints.length} point(s) opérationnel(s) affiché(s).`);
 }
 
 function onMapClickAddPoint(event) {
@@ -1178,30 +1192,35 @@ async function loadUsers() {
 
 async function refreshAll() {
   const loaders = [
-    ['tableau de bord', loadDashboard],
-    ['risques externes', loadExternalRisks],
-    ['communes', loadMunicipalities],
-    ['main courante', loadLogs],
-    ['utilisateurs', loadUsers],
-    ['supervision', loadSupervision],
-    ['interconnexions API', loadApiInterconnections],
-    ['points cartographiques', loadMapPoints],
+    { label: 'tableau de bord', loader: loadDashboard, optional: false },
+    { label: 'risques externes', loader: loadExternalRisks, optional: false },
+    { label: 'communes', loader: loadMunicipalities, optional: false },
+    { label: 'main courante', loader: loadLogs, optional: false },
+    { label: 'utilisateurs', loader: loadUsers, optional: true },
+    { label: 'supervision', loader: loadSupervision, optional: true },
+    { label: 'interconnexions API', loader: loadApiInterconnections, optional: true },
+    { label: 'points cartographiques', loader: loadMapPoints, optional: true },
   ];
 
-  const results = await Promise.allSettled(loaders.map(([, loader]) => loader()));
+  const results = await Promise.allSettled(loaders.map(({ loader }) => loader()));
   const failures = results
-    .map((result, index) => ({ result, label: loaders[index][0] }))
+    .map((result, index) => ({ result, config: loaders[index] }))
     .filter(({ result }) => result.status === 'rejected');
+
+  const blockingFailures = failures.filter(({ config }) => !config.optional);
+  const optionalFailures = failures.filter(({ config }) => config.optional);
 
   renderResources();
   fitMapToData();
 
-  if (!failures.length) {
-    document.getElementById('dashboard-error').textContent = '';
+  if (!blockingFailures.length) {
+    document.getElementById('dashboard-error').textContent = optionalFailures.length
+      ? `Modules secondaires indisponibles: ${optionalFailures.map(({ config, result }) => `${config.label}: ${sanitizeErrorMessage(result.reason?.message || 'erreur')}`).join(' · ')}`
+      : '';
     return;
   }
 
-  const message = failures.map(({ label, result }) => `${label}: ${sanitizeErrorMessage(result.reason?.message || 'erreur')}`).join(' · ');
+  const message = blockingFailures.map(({ config, result }) => `${config.label}: ${sanitizeErrorMessage(result.reason?.message || 'erreur')}`).join(' · ');
   document.getElementById('dashboard-error').textContent = message;
   setMapFeedback(message, true);
 }
