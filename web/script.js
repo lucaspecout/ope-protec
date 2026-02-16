@@ -114,6 +114,7 @@ async function api(path, options = {}) {
   throw new Error(sanitizeErrorMessage(lastError?.message || 'API indisponible'));
 }
 
+
 async function parseJsonResponse(response, path = '') {
   if (response.status === 204) return null;
   const text = await response.text();
@@ -124,6 +125,28 @@ async function parseJsonResponse(response, path = '') {
     const snippet = text.slice(0, 80).replace(/\s+/g, ' ');
     throw new Error(`Réponse non-JSON pour ${path || response.url} (${response.status}): ${snippet}`);
   }
+}
+
+async function apiFile(path) {
+  const headers = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let lastError = null;
+  for (const origin of apiOrigins()) {
+    const url = buildApiUrl(path, origin);
+    try {
+      const response = await fetch(url, { headers });
+      if (!response.ok) {
+        if (response.status === 401) logout();
+        const detail = await response.text();
+        throw new Error(detail || `Erreur API (${response.status})`);
+      }
+      return { blob: await response.blob(), contentType: response.headers.get('content-type') || 'application/octet-stream' };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw new Error(sanitizeErrorMessage(lastError?.message || 'API indisponible'));
 }
 
 function setActivePanel(panelId) {
@@ -584,13 +607,13 @@ async function loadMunicipalities() {
     if (m.convention_file) docs.push('Convention');
     const actions = canEdit()
       ? `<div class="municipality-actions">
-           <button type="button" class="ghost inline-action" data-muni-view="${m.id}">Détail</button>
+           <button type="button" class="ghost inline-action" data-muni-view="${m.id}">Voir</button>
            <button type="button" class="ghost inline-action" data-muni-edit="${m.id}">Éditer</button>
            <button type="button" class="ghost inline-action" data-muni-crisis="${m.id}">${m.crisis_mode ? 'Sortir de crise' : 'Passer en crise'}</button>
            <button type="button" class="ghost inline-action" data-muni-docs="${m.id}">Documents</button>
            <button type="button" class="ghost inline-action danger" data-muni-delete="${m.id}">Supprimer</button>
          </div>`
-      : `<div class="municipality-actions"><button type="button" class="ghost inline-action" data-muni-view="${m.id}">Détail</button></div>`;
+      : `<div class="municipality-actions"><button type="button" class="ghost inline-action" data-muni-view="${m.id}">Voir</button></div>`;
     return `<article class="municipality-card">
       <header>
         <h4>${escapeHtml(m.name)}</h4>
