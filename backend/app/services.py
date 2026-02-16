@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta
+from copy import deepcopy
 import json
 from pathlib import Path
 import re
+from threading import Lock
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote_plus, urlencode
@@ -180,74 +182,102 @@ def _build_mf_alerts(
     alerts.sort(key=lambda alert: {"rouge": 4, "orange": 3, "jaune": 2, "vert": 1}.get(alert["level"], 0), reverse=True)
     return alerts
 
-def fetch_meteo_france_isere() -> dict[str, Any]:
+
+_MF_CACHE_TTL_SECONDS = 180
+_meteo_cache_lock = Lock()
+_meteo_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+
+
+def _fetch_meteo_france_isere_live() -> dict[str, Any]:
     source_url = "https://vigilance.meteofrance.fr/fr/isere"
+    html = _http_get_text(source_url)
+    title_match = re.search(r"<title>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
+    desc_match = re.search(r'<meta name="description" content="(.*?)"', html, re.IGNORECASE)
+    color_match = re.search(r"vigilance (verte|jaune|orange|rouge)", html, re.IGNORECASE)
+    level = color_match.group(1).lower() if color_match else "inconnu"
+    level = "vert" if level == "verte" else level
+    bulletin_title = title_match.group(1).strip() if title_match else "Vigilance Météo Isère"
+    info_state = desc_match.group(1).replace("&#039;", "'") if desc_match else "Informations disponibles"
+    hazards = _extract_meteo_hazards(bulletin_title, info_state)
+
+    token = _extract_mf_token_from_page()
+    dictionary = _meteo_france_wsft_get("warning/dictionary", token, {"domain": "FRA", "warning_type": "vigilance"})
+    warning_today = _meteo_france_wsft_get(
+        "warning/currentphenomenons",
+        token,
+        {"domain": "38", "warning_type": "vigilance", "formatDate": "timestamp", "echeance": "J0", "depth": 1},
+    )
+    warning_tomorrow = _meteo_france_wsft_get(
+        "warning/currentphenomenons",
+        token,
+        {"domain": "38", "warning_type": "vigilance", "formatDate": "timestamp", "echeance": "J1", "depth": 1},
+    )
+    bulletin_today = _meteo_france_wsft_get(
+        "report",
+        token,
+        {"domain": "38", "report_type": "vigilanceV6", "report_subtype": "Bulletin de suivi", "echeance": "J0"},
+        version="v2",
+    )
+    bulletin_tomorrow = _meteo_france_wsft_get(
+        "report",
+        token,
+        {"domain": "38", "report_type": "vigilanceV6", "report_subtype": "Bulletin de suivi", "echeance": "J1"},
+        version="v2",
+    )
+
+    phenomenon_names = {str(item.get("id")): item.get("name", "") for item in dictionary.get("phenomenons") or []}
+    color_names = {int(item.get("id")): item.get("name", "inconnu") for item in dictionary.get("colors") or []}
+    today_bulletin_items = _parse_mf_bulletin_items(bulletin_today)
+    tomorrow_bulletin_items = _parse_mf_bulletin_items(bulletin_tomorrow)
+    current_alerts = _build_mf_alerts(warning_today, phenomenon_names, color_names, today_bulletin_items)
+    tomorrow_alerts = _build_mf_alerts(warning_tomorrow, phenomenon_names, color_names, tomorrow_bulletin_items)
+    monitored_hazards = [alert["phenomenon"].lower() for alert in current_alerts + tomorrow_alerts]
+    hazards = sorted(set(hazards + [hazard for hazard in monitored_hazards if hazard]))
+
+    return {
+        "service": "Météo-France Vigilance",
+        "department": "Isère (38)",
+        "status": "online",
+        "source": source_url,
+        "level": level,
+        "bulletin_title": bulletin_title,
+        "info_state": info_state,
+        "hazards": hazards,
+        "current_alerts": current_alerts,
+        "tomorrow_alerts": tomorrow_alerts,
+        "bulletin_today": today_bulletin_items[:4],
+        "bulletin_tomorrow": tomorrow_bulletin_items[:4],
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+def fetch_meteo_france_isere(force_refresh: bool = False) -> dict[str, Any]:
+    now = datetime.utcnow()
+    with _meteo_cache_lock:
+        cached_payload = _meteo_cache.get("payload")
+        expires_at = _meteo_cache.get("expires_at") or datetime.min
+        if not force_refresh and cached_payload and now < expires_at:
+            return deepcopy(cached_payload)
+
     try:
-        html = _http_get_text(source_url)
-        title_match = re.search(r"<title>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
-        desc_match = re.search(r'<meta name="description" content="(.*?)"', html, re.IGNORECASE)
-        color_match = re.search(r"vigilance (verte|jaune|orange|rouge)", html, re.IGNORECASE)
-        level = color_match.group(1).lower() if color_match else "inconnu"
-        level = "vert" if level == "verte" else level
-        bulletin_title = title_match.group(1).strip() if title_match else "Vigilance Météo Isère"
-        info_state = desc_match.group(1).replace("&#039;", "'") if desc_match else "Informations disponibles"
-        hazards = _extract_meteo_hazards(bulletin_title, info_state)
-
-        token = _extract_mf_token_from_page()
-        dictionary = _meteo_france_wsft_get("warning/dictionary", token, {"domain": "FRA", "warning_type": "vigilance"})
-        warning_today = _meteo_france_wsft_get(
-            "warning/currentphenomenons",
-            token,
-            {"domain": "38", "warning_type": "vigilance", "formatDate": "timestamp", "echeance": "J0", "depth": 1},
-        )
-        warning_tomorrow = _meteo_france_wsft_get(
-            "warning/currentphenomenons",
-            token,
-            {"domain": "38", "warning_type": "vigilance", "formatDate": "timestamp", "echeance": "J1", "depth": 1},
-        )
-        bulletin_today = _meteo_france_wsft_get(
-            "report",
-            token,
-            {"domain": "38", "report_type": "vigilanceV6", "report_subtype": "Bulletin de suivi", "echeance": "J0"},
-            version="v2",
-        )
-        bulletin_tomorrow = _meteo_france_wsft_get(
-            "report",
-            token,
-            {"domain": "38", "report_type": "vigilanceV6", "report_subtype": "Bulletin de suivi", "echeance": "J1"},
-            version="v2",
-        )
-
-        phenomenon_names = {str(item.get("id")): item.get("name", "") for item in dictionary.get("phenomenons") or []}
-        color_names = {int(item.get("id")): item.get("name", "inconnu") for item in dictionary.get("colors") or []}
-        today_bulletin_items = _parse_mf_bulletin_items(bulletin_today)
-        tomorrow_bulletin_items = _parse_mf_bulletin_items(bulletin_tomorrow)
-        current_alerts = _build_mf_alerts(warning_today, phenomenon_names, color_names, today_bulletin_items)
-        tomorrow_alerts = _build_mf_alerts(warning_tomorrow, phenomenon_names, color_names, tomorrow_bulletin_items)
-        monitored_hazards = [alert["phenomenon"].lower() for alert in current_alerts + tomorrow_alerts]
-        hazards = sorted(set(hazards + [hazard for hazard in monitored_hazards if hazard]))
-
-        return {
-            "service": "Météo-France Vigilance",
-            "department": "Isère (38)",
-            "status": "online",
-            "source": source_url,
-            "level": level,
-            "bulletin_title": bulletin_title,
-            "info_state": info_state,
-            "hazards": hazards,
-            "current_alerts": current_alerts,
-            "tomorrow_alerts": tomorrow_alerts,
-            "bulletin_today": today_bulletin_items[:4],
-            "bulletin_tomorrow": tomorrow_bulletin_items[:4],
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
+        payload = _fetch_meteo_france_isere_live()
+        with _meteo_cache_lock:
+            _meteo_cache["payload"] = deepcopy(payload)
+            _meteo_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_MF_CACHE_TTL_SECONDS)
+        return payload
     except (HTTPError, URLError, TimeoutError, ValueError) as exc:
+        with _meteo_cache_lock:
+            cached_payload = _meteo_cache.get("payload")
+            if cached_payload:
+                degraded_payload = deepcopy(cached_payload)
+                degraded_payload["status"] = "stale"
+                degraded_payload["info_state"] = f"Données mises en cache (dernière tentative indisponible: {exc})"
+                return degraded_payload
         return {
             "service": "Météo-France Vigilance",
             "department": "Isère (38)",
             "status": "degraded",
-            "source": source_url,
+            "source": "https://vigilance.meteofrance.fr/fr/isere",
             "level": "inconnu",
             "info_state": f"indisponible ({exc})",
             "hazards": [],
