@@ -533,6 +533,7 @@ async function loadMunicipalities() {
   await renderMunicipalitiesOnMap(municipalities);
 }
 
+
 async function loadLogs() {
   const dashboard = await api('/dashboard');
   document.getElementById('logs-list').innerHTML = (dashboard.latest_logs || []).map((l) => `<li>${new Date(l.created_at).toLocaleString()} · ${l.danger_emoji || ''} <strong style="color:${levelColor(l.danger_level)}">${l.event_type}</strong> · ${l.description}</li>`).join('') || '<li>Aucun log.</li>';
