@@ -316,7 +316,15 @@ function renderMeteoAlerts(meteo = {}) {
 }
 
 function renderItinisereEvents(events = [], targetId = 'itinerary-list') {
-  document.getElementById(targetId).innerHTML = events.slice(0, 8).map((e) => `<li><strong>${e.title}</strong><br>${e.description || ''}<br><a href="${e.link}" target="_blank" rel="noreferrer">Détail</a><br><button type="button" class="ghost inline-action" data-map-query="${(e.title || '').replace(/"/g, '&quot;')}">Voir sur la carte</button></li>`).join('') || '<li>Aucune perturbation publiée.</li>';
+  const target = document.getElementById(targetId);
+  if (!target) return;
+  target.innerHTML = events.slice(0, 8).map((e) => {
+    const title = escapeHtml(e.title || 'Évènement');
+    const description = escapeHtml(e.description || '');
+    const safeLink = String(e.link || '').startsWith('http') ? e.link : '#';
+    const mapQuery = escapeHtml(e.title || '').replace(/"/g, '&quot;');
+    return `<li><strong>${title}</strong><br>${description}<br><a href="${safeLink}" target="_blank" rel="noreferrer">Détail</a><br><button type="button" class="ghost inline-action" data-map-query="${mapQuery}">Voir sur la carte</button></li>`;
+  }).join('') || '<li>Aucune perturbation publiée.</li>';
 }
 
 function renderBisonFuteSummary(bison = {}) {
@@ -512,14 +520,38 @@ async function handleUsersTableAction(event) {
 
 function bindHomeInteractions() {
   const openLogin = () => showLogin();
+  const mobileMenuButton = document.getElementById('mobile-menu-btn');
+  const homeNav = document.getElementById('home-nav');
+
   document.getElementById('open-login-btn')?.addEventListener('click', openLogin);
   document.getElementById('hero-login-btn')?.addEventListener('click', openLogin);
   document.getElementById('back-home-btn')?.addEventListener('click', showHome);
   document.getElementById('scroll-actions-btn')?.addEventListener('click', () => document.getElementById('home-features')?.scrollIntoView({ behavior: 'smooth' }));
+
+  mobileMenuButton?.addEventListener('click', () => {
+    const isOpen = homeNav?.classList.toggle('open');
+    mobileMenuButton.setAttribute('aria-expanded', String(Boolean(isOpen)));
+  });
+
+  homeNav?.querySelectorAll('a, button').forEach((node) => node.addEventListener('click', () => {
+    homeNav.classList.remove('open');
+    mobileMenuButton?.setAttribute('aria-expanded', 'false');
+  }));
 }
 
 function bindAppInteractions() {
-  document.querySelectorAll('.menu-btn').forEach((button) => button.addEventListener('click', () => setActivePanel(button.dataset.target)));
+  const appMenuButton = document.getElementById('app-menu-btn');
+  const appSidebar = document.getElementById('app-sidebar');
+
+  document.querySelectorAll('.menu-btn').forEach((button) => button.addEventListener('click', () => {
+    setActivePanel(button.dataset.target);
+    appSidebar?.classList.remove('open');
+    appMenuButton?.setAttribute('aria-expanded', 'false');
+  }));
+  appMenuButton?.addEventListener('click', () => {
+    const isOpen = appSidebar?.classList.toggle('open');
+    appMenuButton.setAttribute('aria-expanded', String(Boolean(isOpen)));
+  });
   document.getElementById('logout-btn').addEventListener('click', logout);
   document.getElementById('map-search-btn')?.addEventListener('click', handleMapSearch);
   document.getElementById('map-fit-btn')?.addEventListener('click', fitMapToData);
@@ -601,26 +633,28 @@ function startAutoRefresh() {
 async function loadHomeLiveStatus() {
   try {
     const data = await api('/public/live', { logoutOn401: false, omitAuth: true });
-    document.getElementById('home-meteo-state').textContent = normalizeLevel(data.dashboard.vigilance || '-');
-    document.getElementById('home-river-state').textContent = normalizeLevel(data.dashboard.crues || '-');
-    document.getElementById('home-global-risk').textContent = normalizeLevel(data.dashboard.global_risk || '-');
-    document.getElementById('home-crisis-count').textContent = String(data.dashboard.communes_crise ?? 0);
+    const dashboard = data?.dashboard || {};
+    document.getElementById('home-meteo-state').textContent = normalizeLevel(dashboard.vigilance || '-');
+    document.getElementById('home-river-state').textContent = normalizeLevel(dashboard.crues || '-');
+    document.getElementById('home-global-risk').textContent = normalizeLevel(dashboard.global_risk || '-');
+    document.getElementById('home-crisis-count').textContent = String(dashboard.communes_crise ?? 0);
     document.getElementById('home-seismic-state').textContent = data.georisques?.highest_seismic_zone_label || 'inconnue';
     document.getElementById('home-flood-docs').textContent = String(data.georisques?.flood_documents_total ?? 0);
 
-    document.getElementById('home-feature-global-risk').textContent = normalizeLevel(data.dashboard.global_risk || '-');
-    document.getElementById('home-feature-river-risk').textContent = normalizeLevel(data.dashboard.crues || '-');
+    document.getElementById('home-feature-global-risk').textContent = normalizeLevel(dashboard.global_risk || '-');
+    document.getElementById('home-feature-river-risk').textContent = normalizeLevel(dashboard.crues || '-');
     document.getElementById('home-feature-seismic-risk').textContent = data.georisques?.highest_seismic_zone_label || 'inconnue';
 
-    document.getElementById('home-feature-meteo').textContent = normalizeLevel(data.dashboard.vigilance || '-');
+    document.getElementById('home-feature-meteo').textContent = normalizeLevel(dashboard.vigilance || '-');
     document.getElementById('home-feature-vigicrues').textContent = normalizeLevel(data.vigicrues?.water_alert_level || '-');
-    document.getElementById('home-feature-crisis-count').textContent = String(data.dashboard.communes_crise ?? 0);
+    document.getElementById('home-feature-crisis-count').textContent = String(dashboard.communes_crise ?? 0);
 
     document.getElementById('home-feature-itinisere-status').textContent = data.itinisere?.status || 'inconnu';
     document.getElementById('home-feature-itinisere-events').textContent = String(data.itinisere?.events_count ?? 0);
     document.getElementById('home-feature-bison-isere').textContent = `${data.bison_fute?.today?.isere?.departure || 'inconnu'} / ${data.bison_fute?.today?.isere?.return || 'inconnu'}`;
     renderHomeMeteoSituation(data.meteo_france?.current_situation || []);
-    document.getElementById('home-live-updated').textContent = `Dernière mise à jour: ${new Date(data.updated_at).toLocaleString()}`;
+    const updatedLabel = data?.updated_at ? new Date(data.updated_at).toLocaleString() : 'inconnue';
+    document.getElementById('home-live-updated').textContent = `Dernière mise à jour: ${updatedLabel}`;
     document.getElementById('home-live-error').textContent = '';
   } catch (error) {
     document.getElementById('home-live-error').textContent = error.message;
@@ -689,32 +723,44 @@ document.getElementById('municipality-form').addEventListener('submit', async (e
   event.preventDefault();
   if (!canEdit()) return;
   const form = new FormData(event.target);
-  await api('/municipalities', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      name: form.get('name'),
-      manager: form.get('manager'),
-      phone: form.get('phone'),
-      email: form.get('email'),
-      postal_code: form.get('postal_code'),
-    }),
-  });
-  event.target.reset();
-  await loadMunicipalities();
+  const errorTarget = document.getElementById('dashboard-error');
+  try {
+    await api('/municipalities', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: form.get('name'),
+        manager: form.get('manager'),
+        phone: form.get('phone'),
+        email: form.get('email'),
+        postal_code: form.get('postal_code'),
+      }),
+    });
+    event.target.reset();
+    if (errorTarget) errorTarget.textContent = '';
+    await loadMunicipalities();
+  } catch (error) {
+    if (errorTarget) errorTarget.textContent = sanitizeErrorMessage(error.message);
+  }
 });
 
 document.getElementById('log-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!canEdit()) return;
   const form = new FormData(event.target);
-  await api('/logs', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ event_type: form.get('event_type'), description: form.get('description') }),
-  });
-  event.target.reset();
-  await refreshAll();
+  const errorTarget = document.getElementById('dashboard-error');
+  try {
+    await api('/logs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event_type: form.get('event_type'), description: form.get('description') }),
+    });
+    event.target.reset();
+    if (errorTarget) errorTarget.textContent = '';
+    await refreshAll();
+  } catch (error) {
+    if (errorTarget) errorTarget.textContent = sanitizeErrorMessage(error.message);
+  }
 });
 
 (async function bootstrap() {
