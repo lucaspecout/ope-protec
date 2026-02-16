@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from pathlib import Path
+import re
 import secrets
 from typing import Callable
 
@@ -66,6 +67,40 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 ALLOWED_WEATHER_TRANSITIONS = {("jaune", "orange"), ("orange", "rouge")}
 READ_ROLES = {"admin", "ope", "securite", "visiteur", "mairie"}
 EDIT_ROLES = {"admin", "ope"}
+ALLOWED_DOC_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
+
+
+def utc_timestamp() -> str:
+    return datetime.utcnow().isoformat() + "Z"
+
+
+def compute_global_risk(*levels: str) -> str:
+    normalized_levels = {str(level).lower() for level in levels}
+    for level in ("rouge", "orange", "jaune"):
+        if level in normalized_levels:
+            return level
+    return "vert"
+
+
+def validate_password_strength(password: str) -> None:
+    if len(password) < 8:
+        raise HTTPException(400, "Le mot de passe doit contenir au moins 8 caractères")
+
+
+def sanitize_upload_filename(raw_filename: str | None) -> str:
+    filename = Path(raw_filename or "").name
+    if not filename:
+        raise HTTPException(400, "Nom de fichier invalide")
+
+    sanitized = re.sub(r"[^A-Za-z0-9._-]", "_", filename)
+    if not sanitized:
+        raise HTTPException(400, "Nom de fichier invalide")
+    return sanitized
+
+
+def ensure_allowed_extension(filename: str) -> None:
+    if Path(filename).suffix.lower() not in ALLOWED_DOC_EXTENSIONS:
+        raise HTTPException(400, "Type de fichier interdit")
 
 
 def bootstrap_default_admin() -> None:
@@ -164,7 +199,7 @@ def public_live_status(db: Session = Depends(get_db)):
 
     meteo = fetch_meteo_france_isere()
     meteo_level = (meteo.get("level") or db_meteo_level).lower()
-    global_risk = "rouge" if "rouge" in [meteo_level, crues_level] else "orange" if "orange" in [meteo_level, crues_level] else "jaune" if "jaune" in [meteo_level, crues_level] else "vert"
+    global_risk = compute_global_risk(meteo_level, crues_level)
     priority_names = [m.name for m in db.query(Municipality).filter(Municipality.pcs_active.is_(True)).all()]
     vigicrues = fetch_vigicrues_isere(priority_names=priority_names)
     itinisere = fetch_itinisere_disruptions(limit=8)
@@ -179,7 +214,7 @@ def public_live_status(db: Session = Depends(get_db)):
     ]
 
     return {
-        "updated_at": datetime.utcnow().isoformat() + "Z",
+        "updated_at": utc_timestamp(),
         "dashboard": {
             "vigilance": meteo_level,
             "crues": crues_level,
@@ -215,6 +250,7 @@ def public_isere_map():
 @app.post("/auth/register", response_model=UserOut)
 def register(user: UserCreate, db: Session = Depends(get_db), creator: User = Depends(require_roles("admin", "ope"))):
     role, municipality_name = validate_user_payload(user, actor=creator)
+    validate_password_strength(user.password)
 
     if db.query(User).count() >= 20:
         raise HTTPException(400, "Limite de 20 utilisateurs atteinte")
@@ -269,8 +305,7 @@ def reset_user_password(
         raise HTTPException(404, "Utilisateur introuvable")
 
     temporary_password = payload.new_password or secrets.token_urlsafe(10)
-    if len(temporary_password) < 8:
-        raise HTTPException(400, "Le mot de passe doit contenir au moins 8 caractères")
+    validate_password_strength(temporary_password)
 
     target.hashed_password = hash_password(temporary_password)
     target.must_change_password = True
@@ -318,6 +353,7 @@ def auth_me(user: User = Depends(get_current_user)):
 def change_password(payload: PasswordChangeRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     if not verify_password(payload.current_password, user.hashed_password):
         raise HTTPException(400, "Mot de passe actuel invalide")
+    validate_password_strength(payload.new_password)
     user.hashed_password = hash_password(payload.new_password)
     user.must_change_password = False
     db.commit()
@@ -354,7 +390,7 @@ def dashboard(db: Session = Depends(get_db), user: User = Depends(require_roles(
         "vigilance": meteo_level,
         "crues": crues_level,
         "vigilance_risk_type": latest_alert.risk_type if latest_alert else "",
-        "global_risk": "rouge" if "rouge" in [meteo_level, crues_level] else "orange" if "orange" in [meteo_level, crues_level] else "jaune" if "jaune" in [meteo_level, crues_level] else "vert",
+        "global_risk": compute_global_risk(meteo_level, crues_level),
         "communes_crise": crisis_count,
         "latest_logs": [OperationalLogOut.model_validate(log).model_dump() for log in logs],
     }
@@ -369,7 +405,7 @@ def isere_external_risks(db: Session = Depends(get_db), _: User = Depends(requir
     bison_fute = fetch_bison_fute_traffic()
     georisques = fetch_georisques_isere_summary()
     return {
-        "updated_at": datetime.utcnow().isoformat() + "Z",
+        "updated_at": utc_timestamp(),
         "meteo_france": meteo,
         "vigicrues": vigicrues,
         "itinisere": itinisere,
@@ -406,7 +442,7 @@ def supervision_overview(db: Session = Depends(get_db), _: User = Depends(requir
     crisis = db.query(Municipality).filter(Municipality.crisis_mode.is_(True)).all()
     latest_logs = db.query(OperationalLog).order_by(OperationalLog.created_at.desc()).limit(10).all()
     return {
-        "updated_at": datetime.utcnow().isoformat() + "Z",
+        "updated_at": utc_timestamp(),
         "alerts": {
             "meteo": meteo,
             "vigicrues": vigicrues,
@@ -483,12 +519,16 @@ def upload_municipality_docs(
     base_dir.mkdir(parents=True, exist_ok=True)
 
     if orsec_plan:
-        orsec_path = base_dir / f"{municipality_id}_orsec_{orsec_plan.filename}"
+        safe_name = sanitize_upload_filename(orsec_plan.filename)
+        ensure_allowed_extension(safe_name)
+        orsec_path = base_dir / f"{municipality_id}_orsec_{safe_name}"
         orsec_path.write_bytes(orsec_plan.file.read())
         municipality.orsec_plan_file = str(orsec_path)
 
     if convention:
-        convention_path = base_dir / f"{municipality_id}_convention_{convention.filename}"
+        safe_name = sanitize_upload_filename(convention.filename)
+        ensure_allowed_extension(safe_name)
+        convention_path = base_dir / f"{municipality_id}_convention_{safe_name}"
         convention_path.write_bytes(convention.file.read())
         municipality.convention_file = str(convention_path)
 
@@ -517,12 +557,12 @@ def create_log(data: OperationalLogCreate, db: Session = Depends(get_db), user: 
 
 @app.post("/logs/{log_id}/attachment")
 def upload_attachment(log_id: int, file: UploadFile = File(...), db: Session = Depends(get_db), _: User = Depends(require_roles(*EDIT_ROLES))):
-    if not file.filename.lower().endswith((".pdf", ".png", ".jpg", ".jpeg")):
-        raise HTTPException(400, "Type de fichier interdit")
+    safe_name = sanitize_upload_filename(file.filename)
+    ensure_allowed_extension(safe_name)
     log = db.get(OperationalLog, log_id)
     if not log:
         raise HTTPException(404, "Entrée introuvable")
-    dst = Path(settings.upload_dir) / f"{log_id}_{file.filename}"
+    dst = Path(settings.upload_dir) / f"{log_id}_{safe_name}"
     dst.write_bytes(file.file.read())
     log.attachment_path = str(dst)
     db.commit()
@@ -540,6 +580,7 @@ def create_share(municipality_id: int, password: str, db: Session = Depends(get_
     municipality = db.get(Municipality, municipality_id)
     if not municipality:
         raise HTTPException(404, "Commune introuvable")
+    validate_password_strength(password)
     token = secrets.token_urlsafe(24)
     share = PublicShare(
         token=token,
