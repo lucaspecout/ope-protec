@@ -508,34 +508,26 @@ async function loadMunicipalities() {
   const municipalities = await api('/municipalities');
   document.getElementById('municipalities-list').innerHTML = municipalities.map((m) => {
     const dangerColor = levelColor(m.vigilance_color || 'vert');
-    const canEditRow = canEdit();
     const docs = [];
     if (m.orsec_plan_file) docs.push('Plan ORSEC');
     if (m.convention_file) docs.push('Convention');
-
-    const rowActions = canEditRow
+    const actions = canEdit()
       ? `<div class="municipality-actions">
-           <button type="button" class="ghost inline-action" data-muni-view="${m.id}">Voir</button>
+           <button type="button" class="ghost inline-action" data-muni-view="${m.id}">Voir fiche</button>
            <button type="button" class="ghost inline-action" data-muni-edit="${m.id}">Modifier</button>
-           <button type="button" class="ghost inline-action" data-muni-docs="${m.id}">Documents</button>
-           <button type="button" class="ghost inline-action" data-muni-crisis="${m.id}">${m.crisis_mode ? 'Sortir crise' : 'Passer crise'}</button>
+           <button type="button" class="ghost inline-action" data-muni-crisis="${m.id}">${m.crisis_mode ? 'Sortir de crise' : 'Passer en crise'}</button>
+           <button type="button" class="ghost inline-action" data-muni-docs="${m.id}">Ajouter documents/photos/plans</button>
            <button type="button" class="ghost inline-action danger" data-muni-delete="${m.id}">Supprimer</button>
          </div>`
-      : `<div class="municipality-actions"><button type="button" class="ghost inline-action" data-muni-view="${m.id}">Voir</button></div>`;
-
-    return `<li class="municipality-row" data-muni-row="${m.id}">
-      <div class="municipality-row-head">
-        <strong>${escapeHtml(m.name)}</strong> · ${escapeHtml(m.postal_code || 'CP ?')} · ${escapeHtml(m.manager || '-')} · ${escapeHtml(m.phone || '-')}
-        <span style="color:${dangerColor}">${m.crisis_mode ? 'crise' : 'veille'}</span>
-      </div>
-      ${rowActions}
-      <div class="municipality-details hidden" data-muni-details="${m.id}">
-        <p><strong>Email:</strong> ${escapeHtml(m.email || '-')}</p>
-        <p><strong>Contacts astreinte:</strong> ${escapeHtml(m.contacts || 'Non renseignés')}</p>
-        <p><strong>Infos:</strong> ${escapeHtml(m.additional_info || 'Aucune')}</p>
-        <p><strong>Population:</strong> ${m.population ?? '-'} · <strong>Capacité accueil:</strong> ${m.shelter_capacity ?? '-'} · <strong>Canal radio:</strong> ${escapeHtml(m.radio_channel || '-')}</p>
-        <p><strong>Documents:</strong> ${docs.join(', ') || 'Aucun document ajouté'}</p>
-      </div>
+      : `<div class="municipality-actions"><button type="button" class="ghost inline-action" data-muni-view="${m.id}">Voir fiche</button></div>`;
+    return `<li>
+      <strong>${m.name}</strong> · ${m.postal_code || 'CP ?'} · ${m.manager} · ${m.phone}
+      <br><span style="color:${dangerColor}">Statut: ${m.crisis_mode ? 'CRISE' : 'veille'} · Vigilance ${normalizeLevel(m.vigilance_color || 'vert')}</span>
+      <br>Contacts: ${escapeHtml(m.contacts || 'Non renseignés')}
+      <br>Infos: ${escapeHtml(m.additional_info || 'Aucune')}
+      <br>Population: ${m.population ?? '-'} · Capacité accueil: ${m.shelter_capacity ?? '-'} · Canal radio: ${escapeHtml(m.radio_channel || '-')}
+      <br>Documents: ${docs.join(', ') || 'Aucun document ajouté'}
+      ${actions}
     </li>`;
   }).join('') || '<li>Aucune commune.</li>';
   await renderMunicipalitiesOnMap(municipalities);
@@ -721,15 +713,26 @@ function bindAppInteractions() {
     const docsButton = event.target.closest('[data-muni-docs]');
     const deleteButton = event.target.closest('[data-muni-delete]');
     if (!viewButton && !editButton && !crisisButton && !docsButton && !deleteButton) return;
-
     try {
       const municipalities = await api('/municipalities');
       const getMunicipality = (id) => municipalities.find((m) => String(m.id) === String(id));
 
       if (viewButton) {
-        const municipalityId = viewButton.getAttribute('data-muni-view');
-        const details = document.querySelector(`[data-muni-details="${municipalityId}"]`);
-        details?.classList.toggle('hidden');
+        const municipality = getMunicipality(viewButton.getAttribute('data-muni-view'));
+        if (!municipality) return;
+        window.alert(`Fiche commune: ${municipality.name}
+
+Responsable: ${municipality.manager}
+Téléphone: ${municipality.phone}
+Email: ${municipality.email}
+Code postal: ${municipality.postal_code || '-'}
+Contacts: ${municipality.contacts || '-'}
+Infos: ${municipality.additional_info || '-'}
+Population: ${municipality.population ?? '-'}
+Capacité accueil: ${municipality.shelter_capacity ?? '-'}
+Canal radio: ${municipality.radio_channel || '-'}
+Crise: ${municipality.crisis_mode ? 'Oui' : 'Non'}
+Documents: ${municipality.orsec_plan_file ? 'Plan ORSEC ' : ''}${municipality.convention_file ? 'Convention' : ''}`);
         return;
       }
 
@@ -737,17 +740,10 @@ function bindAppInteractions() {
         const municipalityId = editButton.getAttribute('data-muni-edit');
         const municipality = getMunicipality(municipalityId);
         if (!municipality) return;
-        const manager = window.prompt(`Responsable (${municipality.name})`, municipality.manager);
-        if (manager === null) return;
-        const phone = window.prompt(`Téléphone (${municipality.name})`, municipality.phone);
-        if (phone === null) return;
-        const email = window.prompt(`Email (${municipality.name})`, municipality.email);
-        if (email === null) return;
-
         const payload = {
-          manager,
-          phone,
-          email,
+          manager: window.prompt(`Responsable (${municipality.name})`, municipality.manager) ?? municipality.manager,
+          phone: window.prompt(`Téléphone (${municipality.name})`, municipality.phone) ?? municipality.phone,
+          email: window.prompt(`Email (${municipality.name})`, municipality.email) ?? municipality.email,
           postal_code: window.prompt(`Code postal (${municipality.name})`, municipality.postal_code || '') ?? municipality.postal_code,
           contacts: window.prompt(`Contacts d'astreinte (${municipality.name})`, municipality.contacts || '') ?? municipality.contacts,
           additional_info: window.prompt(`Infos complémentaires (${municipality.name})`, municipality.additional_info || '') ?? municipality.additional_info,

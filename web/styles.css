@@ -167,10 +167,6 @@ label { display: block; margin-bottom: .8rem; }
 
 .municipality-actions { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .45rem; }
 .inline-action.danger { border-color: #ca3a3a; color: #a31515; }
-
-.municipality-row-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .4rem; align-items: center; }
-.municipality-details { margin-top: .45rem; padding-top: .45rem; border-top: 1px dashed var(--line); }
-.municipality-details p { margin: .2rem 0; font-size: .92rem; }
 .services-grid { display: grid; gap: .65rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
 .service-card { border: 1px solid var(--line); border-radius: 12px; padding: .8rem; background: linear-gradient(180deg, #fff, #f7faff); }
 .service-card a { color: #0b4daa; font-weight: 600; }
