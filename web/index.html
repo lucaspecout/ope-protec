@@ -316,12 +316,27 @@
         </section>
 
         <section id="map-panel" class="panel view hidden" hidden>
-          <h3>Carte stratégique Isère</h3>
+          <div class="map-panel-head">
+            <div>
+              <h3>Carte stratégique Isère</h3>
+              <p class="muted">Vue opérationnelle accessible avec actions rapides, filtres simplifiés et raccourcis d'analyse.</p>
+            </div>
+            <div class="map-quick-actions" role="group" aria-label="Actions rapides carte">
+              <button id="map-focus-crisis" type="button" class="ghost">🎯 Focus crise</button>
+              <button id="map-reset-filters" type="button" class="ghost">↺ Réinitialiser filtres</button>
+              <button id="map-toggle-contrast" type="button" class="ghost" aria-pressed="false">Contraste renforcé: off</button>
+            </div>
+          </div>
           <div class="map-toolbar">
-            <input id="map-search" type="search" placeholder="Rechercher une adresse ou un nom" />
+            <input id="map-search" type="search" placeholder="Rechercher une adresse ou un nom" aria-label="Recherche sur la carte" />
             <button id="map-search-btn" type="button">Rechercher</button>
             <button id="map-fit-btn" type="button" class="ghost">Voir tous les points</button>
             <button id="map-add-point-toggle" type="button" class="ghost">Mode ajout: désactivé</button>
+            <select id="map-basemap-select" aria-label="Choisir le fond de carte">
+              <option value="osm">Fond standard (OSM)</option>
+              <option value="topo">Relief (topographique)</option>
+              <option value="light">Fond clair (lisible)</option>
+            </select>
             <select id="map-point-category-filter">
               <option value="all">Tous les points opérationnels</option>
               <option value="incident">Incidents</option>
@@ -345,6 +360,12 @@
             </select>
           </div>
           <p id="map-feedback" class="muted"></p>
+          <div class="map-summary" aria-live="polite">
+            <article><p>Stations visibles</p><strong id="map-summary-stations">0</strong></article>
+            <article><p>Communes PCS visibles</p><strong id="map-summary-pcs">0</strong></article>
+            <article><p>Ressources visibles</p><strong id="map-summary-resources">0</strong></article>
+            <article><p>Points personnalisés</p><strong id="map-summary-custom">0</strong></article>
+          </div>
           <div id="isere-map-leaflet" class="leaflet-map" aria-label="Carte interactive Isère"></div>
           <div class="map-layout">
             <div>

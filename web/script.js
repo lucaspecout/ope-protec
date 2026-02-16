@@ -35,6 +35,7 @@ let resourceLayer = null;
 let searchLayer = null;
 let customPointsLayer = null;
 let mapPointsLayer = null;
+let mapTileLayer = null;
 let mapAddPointMode = false;
 let mapPoints = [];
 let pendingMapPointCoords = null;
@@ -42,6 +43,7 @@ let cachedStations = [];
 let cachedMunicipalities = [];
 let cachedMunicipalityRecords = [];
 let geocodeCache = new Map();
+let mapStats = { stations: 0, pcs: 0, resources: 0, custom: 0 };
 
 const homeView = document.getElementById('home-view');
 const loginView = document.getElementById('login-view');
@@ -160,10 +162,39 @@ function setActivePanel(panelId) {
   if (panelId === 'map-panel' && leafletMap) setTimeout(() => leafletMap.invalidateSize(), 100);
 }
 
+
+function updateMapSummary() {
+  setText('map-summary-stations', String(mapStats.stations));
+  setText('map-summary-pcs', String(mapStats.pcs));
+  setText('map-summary-resources', String(mapStats.resources));
+  setText('map-summary-custom', String(mapStats.custom));
+}
+
+function applyBasemap(style = 'osm') {
+  if (!leafletMap || typeof window.L === 'undefined') return;
+  if (mapTileLayer) leafletMap.removeLayer(mapTileLayer);
+  const layers = {
+    osm: {
+      url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      options: { maxZoom: 18, attribution: '&copy; OpenStreetMap contributors' },
+    },
+    topo: {
+      url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+      options: { maxZoom: 17, attribution: '&copy; OpenTopoMap contributors' },
+    },
+    light: {
+      url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+      options: { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors &copy; CARTO' },
+    },
+  };
+  const selected = layers[style] || layers.osm;
+  mapTileLayer = window.L.tileLayer(selected.url, selected.options).addTo(leafletMap);
+}
+
 function initMap() {
   if (leafletMap || typeof window.L === 'undefined') return;
   leafletMap = window.L.map('isere-map-leaflet', { zoomControl: true }).setView([45.2, 5.72], 9);
-  window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '&copy; OpenStreetMap contributors' }).addTo(leafletMap);
+  applyBasemap(document.getElementById('map-basemap-select')?.value || 'osm');
   hydroLayer = window.L.layerGroup().addTo(leafletMap);
   hydroLineLayer = window.L.layerGroup().addTo(leafletMap);
   pcsLayer = window.L.layerGroup().addTo(leafletMap);
@@ -179,6 +210,57 @@ function setMapFeedback(message = '', isError = false) {
   if (!target) return;
   target.textContent = message;
   target.className = isError ? 'error' : 'muted';
+}
+
+
+async function resetMapFilters() {
+  const defaults = {
+    'map-search': '',
+    'map-point-category-filter': 'all',
+    'resource-type-filter': 'all',
+    'map-basemap-select': 'osm',
+  };
+  Object.entries(defaults).forEach(([id, value]) => {
+    const node = document.getElementById(id);
+    if (!node) return;
+    node.value = value;
+  });
+  const hydro = document.getElementById('filter-hydro');
+  const pcs = document.getElementById('filter-pcs');
+  const activeOnly = document.getElementById('filter-resources-active');
+  if (hydro) hydro.checked = true;
+  if (pcs) pcs.checked = true;
+  if (activeOnly) activeOnly.checked = false;
+  if (searchLayer) searchLayer.clearLayers();
+  applyBasemap('osm');
+  renderStations(cachedStations);
+  renderCustomPoints();
+  renderResources();
+  await renderMunicipalitiesOnMap(cachedMunicipalities);
+  setMapFeedback('Filtres carte réinitialisés.');
+}
+
+function focusOnCrisisAreas() {
+  if (!leafletMap || !pcsLayer || typeof window.L === 'undefined') return;
+  const crisisPoints = cachedMunicipalities.filter((m) => m.pcs_active && m.crisis_mode);
+  if (!crisisPoints.length) {
+    setMapFeedback('Aucune commune en crise actuellement, vue globale conservée.');
+    fitMapToData();
+    return;
+  }
+  const candidateLayers = pcsLayer.getLayers().filter((layer) => typeof layer.getLatLng === 'function');
+  const bounds = window.L.latLngBounds(candidateLayers.map((layer) => layer.getLatLng()));
+  if (bounds.isValid()) leafletMap.fitBounds(bounds, { padding: [30, 30], maxZoom: 11 });
+  setMapFeedback(`Focus crise: ${crisisPoints.length} commune(s) en mode crise.`);
+}
+
+function toggleMapContrast() {
+  const panel = document.getElementById('map-panel');
+  const button = document.getElementById('map-toggle-contrast');
+  if (!panel || !button) return;
+  const active = panel.classList.toggle('map-panel--high-contrast');
+  button.textContent = `Contraste renforcé: ${active ? 'on' : 'off'}`;
+  button.setAttribute('aria-pressed', String(active));
 }
 
 function fitMapToData() {
@@ -212,9 +294,14 @@ function renderStations(stations = []) {
   if (!hydroLayer || !hydroLineLayer) return;
   hydroLayer.clearLayers();
   hydroLineLayer.clearLayers();
-  if (!visible) return;
+  if (!visible) {
+    mapStats.stations = 0;
+    updateMapSummary();
+    return;
+  }
 
   const stationsWithPoints = stations.filter((s) => s.lat != null && s.lon != null);
+  mapStats.stations = stationsWithPoints.length;
   stationsWithPoints.forEach((s) => {
     window.L.circleMarker([s.lat, s.lon], { radius: 7, color: '#fff', weight: 1.5, fillColor: levelColor(s.level), fillOpacity: 0.95 })
       .bindPopup(`<strong>${s.station || s.code}</strong><br>${s.river || ''}<br>Niveau: ${normalizeLevel(s.level)}<br>Hauteur: ${s.height_m} m`)
@@ -238,6 +325,7 @@ function renderStations(stations = []) {
       .addTo(hydroLineLayer);
   });
 
+  updateMapSummary();
   setMapFeedback(`${stations.length} station(s) Vigicrues chargée(s).`);
 }
 
@@ -275,7 +363,11 @@ async function renderMunicipalitiesOnMap(municipalities = []) {
   document.getElementById('pcs-list').innerHTML = pcs.slice(0, 15).map((m) => `<li><strong>${m.name}</strong> · ${m.postal_code || 'CP ?'} · ${m.manager} · ${m.crisis_mode ? '🔴 CRISE' : 'veille'}</li>`).join('') || '<li>Aucune commune PCS.</li>';
   if (!pcsLayer) return;
   pcsLayer.clearLayers();
-  if (!(document.getElementById('filter-pcs')?.checked ?? true)) return;
+  if (!(document.getElementById('filter-pcs')?.checked ?? true)) {
+    mapStats.pcs = 0;
+    updateMapSummary();
+    return;
+  }
   const points = await Promise.all(pcs.map(async (m) => ({ municipality: m, point: await geocodeMunicipality(m) })));
   let renderedCount = 0;
   points.forEach(({ municipality, point }) => {
@@ -302,6 +394,8 @@ async function renderMunicipalitiesOnMap(municipalities = []) {
     }
     renderedCount += 1;
   });
+  mapStats.pcs = renderedCount;
+  updateMapSummary();
   setMapFeedback(`${renderedCount}/${pcs.length} commune(s) PCS géolocalisée(s).`);
 }
 
@@ -311,6 +405,8 @@ function renderResources() {
   const query = (document.getElementById('map-search')?.value || '').trim().toLowerCase();
   const resources = RESOURCE_POINTS.filter((r) => (!onlyActive || r.active) && (type === 'all' || r.type === type) && (!query || `${r.name} ${r.address}`.toLowerCase().includes(query)));
   document.getElementById('resources-list').innerHTML = resources.map((r) => `<li><strong>${r.name}</strong> · ${r.address} · ${r.active ? 'activée' : 'en attente'}</li>`).join('') || '<li>Aucune ressource avec ces filtres.</li>';
+  mapStats.resources = resources.length;
+  updateMapSummary();
   if (!resourceLayer) return;
   resourceLayer.clearLayers();
   resources.forEach((r) => {
@@ -418,6 +514,8 @@ function renderCustomPoints() {
     .join('') || '<li>Aucun point personnalisé.</li>';
   setHtml('custom-points-list', listMarkup);
 
+  mapStats.custom = filteredPoints.length;
+  updateMapSummary();
   if (!mapPointsLayer) return;
   filteredPoints.forEach((point) => {
     const marker = window.L.marker([point.lat, point.lon], { icon: emojiDivIcon(point.icon || iconForCategory(point.category)) });
@@ -946,6 +1044,16 @@ function bindAppInteractions() {
   document.getElementById('logout-btn').addEventListener('click', logout);
   document.getElementById('map-search-btn')?.addEventListener('click', handleMapSearch);
   document.getElementById('map-fit-btn')?.addEventListener('click', fitMapToData);
+  document.getElementById('map-focus-crisis')?.addEventListener('click', focusOnCrisisAreas);
+  document.getElementById('map-toggle-contrast')?.addEventListener('click', toggleMapContrast);
+  document.getElementById('map-reset-filters')?.addEventListener('click', async () => {
+    try {
+      await resetMapFilters();
+    } catch (error) {
+      setMapFeedback(sanitizeErrorMessage(error.message), true);
+    }
+  });
+  document.getElementById('map-basemap-select')?.addEventListener('change', (event) => applyBasemap(event.target.value));
   document.getElementById('api-refresh-btn')?.addEventListener('click', async () => {
     try {
       await loadApiInterconnections();
@@ -958,6 +1066,7 @@ function bindAppInteractions() {
   document.getElementById('map-add-point-toggle')?.addEventListener('click', () => {
     mapAddPointMode = !mapAddPointMode;
     setText('map-add-point-toggle', `Mode ajout: ${mapAddPointMode ? 'activé' : 'désactivé'}`);
+    document.getElementById('map-add-point-toggle')?.setAttribute('aria-pressed', String(mapAddPointMode));
     setMapFeedback(mapAddPointMode ? 'Cliquez sur la carte pour ajouter un point opérationnel avec icône.' : 'Mode ajout désactivé.');
   });
   document.getElementById('map-point-category-filter')?.addEventListener('change', renderCustomPoints);
