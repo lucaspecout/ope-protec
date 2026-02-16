@@ -313,6 +313,17 @@ function renderItinisereEvents(events = [], targetId = 'itinerary-list') {
   document.getElementById(targetId).innerHTML = events.slice(0, 8).map((e) => `<li><strong>${e.title}</strong><br>${e.description || ''}<br><a href="${e.link}" target="_blank" rel="noreferrer">Détail</a></li>`).join('') || '<li>Aucune perturbation publiée.</li>';
 }
 
+function renderCriticalRisks(meteo = {}) {
+  const criticalLevels = new Set(['orange', 'rouge']);
+  const currentAlerts = (meteo.current_alerts || []).filter((alert) => criticalLevels.has(normalizeLevel(alert.level)));
+  const markup = currentAlerts.map((alert) => {
+    const level = normalizeLevel(alert.level);
+    const details = (alert.details || []).slice(0, 1).join(' ');
+    return `<li><strong>${alert.phenomenon}</strong> · <span class="risk-${level}">${level}</span>${details ? `<br>${details}` : ''}</li>`;
+  }).join('') || '<li>Aucun risque orange ou rouge en cours.</li>';
+  setHtml('critical-risks-list', markup);
+}
+
 async function loadDashboard() {
   const dashboard = await api('/dashboard');
   document.getElementById('vigilance').textContent = normalizeLevel(dashboard.vigilance);
@@ -333,6 +344,7 @@ async function loadExternalRisks() {
   setText('itinisere-status', `${data.itinisere.status} · ${data.itinisere.events.length} événements`);
   setText('georisques-status', `${data.georisques.status} · sismicité ${data.georisques.highest_seismic_zone_label || 'inconnue'}`);
   setText('georisques-info', `${data.georisques.flood_documents_total ?? 0} document(s) inondation suivis`);
+  renderCriticalRisks(data.meteo_france || {});
   renderMeteoAlerts(data.meteo_france || {});
   renderItinisereEvents(data.itinisere?.events || []);
   setText('meteo-level', normalizeLevel(data.meteo_france.level || 'vert'));
