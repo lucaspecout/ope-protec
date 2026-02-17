@@ -189,6 +189,19 @@ _meteo_cache_lock = Lock()
 _meteo_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 
 
+def _highest_vigilance_level(alerts: list[dict[str, Any]]) -> str:
+    priority = {"vert": 1, "jaune": 2, "orange": 3, "rouge": 4}
+    highest = "vert"
+    highest_score = priority[highest]
+    for alert in alerts:
+        level = str(alert.get("level") or "vert").lower()
+        score = priority.get(level, 0)
+        if score > highest_score:
+            highest = level
+            highest_score = score
+    return highest
+
+
 def _fetch_meteo_france_isere_live() -> dict[str, Any]:
     source_url = "https://vigilance.meteofrance.fr/fr/isere"
     html = _http_get_text(source_url)
@@ -234,6 +247,10 @@ def _fetch_meteo_france_isere_live() -> dict[str, Any]:
     tomorrow_alerts = _build_mf_alerts(warning_tomorrow, phenomenon_names, color_names, tomorrow_bulletin_items)
     monitored_hazards = [alert["phenomenon"].lower() for alert in current_alerts + tomorrow_alerts]
     hazards = sorted(set(hazards + [hazard for hazard in monitored_hazards if hazard]))
+    if current_alerts:
+        level = _highest_vigilance_level(current_alerts)
+    elif tomorrow_alerts:
+        level = _highest_vigilance_level(tomorrow_alerts)
 
     return {
         "service": "Météo-France Vigilance",
