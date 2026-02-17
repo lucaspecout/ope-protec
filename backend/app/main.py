@@ -509,13 +509,17 @@ def dashboard(db: Session = Depends(get_db), user: User = Depends(require_roles(
 
 
 @app.get("/external/isere/risks")
-def isere_external_risks(db: Session = Depends(get_db), _: User = Depends(require_roles(*READ_ROLES))):
-    meteo = fetch_meteo_france_isere()
+def isere_external_risks(
+    refresh: bool = False,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(*READ_ROLES)),
+):
+    meteo = fetch_meteo_france_isere(force_refresh=refresh)
     priority_names = [m.name for m in db.query(Municipality).filter(Municipality.pcs_active.is_(True)).all()]
-    vigicrues = fetch_vigicrues_isere(priority_names=priority_names)
-    itinisere = fetch_itinisere_disruptions()
-    bison_fute = fetch_bison_fute_traffic()
-    georisques = fetch_georisques_isere_summary()
+    vigicrues = fetch_vigicrues_isere(priority_names=priority_names, force_refresh=refresh)
+    itinisere = fetch_itinisere_disruptions(force_refresh=refresh)
+    bison_fute = fetch_bison_fute_traffic(force_refresh=refresh)
+    georisques = fetch_georisques_isere_summary(force_refresh=refresh)
     return {
         "updated_at": utc_timestamp(),
         "meteo_france": meteo,
@@ -532,25 +536,33 @@ def interactive_map_meteo_vigilance():
 
 
 @app.get("/api/vigicrues/geojson")
-def interactive_map_vigicrues_geojson(db: Session = Depends(get_db), _: User = Depends(require_roles(*READ_ROLES))):
+def interactive_map_vigicrues_geojson(
+    refresh: bool = False,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(*READ_ROLES)),
+):
     priority_names = [m.name for m in db.query(Municipality).filter(Municipality.pcs_active.is_(True)).all()]
-    vigicrues = fetch_vigicrues_isere(priority_names=priority_names, station_limit=60)
+    vigicrues = fetch_vigicrues_isere(priority_names=priority_names, station_limit=60, force_refresh=refresh)
     return vigicrues_geojson_from_stations(vigicrues.get("stations", []))
 
 
 @app.get("/api/itinisere/events")
-def interactive_map_itinisere_events(_: User = Depends(require_roles(*READ_ROLES))):
-    return fetch_itinisere_disruptions()
+def interactive_map_itinisere_events(refresh: bool = False, _: User = Depends(require_roles(*READ_ROLES))):
+    return fetch_itinisere_disruptions(force_refresh=refresh)
 
 
 @app.get("/supervision/overview")
-def supervision_overview(db: Session = Depends(get_db), _: User = Depends(require_roles(*READ_ROLES))):
-    meteo = fetch_meteo_france_isere()
+def supervision_overview(
+    refresh: bool = False,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(*READ_ROLES)),
+):
+    meteo = fetch_meteo_france_isere(force_refresh=refresh)
     priority_names = [m.name for m in db.query(Municipality).filter(Municipality.pcs_active.is_(True)).all()]
-    vigicrues = fetch_vigicrues_isere(priority_names=priority_names, station_limit=12)
-    itinisere = fetch_itinisere_disruptions(limit=8)
-    bison_fute = fetch_bison_fute_traffic()
-    georisques = fetch_georisques_isere_summary()
+    vigicrues = fetch_vigicrues_isere(priority_names=priority_names, station_limit=12, force_refresh=refresh)
+    itinisere = fetch_itinisere_disruptions(limit=8, force_refresh=refresh)
+    bison_fute = fetch_bison_fute_traffic(force_refresh=refresh)
+    georisques = fetch_georisques_isere_summary(force_refresh=refresh)
     crisis = db.query(Municipality).filter(Municipality.crisis_mode.is_(True)).all()
     latest_logs = db.query(OperationalLog).order_by(OperationalLog.created_at.desc()).limit(10).all()
     return {

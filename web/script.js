@@ -404,7 +404,7 @@ function setActivePanel(panelId) {
   if (panelId === 'map-panel' && leafletMap) setTimeout(() => leafletMap.invalidateSize(), 100);
   if (panelId === 'logs-panel') ensureLogMunicipalitiesLoaded();
   if (panelId === 'api-panel' && token) {
-    loadApiInterconnections(true).catch((error) => {
+    loadApiInterconnections(false).catch((error) => {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
     });
   }
@@ -1544,7 +1544,7 @@ async function loadSupervision() {
 }
 
 async function loadApiInterconnections(forceRefresh = false) {
-  const suffix = forceRefresh ? `?refresh=${Date.now()}` : '';
+  const suffix = forceRefresh ? '?refresh=true' : '';
   const data = await api(`/external/isere/risks${suffix}`);
   const services = [
     { key: 'meteo_france', label: 'Météo-France', level: normalizeLevel(data.meteo_france?.level || 'inconnu'), details: data.meteo_france?.info_state || data.meteo_france?.bulletin_title || '-' },
@@ -1716,7 +1716,6 @@ async function refreshAll(forceRefresh = false) {
     { label: 'points cartographiques', loader: loadMapPoints, optional: true },
   ];
 
-  if (forceRefresh) clearApiCache();
   const results = await Promise.allSettled(loaders.map(({ loader }) => loader()));
   const failures = results
     .map((result, index) => ({ result, config: loaders[index] }))
@@ -2284,7 +2283,7 @@ function logout() {
 
 function startAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
-  refreshTimer = setInterval(() => token && refreshAll(true), AUTO_REFRESH_MS);
+  refreshTimer = setInterval(() => token && refreshAll(false), AUTO_REFRESH_MS);
 }
 
 function startApiPanelAutoRefresh() {
@@ -2292,7 +2291,7 @@ function startApiPanelAutoRefresh() {
   apiPanelTimer = setInterval(() => {
     const activePanel = localStorage.getItem(STORAGE_KEYS.activePanel);
     if (!token || activePanel !== 'api-panel' || document.hidden) return;
-    loadApiInterconnections(true).catch((error) => {
+    loadApiInterconnections(false).catch((error) => {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
     });
   }, API_PANEL_REFRESH_MS);
