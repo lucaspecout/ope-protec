@@ -1,7 +1,7 @@
 const STORAGE_KEYS = { token: 'token', activePanel: 'activePanel', mapPointsCache: 'mapPointsCache', municipalitiesCache: 'municipalitiesCache' };
-const AUTO_REFRESH_MS = 30000;
+const AUTO_REFRESH_MS = 10000;
 const HOME_LIVE_REFRESH_MS = 30000;
-const API_CACHE_TTL_MS = 30000;
+const API_CACHE_TTL_MS = 8000;
 const PANEL_TITLES = {
   'situation-panel': 'Situation opérationnelle',
   'services-panel': 'Services connectés',
@@ -401,6 +401,11 @@ function setActivePanel(panelId) {
   document.getElementById('panel-title').textContent = PANEL_TITLES[panelId] || 'Centre opérationnel';
   if (panelId === 'map-panel' && leafletMap) setTimeout(() => leafletMap.invalidateSize(), 100);
   if (panelId === 'logs-panel') ensureLogMunicipalitiesLoaded();
+  if (token) {
+    refreshAll(true).catch((error) => {
+      document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
+    });
+  }
 }
 
 
@@ -1536,8 +1541,9 @@ async function loadSupervision() {
   renderItinisereEvents(data.alerts.itinisere.events || [], 'supervision-itinisere-events');
 }
 
-async function loadApiInterconnections() {
-  const data = await api('/external/isere/risks');
+async function loadApiInterconnections(forceRefresh = false) {
+  const suffix = forceRefresh ? `?refresh=${Date.now()}` : '';
+  const data = await api(`/external/isere/risks${suffix}`);
   const services = [
     { key: 'meteo_france', label: 'Météo-France', level: normalizeLevel(data.meteo_france?.level || 'inconnu'), details: data.meteo_france?.info_state || data.meteo_france?.bulletin_title || '-' },
     { key: 'vigicrues', label: 'Vigicrues', level: normalizeLevel(data.vigicrues?.water_alert_level || 'inconnu'), details: `${(data.vigicrues?.stations || []).length} station(s)` },
@@ -1696,7 +1702,7 @@ async function loadUsers() {
   }).join('') || '<tr><td colspan="6">Aucun utilisateur.</td></tr>';
 }
 
-async function refreshAll() {
+async function refreshAll(forceRefresh = false) {
   const loaders = [
     { label: 'tableau de bord', loader: loadDashboard, optional: false },
     { label: 'risques externes', loader: loadExternalRisks, optional: false },
@@ -1708,6 +1714,7 @@ async function refreshAll() {
     { label: 'points cartographiques', loader: loadMapPoints, optional: true },
   ];
 
+  if (forceRefresh) clearApiCache();
   const results = await Promise.allSettled(loaders.map(({ loader }) => loader()));
   const failures = results
     .map((result, index) => ({ result, config: loaders[index] }))
@@ -1896,7 +1903,7 @@ function bindAppInteractions() {
   document.getElementById('map-basemap-select')?.addEventListener('change', (event) => applyBasemap(event.target.value));
   document.getElementById('api-refresh-btn')?.addEventListener('click', async () => {
     try {
-      await loadApiInterconnections();
+      await loadApiInterconnections(true);
       document.getElementById('dashboard-error').textContent = '';
     } catch (error) {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
@@ -2274,7 +2281,7 @@ function logout() {
 
 function startAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
-  refreshTimer = setInterval(() => token && refreshAll(), AUTO_REFRESH_MS);
+  refreshTimer = setInterval(() => token && refreshAll(true), AUTO_REFRESH_MS);
 }
 
 async function loadHomeLiveStatus() {
@@ -2441,11 +2448,11 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
     loadHomeLiveStatus();
-    if (token) refreshAll();
+    if (token) refreshAll(true);
   });
   window.addEventListener('focus', () => {
     loadHomeLiveStatus();
-    if (token) refreshAll();
+    if (token) refreshAll(true);
   });
 
   try {
