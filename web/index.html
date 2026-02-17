@@ -296,28 +296,14 @@
         <section id="logs-panel" class="panel view hidden" hidden>
           <h3>Main courante</h3>
           <form id="log-form" class="form" data-requires-edit>
-            <input name="event_type" placeholder="Type d'évènement" required />
-            <input name="description" placeholder="Description opérationnelle" required />
             <select name="target_scope" id="log-target-scope">
               <option value="departemental">Départemental</option>
               <option value="commune">Commune</option>
-              <option value="pcs">PCS (commune avec plan actif)</option>
             </select>
             <select name="municipality_id" id="log-municipality-id" disabled>
               <option value="">Sélectionnez une commune</option>
             </select>
-            <select name="danger_level">
-              <option value="vert">🟢 Vert</option>
-              <option value="jaune">🟡 Jaune</option>
-              <option value="orange">🟠 Orange</option>
-              <option value="rouge">🔴 Rouge</option>
-            </select>
-            <select name="danger_emoji">
-              <option value="🟢">🟢 Stable</option>
-              <option value="🟡">🟡 À surveiller</option>
-              <option value="🟠">🟠 Tension</option>
-              <option value="🔴">🔴 Critique</option>
-            </select>
+            <input name="description" placeholder="Information (commune ou lieu concerné)" required />
             <button type="submit">Ajouter</button>
           </form>
           <ul id="logs-list" class="list"></ul>

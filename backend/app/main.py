@@ -838,6 +838,17 @@ def create_log(data: OperationalLogCreate, db: Session = Depends(get_db), user: 
     return entry
 
 
+@app.get("/logs", response_model=list[OperationalLogOut])
+def list_logs(db: Session = Depends(get_db), user: User = Depends(require_roles(*READ_ROLES))):
+    query = db.query(OperationalLog).order_by(OperationalLog.created_at.desc())
+    if user.role == "mairie":
+        municipality_id = get_user_municipality_id(user, db)
+        if municipality_id is None:
+            return []
+        query = query.filter(OperationalLog.municipality_id == municipality_id)
+    return query.limit(200).all()
+
+
 @app.post("/logs/{log_id}/attachment")
 def upload_attachment(log_id: int, file: UploadFile = File(...), db: Session = Depends(get_db), _: User = Depends(require_roles(*EDIT_ROLES))):
     safe_name = sanitize_upload_filename(file.filename)
