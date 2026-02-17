@@ -1361,7 +1361,7 @@ async function openMunicipalityDetailsModal(municipality) {
   const quickActions = canMunicipalityFiles()
     ? `<div class="municipality-actions municipality-actions--modal">
          ${canEdit() ? `<button type="button" class="ghost inline-action" data-muni-detail-crisis="${municipality.id}">${municipality.crisis_mode ? 'Sortir de crise' : 'Passer en crise'}</button>
-         <button type="button" class="ghost inline-action" data-muni-detail-edit="${municipality.id}">Éditer la fiche</button>` : ''}
+         ` : ''}
          <form class="municipality-upload-form" data-muni-upload-form="${municipality.id}">
            <input name="title" placeholder="Titre du document" required />
            <select name="doc_type">
@@ -2060,25 +2060,15 @@ function bindAppInteractions() {
     if (event.target?.id === 'municipality-details-modal') closeMunicipalityDetailsModal();
   });
   document.getElementById('municipality-details-content')?.addEventListener('click', async (event) => {
-    const editButton = event.target.closest('[data-muni-detail-edit]');
     const crisisButton = event.target.closest('[data-muni-detail-crisis]');
     const openFileButton = event.target.closest('[data-muni-file-open]');
     const uploadFileButton = event.target.closest('[data-muni-file-upload]');
     const deleteFileButton = event.target.closest('[data-muni-file-delete]');
-    if (!editButton && !crisisButton && !openFileButton && !uploadFileButton && !deleteFileButton) return;
+    if (!crisisButton && !openFileButton && !uploadFileButton && !deleteFileButton) return;
 
     const getMunicipality = (id) => cachedMunicipalityRecords.find((m) => String(m.id) === String(id));
 
     try {
-      if (editButton) {
-        if (!canEdit()) return;
-        const municipality = getMunicipality(editButton.getAttribute('data-muni-detail-edit'));
-        if (!municipality) return;
-        closeMunicipalityDetailsModal();
-        openMunicipalityEditor(municipality);
-        return;
-      }
-
       if (crisisButton) {
         if (!canEdit()) return;
         const municipalityId = crisisButton.getAttribute('data-muni-detail-crisis');
