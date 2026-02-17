@@ -1310,6 +1310,10 @@ function closeMunicipalityDetailsModal() {
   modal.removeAttribute('open');
 }
 
+function openMunicipalityDetailsInlineFallback(municipality) {
+  return openMunicipalityDetailsModal(municipality);
+}
+
 async function openMunicipalityDetailsModal(municipality) {
   const modal = document.getElementById('municipality-details-modal');
   const content = document.getElementById('municipality-details-content');
@@ -2028,6 +2032,9 @@ function bindAppInteractions() {
   document.getElementById('user-create-role')?.addEventListener('change', syncUserCreateMunicipalityVisibility);
   document.getElementById('municipality-editor-close')?.addEventListener('click', closeMunicipalityEditor);
   document.getElementById('municipality-details-close')?.addEventListener('click', closeMunicipalityDetailsModal);
+  document.getElementById('municipality-details-modal')?.addEventListener('click', (event) => {
+    if (event.target?.id === 'municipality-details-modal') closeMunicipalityDetailsModal();
+  });
   document.getElementById('municipality-details-content')?.addEventListener('click', async (event) => {
     const editButton = event.target.closest('[data-muni-detail-edit]');
     const crisisButton = event.target.closest('[data-muni-detail-crisis]');
