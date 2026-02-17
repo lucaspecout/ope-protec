@@ -1310,6 +1310,8 @@ function closeMunicipalityDetailsModal() {
   } catch (_) {
     // ignore close errors and fallback to attribute cleanup
   }
+
+  modal.open = false;
   modal.removeAttribute('open');
 }
 
