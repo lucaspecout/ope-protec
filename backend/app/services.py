@@ -344,6 +344,45 @@ def _vigicrues_level_from_delta(delta_m: float) -> str:
     return "vert"
 
 
+def _vigicrues_extract_observation(station_code: str) -> tuple[float, float, str]:
+    try:
+        payload = _http_get_json(
+            f"https://www.vigicrues.gouv.fr/services/observations.json/index.php?CdStationHydro={quote_plus(station_code)}&FormatDate=iso"
+        )
+    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
+        return 0.0, 0.0, ""
+
+    observations = ((payload.get("Serie") or {}).get("ObssHydro") or [])
+    valid = [item for item in observations if item.get("ResObsHydro") not in (None, "")]
+    if not valid:
+        return 0.0, 0.0, ""
+
+    latest = valid[-1]
+    previous = valid[-2] if len(valid) >= 2 else latest
+    latest_height = float(latest.get("ResObsHydro") or 0.0)
+    previous_height = float(previous.get("ResObsHydro") or latest_height)
+    delta = latest_height - previous_height
+    observed_at = str(latest.get("DtObsHydro") or "")
+    return latest_height, delta, observed_at
+
+
+def _normalize_vigicrues_coordinates(coord_x: Any, coord_y: Any, commune_code: str) -> tuple[float | None, float | None]:
+    try:
+        lon = float(coord_x) if coord_x not in (None, "") else None
+        lat = float(coord_y) if coord_y not in (None, "") else None
+    except (TypeError, ValueError):
+        lon = None
+        lat = None
+
+    if lat is not None and lon is not None and -90 <= lat <= 90 and -180 <= lon <= 180:
+        return lat, lon
+
+    fallback_center = _commune_center(commune_code) if commune_code else None
+    if fallback_center:
+        return fallback_center
+    return None, None
+
+
 def _commune_center(code_insee: str) -> tuple[float, float] | None:
     try:
         payload = _http_get_json(f"https://geo.api.gouv.fr/communes/{quote_plus(code_insee)}?fields=centre")
@@ -403,151 +442,28 @@ def fetch_vigicrues_isere(
     priority_names = [name.lower() for name in (priority_names or [])]
 
     try:
-        home_html = _http_get_text(source)
-        discovered_codes = set(re.findall(r'href="/territoire/(\d+)"', home_html))
-        isere_territory_codes = (discovered_codes & default_territory_codes) or default_territory_codes
-    except (HTTPError, URLError, TimeoutError):
-        isere_territory_codes = default_territory_codes
-
-    color_map = {
-        "green": "vert",
-        "yellow": "jaune",
-        "orange": "orange",
-        "red": "rouge",
-        "vert": "vert",
-        "jaune": "jaune",
-        "rouge": "rouge",
-    }
-
-    try:
-        troncons_by_code: dict[str, dict[str, Any]] = {}
-        stations_index: dict[str, dict[str, Any]] = {}
-
-        for territory_code in sorted(isere_territory_codes):
-            try:
-                territory_html = _http_get_text(f"{source}/territoire/{territory_code}")
-            except (HTTPError, URLError, TimeoutError):
-                continue
-
-            table_rows = list(re.finditer(r"<tr[^>]*>(.*?)</tr>", territory_html, re.IGNORECASE | re.DOTALL))
-            for row_match in table_rows:
-                row_html = row_match.group(1)
-                if "basin-item-hi" not in row_html or "aria-controls=\"accordion-" not in row_html:
-                    continue
-
-                troncon_code_match = re.search(r'id="(RS\d+)"', row_html)
-                troncon_name_match = re.search(r"announceMapDisplay\('([^']+)'\)", row_html)
-                accordion_match = re.search(r'aria-controls="(accordion-\d+)"', row_html)
-                level_match = re.search(r'basin-item-vigilance\s+([a-z]+)"', row_html)
-                rss_match = re.search(r"CdEntVigiCru=(RS\d+)", row_html)
-                if not troncon_code_match or not troncon_name_match or not accordion_match:
-                    continue
-
-                troncon_code = troncon_code_match.group(1)
-                troncon_name = unescape(troncon_name_match.group(1)).strip()
-                try:
-                    troncon_name = troncon_name.encode("utf-8").decode("unicode_escape")
-                except UnicodeDecodeError:
-                    pass
-                level = color_map.get(level_match.group(1).lower(), "inconnu") if level_match else "inconnu"
-                rss_code = rss_match.group(1) if rss_match else troncon_code
-
-                troncon = troncons_by_code.setdefault(
-                    troncon_code,
-                    {
-                        "code": troncon_code,
-                        "name": troncon_name,
-                        "level": level,
-                        "territory": territory_code,
-                        "rss": f"{source}/territoire/rss/?CdEntVigiCru={rss_code}",
-                        "stations": [],
-                    },
-                )
-                if troncon.get("level") in {"vert", "inconnu"} and level in {"jaune", "orange", "rouge"}:
-                    troncon["level"] = level
-
-                accordion_id = accordion_match.group(1)
-                accordion_block = re.search(
-                    rf'<tr>\s*<td[^>]+id="{re.escape(accordion_id)}"[^>]*>(.*?)</tr>',
-                    territory_html,
-                    re.IGNORECASE | re.DOTALL,
-                )
-                if not accordion_block:
-                    continue
-
-                station_pairs: list[tuple[str, str, str]] = []
-                for station_code, button_html in re.findall(
-                    r"window\.location\.href='/station/([A-Z0-9]+)'.*?>(.*?)</button>",
-                    accordion_block.group(1),
-                    re.IGNORECASE | re.DOTALL,
-                ):
-                    cleaned = unescape(re.sub(r"<[^>]+>", " ", button_html)).replace("\xa0", " ")
-                    cleaned = re.sub(r"\s+", " ", cleaned).strip()
-                    name, _, river = cleaned.partition("(")
-                    station_pairs.append((station_code, name.strip(), river.replace(")", "").strip()))
-
-                for station_code, station_name_raw, river_raw in station_pairs:
-                    station_name = unescape(station_name_raw).replace("\xa0", " ").strip()
-                    river_name = unescape(river_raw).replace("\xa0", " ").strip()
-                    if not any(s.get("code") == station_code for s in troncon["stations"]):
-                        troncon["stations"].append({"code": station_code, "station": station_name, "river": river_name})
-                    stations_index.setdefault(
-                        station_code,
-                        {
-                            "code": station_code,
-                            "station": station_name,
-                            "river": river_name,
-                            "level": level,
-                            "troncon": troncon_name,
-                            "troncon_code": troncon_code,
-                            "source_link": f"{source}/station/{station_code}",
-                        },
-                    )
-
-        if not stations_index:
-            raise ValueError("Aucune station détectée sur les territoires Vigicrues de l'Isère")
-
-        details_cache: dict[str, dict[str, Any]] = {}
-        isere_detail_codes: set[str] = set()
-        pending_codes = list(stations_index.keys())
-        target_isere_matches = max(station_limit or 0, 30)
-        max_detail_lookups = max(sample_size, target_isere_matches * 20)
-        while pending_codes and len(details_cache) < max_detail_lookups and (len(details_cache) < sample_size or len(isere_detail_codes) < target_isere_matches):
-            current_code = pending_codes.pop(0)
-            if current_code in details_cache:
-                continue
-            try:
-                details = _http_get_json(f"{source}/services/station.json?CdStationHydro={current_code}")
-            except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
-                continue
-            details_cache[current_code] = details
-            if str(details.get("CdCommune") or "").startswith("38"):
-                isere_detail_codes.add(current_code)
-
-            current = stations_index.get(current_code) or {}
-            for linked in (details.get("VigilanceCrues") or {}).get("StationsBassin") or []:
-                linked_code = str(linked.get("CdStationHydro") or "").strip()
-                if not linked_code:
-                    continue
-                stations_index.setdefault(
-                    linked_code,
-                    {
-                        "code": linked_code,
-                        "station": linked.get("LbStationHydro") or current.get("station") or "",
-                        "river": linked.get("LbCoursEau") or current.get("river") or "",
-                        "level": current.get("level", "inconnu"),
-                        "troncon": current.get("troncon", ""),
-                        "troncon_code": current.get("troncon_code", ""),
-                        "source_link": f"{source}/station/{linked_code}",
-                    },
-                )
-                if linked_code not in details_cache and linked_code not in pending_codes and len(details_cache) + len(pending_codes) < sample_size:
-                    pending_codes.append(linked_code)
+        catalog = _http_get_json(f"{source}/services/station.json")
+        all_stations = (catalog.get("Stations") or []) if isinstance(catalog, dict) else []
+        territory_codes = {int(code) for code in default_territory_codes}
+        candidate_codes = [
+            str(item.get("CdStationHydro") or "").strip()
+            for item in all_stations
+            if int(item.get("PereBoitEntVigiCru") or 0) in territory_codes
+        ]
+        candidate_codes = [code for code in candidate_codes if code]
+        max_lookups = max(80, station_limit * 15) if station_limit else 140
+        if sample_size > 0:
+            max_lookups = min(max_lookups, sample_size)
+        candidate_codes = candidate_codes[:max_lookups]
+        if not candidate_codes:
+            raise ValueError("Aucune station candidate détectée pour l'Isère")
 
         isere_stations: list[dict[str, Any]] = []
-        for station_code, station in stations_index.items():
-            details = details_cache.get(station_code)
-            if not details:
+        target_isere_count = max(station_limit or 0, 12)
+        for station_code in candidate_codes:
+            try:
+                details = _http_get_json(f"{source}/services/station.json?CdStationHydro={quote_plus(station_code)}")
+            except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
                 continue
 
             commune_code = str(details.get("CdCommune") or "")
@@ -555,55 +471,56 @@ def fetch_vigicrues_isere(
                 continue
 
             coords = details.get("CoordStationHydro") or {}
-            coord_x = coords.get("CoordXStationHydro")
-            coord_y = coords.get("CoordYStationHydro")
-            lat = float(coord_y) if coord_y else None
-            lon = float(coord_x) if coord_x else None
-            if lat is None or lon is None:
-                fallback_center = _commune_center(commune_code)
-                if fallback_center:
-                    lat, lon = fallback_center
-            text_blob = f"{station.get('station', '')} {station.get('river', '')} {station.get('troncon', '')}".lower()
+            lat, lon = _normalize_vigicrues_coordinates(coords.get("CoordYStationHydro"), coords.get("CoordXStationHydro"), commune_code)
+            station_name = details.get("LbStationHydro") or "Station Vigicrues"
+            river_name = details.get("LbCoursEau") or ""
+            text_blob = f"{station_name} {river_name}".lower()
+            height_m, delta_window_m, observed_at = _vigicrues_extract_observation(station_code)
+            level = _vigicrues_level_from_delta(abs(delta_window_m))
 
             isere_stations.append(
                 {
                     "code": station_code,
-                    "station": details.get("LbStationHydro") or station.get("station") or "Station Vigicrues",
-                    "river": details.get("LbCoursEau") or station.get("river") or "",
-                    "height_m": 0.0,
-                    "delta_window_m": 0.0,
-                    "level": station.get("level", "inconnu"),
+                    "station": station_name,
+                    "river": river_name,
+                    "height_m": round(height_m, 2),
+                    "delta_window_m": round(delta_window_m, 3),
+                    "level": level,
                     "control_status": _vigicrues_station_control(details),
                     "is_priority": ("grenoble" in text_blob or any(name in text_blob for name in priority_names)),
-                    "observed_at": "",
+                    "observed_at": observed_at,
                     "lat": lat,
                     "lon": lon,
                     "commune_code": commune_code,
-                    "troncon": station.get("troncon", ""),
-                    "troncon_code": station.get("troncon_code", ""),
-                    "source_link": station.get("source_link", f"{source}/station/{station_code}"),
+                    "troncon": "",
+                    "troncon_code": "",
+                    "source_link": f"{source}/station/{station_code}",
                 }
             )
+            if len(isere_stations) >= target_isere_count:
+                break
 
         if not isere_stations:
             raise ValueError("Aucune station du département de l'Isère trouvée")
 
-        isere_codes = {station["code"] for station in isere_stations}
-        troncons: list[dict[str, Any]] = []
-        for troncon in troncons_by_code.values():
-            kept_stations = [s for s in troncon.get("stations", []) if s.get("code") in isere_codes]
-            if not kept_stations and "isere" not in (troncon.get("name") or "").lower() and "isère" not in (troncon.get("name") or "").lower():
-                continue
-            troncons.append(
+        troncons_index: dict[str, dict[str, Any]] = {}
+        for station in isere_stations:
+            key = station.get("river") or "Cours d'eau non précisé"
+            group = troncons_index.setdefault(
+                key,
                 {
-                    "code": troncon.get("code"),
-                    "name": troncon.get("name"),
-                    "level": troncon.get("level", "inconnu"),
-                    "territory": troncon.get("territory"),
-                    "rss": troncon.get("rss"),
-                    "stations": kept_stations,
-                }
+                    "code": re.sub(r"[^A-Z0-9]", "", key.upper())[:12] or "ISERE",
+                    "name": key,
+                    "level": "vert",
+                    "territory": "18",
+                    "rss": None,
+                    "stations": [],
+                },
             )
+            group["stations"].append({"code": station["code"], "station": station["station"], "river": station["river"]})
+            group["level"] = _highest_vigilance_level([{"level": group["level"]}, {"level": station["level"]}])
+
+        troncons = list(troncons_index.values())
 
         isere_stations.sort(key=lambda station: (not station["is_priority"], station["station"] or ""))
         troncons.sort(key=lambda troncon: troncon.get("name") or "")
