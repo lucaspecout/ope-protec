@@ -1,7 +1,8 @@
 const STORAGE_KEYS = { token: 'token', activePanel: 'activePanel', mapPointsCache: 'mapPointsCache', municipalitiesCache: 'municipalitiesCache' };
 const AUTO_REFRESH_MS = 10000;
 const HOME_LIVE_REFRESH_MS = 30000;
-const API_CACHE_TTL_MS = 8000;
+const API_CACHE_TTL_MS = 30000;
+const API_PANEL_REFRESH_MS = 10000;
 const PANEL_TITLES = {
   'situation-panel': 'Situation opérationnelle',
   'services-panel': 'Services connectés',
@@ -26,6 +27,7 @@ let currentUser = null;
 let pendingCurrentPassword = '';
 let refreshTimer = null;
 let homeLiveTimer = null;
+let apiPanelTimer = null;
 const apiGetCache = new Map();
 const apiInFlight = new Map();
 
@@ -401,8 +403,8 @@ function setActivePanel(panelId) {
   document.getElementById('panel-title').textContent = PANEL_TITLES[panelId] || 'Centre opérationnel';
   if (panelId === 'map-panel' && leafletMap) setTimeout(() => leafletMap.invalidateSize(), 100);
   if (panelId === 'logs-panel') ensureLogMunicipalitiesLoaded();
-  if (token) {
-    refreshAll(true).catch((error) => {
+  if (panelId === 'api-panel' && token) {
+    loadApiInterconnections(true).catch((error) => {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
     });
   }
@@ -2276,12 +2278,24 @@ function logout() {
   clearApiCache();
   localStorage.removeItem(STORAGE_KEYS.token);
   if (refreshTimer) clearInterval(refreshTimer);
+  if (apiPanelTimer) clearInterval(apiPanelTimer);
   showHome();
 }
 
 function startAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
   refreshTimer = setInterval(() => token && refreshAll(true), AUTO_REFRESH_MS);
+}
+
+function startApiPanelAutoRefresh() {
+  if (apiPanelTimer) clearInterval(apiPanelTimer);
+  apiPanelTimer = setInterval(() => {
+    const activePanel = localStorage.getItem(STORAGE_KEYS.activePanel);
+    if (!token || activePanel !== 'api-panel' || document.hidden) return;
+    loadApiInterconnections(true).catch((error) => {
+      document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
+    });
+  }, API_PANEL_REFRESH_MS);
 }
 
 async function loadHomeLiveStatus() {
@@ -2445,6 +2459,7 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
   bindHomeInteractions();
   bindAppInteractions();
   startHomeLiveRefresh();
+  startApiPanelAutoRefresh();
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
     loadHomeLiveStatus();
