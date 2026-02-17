@@ -460,17 +460,24 @@ def fetch_vigicrues_isere(
             for territory_code in preferred_territory_codes
             for code in stations_by_territory.get(territory_code, [])
         ]
-        candidate_codes = [code for code in candidate_codes if code]
-        max_lookups = max(80, station_limit * 15) if station_limit else 140
+        seen_codes = set(prioritized_codes)
+        remaining_codes = [code for code in all_codes if code not in seen_codes]
+
+        target_isere_count = max(station_limit or 0, 12)
+        max_lookups = max(220, target_isere_count * 40)
         if sample_size > 0:
             max_lookups = min(max_lookups, sample_size)
-        candidate_codes = candidate_codes[:max_lookups]
+
+        candidate_codes = (prioritized_codes + remaining_codes + list(fallback_isere_codes))[:max_lookups]
+        candidate_codes = [code for code in candidate_codes if code]
         if not candidate_codes:
             raise ValueError("Aucune station candidate détectée pour l'Isère")
 
         isere_stations: list[dict[str, Any]] = []
-        target_isere_count = max(station_limit or 0, 12)
+        added_codes: set[str] = set()
         for station_code in candidate_codes:
+            if station_code in added_codes:
+                continue
             try:
                 details = _http_get_json(f"{source}/services/station.json?CdStationHydro={quote_plus(station_code)}")
             except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
@@ -507,6 +514,7 @@ def fetch_vigicrues_isere(
                     "source_link": f"{source}/station/{station_code}",
                 }
             )
+            added_codes.add(station_code)
             if len(isere_stations) >= target_isere_count:
                 break
 
@@ -563,7 +571,6 @@ def fetch_vigicrues_isere(
             "troncons": [],
             "error": str(exc),
         }
-
 
 
 
