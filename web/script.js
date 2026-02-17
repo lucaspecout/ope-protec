@@ -1314,6 +1314,11 @@ function openMunicipalityDetailsInlineFallback(municipality) {
   return openMunicipalityDetailsModal(municipality);
 }
 
+if (typeof window !== 'undefined') {
+  window.openMunicipalityDetailsInlineFallback = openMunicipalityDetailsInlineFallback;
+  window.closeMunicipalityDetailsModal = closeMunicipalityDetailsModal;
+}
+
 async function openMunicipalityDetailsModal(municipality) {
   const modal = document.getElementById('municipality-details-modal');
   const content = document.getElementById('municipality-details-content');
@@ -1392,6 +1397,7 @@ async function openMunicipalityDetailsModal(municipality) {
   `;
 
   if (typeof modal.showModal === 'function') {
+    if (modal.open) return;
     modal.showModal();
     return;
   }
