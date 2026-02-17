@@ -188,6 +188,43 @@ _MF_CACHE_TTL_SECONDS = 180
 _meteo_cache_lock = Lock()
 _meteo_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 
+_VIGICRUES_CACHE_TTL_SECONDS = 120
+_ITINISERE_CACHE_TTL_SECONDS = 180
+_BISON_CACHE_TTL_SECONDS = 600
+_GEORISQUES_CACHE_TTL_SECONDS = 900
+
+_vigicrues_cache_lock = Lock()
+_vigicrues_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_itinisere_cache_lock = Lock()
+_itinisere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_bison_cache_lock = Lock()
+_bison_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_georisques_cache_lock = Lock()
+_georisques_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+
+
+def _cached_external_payload(
+    *,
+    cache: dict[str, Any],
+    lock: Lock,
+    ttl_seconds: int,
+    force_refresh: bool,
+    loader: Any,
+) -> dict[str, Any]:
+    now = datetime.utcnow()
+    with lock:
+        cached_payload = cache.get("payload")
+        expires_at = cache.get("expires_at") or datetime.min
+        if not force_refresh and cached_payload and now < expires_at:
+            return deepcopy(cached_payload)
+
+    payload = loader()
+    if payload.get("status") in {"online", "partial", "stale"}:
+        with lock:
+            cache["payload"] = deepcopy(payload)
+            cache["expires_at"] = datetime.utcnow() + timedelta(seconds=ttl_seconds)
+    return payload
+
 
 def _highest_vigilance_level(alerts: list[dict[str, Any]]) -> str:
     priority = {"vert": 1, "jaune": 2, "orange": 3, "rouge": 4}
@@ -431,7 +468,7 @@ def _vigicrues_station_control(details: dict[str, Any]) -> str:
     return "inconnu"
 
 
-def fetch_vigicrues_isere(
+def _fetch_vigicrues_isere_live(
     sample_size: int = 1200,
     station_limit: int | None = None,
     priority_names: list[str] | None = None,
@@ -587,6 +624,25 @@ def fetch_vigicrues_isere(
         }
 
 
+def fetch_vigicrues_isere(
+    sample_size: int = 1200,
+    station_limit: int | None = None,
+    priority_names: list[str] | None = None,
+    force_refresh: bool = False,
+) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_vigicrues_cache,
+        lock=_vigicrues_cache_lock,
+        ttl_seconds=_VIGICRUES_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=lambda: _fetch_vigicrues_isere_live(
+            sample_size=sample_size,
+            station_limit=station_limit,
+            priority_names=priority_names,
+        ),
+    )
+
+
 
 def _itinisere_category(title: str, description: str) -> str:
     text = f"{title} {description}".lower()
@@ -627,7 +683,7 @@ def _itinisere_insights(events: list[dict[str, Any]]) -> dict[str, Any]:
         "top_roads": [{"road": road, "count": count} for road, count in top_roads],
     }
 
-def fetch_itinisere_disruptions(limit: int = 20) -> dict[str, Any]:
+def _fetch_itinisere_disruptions_live(limit: int = 20) -> dict[str, Any]:
     source = "https://www.itinisere.fr/fr/rss/Disruptions"
     try:
         xml_payload = _http_get_text(source)
@@ -670,6 +726,16 @@ def fetch_itinisere_disruptions(limit: int = 20) -> dict[str, Any]:
         }
 
 
+def fetch_itinisere_disruptions(limit: int = 20, force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_itinisere_cache,
+        lock=_itinisere_cache_lock,
+        ttl_seconds=_ITINISERE_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=lambda: _fetch_itinisere_disruptions_live(limit=limit),
+    )
+
+
 def _bison_color_label(code: str) -> str:
     mapping = {
         "V": "vert",
@@ -689,7 +755,7 @@ def _parse_bison_segment(segment: str) -> dict[str, str]:
     }
 
 
-def fetch_bison_fute_traffic() -> dict[str, Any]:
+def _fetch_bison_fute_traffic_live() -> dict[str, Any]:
     source = "https://www.bison-fute.gouv.fr/previsions/previsions.json"
     try:
         payload = _http_get_json(source)
@@ -745,7 +811,17 @@ def fetch_bison_fute_traffic() -> dict[str, Any]:
         }
 
 
-def fetch_georisques_isere_summary() -> dict[str, Any]:
+def fetch_bison_fute_traffic(force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_bison_cache,
+        lock=_bison_cache_lock,
+        ttl_seconds=_BISON_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=_fetch_bison_fute_traffic_live,
+    )
+
+
+def _fetch_georisques_isere_summary_live() -> dict[str, Any]:
     source = "https://www.georisques.gouv.fr/api/v1"
     communes = [
         {"name": "Grenoble", "code_insee": "38185"},
@@ -902,6 +978,16 @@ def fetch_georisques_isere_summary() -> dict[str, Any]:
         "errors": errors,
         "error": " ; ".join(errors) if errors else None,
     }
+
+
+def fetch_georisques_isere_summary(force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_georisques_cache,
+        lock=_georisques_cache_lock,
+        ttl_seconds=_GEORISQUES_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=_fetch_georisques_isere_summary_live,
+    )
 
 
 def vigicrues_geojson_from_stations(stations: list[dict[str, Any]]) -> dict[str, Any]:
