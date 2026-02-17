@@ -438,17 +438,27 @@ def fetch_vigicrues_isere(
 ) -> dict[str, Any]:
     source = "https://www.vigicrues.gouv.fr"
     sandre_reference = "https://www.sandre.eaufrance.fr/definition/VIC/1.1/EntVigiCru"
-    default_territory_codes = {"18", "17", "16", "15", "14"}
+    # 19 = Alpes du Nord (inclut l'Isère). On le priorise pour augmenter
+    # fortement le nombre de stations iséroises disponibles côté cartographie.
+    preferred_territory_codes = (19, 18, 17, 16, 15, 14)
     priority_names = [name.lower() for name in (priority_names or [])]
 
     try:
         catalog = _http_get_json(f"{source}/services/station.json")
         all_stations = (catalog.get("Stations") or []) if isinstance(catalog, dict) else []
-        territory_codes = {int(code) for code in default_territory_codes}
+        stations_by_territory: dict[int, list[str]] = {code: [] for code in preferred_territory_codes}
+        for item in all_stations:
+            territory_code = int(item.get("PereBoitEntVigiCru") or 0)
+            if territory_code not in stations_by_territory:
+                continue
+            station_code = str(item.get("CdStationHydro") or "").strip()
+            if station_code:
+                stations_by_territory[territory_code].append(station_code)
+
         candidate_codes = [
-            str(item.get("CdStationHydro") or "").strip()
-            for item in all_stations
-            if int(item.get("PereBoitEntVigiCru") or 0) in territory_codes
+            code
+            for territory_code in preferred_territory_codes
+            for code in stations_by_territory.get(territory_code, [])
         ]
         candidate_codes = [code for code in candidate_codes if code]
         max_lookups = max(80, station_limit * 15) if station_limit else 140
