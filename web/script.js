@@ -58,6 +58,7 @@ let trafficGeocodeCache = new Map();
 let mapStats = { stations: 0, pcs: 0, resources: 0, custom: 0, traffic: 0 };
 let mapControlsCollapsed = false;
 let cachedCrisisPoints = [];
+let cachedLogs = [];
 
 const ISERE_BOUNDARY_STYLE = { color: '#163a87', weight: 2, fillColor: '#63c27d', fillOpacity: 0.2 };
 const TRAFFIC_COMMUNES = ['Grenoble', 'Voiron', 'Vienne', 'Bourgoin-Jallieu', 'Pont-de-Claix', 'Meylan', 'Échirolles', 'L\'Isle-d\'Abeau', 'Saint-Martin-d\'Hères', 'La Tour-du-Pin', 'Rives', 'Sassenage', 'Crolles', 'Tullins'];
@@ -113,13 +114,26 @@ function getMunicipalityName(municipalityId) {
 }
 
 function populateLogMunicipalityOptions(municipalities = []) {
-  const select = document.getElementById('log-municipality-id');
-  if (!select) return;
-  const current = select.value;
-  select.innerHTML = '<option value="">Sélectionnez une commune</option>' + municipalities
-    .map((m) => `<option value="${m.id}">${escapeHtml(m.name)}${m.pcs_active ? ' · PCS actif' : ''}</option>`)
-    .join('');
-  if (current) select.value = current;
+  const createOptions = (includeEmpty = true, allLabel = 'Toutes les communes') => {
+    const base = includeEmpty ? `<option value="">Sélectionnez une commune</option>` : `<option value="all">${allLabel}</option>`;
+    return base + municipalities
+      .map((m) => `<option value="${m.id}">${escapeHtml(m.name)}${m.pcs_active ? ' · PCS actif' : ''}</option>`)
+      .join('');
+  };
+
+  const formSelect = document.getElementById('log-municipality-id');
+  if (formSelect) {
+    const current = formSelect.value;
+    formSelect.innerHTML = createOptions(true);
+    if (current) formSelect.value = current;
+  }
+
+  const filterSelect = document.getElementById('logs-municipality-filter');
+  if (filterSelect) {
+    const currentFilter = filterSelect.value;
+    filterSelect.innerHTML = createOptions(false, 'Toutes les communes');
+    if (currentFilter) filterSelect.value = currentFilter;
+  }
 }
 
 function syncLogScopeFields() {
@@ -1496,6 +1510,42 @@ async function loadMunicipalities() {
 }
 
 
+function computeLogCriticality(level) {
+  return ({ rouge: 4, orange: 3, jaune: 2, vert: 1 }[normalizeLevel(level)] || 0);
+}
+
+function renderLogsList() {
+  const search = String(document.getElementById('logs-search')?.value || '').trim().toLowerCase();
+  const municipalityFilter = String(document.getElementById('logs-municipality-filter')?.value || 'all');
+  const scopeFilter = String(document.getElementById('logs-scope-filter')?.value || 'all');
+  const sort = String(document.getElementById('logs-sort')?.value || 'date_desc');
+
+  let filtered = [...cachedLogs];
+  if (scopeFilter !== 'all') filtered = filtered.filter((log) => String(log.target_scope || 'departemental') === scopeFilter);
+  if (municipalityFilter !== 'all') filtered = filtered.filter((log) => String(log.municipality_id || '') === municipalityFilter);
+  if (search) {
+    filtered = filtered.filter((log) => {
+      const haystack = [
+        log.event_type,
+        log.description,
+        log.target_scope,
+        getMunicipalityName(log.municipality_id),
+      ].map((value) => String(value || '').toLowerCase()).join(' ');
+      return haystack.includes(search);
+    });
+  }
+
+  filtered.sort((a, b) => {
+    if (sort === 'date_asc') return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    if (sort === 'danger_desc') return computeLogCriticality(b.danger_level) - computeLogCriticality(a.danger_level);
+    if (sort === 'type_asc') return String(a.event_type || '').localeCompare(String(b.event_type || ''), 'fr');
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  });
+
+  document.getElementById('logs-count').textContent = String(filtered.length);
+  document.getElementById('logs-list').innerHTML = filtered.map((l) => `<li>${new Date(l.created_at).toLocaleString()} · <span class="badge neutral">${formatLogScope(l)}</span> ${l.danger_emoji || ''} <strong style="color:${levelColor(l.danger_level)}">${escapeHtml(l.event_type || 'MCO')}</strong> · ${escapeHtml(l.description || '')}</li>`).join('') || '<li>Aucun log.</li>';
+}
+
 async function loadLogs() {
   const logs = await api('/logs');
   document.getElementById('logs-list').innerHTML = (logs || []).map((l) => `<li>${new Date(l.created_at).toLocaleString()} · <span class="badge neutral">${formatLogScope(l)}</span> ${l.danger_emoji || ''} <strong style="color:${levelColor(l.danger_level)}">${l.event_type}</strong> · ${escapeHtml(l.description || '')}</li>`).join('') || '<li>Aucun log.</li>';
@@ -1960,6 +2010,10 @@ function bindAppInteractions() {
   document.getElementById('log-target-scope')?.addEventListener('change', () => {
     syncLogScopeFields();
   });
+  ['logs-search', 'logs-municipality-filter', 'logs-scope-filter', 'logs-sort'].forEach((id) => {
+    document.getElementById(id)?.addEventListener('input', renderLogsList);
+    document.getElementById(id)?.addEventListener('change', renderLogsList);
+  });
   syncLogScopeFields();
 
   document.getElementById('municipality-edit-form')?.addEventListener('submit', async (event) => {
@@ -2112,6 +2166,7 @@ loginForm.addEventListener('submit', async (event) => {
     showApp();
     setActivePanel(localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel');
     await loadIsereBoundary();
+    syncLogScopeFields();
     await refreshAll();
     startAutoRefresh();
   } catch (error) {
@@ -2188,6 +2243,7 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
     });
     event.target.reset();
     if (errorTarget) errorTarget.textContent = '';
+    syncLogScopeFields();
     await refreshAll();
   } catch (error) {
     if (errorTarget) errorTarget.textContent = sanitizeErrorMessage(error.message);
@@ -2227,6 +2283,7 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
     showApp();
     setActivePanel(localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel');
     await loadIsereBoundary();
+    syncLogScopeFields();
     await refreshAll();
     startAutoRefresh();
   } catch {

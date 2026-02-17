@@ -306,6 +306,25 @@
             <input name="description" placeholder="Information (commune ou lieu concerné)" required />
             <button type="submit">Ajouter</button>
           </form>
+          <div class="form" id="logs-filters">
+            <input id="logs-search" type="search" placeholder="Rechercher (catégorie, texte, lieu, commune...)" />
+            <select id="logs-municipality-filter">
+              <option value="all">Toutes les communes</option>
+            </select>
+            <select id="logs-scope-filter">
+              <option value="all">Tous les périmètres</option>
+              <option value="departemental">Départemental</option>
+              <option value="commune">Commune</option>
+              <option value="pcs">PCS</option>
+            </select>
+            <select id="logs-sort">
+              <option value="date_desc">Tri: plus récent</option>
+              <option value="date_asc">Tri: plus ancien</option>
+              <option value="danger_desc">Tri: criticité</option>
+              <option value="type_asc">Tri: catégorie A→Z</option>
+            </select>
+          </div>
+          <p class="muted">Entrées affichées: <strong id="logs-count">0</strong></p>
           <ul id="logs-list" class="list"></ul>
         </section>
 
