@@ -2358,11 +2358,7 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        event_type: (() => {
-          const selected = String(form.get('event_type_select') || '').trim();
-          if (selected.toLowerCase() !== 'autre') return selected;
-          return String(form.get('event_type_other') || '').trim();
-        })(),
+        event_type: form.get('event_type'),
         description: form.get('description'),
         danger_level: form.get('danger_level') || 'vert',
         danger_emoji: LOG_LEVEL_EMOJI[form.get('danger_level') || 'vert'] || '🟢',
@@ -2370,12 +2366,7 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
         target_scope: form.get('target_scope'),
         municipality_id: form.get('municipality_id') ? Number(form.get('municipality_id')) : null,
         location: form.get('location') || null,
-        source: (() => {
-          const selected = String(form.get('source_select') || '').trim();
-          if (!selected) return null;
-          if (selected.toLowerCase() !== 'autre') return selected;
-          return String(form.get('source_other') || '').trim() || null;
-        })(),
+        source: form.get('source') || null,
         assigned_to: form.get('assigned_to') || null,
         tags: form.get('tags') || null,
         next_update_due: form.get('next_update_due') || null,

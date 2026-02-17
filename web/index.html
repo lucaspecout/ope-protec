@@ -296,19 +296,7 @@
         <section id="logs-panel" class="panel view hidden" hidden>
           <h3>Main courante</h3>
           <form id="log-form" class="form" data-requires-edit>
-            <select name="event_type_select" id="log-event-type" required>
-              <option value="">Catégorie d'évènement</option>
-              <option value="Météo">Météo</option>
-              <option value="Hydrologie">Hydrologie</option>
-              <option value="Inondation">Inondation</option>
-              <option value="Réseaux">Réseaux</option>
-              <option value="Voirie">Voirie</option>
-              <option value="Logistique">Logistique</option>
-              <option value="Sécurité">Sécurité</option>
-              <option value="Santé">Santé</option>
-              <option value="Autre">Autre</option>
-            </select>
-            <input name="event_type_other" id="log-event-type-other" class="hidden" hidden placeholder="Précisez la catégorie" />
+            <input name="event_type" placeholder="Catégorie (ex: Inondation, Voirie, Météo)" required />
             <select name="status" id="log-status">
               <option value="nouveau">Nouveau</option>
               <option value="en_cours">En cours</option>
@@ -330,17 +318,7 @@
               <option value="">Sélectionnez une commune</option>
             </select>
             <input name="location" placeholder="Lieu / secteur" />
-            <select name="source_select" id="log-source-select">
-              <option value="">Source</option>
-              <option value="CODIS">CODIS</option>
-              <option value="Mairie">Mairie</option>
-              <option value="Terrain">Terrain</option>
-              <option value="Préfecture">Préfecture</option>
-              <option value="Vigicrues">Vigicrues</option>
-              <option value="Météo-France">Météo-France</option>
-              <option value="Autre">Autre</option>
-            </select>
-            <input name="source_other" id="log-source-other" class="hidden" hidden placeholder="Précisez la source" />
+            <input name="source" placeholder="Source (CODIS, mairie, terrain...)" />
             <input name="assigned_to" placeholder="Responsable suivi" />
             <input name="tags" placeholder="Tags (virgules)" />
             <input name="next_update_due" type="datetime-local" />
