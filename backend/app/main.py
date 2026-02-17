@@ -828,6 +828,7 @@ def create_log(data: OperationalLogCreate, db: Session = Depends(get_db), user: 
     payload["event_time"] = payload.get("event_time") or datetime.utcnow()
     target_scope = payload.get("target_scope", "departemental")
     municipality_id = payload.get("municipality_id")
+    linked_municipality = None
 
     if target_scope in {"commune", "pcs"}:
         if not municipality_id:
@@ -837,11 +838,19 @@ def create_log(data: OperationalLogCreate, db: Session = Depends(get_db), user: 
             raise HTTPException(404, "Commune introuvable")
         if target_scope == "pcs" and not municipality.pcs_active:
             raise HTTPException(400, "La commune sélectionnée n'a pas de PCS actif")
+        linked_municipality = municipality
     else:
         payload["municipality_id"] = None
 
     entry = OperationalLog(**payload, created_by_id=user.id)
     db.add(entry)
+
+    if linked_municipality:
+        summary_date = payload["event_time"].strftime("%d/%m/%Y %H:%M")
+        summary = f"[MCO {summary_date}] {payload.get('event_type', 'MCO')} · {payload.get('description', '')}".strip()
+        previous_info = (linked_municipality.additional_info or "").strip()
+        linked_municipality.additional_info = f"{summary}\n{previous_info}" if previous_info else summary
+
     db.commit()
     db.refresh(entry)
     return entry

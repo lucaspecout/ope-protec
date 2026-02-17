@@ -172,6 +172,39 @@ function syncLogScopeFields() {
   if (!requiresMunicipality) municipalitySelect.value = '';
 }
 
+function syncLogOtherFields() {
+  const categorySelect = document.getElementById('log-event-type');
+  const categoryOther = document.getElementById('log-event-type-other');
+  const sourceSelect = document.getElementById('log-source-select');
+  const sourceOther = document.getElementById('log-source-other');
+
+  if (categorySelect && categoryOther) {
+    const isOther = String(categorySelect.value || '').toLowerCase() === 'autre';
+    categoryOther.required = isOther;
+    setVisibility(categoryOther, isOther);
+    if (!isOther) categoryOther.value = '';
+  }
+
+  if (sourceSelect && sourceOther) {
+    const isOther = String(sourceSelect.value || '').toLowerCase() === 'autre';
+    sourceOther.required = isOther;
+    setVisibility(sourceOther, isOther);
+    if (!isOther) sourceOther.value = '';
+  }
+}
+
+async function ensureLogMunicipalitiesLoaded() {
+  const municipalitySelect = document.getElementById('log-municipality-id');
+  if (!municipalitySelect) return;
+  const loadedOptions = Array.from(municipalitySelect.options || []).filter((option) => option.value).length;
+  if (loadedOptions > 0) return;
+  try {
+    await loadMunicipalities();
+  } catch (_) {
+    populateLogMunicipalityOptions();
+  }
+}
+
 function setVisibility(node, visible) {
   if (!node) return;
   node.classList.toggle('hidden', !visible);
@@ -365,6 +398,7 @@ function setActivePanel(panelId) {
   document.querySelectorAll('.view').forEach((panel) => setVisibility(panel, panel.id === panelId));
   document.getElementById('panel-title').textContent = PANEL_TITLES[panelId] || 'Centre opérationnel';
   if (panelId === 'map-panel' && leafletMap) setTimeout(() => leafletMap.invalidateSize(), 100);
+  if (panelId === 'logs-panel') ensureLogMunicipalitiesLoaded();
 }
 
 
@@ -1565,6 +1599,7 @@ async function loadMunicipalities() {
   }).join('') || '<p class="muted">Aucune commune.</p>';
   populateLogMunicipalityOptions(municipalities);
   syncLogScopeFields();
+  syncLogOtherFields();
   await renderMunicipalitiesOnMap(municipalities);
 }
 
@@ -2086,6 +2121,11 @@ function bindAppInteractions() {
   document.getElementById('log-target-scope')?.addEventListener('change', () => {
     syncLogScopeFields();
   });
+  document.getElementById('log-event-type')?.addEventListener('change', syncLogOtherFields);
+  document.getElementById('log-source-select')?.addEventListener('change', syncLogOtherFields);
+  document.getElementById('log-municipality-id')?.addEventListener('focus', () => {
+    ensureLogMunicipalitiesLoaded();
+  });
   ['logs-search', 'logs-municipality-filter', 'logs-scope-filter', 'logs-sort'].forEach((id) => {
     document.getElementById(id)?.addEventListener('input', renderLogsList);
     document.getElementById(id)?.addEventListener('change', renderLogsList);
@@ -2250,6 +2290,7 @@ loginForm.addEventListener('submit', async (event) => {
     setActivePanel(localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel');
     await loadIsereBoundary();
     syncLogScopeFields();
+    syncLogOtherFields();
     await refreshAll();
     startAutoRefresh();
   } catch (error) {
@@ -2311,6 +2352,7 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
   if (!canEdit()) return;
   const form = new FormData(event.target);
   const errorTarget = document.getElementById('dashboard-error');
+  await ensureLogMunicipalitiesLoaded();
   try {
     await api('/logs', {
       method: 'POST',
