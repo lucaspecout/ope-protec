@@ -89,6 +89,19 @@ const passwordForm = document.getElementById('password-form');
 
 const normalizeLevel = (level) => ({ verte: 'vert', green: 'vert', yellow: 'jaune', red: 'rouge' }[(level || '').toLowerCase()] || (level || 'vert').toLowerCase());
 const levelColor = (level) => ({ vert: '#2f9e44', jaune: '#f59f00', orange: '#f76707', rouge: '#e03131' }[normalizeLevel(level)] || '#2f9e44');
+const LOG_LEVEL_EMOJI = { vert: '🟢', jaune: '🟡', orange: '🟠', rouge: '🔴' };
+const LOG_STATUS_LABEL = { nouveau: 'Nouveau', en_cours: 'En cours', suivi: 'Suivi', clos: 'Clos' };
+
+function formatLogLine(log = {}) {
+  const status = LOG_STATUS_LABEL[String(log.status || 'nouveau')] || 'Nouveau';
+  const municipality = log.municipality_id ? ` · ${escapeHtml(getMunicipalityName(log.municipality_id))}` : '';
+  const place = log.location ? ` · 📍 ${escapeHtml(log.location)}` : '';
+  const source = log.source ? ` · Source: ${escapeHtml(log.source)}` : '';
+  const owner = log.assigned_to ? ` · 👤 ${escapeHtml(log.assigned_to)}` : '';
+  const next = log.next_update_due ? ` · ⏱️ MAJ ${new Date(log.next_update_due).toLocaleString()}` : '';
+  const actions = log.actions_taken ? `<div class="muted">Actions: ${escapeHtml(log.actions_taken)}</div>` : '';
+  return `<li>${new Date(log.event_time || log.created_at).toLocaleString()} · <span class="badge neutral">${formatLogScope(log)}${municipality}</span> ${log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢'} <strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'MCO')}</strong> · <span class="badge neutral">${status}</span>${place}${owner}${source}${next}<div>${escapeHtml(log.description || '')}</div>${actions}</li>`;
+}
 
 function formatLogScope(log = {}) {
   const scope = String(log.target_scope || 'departemental').toLowerCase();
@@ -141,7 +154,7 @@ function syncLogScopeFields() {
   const municipalitySelect = document.getElementById('log-municipality-id');
   if (!scopeSelect || !municipalitySelect) return;
   const scope = String(scopeSelect.value || 'departemental');
-  const requiresMunicipality = scope === 'commune';
+  const requiresMunicipality = scope === 'commune' || scope === 'pcs';
   municipalitySelect.disabled = !requiresMunicipality;
   municipalitySelect.required = requiresMunicipality;
   if (!requiresMunicipality) municipalitySelect.value = '';
@@ -1529,6 +1542,10 @@ function renderLogsList() {
         log.event_type,
         log.description,
         log.target_scope,
+        log.status,
+        log.location,
+        log.source,
+        log.tags,
         getMunicipalityName(log.municipality_id),
       ].map((value) => String(value || '').toLowerCase()).join(' ');
       return haystack.includes(search);
@@ -1536,19 +1553,32 @@ function renderLogsList() {
   }
 
   filtered.sort((a, b) => {
-    if (sort === 'date_asc') return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    if (sort === 'date_asc') return new Date(a.event_time || a.created_at).getTime() - new Date(b.event_time || b.created_at).getTime();
     if (sort === 'danger_desc') return computeLogCriticality(b.danger_level) - computeLogCriticality(a.danger_level);
     if (sort === 'type_asc') return String(a.event_type || '').localeCompare(String(b.event_type || ''), 'fr');
-    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    return new Date(b.event_time || b.created_at).getTime() - new Date(a.event_time || a.created_at).getTime();
   });
 
   document.getElementById('logs-count').textContent = String(filtered.length);
-  document.getElementById('logs-list').innerHTML = filtered.map((l) => `<li>${new Date(l.created_at).toLocaleString()} · <span class="badge neutral">${formatLogScope(l)}</span> ${l.danger_emoji || ''} <strong style="color:${levelColor(l.danger_level)}">${escapeHtml(l.event_type || 'MCO')}</strong> · ${escapeHtml(l.description || '')}</li>`).join('') || '<li>Aucun log.</li>';
+  document.getElementById('logs-list').innerHTML = filtered.map((l) => formatLogLine(l)).join('') || '<li>Aucun log.</li>';
 }
 
 async function loadLogs() {
   const logs = await api('/logs');
-  document.getElementById('logs-list').innerHTML = (logs || []).map((l) => `<li>${new Date(l.created_at).toLocaleString()} · <span class="badge neutral">${formatLogScope(l)}</span> ${l.danger_emoji || ''} <strong style="color:${levelColor(l.danger_level)}">${l.event_type}</strong> · ${escapeHtml(l.description || '')}</li>`).join('') || '<li>Aucun log.</li>';
+  cachedLogs = Array.isArray(logs) ? logs : [];
+  renderLogsList();
+}
+
+async function exportLogsCsv() {
+  const response = await fetch('/logs/export/csv', { headers: { Authorization: `Bearer ${token}` } });
+  if (!response.ok) throw new Error(`Export impossible (${response.status})`);
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `main-courante-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.csv`;
+  link.click();
+  window.URL.revokeObjectURL(url);
 }
 
 async function loadUsers() {
@@ -2014,6 +2044,13 @@ function bindAppInteractions() {
     document.getElementById(id)?.addEventListener('input', renderLogsList);
     document.getElementById(id)?.addEventListener('change', renderLogsList);
   });
+  document.getElementById('logs-export')?.addEventListener('click', async () => {
+    try {
+      await exportLogsCsv();
+    } catch (error) {
+      document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
+    }
+  });
   syncLogScopeFields();
 
   document.getElementById('municipality-edit-form')?.addEventListener('submit', async (event) => {
@@ -2233,12 +2270,19 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        event_type: 'MCO',
+        event_type: form.get('event_type'),
         description: form.get('description'),
-        danger_level: 'vert',
-        danger_emoji: '🟢',
+        danger_level: form.get('danger_level') || 'vert',
+        danger_emoji: LOG_LEVEL_EMOJI[form.get('danger_level') || 'vert'] || '🟢',
+        status: form.get('status') || 'nouveau',
         target_scope: form.get('target_scope'),
         municipality_id: form.get('municipality_id') ? Number(form.get('municipality_id')) : null,
+        location: form.get('location') || null,
+        source: form.get('source') || null,
+        assigned_to: form.get('assigned_to') || null,
+        tags: form.get('tags') || null,
+        next_update_due: form.get('next_update_due') || null,
+        actions_taken: form.get('actions_taken') || null,
       }),
     });
     event.target.reset();
