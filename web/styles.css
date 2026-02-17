@@ -194,10 +194,6 @@ label { display: block; margin-bottom: .8rem; }
 .municipality-upload-progress__bar { position: absolute; inset: 0 auto 0 0; background: linear-gradient(90deg, #2b6bff, #1f57d8); width: 0; transition: width .2s ease; }
 .municipality-upload-progress span { position: relative; display: block; text-align: center; line-height: 24px; font-weight: 700; color: #113572; font-size: .8rem; }
 
-.municipality-document-preview { margin-top: .7rem; border: 1px solid #c8dafb; border-radius: 12px; background: #f7faff; padding: .55rem; }
-.municipality-document-preview__frame { width: 100%; min-height: 62vh; border: 0; border-radius: 8px; background: #fff; }
-.municipality-document-preview__image { display: block; max-width: 100%; max-height: 62vh; margin: 0 auto; border-radius: 8px; }
-
 .municipality-editor {
   margin-top: 1rem;
   border: 1px solid #c8dafb;

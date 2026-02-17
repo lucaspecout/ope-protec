@@ -51,7 +51,6 @@ let cachedBisonFute = {};
 let geocodeCache = new Map();
 let municipalityContourCache = new Map();
 const municipalityDocumentsUiState = new Map();
-let currentMunicipalityPreviewUrl = null;
 let trafficGeocodeCache = new Map();
 let mapStats = { stations: 0, pcs: 0, resources: 0, custom: 0, traffic: 0 };
 let mapControlsCollapsed = false;
@@ -1068,16 +1067,6 @@ async function uploadMunicipalityDocumentWithFallback(municipalityId, formData, 
   throw new Error(sanitizeErrorMessage(lastError?.message || 'Téléversement impossible'));
 }
 
-function municipalityPreviewMarkup(contentType, objectUrl) {
-  if ((contentType || '').includes('pdf')) {
-    return `<iframe class="municipality-document-preview__frame" src="${objectUrl}" title="Prévisualisation PDF" loading="lazy"></iframe>`;
-  }
-  if ((contentType || '').startsWith('image/')) {
-    return `<img class="municipality-document-preview__image" src="${objectUrl}" alt="Prévisualisation du document" loading="lazy" />`;
-  }
-  return `<p class="muted">Ce format ne peut pas être prévisualisé ici. Le document a été ouvert dans un nouvel onglet.</p>`;
-}
-
 async function openMunicipalityFile(municipalityId, fileId) {
   const { blob, contentType } = await apiFile(`/municipalities/${municipalityId}/files/${fileId}`);
   const objectUrl = URL.createObjectURL(blob);
@@ -1181,9 +1170,6 @@ async function openMunicipalityDetailsModal(municipality) {
     <p class="muted">Total: <strong>${files.length}</strong>${Object.entries(byType).map(([type, count]) => ` · ${escapeHtml(type)}: ${count}`).join('')}</p>
     ${municipalityDocumentFiltersMarkup(state, municipality.id)}
     <ul class="list compact">${municipalityFilesMarkup(filteredFiles, municipality.id)}</ul>
-    <section id="municipality-document-preview" class="municipality-document-preview hidden" hidden>
-      <p class="muted">Prévisualisation du document.</p>
-    </section>
     ${quickActions}
   `;
 
