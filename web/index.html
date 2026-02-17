@@ -296,15 +296,57 @@
         <section id="logs-panel" class="panel view hidden" hidden>
           <h3>Main courante</h3>
           <form id="log-form" class="form" data-requires-edit>
+            <select name="event_type_select" id="log-event-type" required>
+              <option value="">Catégorie d'évènement</option>
+              <option value="Météo">Météo</option>
+              <option value="Hydrologie">Hydrologie</option>
+              <option value="Inondation">Inondation</option>
+              <option value="Réseaux">Réseaux</option>
+              <option value="Voirie">Voirie</option>
+              <option value="Logistique">Logistique</option>
+              <option value="Sécurité">Sécurité</option>
+              <option value="Santé">Santé</option>
+              <option value="Autre">Autre</option>
+            </select>
+            <input name="event_type_other" id="log-event-type-other" class="hidden" hidden placeholder="Précisez la catégorie" />
+            <select name="status" id="log-status">
+              <option value="nouveau">Nouveau</option>
+              <option value="en_cours">En cours</option>
+              <option value="suivi">Suivi</option>
+              <option value="clos">Clos</option>
+            </select>
+            <select name="danger_level" id="log-danger-level">
+              <option value="vert">🟢 Vert</option>
+              <option value="jaune">🟡 Jaune</option>
+              <option value="orange">🟠 Orange</option>
+              <option value="rouge">🔴 Rouge</option>
+            </select>
             <select name="target_scope" id="log-target-scope">
               <option value="departemental">Départemental</option>
               <option value="commune">Commune</option>
+              <option value="pcs">PCS</option>
             </select>
             <select name="municipality_id" id="log-municipality-id" disabled>
               <option value="">Sélectionnez une commune</option>
             </select>
-            <input name="description" placeholder="Information (commune ou lieu concerné)" required />
-            <button type="submit">Ajouter</button>
+            <input name="location" placeholder="Lieu / secteur" />
+            <select name="source_select" id="log-source-select">
+              <option value="">Source</option>
+              <option value="CODIS">CODIS</option>
+              <option value="Mairie">Mairie</option>
+              <option value="Terrain">Terrain</option>
+              <option value="Préfecture">Préfecture</option>
+              <option value="Vigicrues">Vigicrues</option>
+              <option value="Météo-France">Météo-France</option>
+              <option value="Autre">Autre</option>
+            </select>
+            <input name="source_other" id="log-source-other" class="hidden" hidden placeholder="Précisez la source" />
+            <input name="assigned_to" placeholder="Responsable suivi" />
+            <input name="tags" placeholder="Tags (virgules)" />
+            <input name="next_update_due" type="datetime-local" />
+            <textarea name="description" placeholder="Faits observés" required></textarea>
+            <textarea name="actions_taken" placeholder="Actions engagées / décisions"></textarea>
+            <button type="submit">Ajouter l'entrée</button>
           </form>
           <div class="form" id="logs-filters">
             <input id="logs-search" type="search" placeholder="Rechercher (catégorie, texte, lieu, commune...)" />
@@ -324,7 +366,7 @@
               <option value="type_asc">Tri: catégorie A→Z</option>
             </select>
           </div>
-          <p class="muted">Entrées affichées: <strong id="logs-count">0</strong></p>
+          <p class="muted">Entrées affichées: <strong id="logs-count">0</strong> · <button id="logs-export" type="button" class="ghost">Exporter CSV</button></p>
           <ul id="logs-list" class="list"></ul>
         </section>
 
