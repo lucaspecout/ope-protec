@@ -1,4 +1,4 @@
-const STORAGE_KEYS = { token: 'token', activePanel: 'activePanel', mapPointsCache: 'mapPointsCache', municipalitiesCache: 'municipalitiesCache' };
+const STORAGE_KEYS = { token: 'token', activePanel: 'activePanel', mapPointsCache: 'mapPointsCache', municipalitiesCache: 'municipalitiesCache', dashboardSnapshot: 'dashboardSnapshot', externalRisksSnapshot: 'externalRisksSnapshot', apiInterconnectionsSnapshot: 'apiInterconnectionsSnapshot' };
 const AUTO_REFRESH_MS = 10000;
 const HOME_LIVE_REFRESH_MS = 30000;
 const API_CACHE_TTL_MS = 30000;
@@ -275,6 +275,25 @@ function normalizeApiErrorMessage(payload, status) {
     return JSON.stringify(detail);
   }
   return `Erreur API (${status})`;
+}
+
+
+function saveSnapshot(key, payload) {
+  try {
+    localStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), payload }));
+  } catch (_) {
+    // ignore localStorage saturation
+  }
+}
+
+function readSnapshot(key) {
+  try {
+    const raw = JSON.parse(localStorage.getItem(key) || 'null');
+    if (!raw || typeof raw !== 'object') return null;
+    return raw.payload;
+  } catch (_) {
+    return null;
+  }
 }
 
 function clonePayload(payload) {
@@ -1484,8 +1503,7 @@ function renderCriticalRisks(meteo = {}) {
   setHtml('critical-risks-list', markup);
 }
 
-async function loadDashboard() {
-  const dashboard = await api('/dashboard');
+function renderDashboard(dashboard = {}) {
   setRiskText('vigilance', normalizeLevel(dashboard.vigilance), dashboard.vigilance);
   setRiskText('crues', normalizeLevel(dashboard.crues), dashboard.crues);
   setRiskText('risk', normalizeLevel(dashboard.global_risk), dashboard.global_risk);
@@ -1494,8 +1512,15 @@ async function loadDashboard() {
   document.getElementById('latest-logs').innerHTML = (dashboard.latest_logs || []).map((l) => `<li><span class="badge neutral">${formatLogScope(l)}</span> ${l.danger_emoji || ''} <strong style="color:${levelColor(l.danger_level)}">${l.event_type}</strong> · ${l.description}</li>`).join('') || '<li>Aucun événement récent.</li>';
 }
 
-async function loadExternalRisks() {
-  const data = await api('/external/isere/risks');
+async function loadDashboard() {
+  const cached = readSnapshot(STORAGE_KEYS.dashboardSnapshot);
+  if (cached) renderDashboard(cached);
+  const dashboard = await api('/dashboard');
+  renderDashboard(dashboard);
+  saveSnapshot(STORAGE_KEYS.dashboardSnapshot, dashboard);
+}
+
+function renderExternalRisks(data = {}) {
   const meteo = data?.meteo_france || {};
   const vigicrues = data?.vigicrues || {};
   const itinisere = data?.itinisere || {};
@@ -1528,6 +1553,18 @@ async function loadExternalRisks() {
   setText('map-seismic-level', georisques.highest_seismic_zone_label || 'inconnue');
   setText('map-flood-docs', String(georisques.flood_documents_total ?? 0));
   renderStations(vigicrues.stations || []);
+}
+
+async function loadExternalRisks() {
+  const cached = readSnapshot(STORAGE_KEYS.externalRisksSnapshot);
+  if (cached) {
+    renderExternalRisks(cached);
+    renderTrafficOnMap().catch(() => {});
+  }
+
+  const data = await api('/external/isere/risks');
+  renderExternalRisks(data);
+  saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, data);
   await renderTrafficOnMap();
 }
 
@@ -1543,9 +1580,7 @@ async function loadSupervision() {
   renderItinisereEvents(data.alerts.itinisere.events || [], 'supervision-itinisere-events');
 }
 
-async function loadApiInterconnections(forceRefresh = false) {
-  const suffix = forceRefresh ? '?refresh=true' : '';
-  const data = await api(`/external/isere/risks${suffix}`);
+function renderApiInterconnections(data = {}) {
   const services = [
     { key: 'meteo_france', label: 'Météo-France', level: normalizeLevel(data.meteo_france?.level || 'inconnu'), details: data.meteo_france?.info_state || data.meteo_france?.bulletin_title || '-' },
     { key: 'vigicrues', label: 'Vigicrues', level: normalizeLevel(data.vigicrues?.water_alert_level || 'inconnu'), details: `${(data.vigicrues?.stations || []).length} station(s)` },
@@ -1576,6 +1611,17 @@ async function loadApiInterconnections(forceRefresh = false) {
   setText('api-error-banner', activeErrors.join(' · ') || 'Aucune erreur active sur les interconnexions.');
   setHtml('api-service-grid', cards || '<p>Aucun service disponible.</p>');
   setHtml('api-raw-list', rawBlocks || '<p>Aucun retour JSON disponible.</p>');
+}
+
+async function loadApiInterconnections(forceRefresh = false) {
+  const suffix = forceRefresh ? '?refresh=true' : '';
+  if (!forceRefresh) {
+    const cached = readSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot);
+    if (cached) renderApiInterconnections(cached);
+  }
+  const data = await api(`/external/isere/risks${suffix}`);
+  renderApiInterconnections(data);
+  saveSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot, data);
 }
 
 async function loadMunicipalities() {
@@ -1922,6 +1968,8 @@ function bindAppInteractions() {
     mapAddPointMode = !mapAddPointMode;
     setText('map-add-point-toggle', `Ajout: ${mapAddPointMode ? 'on' : 'off'}`);
     document.getElementById('map-add-point-toggle')?.setAttribute('aria-pressed', String(mapAddPointMode));
+    const mapCanvas = document.getElementById('isere-map-leaflet');
+    if (mapCanvas) mapCanvas.style.cursor = mapAddPointMode ? 'crosshair' : '';
     setMapFeedback(mapAddPointMode ? 'Cliquez sur la carte pour ajouter un point opérationnel avec icône.' : 'Mode ajout désactivé.');
   });
   document.getElementById('map-point-category-filter')?.addEventListener('change', renderCustomPoints);
@@ -1949,6 +1997,10 @@ function bindAppInteractions() {
   });
   document.getElementById('map-point-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
+    if (!pendingMapPointCoords && leafletMap) {
+      pendingMapPointCoords = leafletMap.getCenter();
+      setMapFeedback('Point non sélectionné: utilisation du centre de carte.');
+    }
     if (!pendingMapPointCoords) {
       setMapFeedback('Cliquez d\'abord sur la carte pour positionner le point.', true);
       return;
