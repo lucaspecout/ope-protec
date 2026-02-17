@@ -103,13 +103,7 @@ function populateLogMunicipalityOptions(municipalities = []) {
   select.innerHTML = '<option value="">Sélectionnez une commune</option>' + municipalities
     .map((m) => `<option value="${m.id}">${escapeHtml(m.name)}${m.pcs_active ? ' · PCS actif' : ''}</option>`)
     .join('');
-
-  if (current && municipalities.some((m) => String(m.id) === String(current))) {
-    select.value = current;
-  } else if (!select.value && municipalities.length) {
-    // Facilite la saisie: une commune déjà enregistrée est immédiatement sélectionnable.
-    select.value = String(municipalities[0].id);
-  }
+  if (current) select.value = current;
 }
 
 function syncLogScopeFields() {
@@ -118,10 +112,9 @@ function syncLogScopeFields() {
   if (!scopeSelect || !municipalitySelect) return;
   const scope = String(scopeSelect.value || 'departemental');
   const requiresMunicipality = scope === 'commune' || scope === 'pcs';
-
-  // La liste reste utilisable en permanence, mais n'est obligatoire que pour commune/PCS.
-  municipalitySelect.disabled = false;
+  municipalitySelect.disabled = !requiresMunicipality;
   municipalitySelect.required = requiresMunicipality;
+  if (!requiresMunicipality) municipalitySelect.value = '';
 }
 
 function setVisibility(node, visible) {
@@ -1927,13 +1920,6 @@ function bindAppInteractions() {
   });
 
   document.getElementById('log-target-scope')?.addEventListener('change', () => {
-    syncLogScopeFields();
-  });
-  document.getElementById('log-municipality-id')?.addEventListener('change', (event) => {
-    const scopeSelect = document.getElementById('log-target-scope');
-    const selectedMunicipality = String(event.target?.value || '');
-    if (!scopeSelect || !selectedMunicipality) return;
-    if (scopeSelect.value === 'departemental') scopeSelect.value = 'commune';
     syncLogScopeFields();
   });
   syncLogScopeFields();
