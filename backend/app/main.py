@@ -5,7 +5,7 @@ import secrets
 from typing import Callable
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
@@ -69,6 +69,14 @@ with engine.begin() as conn:
     conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS danger_level VARCHAR(20) DEFAULT 'vert'"))
     conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS danger_emoji VARCHAR(8) DEFAULT '🟢'"))
     conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS target_scope VARCHAR(20) DEFAULT 'departemental'"))
+    conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'nouveau'"))
+    conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS event_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP"))
+    conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS location VARCHAR(160)"))
+    conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS source VARCHAR(120)"))
+    conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS actions_taken TEXT"))
+    conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS next_update_due TIMESTAMP WITHOUT TIME ZONE"))
+    conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS assigned_to VARCHAR(120)"))
+    conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS tags VARCHAR(255)"))
     conn.execute(text("""
         CREATE TABLE IF NOT EXISTS municipality_documents (
             id SERIAL PRIMARY KEY,
@@ -817,6 +825,7 @@ def delete_municipality(
 @app.post("/logs", response_model=OperationalLogOut)
 def create_log(data: OperationalLogCreate, db: Session = Depends(get_db), user: User = Depends(require_roles(*EDIT_ROLES))):
     payload = data.model_dump()
+    payload["event_time"] = payload.get("event_time") or datetime.utcnow()
     target_scope = payload.get("target_scope", "departemental")
     municipality_id = payload.get("municipality_id")
 
@@ -847,6 +856,41 @@ def list_logs(db: Session = Depends(get_db), user: User = Depends(require_roles(
             return []
         query = query.filter(OperationalLog.municipality_id == municipality_id)
     return query.limit(200).all()
+
+
+@app.get("/logs/export/csv")
+def export_logs_csv(db: Session = Depends(get_db), user: User = Depends(require_roles(*READ_ROLES))):
+    query = db.query(OperationalLog).order_by(OperationalLog.created_at.desc())
+    if user.role == "mairie":
+        municipality_id = get_user_municipality_id(user, db)
+        if municipality_id is None:
+            raise HTTPException(404, "Commune introuvable")
+        query = query.filter(OperationalLog.municipality_id == municipality_id)
+
+    rows = query.limit(1000).all()
+
+    import csv
+    import io
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "id", "event_time", "created_at", "event_type", "status", "danger_level", "target_scope",
+        "municipality_id", "location", "source", "assigned_to", "tags", "description", "actions_taken", "next_update_due",
+    ])
+    for row in rows:
+        writer.writerow([
+            row.id, row.event_time, row.created_at, row.event_type, row.status, row.danger_level, row.target_scope,
+            row.municipality_id, row.location, row.source, row.assigned_to, row.tags, row.description, row.actions_taken, row.next_update_due,
+        ])
+
+    output.seek(0)
+    filename = f"main-courante-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.csv"
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 @app.post("/logs/{log_id}/attachment")
