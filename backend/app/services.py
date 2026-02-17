@@ -441,21 +441,35 @@ def fetch_vigicrues_isere(
     # 19 = Alpes du Nord (inclut l'Isère). On le priorise pour augmenter
     # fortement le nombre de stations iséroises disponibles côté cartographie.
     preferred_territory_codes = (19, 18, 17, 16, 15, 14)
+    # Filet de sécurité: stations iséroises connues (dépt 38), pour éviter "0 station"
+    # si le catalogue change ou si certains appels détaillés échouent.
+    fallback_isere_codes = (
+        "W141001001", "W140000101", "W130001002", "W131001002", "W320001002",
+        "W283201001", "W283201102", "W114402001", "W274601201", "W274601302",
+    )
     priority_names = [name.lower() for name in (priority_names or [])]
 
     try:
         catalog = _http_get_json(f"{source}/services/station.json")
         all_stations = (catalog.get("Stations") or []) if isinstance(catalog, dict) else []
+
         stations_by_territory: dict[int, list[str]] = {code: [] for code in preferred_territory_codes}
+        all_codes: list[str] = []
         for item in all_stations:
-            territory_code = int(item.get("PereBoitEntVigiCru") or 0)
-            if territory_code not in stations_by_territory:
-                continue
             station_code = str(item.get("CdStationHydro") or "").strip()
-            if station_code:
+            if not station_code:
+                continue
+            all_codes.append(station_code)
+
+            territory_raw = item.get("PereBoitEntVigiCru")
+            try:
+                territory_code = int(territory_raw)
+            except (TypeError, ValueError):
+                continue
+            if territory_code in stations_by_territory:
                 stations_by_territory[territory_code].append(station_code)
 
-        candidate_codes = [
+        prioritized_codes = [
             code
             for territory_code in preferred_territory_codes
             for code in stations_by_territory.get(territory_code, [])
