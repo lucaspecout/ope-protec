@@ -93,14 +93,16 @@ const LOG_LEVEL_EMOJI = { vert: '🟢', jaune: '🟡', orange: '🟠', rouge: '�
 const LOG_STATUS_LABEL = { nouveau: 'Nouveau', en_cours: 'En cours', suivi: 'Suivi', clos: 'Clos' };
 
 function formatLogLine(log = {}) {
-  const status = LOG_STATUS_LABEL[String(log.status || 'nouveau')] || 'Nouveau';
+  const statusKey = String(log.status || 'nouveau');
+  const status = LOG_STATUS_LABEL[statusKey] || 'Nouveau';
   const municipality = log.municipality_id ? ` · ${escapeHtml(getMunicipalityName(log.municipality_id))}` : '';
   const place = log.location ? ` · 📍 ${escapeHtml(log.location)}` : '';
   const source = log.source ? ` · Source: ${escapeHtml(log.source)}` : '';
   const owner = log.assigned_to ? ` · 👤 ${escapeHtml(log.assigned_to)}` : '';
   const next = log.next_update_due ? ` · ⏱️ MAJ ${new Date(log.next_update_due).toLocaleString()}` : '';
   const actions = log.actions_taken ? `<div class="muted">Actions: ${escapeHtml(log.actions_taken)}</div>` : '';
-  return `<li>${new Date(log.event_time || log.created_at).toLocaleString()} · <span class="badge neutral">${formatLogScope(log)}${municipality}</span> ${log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢'} <strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'MCO')}</strong> · <span class="badge neutral">${status}</span>${place}${owner}${source}${next}<div>${escapeHtml(log.description || '')}</div>${actions}</li>`;
+  const statusActions = canEdit() ? `<div class="map-inline-actions"><button type="button" class="ghost inline-action" data-log-status="${log.id}" data-log-next="en_cours">En cours</button><button type="button" class="ghost inline-action" data-log-status="${log.id}" data-log-next="suivi">Suivi</button><button type="button" class="ghost inline-action" data-log-status="${log.id}" data-log-next="clos">Clore</button><button type="button" class="ghost inline-action danger" data-log-delete="${log.id}">Supprimer</button></div>` : '';
+  return `<li><strong>${new Date(log.event_time || log.created_at).toLocaleString()}</strong> · <span class="badge neutral">${formatLogScope(log)}${municipality}</span> ${log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢'} <strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'MCO')}</strong> · <span class="badge neutral">${status}</span>${place}${owner}${source}${next}<div>${escapeHtml(log.description || '')}</div>${actions}${statusActions}</li>`;
 }
 
 function formatLogScope(log = {}) {
@@ -1303,10 +1305,14 @@ function closeMunicipalityDetailsModal() {
     currentMunicipalityPreviewUrl = null;
   }
   if (!modal) return;
-  if (typeof modal.close === 'function') {
-    modal.close();
-    return;
+
+  try {
+    if (typeof modal.close === 'function') modal.close('dismiss');
+  } catch (_) {
+    // ignore close errors and continue with hard fallback
   }
+
+  modal.open = false;
   modal.removeAttribute('open');
 }
 
@@ -1392,7 +1398,10 @@ async function openMunicipalityDetailsModal(municipality) {
     ${municipalityDocumentFiltersMarkup(state, municipality.id)}
     <ul class="list compact">${municipalityFilesMarkup(filteredFiles, municipality.id)}</ul>
     <h5>Main courante liée à la commune</h5>
-    <ul class="list compact">${municipalityLogs.map((log) => `<li>${new Date(log.created_at).toLocaleString()} · ${log.danger_emoji || '🟢'} <strong>${escapeHtml(log.event_type || 'MCO')}</strong> · ${escapeHtml(log.description || '')}</li>`).join('') || '<li>Aucune entrée main courante associée.</li>'}</ul>
+    <ul class="list compact">${municipalityLogs.map((log) => {
+      const status = LOG_STATUS_LABEL[String(log.status || 'nouveau')] || 'Nouveau';
+      return `<li><strong>${new Date(log.created_at).toLocaleString()}</strong> · ${log.danger_emoji || '🟢'} <strong>${escapeHtml(log.event_type || 'MCO')}</strong> · <span class="badge neutral">${status}</span><br>${escapeHtml(log.description || '')}</li>`;
+    }).join('') || '<li>Aucune entrée main courante associée.</li>'}</ul>
     ${quickActions}
   `;
 
@@ -2036,8 +2045,21 @@ function bindAppInteractions() {
     }
   });
   document.getElementById('user-create-role')?.addEventListener('change', syncUserCreateMunicipalityVisibility);
-  document.getElementById('municipality-editor-close')?.addEventListener('click', closeMunicipalityEditor);
-  document.getElementById('municipality-details-close')?.addEventListener('click', closeMunicipalityDetailsModal);
+  document.getElementById('municipality-editor-close')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    closeMunicipalityEditor();
+  });
+  document.getElementById('municipality-details-close')?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    closeMunicipalityDetailsModal();
+  });
+  document.getElementById('municipality-details-modal')?.addEventListener('cancel', (event) => {
+    event.preventDefault();
+    closeMunicipalityDetailsModal();
+  });
+  document.getElementById('municipality-details-modal')?.addEventListener('close', () => {
+    closeMunicipalityDetailsModal();
+  });
   document.getElementById('municipality-details-modal')?.addEventListener('click', (event) => {
     if (event.target?.id === 'municipality-details-modal') closeMunicipalityDetailsModal();
   });
@@ -2144,6 +2166,35 @@ function bindAppInteractions() {
   document.getElementById('logs-export')?.addEventListener('click', async () => {
     try {
       await exportLogsCsv();
+    } catch (error) {
+      document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
+    }
+  });
+  document.getElementById('logs-list')?.addEventListener('click', async (event) => {
+    const statusButton = event.target.closest('[data-log-status]');
+    const deleteButton = event.target.closest('[data-log-delete]');
+    if (!statusButton && !deleteButton) return;
+    if (!canEdit()) return;
+
+    try {
+      if (statusButton) {
+        const logId = statusButton.getAttribute('data-log-status');
+        const status = statusButton.getAttribute('data-log-next');
+        await api(`/logs/${logId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status }),
+        });
+      }
+
+      if (deleteButton) {
+        const logId = deleteButton.getAttribute('data-log-delete');
+        const confirmed = window.confirm('Supprimer cette entrée de main courante ?');
+        if (!confirmed) return;
+        await api(`/logs/${logId}`, { method: 'DELETE' });
+      }
+
+      await loadLogs();
     } catch (error) {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
     }

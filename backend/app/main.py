@@ -24,6 +24,7 @@ from .schemas import (
     MunicipalityUpdate,
     OperationalLogCreate,
     OperationalLogOut,
+    OperationalLogStatusUpdate,
     PasswordChangeRequest,
     ShareAccessRequest,
     Token,
@@ -854,6 +855,48 @@ def create_log(data: OperationalLogCreate, db: Session = Depends(get_db), user: 
     db.commit()
     db.refresh(entry)
     return entry
+
+
+@app.patch("/logs/{log_id}", response_model=OperationalLogOut)
+def update_log_status(
+    log_id: int,
+    data: OperationalLogStatusUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*EDIT_ROLES, "mairie")),
+):
+    entry = db.get(OperationalLog, log_id)
+    if not entry:
+        raise HTTPException(404, "Entrée introuvable")
+
+    if user.role == "mairie":
+        municipality_id = get_user_municipality_id(user, db)
+        if municipality_id is None or entry.municipality_id != municipality_id:
+            raise HTTPException(403, "Accès refusé à cette commune")
+
+    entry.status = data.status
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
+@app.delete("/logs/{log_id}")
+def delete_log(
+    log_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*EDIT_ROLES, "mairie")),
+):
+    entry = db.get(OperationalLog, log_id)
+    if not entry:
+        raise HTTPException(404, "Entrée introuvable")
+
+    if user.role == "mairie":
+        municipality_id = get_user_municipality_id(user, db)
+        if municipality_id is None or entry.municipality_id != municipality_id:
+            raise HTTPException(403, "Accès refusé à cette commune")
+
+    db.delete(entry)
+    db.commit()
+    return {"status": "deleted", "id": log_id}
 
 
 @app.get("/logs", response_model=list[OperationalLogOut])
