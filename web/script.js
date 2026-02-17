@@ -92,8 +92,24 @@ const levelColor = (level) => ({ vert: '#2f9e44', jaune: '#f59f00', orange: '#f7
 function formatLogScope(log = {}) {
   const scope = String(log.target_scope || 'departemental').toLowerCase();
   if (scope === 'pcs') return 'PCS';
-  if (scope === 'commune') return `Commune${log.municipality_id ? ` #${log.municipality_id}` : ''}`;
+  if (scope === 'commune') return `Commune${log.municipality_id ? ` · ${escapeHtml(getMunicipalityName(log.municipality_id))}` : ''}`;
   return 'Départemental';
+}
+
+function getMunicipalityName(municipalityId) {
+  const id = String(municipalityId || '');
+  if (!id) return 'Commune inconnue';
+  const fromCache = cachedMunicipalityRecords.find((municipality) => String(municipality.id) === id)
+    || cachedMunicipalities.find((municipality) => String(municipality.id) === id);
+  if (fromCache?.name) return fromCache.name;
+  try {
+    const local = JSON.parse(localStorage.getItem(STORAGE_KEYS.municipalitiesCache) || '[]');
+    const fromLocal = Array.isArray(local) ? local.find((municipality) => String(municipality.id) === id) : null;
+    if (fromLocal?.name) return fromLocal.name;
+  } catch (_) {
+    // ignore cache parsing issues
+  }
+  return `#${id}`;
 }
 
 function populateLogMunicipalityOptions(municipalities = []) {
@@ -111,7 +127,7 @@ function syncLogScopeFields() {
   const municipalitySelect = document.getElementById('log-municipality-id');
   if (!scopeSelect || !municipalitySelect) return;
   const scope = String(scopeSelect.value || 'departemental');
-  const requiresMunicipality = scope === 'commune' || scope === 'pcs';
+  const requiresMunicipality = scope === 'commune';
   municipalitySelect.disabled = !requiresMunicipality;
   municipalitySelect.required = requiresMunicipality;
   if (!requiresMunicipality) municipalitySelect.value = '';
@@ -1193,7 +1209,13 @@ async function openMunicipalityDetailsModal(municipality) {
   const content = document.getElementById('municipality-details-content');
   if (!modal || !content || !municipality) return;
 
-  const files = await loadMunicipalityFiles(municipality.id).catch(() => []);
+  const [files, logs] = await Promise.all([
+    loadMunicipalityFiles(municipality.id).catch(() => []),
+    api('/logs').catch(() => []),
+  ]);
+  const municipalityLogs = (Array.isArray(logs) ? logs : [])
+    .filter((log) => String(log.municipality_id || '') === String(municipality.id))
+    .slice(0, 8);
   const previousState = municipalityDocumentsUiState.get(String(municipality.id)) || { search: '', type: 'all', sort: 'date_desc', uploading: false, progress: 0 };
   const state = { ...previousState, uploading: false, progress: 0 };
   municipalityDocumentsUiState.set(String(municipality.id), state);
@@ -1254,6 +1276,8 @@ async function openMunicipalityDetailsModal(municipality) {
     <p class="muted">Total: <strong>${files.length}</strong>${Object.entries(byType).map(([type, count]) => ` · ${escapeHtml(type)}: ${count}`).join('')}</p>
     ${municipalityDocumentFiltersMarkup(state, municipality.id)}
     <ul class="list compact">${municipalityFilesMarkup(filteredFiles, municipality.id)}</ul>
+    <h5>Main courante liée à la commune</h5>
+    <ul class="list compact">${municipalityLogs.map((log) => `<li>${new Date(log.created_at).toLocaleString()} · ${log.danger_emoji || '🟢'} <strong>${escapeHtml(log.event_type || 'MCO')}</strong> · ${escapeHtml(log.description || '')}</li>`).join('') || '<li>Aucune entrée main courante associée.</li>'}</ul>
     ${quickActions}
   `;
 
@@ -1473,8 +1497,8 @@ async function loadMunicipalities() {
 
 
 async function loadLogs() {
-  const dashboard = await api('/dashboard');
-  document.getElementById('logs-list').innerHTML = (dashboard.latest_logs || []).map((l) => `<li>${new Date(l.created_at).toLocaleString()} · <span class="badge neutral">${formatLogScope(l)}</span> ${l.danger_emoji || ''} <strong style="color:${levelColor(l.danger_level)}">${l.event_type}</strong> · ${l.description}</li>`).join('') || '<li>Aucun log.</li>';
+  const logs = await api('/logs');
+  document.getElementById('logs-list').innerHTML = (logs || []).map((l) => `<li>${new Date(l.created_at).toLocaleString()} · <span class="badge neutral">${formatLogScope(l)}</span> ${l.danger_emoji || ''} <strong style="color:${levelColor(l.danger_level)}">${l.event_type}</strong> · ${escapeHtml(l.description || '')}</li>`).join('') || '<li>Aucun log.</li>';
 }
 
 async function loadUsers() {
@@ -2153,7 +2177,14 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
     await api('/logs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ event_type: form.get('event_type'), description: form.get('description'), danger_level: form.get('danger_level'), danger_emoji: form.get('danger_emoji'), target_scope: form.get('target_scope'), municipality_id: form.get('municipality_id') ? Number(form.get('municipality_id')) : null }),
+      body: JSON.stringify({
+        event_type: 'MCO',
+        description: form.get('description'),
+        danger_level: 'vert',
+        danger_emoji: '🟢',
+        target_scope: form.get('target_scope'),
+        municipality_id: form.get('municipality_id') ? Number(form.get('municipality_id')) : null,
+      }),
     });
     event.target.reset();
     if (errorTarget) errorTarget.textContent = '';
