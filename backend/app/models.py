@@ -107,6 +107,7 @@ class OperationalLog(Base):
     description: Mapped[str] = mapped_column(Text)
     danger_level: Mapped[str] = mapped_column(String(20), default="vert")
     danger_emoji: Mapped[str] = mapped_column(String(8), default="🟢")
+    target_scope: Mapped[str] = mapped_column(String(20), default="departemental")
     attachment_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
