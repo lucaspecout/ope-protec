@@ -127,9 +127,21 @@ function getMunicipalityName(municipalityId) {
 }
 
 function populateLogMunicipalityOptions(municipalities = []) {
+  let source = Array.isArray(municipalities) ? municipalities : [];
+  if (!source.length && Array.isArray(cachedMunicipalityRecords) && cachedMunicipalityRecords.length) source = cachedMunicipalityRecords;
+  if (!source.length && Array.isArray(cachedMunicipalities) && cachedMunicipalities.length) source = cachedMunicipalities;
+  if (!source.length) {
+    try {
+      const local = JSON.parse(localStorage.getItem(STORAGE_KEYS.municipalitiesCache) || '[]');
+      if (Array.isArray(local)) source = local;
+    } catch (_) {
+      source = [];
+    }
+  }
+
   const createOptions = (includeEmpty = true, allLabel = 'Toutes les communes') => {
     const base = includeEmpty ? `<option value="">Sélectionnez une commune</option>` : `<option value="all">${allLabel}</option>`;
-    return base + municipalities
+    return base + source
       .map((m) => `<option value="${m.id}">${escapeHtml(m.name)}${m.pcs_active ? ' · PCS actif' : ''}</option>`)
       .join('');
   };
@@ -192,14 +204,40 @@ function buildApiUrl(path, origin) {
 }
 
 function sanitizeErrorMessage(message) {
-  if (!message) return 'Erreur inconnue';
-  if (message.includes('Failed to fetch') || message.includes('NetworkError')) {
+  const normalized = typeof message === 'string' ? message : String(message || '');
+  if (!normalized) return 'Erreur inconnue';
+  if (normalized.includes('Failed to fetch') || normalized.includes('NetworkError')) {
     return "Connexion API indisponible (Failed to fetch). Vérifiez le backend, le port 1182 et le proxy web.";
   }
-  if (message.includes('<!doctype') || message.includes('<html')) {
+  if (normalized.includes('<!doctype') || normalized.includes('<html')) {
     return "L'API renvoie une page HTML au lieu d'un JSON. Vérifiez que le backend tourne bien sur le même hôte (docker compose up -d).";
   }
-  return message;
+  return normalized;
+}
+
+function normalizeApiErrorMessage(payload, status) {
+  if (!payload) return `Erreur API (${status})`;
+  const detail = payload.detail ?? payload.message;
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  if (Array.isArray(detail)) {
+    const lines = detail.map((item) => {
+      if (typeof item === 'string') return item;
+      if (item && typeof item === 'object') {
+        const msg = String(item.msg || item.message || '').trim();
+        const loc = Array.isArray(item.loc) ? item.loc.join('.') : '';
+        if (msg && loc) return `${loc}: ${msg}`;
+        if (msg) return msg;
+      }
+      return String(item || '').trim();
+    }).filter(Boolean);
+    if (lines.length) return lines.join(' · ');
+  }
+  if (detail && typeof detail === 'object') {
+    const msg = String(detail.msg || detail.message || '').trim();
+    if (msg) return msg;
+    return JSON.stringify(detail);
+  }
+  return `Erreur API (${status})`;
 }
 
 function clonePayload(payload) {
@@ -249,7 +287,7 @@ async function api(path, options = {}) {
         const response = await fetch(url, { ...fetchOptions, headers });
         const payload = await parseJsonResponse(response, path);
         if (!response.ok) {
-          const message = payload?.detail || payload?.message || `Erreur API (${response.status})`;
+          const message = normalizeApiErrorMessage(payload, response.status);
           if (response.status === 401 && logoutOn401) logout();
           throw new Error(message);
         }
@@ -303,8 +341,15 @@ async function apiFile(path) {
       const response = await fetch(url, { headers });
       if (!response.ok) {
         if (response.status === 401) logout();
-        const detail = await response.text();
-        throw new Error(detail || `Erreur API (${response.status})`);
+        const detailText = await response.text();
+        let detail = detailText;
+        try {
+          const payload = detailText ? JSON.parse(detailText) : null;
+          detail = normalizeApiErrorMessage(payload, response.status);
+        } catch (_) {
+          detail = detailText || `Erreur API (${response.status})`;
+        }
+        throw new Error(detail);
       }
       return { blob: await response.blob(), contentType: response.headers.get('content-type') || 'application/octet-stream' };
     } catch (error) {
@@ -1486,6 +1531,7 @@ async function loadMunicipalities() {
   }
 
   cachedMunicipalityRecords = municipalities;
+  cachedMunicipalities = municipalities;
   document.getElementById('municipalities-list').innerHTML = municipalities.map((m) => {
     const dangerColor = levelColor(m.vigilance_color || 'vert');
     const actions = canEdit()
