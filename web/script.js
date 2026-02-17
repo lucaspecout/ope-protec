@@ -2,6 +2,7 @@ const STORAGE_KEYS = { token: 'token', activePanel: 'activePanel', mapPointsCach
 const AUTO_REFRESH_MS = 30000;
 const HOME_LIVE_REFRESH_MS = 30000;
 const API_CACHE_TTL_MS = 30000;
+const API_PANEL_REFRESH_MS = 10000;
 const PANEL_TITLES = {
   'situation-panel': 'Situation opérationnelle',
   'services-panel': 'Services connectés',
@@ -26,6 +27,7 @@ let currentUser = null;
 let pendingCurrentPassword = '';
 let refreshTimer = null;
 let homeLiveTimer = null;
+let apiPanelTimer = null;
 const apiGetCache = new Map();
 const apiInFlight = new Map();
 
@@ -401,6 +403,11 @@ function setActivePanel(panelId) {
   document.getElementById('panel-title').textContent = PANEL_TITLES[panelId] || 'Centre opérationnel';
   if (panelId === 'map-panel' && leafletMap) setTimeout(() => leafletMap.invalidateSize(), 100);
   if (panelId === 'logs-panel') ensureLogMunicipalitiesLoaded();
+  if (panelId === 'api-panel' && token) {
+    loadApiInterconnections(true).catch((error) => {
+      document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
+    });
+  }
 }
 
 
@@ -1536,8 +1543,9 @@ async function loadSupervision() {
   renderItinisereEvents(data.alerts.itinisere.events || [], 'supervision-itinisere-events');
 }
 
-async function loadApiInterconnections() {
-  const data = await api('/external/isere/risks');
+async function loadApiInterconnections(forceRefresh = false) {
+  const suffix = forceRefresh ? `?refresh=${Date.now()}` : '';
+  const data = await api(`/external/isere/risks${suffix}`);
   const services = [
     { key: 'meteo_france', label: 'Météo-France', level: normalizeLevel(data.meteo_france?.level || 'inconnu'), details: data.meteo_france?.info_state || data.meteo_france?.bulletin_title || '-' },
     { key: 'vigicrues', label: 'Vigicrues', level: normalizeLevel(data.vigicrues?.water_alert_level || 'inconnu'), details: `${(data.vigicrues?.stations || []).length} station(s)` },
@@ -1896,7 +1904,7 @@ function bindAppInteractions() {
   document.getElementById('map-basemap-select')?.addEventListener('change', (event) => applyBasemap(event.target.value));
   document.getElementById('api-refresh-btn')?.addEventListener('click', async () => {
     try {
-      await loadApiInterconnections();
+      await loadApiInterconnections(true);
       document.getElementById('dashboard-error').textContent = '';
     } catch (error) {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
@@ -2269,12 +2277,24 @@ function logout() {
   clearApiCache();
   localStorage.removeItem(STORAGE_KEYS.token);
   if (refreshTimer) clearInterval(refreshTimer);
+  if (apiPanelTimer) clearInterval(apiPanelTimer);
   showHome();
 }
 
 function startAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
   refreshTimer = setInterval(() => token && refreshAll(), AUTO_REFRESH_MS);
+}
+
+function startApiPanelAutoRefresh() {
+  if (apiPanelTimer) clearInterval(apiPanelTimer);
+  apiPanelTimer = setInterval(() => {
+    const activePanel = localStorage.getItem(STORAGE_KEYS.activePanel);
+    if (!token || activePanel !== 'api-panel' || document.hidden) return;
+    loadApiInterconnections(true).catch((error) => {
+      document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
+    });
+  }, API_PANEL_REFRESH_MS);
 }
 
 async function loadHomeLiveStatus() {
@@ -2438,6 +2458,7 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
   bindHomeInteractions();
   bindAppInteractions();
   startHomeLiveRefresh();
+  startApiPanelAutoRefresh();
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
     loadHomeLiveStatus();
