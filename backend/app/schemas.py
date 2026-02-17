@@ -7,6 +7,7 @@ ALLOWED_ROLES = {"admin", "ope", "securite", "visiteur", "mairie"}
 ALLOWED_WEATHER_LEVELS = {"vert", "jaune", "orange", "rouge"}
 ALLOWED_VIGILANCE_COLORS = {"vert", "jaune", "orange", "rouge"}
 ALLOWED_DANGER_LEVELS = {"vert", "jaune", "orange", "rouge"}
+ALLOWED_LOG_SCOPES = {"commune", "pcs", "departemental"}
 
 
 class Token(BaseModel):
@@ -238,6 +239,7 @@ class OperationalLogCreate(BaseModel):
     description: str
     danger_level: str = "vert"
     danger_emoji: str = "🟢"
+    target_scope: str = "departemental"
     municipality_id: int | None = None
 
     @field_validator("event_type", "description")
@@ -256,6 +258,14 @@ class OperationalLogCreate(BaseModel):
             raise ValueError("Niveau de danger invalide")
         return normalized
 
+    @field_validator("target_scope")
+    @classmethod
+    def validate_target_scope(cls, value: str) -> str:
+        normalized = value.lower().strip()
+        if normalized not in ALLOWED_LOG_SCOPES:
+            raise ValueError("Cible invalide")
+        return normalized
+
 
 class OperationalLogOut(BaseModel):
     id: int
@@ -263,6 +273,8 @@ class OperationalLogOut(BaseModel):
     description: str
     danger_level: str
     danger_emoji: str
+    target_scope: str
+    municipality_id: int | None = None
     created_at: datetime
     created_by_id: int
 

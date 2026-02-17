@@ -68,6 +68,7 @@ with engine.begin() as conn:
     conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS municipality_id INTEGER REFERENCES municipalities(id)"))
     conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS danger_level VARCHAR(20) DEFAULT 'vert'"))
     conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS danger_emoji VARCHAR(8) DEFAULT '🟢'"))
+    conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS target_scope VARCHAR(20) DEFAULT 'departemental'"))
     conn.execute(text("""
         CREATE TABLE IF NOT EXISTS municipality_documents (
             id SERIAL PRIMARY KEY,
@@ -814,7 +815,22 @@ def delete_municipality(
 
 @app.post("/logs", response_model=OperationalLogOut)
 def create_log(data: OperationalLogCreate, db: Session = Depends(get_db), user: User = Depends(require_roles(*EDIT_ROLES))):
-    entry = OperationalLog(**data.model_dump(), created_by_id=user.id)
+    payload = data.model_dump()
+    target_scope = payload.get("target_scope", "departemental")
+    municipality_id = payload.get("municipality_id")
+
+    if target_scope in {"commune", "pcs"}:
+        if not municipality_id:
+            raise HTTPException(400, "Sélectionnez une commune pour ce type d'évènement")
+        municipality = db.get(Municipality, municipality_id)
+        if not municipality:
+            raise HTTPException(404, "Commune introuvable")
+        if target_scope == "pcs" and not municipality.pcs_active:
+            raise HTTPException(400, "La commune sélectionnée n'a pas de PCS actif")
+    else:
+        payload["municipality_id"] = None
+
+    entry = OperationalLog(**payload, created_by_id=user.id)
     db.add(entry)
     db.commit()
     db.refresh(entry)

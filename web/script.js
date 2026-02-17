@@ -89,6 +89,34 @@ const passwordForm = document.getElementById('password-form');
 const normalizeLevel = (level) => ({ verte: 'vert', green: 'vert', yellow: 'jaune', red: 'rouge' }[(level || '').toLowerCase()] || (level || 'vert').toLowerCase());
 const levelColor = (level) => ({ vert: '#2f9e44', jaune: '#f59f00', orange: '#f76707', rouge: '#e03131' }[normalizeLevel(level)] || '#2f9e44');
 
+function formatLogScope(log = {}) {
+  const scope = String(log.target_scope || 'departemental').toLowerCase();
+  if (scope === 'pcs') return 'PCS';
+  if (scope === 'commune') return `Commune${log.municipality_id ? ` #${log.municipality_id}` : ''}`;
+  return 'Départemental';
+}
+
+function populateLogMunicipalityOptions(municipalities = []) {
+  const select = document.getElementById('log-municipality-id');
+  if (!select) return;
+  const current = select.value;
+  select.innerHTML = '<option value="">Sélectionnez une commune</option>' + municipalities
+    .map((m) => `<option value="${m.id}">${escapeHtml(m.name)}${m.pcs_active ? ' · PCS actif' : ''}</option>`)
+    .join('');
+  if (current) select.value = current;
+}
+
+function syncLogScopeFields() {
+  const scopeSelect = document.getElementById('log-target-scope');
+  const municipalitySelect = document.getElementById('log-municipality-id');
+  if (!scopeSelect || !municipalitySelect) return;
+  const scope = String(scopeSelect.value || 'departemental');
+  const requiresMunicipality = scope === 'commune' || scope === 'pcs';
+  municipalitySelect.disabled = !requiresMunicipality;
+  municipalitySelect.required = requiresMunicipality;
+  if (!requiresMunicipality) municipalitySelect.value = '';
+}
+
 function setVisibility(node, visible) {
   if (!node) return;
   node.classList.toggle('hidden', !visible);
@@ -931,7 +959,9 @@ function renderItinisereEvents(events = [], targetId = 'itinerary-list') {
     const description = escapeHtml(e.description || '');
     const safeLink = String(e.link || '').startsWith('http') ? e.link : '#';
     const mapQuery = escapeHtml(e.title || '').replace(/"/g, '&quot;');
-    return `<li><strong>${title}</strong><br>${description}<br><a href="${safeLink}" target="_blank" rel="noreferrer">Détail</a><br><button type="button" class="ghost inline-action" data-map-query="${mapQuery}">Voir sur la carte</button></li>`;
+    const category = escapeHtml(e.category || 'trafic');
+    const roads = Array.isArray(e.roads) && e.roads.length ? ` · Axes: ${escapeHtml(e.roads.join(', '))}` : '';
+    return `<li><strong>${title}</strong> <span class="badge neutral">${category}</span>${roads}<br>${description}<br><a href="${safeLink}" target="_blank" rel="noreferrer">Détail</a><br><button type="button" class="ghost inline-action" data-map-query="${mapQuery}">Voir sur la carte</button></li>`;
   }).join('') || '<li>Aucune perturbation publiée.</li>';
 }
 
@@ -1302,7 +1332,7 @@ async function loadDashboard() {
   setRiskText('risk', normalizeLevel(dashboard.global_risk), dashboard.global_risk);
   document.getElementById('risk').className = normalizeLevel(dashboard.global_risk);
   document.getElementById('crisis').textContent = String(dashboard.communes_crise || 0);
-  document.getElementById('latest-logs').innerHTML = (dashboard.latest_logs || []).map((l) => `<li>${l.danger_emoji || ''} <strong style="color:${levelColor(l.danger_level)}">${l.event_type}</strong> · ${l.description}</li>`).join('') || '<li>Aucun événement récent.</li>';
+  document.getElementById('latest-logs').innerHTML = (dashboard.latest_logs || []).map((l) => `<li><span class="badge neutral">${formatLogScope(l)}</span> ${l.danger_emoji || ''} <strong style="color:${levelColor(l.danger_level)}">${l.event_type}</strong> · ${l.description}</li>`).join('') || '<li>Aucun événement récent.</li>';
 }
 
 async function loadExternalRisks() {
@@ -1332,6 +1362,10 @@ async function loadExternalRisks() {
   setText('meteo-level', normalizeLevel(meteo.level || 'vert'));
   setText('meteo-hazards', (meteo.hazards || []).join(', ') || 'non précisé');
   setText('river-level', normalizeLevel(vigicrues.water_alert_level || 'vert'));
+  const itinisereInsights = itinisere.insights || {};
+  const topRoads = (itinisereInsights.top_roads || []).map((item) => `${item.road} (${item.count})`).join(', ');
+  setText('map-itinisere-category', itinisereInsights.dominant_category || 'inconnue');
+  setText('map-itinisere-roads', topRoads || 'non renseigné');
   setText('map-seismic-level', georisques.highest_seismic_zone_label || 'inconnue');
   setText('map-flood-docs', String(georisques.flood_documents_total ?? 0));
   renderStations(vigicrues.stations || []);
@@ -1346,7 +1380,7 @@ async function loadSupervision() {
   document.getElementById('supervision-bison').textContent = `${data.alerts.bison_fute.status} · Isère départ ${data.alerts.bison_fute.today?.isere?.departure || 'inconnu'}`;
   document.getElementById('supervision-georisques').textContent = `${data.alerts.georisques.status} · ${data.alerts.georisques.highest_seismic_zone_label || 'inconnue'}`;
   document.getElementById('supervision-crisis-count').textContent = String(data.crisis_municipalities.length || 0);
-  document.getElementById('supervision-timeline').innerHTML = (data.timeline || []).map((l) => `<li>${new Date(l.created_at).toLocaleString()} · <strong>${l.event_type}</strong> · ${l.description}</li>`).join('') || '<li>Aucun historique.</li>';
+  document.getElementById('supervision-timeline').innerHTML = (data.timeline || []).map((l) => `<li>${new Date(l.created_at).toLocaleString()} · <span class="badge neutral">${formatLogScope(l)}</span> <strong>${l.event_type}</strong> · ${l.description}</li>`).join('') || '<li>Aucun historique.</li>';
   renderItinisereEvents(data.alerts.itinisere.events || [], 'supervision-itinisere-events');
 }
 
@@ -1418,13 +1452,15 @@ async function loadMunicipalities() {
       ${actions}
     </article>`;
   }).join('') || '<p class="muted">Aucune commune.</p>';
+  populateLogMunicipalityOptions(municipalities);
+  syncLogScopeFields();
   await renderMunicipalitiesOnMap(municipalities);
 }
 
 
 async function loadLogs() {
   const dashboard = await api('/dashboard');
-  document.getElementById('logs-list').innerHTML = (dashboard.latest_logs || []).map((l) => `<li>${new Date(l.created_at).toLocaleString()} · ${l.danger_emoji || ''} <strong style="color:${levelColor(l.danger_level)}">${l.event_type}</strong> · ${l.description}</li>`).join('') || '<li>Aucun log.</li>';
+  document.getElementById('logs-list').innerHTML = (dashboard.latest_logs || []).map((l) => `<li>${new Date(l.created_at).toLocaleString()} · <span class="badge neutral">${formatLogScope(l)}</span> ${l.danger_emoji || ''} <strong style="color:${levelColor(l.danger_level)}">${l.event_type}</strong> · ${l.description}</li>`).join('') || '<li>Aucun log.</li>';
 }
 
 async function loadUsers() {
@@ -1882,6 +1918,12 @@ function bindAppInteractions() {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
     }
   });
+
+  document.getElementById('log-target-scope')?.addEventListener('change', () => {
+    syncLogScopeFields();
+  });
+  syncLogScopeFields();
+
   document.getElementById('municipality-edit-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!canEdit()) return;
@@ -2097,7 +2139,7 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
     await api('/logs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ event_type: form.get('event_type'), description: form.get('description'), danger_level: form.get('danger_level'), danger_emoji: form.get('danger_emoji') }),
+      body: JSON.stringify({ event_type: form.get('event_type'), description: form.get('description'), danger_level: form.get('danger_level'), danger_emoji: form.get('danger_emoji'), target_scope: form.get('target_scope'), municipality_id: form.get('municipality_id') ? Number(form.get('municipality_id')) : null }),
     });
     event.target.reset();
     if (errorTarget) errorTarget.textContent = '';
