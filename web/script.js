@@ -1,4 +1,4 @@
-const STORAGE_KEYS = { token: 'token', activePanel: 'activePanel', mapPointsCache: 'mapPointsCache' };
+const STORAGE_KEYS = { token: 'token', activePanel: 'activePanel', mapPointsCache: 'mapPointsCache', municipalitiesCache: 'municipalitiesCache' };
 const AUTO_REFRESH_MS = 30000;
 const HOME_LIVE_REFRESH_MS = 30000;
 const API_CACHE_TTL_MS = 30000;
@@ -88,6 +88,48 @@ const passwordForm = document.getElementById('password-form');
 
 const normalizeLevel = (level) => ({ verte: 'vert', green: 'vert', yellow: 'jaune', red: 'rouge' }[(level || '').toLowerCase()] || (level || 'vert').toLowerCase());
 const levelColor = (level) => ({ vert: '#2f9e44', jaune: '#f59f00', orange: '#f76707', rouge: '#e03131' }[normalizeLevel(level)] || '#2f9e44');
+
+function formatLogScope(log = {}) {
+  const scope = String(log.target_scope || 'departemental').toLowerCase();
+  if (scope === 'pcs') return 'PCS';
+  if (scope === 'commune') return `Commune${log.municipality_id ? ` #${log.municipality_id}` : ''}`;
+  return 'Départemental';
+}
+
+function populateLogMunicipalityOptions(municipalities = []) {
+  const select = document.getElementById('log-municipality-id');
+  if (!select) return;
+  const current = select.value;
+  const list = Array.isArray(municipalities) ? municipalities : [];
+  const hasMunicipalities = list.length > 0;
+
+  select.innerHTML = '<option value="">Sélectionnez une commune</option>' + list
+    .map((m) => `<option value="${m.id}">${escapeHtml(m.name)}${m.pcs_active ? ' · PCS actif' : ''}</option>`)
+    .join('');
+
+  if (current && list.some((m) => String(m.id) === String(current))) {
+    select.value = current;
+  } else if (!select.value && hasMunicipalities) {
+    // Facilite la saisie: une commune déjà enregistrée est immédiatement sélectionnée.
+    select.value = String(list[0].id);
+  }
+
+  if (!hasMunicipalities) {
+    select.innerHTML = '<option value="">Aucune commune enregistrée</option>';
+  }
+}
+
+function syncLogScopeFields() {
+  const scopeSelect = document.getElementById('log-target-scope');
+  const municipalitySelect = document.getElementById('log-municipality-id');
+  if (!scopeSelect || !municipalitySelect) return;
+  const scope = String(scopeSelect.value || 'departemental');
+  const requiresMunicipality = scope === 'commune' || scope === 'pcs';
+
+  // La liste reste utilisable en permanence, mais n'est obligatoire que pour commune/PCS.
+  municipalitySelect.disabled = false;
+  municipalitySelect.required = requiresMunicipality;
+}
 
 function setVisibility(node, visible) {
   if (!node) return;
@@ -931,7 +973,9 @@ function renderItinisereEvents(events = [], targetId = 'itinerary-list') {
     const description = escapeHtml(e.description || '');
     const safeLink = String(e.link || '').startsWith('http') ? e.link : '#';
     const mapQuery = escapeHtml(e.title || '').replace(/"/g, '&quot;');
-    return `<li><strong>${title}</strong><br>${description}<br><a href="${safeLink}" target="_blank" rel="noreferrer">Détail</a><br><button type="button" class="ghost inline-action" data-map-query="${mapQuery}">Voir sur la carte</button></li>`;
+    const category = escapeHtml(e.category || 'trafic');
+    const roads = Array.isArray(e.roads) && e.roads.length ? ` · Axes: ${escapeHtml(e.roads.join(', '))}` : '';
+    return `<li><strong>${title}</strong> <span class="badge neutral">${category}</span>${roads}<br>${description}<br><a href="${safeLink}" target="_blank" rel="noreferrer">Détail</a><br><button type="button" class="ghost inline-action" data-map-query="${mapQuery}">Voir sur la carte</button></li>`;
   }).join('') || '<li>Aucune perturbation publiée.</li>';
 }
 
@@ -1302,7 +1346,7 @@ async function loadDashboard() {
   setRiskText('risk', normalizeLevel(dashboard.global_risk), dashboard.global_risk);
   document.getElementById('risk').className = normalizeLevel(dashboard.global_risk);
   document.getElementById('crisis').textContent = String(dashboard.communes_crise || 0);
-  document.getElementById('latest-logs').innerHTML = (dashboard.latest_logs || []).map((l) => `<li>${l.danger_emoji || ''} <strong style="color:${levelColor(l.danger_level)}">${l.event_type}</strong> · ${l.description}</li>`).join('') || '<li>Aucun événement récent.</li>';
+  document.getElementById('latest-logs').innerHTML = (dashboard.latest_logs || []).map((l) => `<li><span class="badge neutral">${formatLogScope(l)}</span> ${l.danger_emoji || ''} <strong style="color:${levelColor(l.danger_level)}">${l.event_type}</strong> · ${l.description}</li>`).join('') || '<li>Aucun événement récent.</li>';
 }
 
 async function loadExternalRisks() {
@@ -1332,6 +1376,10 @@ async function loadExternalRisks() {
   setText('meteo-level', normalizeLevel(meteo.level || 'vert'));
   setText('meteo-hazards', (meteo.hazards || []).join(', ') || 'non précisé');
   setText('river-level', normalizeLevel(vigicrues.water_alert_level || 'vert'));
+  const itinisereInsights = itinisere.insights || {};
+  const topRoads = (itinisereInsights.top_roads || []).map((item) => `${item.road} (${item.count})`).join(', ');
+  setText('map-itinisere-category', itinisereInsights.dominant_category || 'inconnue');
+  setText('map-itinisere-roads', topRoads || 'non renseigné');
   setText('map-seismic-level', georisques.highest_seismic_zone_label || 'inconnue');
   setText('map-flood-docs', String(georisques.flood_documents_total ?? 0));
   renderStations(vigicrues.stations || []);
@@ -1346,7 +1394,7 @@ async function loadSupervision() {
   document.getElementById('supervision-bison').textContent = `${data.alerts.bison_fute.status} · Isère départ ${data.alerts.bison_fute.today?.isere?.departure || 'inconnu'}`;
   document.getElementById('supervision-georisques').textContent = `${data.alerts.georisques.status} · ${data.alerts.georisques.highest_seismic_zone_label || 'inconnue'}`;
   document.getElementById('supervision-crisis-count').textContent = String(data.crisis_municipalities.length || 0);
-  document.getElementById('supervision-timeline').innerHTML = (data.timeline || []).map((l) => `<li>${new Date(l.created_at).toLocaleString()} · <strong>${l.event_type}</strong> · ${l.description}</li>`).join('') || '<li>Aucun historique.</li>';
+  document.getElementById('supervision-timeline').innerHTML = (data.timeline || []).map((l) => `<li>${new Date(l.created_at).toLocaleString()} · <span class="badge neutral">${formatLogScope(l)}</span> <strong>${l.event_type}</strong> · ${l.description}</li>`).join('') || '<li>Aucun historique.</li>';
   renderItinisereEvents(data.alerts.itinisere.events || [], 'supervision-itinisere-events');
 }
 
@@ -1385,7 +1433,21 @@ async function loadApiInterconnections() {
 }
 
 async function loadMunicipalities() {
-  const municipalities = await api('/municipalities');
+  let municipalities = [];
+  try {
+    const payload = await api('/municipalities');
+    municipalities = Array.isArray(payload) ? payload : [];
+    localStorage.setItem(STORAGE_KEYS.municipalitiesCache, JSON.stringify(municipalities));
+  } catch (error) {
+    try {
+      const cached = JSON.parse(localStorage.getItem(STORAGE_KEYS.municipalitiesCache) || '[]');
+      municipalities = Array.isArray(cached) ? cached : [];
+    } catch (_) {
+      municipalities = [];
+    }
+    setMapFeedback(`Liste des communes indisponible via API, affichage du cache local (${municipalities.length}).`, true);
+  }
+
   cachedMunicipalityRecords = municipalities;
   document.getElementById('municipalities-list').innerHTML = municipalities.map((m) => {
     const dangerColor = levelColor(m.vigilance_color || 'vert');
@@ -1418,13 +1480,15 @@ async function loadMunicipalities() {
       ${actions}
     </article>`;
   }).join('') || '<p class="muted">Aucune commune.</p>';
+  populateLogMunicipalityOptions(municipalities);
+  syncLogScopeFields();
   await renderMunicipalitiesOnMap(municipalities);
 }
 
 
 async function loadLogs() {
   const dashboard = await api('/dashboard');
-  document.getElementById('logs-list').innerHTML = (dashboard.latest_logs || []).map((l) => `<li>${new Date(l.created_at).toLocaleString()} · ${l.danger_emoji || ''} <strong style="color:${levelColor(l.danger_level)}">${l.event_type}</strong> · ${l.description}</li>`).join('') || '<li>Aucun log.</li>';
+  document.getElementById('logs-list').innerHTML = (dashboard.latest_logs || []).map((l) => `<li>${new Date(l.created_at).toLocaleString()} · <span class="badge neutral">${formatLogScope(l)}</span> ${l.danger_emoji || ''} <strong style="color:${levelColor(l.danger_level)}">${l.event_type}</strong> · ${l.description}</li>`).join('') || '<li>Aucun log.</li>';
 }
 
 async function loadUsers() {
@@ -1882,6 +1946,19 @@ function bindAppInteractions() {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
     }
   });
+
+  document.getElementById('log-target-scope')?.addEventListener('change', () => {
+    syncLogScopeFields();
+  });
+  document.getElementById('log-municipality-id')?.addEventListener('change', (event) => {
+    const scopeSelect = document.getElementById('log-target-scope');
+    const selectedMunicipality = String(event.target?.value || '');
+    if (!scopeSelect || !selectedMunicipality) return;
+    if (scopeSelect.value === 'departemental') scopeSelect.value = 'commune';
+    syncLogScopeFields();
+  });
+  syncLogScopeFields();
+
   document.getElementById('municipality-edit-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!canEdit()) return;
@@ -2097,7 +2174,7 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
     await api('/logs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ event_type: form.get('event_type'), description: form.get('description'), danger_level: form.get('danger_level'), danger_emoji: form.get('danger_emoji') }),
+      body: JSON.stringify({ event_type: form.get('event_type'), description: form.get('description'), danger_level: form.get('danger_level'), danger_emoji: form.get('danger_emoji'), target_scope: form.get('target_scope'), municipality_id: form.get('municipality_id') ? Number(form.get('municipality_id')) : null }),
     });
     event.target.reset();
     if (errorTarget) errorTarget.textContent = '';
@@ -2120,6 +2197,16 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
     loadHomeLiveStatus();
     if (token) refreshAll();
   });
+
+  try {
+    const cachedMunicipalities = JSON.parse(localStorage.getItem(STORAGE_KEYS.municipalitiesCache) || '[]');
+    if (Array.isArray(cachedMunicipalities)) {
+      populateLogMunicipalityOptions(cachedMunicipalities);
+      syncLogScopeFields();
+    }
+  } catch (_) {
+    // ignore cache parsing issues
+  }
 
   if (!token) return showHome();
   try {

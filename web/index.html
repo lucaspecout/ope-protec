@@ -298,6 +298,14 @@
           <form id="log-form" class="form" data-requires-edit>
             <input name="event_type" placeholder="Type d'évènement" required />
             <input name="description" placeholder="Description opérationnelle" required />
+            <select name="target_scope" id="log-target-scope">
+              <option value="departemental">Départemental</option>
+              <option value="commune">Commune</option>
+              <option value="pcs">PCS (commune avec plan actif)</option>
+            </select>
+            <select name="municipality_id" id="log-municipality-id">
+              <option value="">Sélectionnez une commune</option>
+            </select>
             <select name="danger_level">
               <option value="vert">🟢 Vert</option>
               <option value="jaune">🟡 Jaune</option>
@@ -402,6 +410,8 @@
               <p>Risques météo concernés <strong id="meteo-hazards">-</strong></p>
               <p>Niveau hydrologique <strong id="river-level">-</strong></p>
               <p>Bison Futé Isère (départs) <strong id="map-bison-isere">-</strong></p>
+              <p>Itinisère · catégorie dominante <strong id="map-itinisere-category">-</strong></p>
+              <p>Itinisère · axes les plus touchés <strong id="map-itinisere-roads">-</strong></p>
               <p>Sismicité max <strong id="map-seismic-level">-</strong></p>
               <p>Docs inondation suivis <strong id="map-flood-docs">0</strong></p>
               <p class="muted" id="map-source">Source carte: chargement…</p>

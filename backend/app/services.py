@@ -638,6 +638,47 @@ def fetch_vigicrues_isere(
         }
 
 
+
+
+def _itinisere_category(title: str, description: str) -> str:
+    text = f"{title} {description}".lower()
+    if any(word in text for word in ("fermeture", "coup", "interdit", "impossible")):
+        return "fermeture"
+    if any(word in text for word in ("travaux", "chantier", "alternat")):
+        return "travaux"
+    if any(word in text for word in ("accident", "collision", "panne", "obstacle")):
+        return "incident"
+    if any(word in text for word in ("neige", "verglas", "intemp", "pluie", "crue")):
+        return "météo"
+    if any(word in text for word in ("manifest", "évènement", "course", "marché")):
+        return "évènement"
+    return "trafic"
+
+
+def _itinisere_extract_roads(text: str) -> list[str]:
+    roads = {road.upper() for road in re.findall(r"\b([ADNMCR]\d{1,4})\b", text or "")}
+    return sorted(roads)
+
+
+def _itinisere_insights(events: list[dict[str, Any]]) -> dict[str, Any]:
+    category_counts: dict[str, int] = {}
+    road_counts: dict[str, int] = {}
+
+    for event in events:
+        category = str(event.get("category") or "trafic")
+        category_counts[category] = category_counts.get(category, 0) + 1
+        for road in event.get("roads") or []:
+            road_counts[road] = road_counts.get(road, 0) + 1
+
+    dominant_category = max(category_counts.items(), key=lambda item: item[1])[0] if category_counts else "aucune"
+    top_roads = sorted(road_counts.items(), key=lambda item: item[1], reverse=True)[:5]
+
+    return {
+        "dominant_category": dominant_category,
+        "category_breakdown": category_counts,
+        "top_roads": [{"road": road, "count": count} for road, count in top_roads],
+    }
+
 def fetch_itinisere_disruptions(limit: int = 20) -> dict[str, Any]:
     source = "https://www.itinisere.fr/fr/rss/Disruptions"
     try:
@@ -649,19 +690,25 @@ def fetch_itinisere_disruptions(limit: int = 20) -> dict[str, Any]:
             description = re.sub(r"\s+", " ", (item.findtext("description") or "").strip())
             published = (item.findtext("pubDate") or "").strip()
             link = (item.findtext("link") or "https://www.itinisere.fr").strip()
+            roads = _itinisere_extract_roads(f"{title} {description}")
+            category = _itinisere_category(title, description)
             events.append(
                 {
                     "title": title,
                     "description": description[:400],
                     "published_at": published,
                     "link": link,
+                    "roads": roads,
+                    "category": category,
                 }
             )
+        insights = _itinisere_insights(events)
         return {
             "service": "Itinisère",
             "status": "online",
             "source": source,
             "events": events,
+            "insights": insights,
             "updated_at": datetime.utcnow().isoformat() + "Z",
         }
     except (ET.ParseError, HTTPError, URLError, TimeoutError, ValueError) as exc:
@@ -670,6 +717,7 @@ def fetch_itinisere_disruptions(limit: int = 20) -> dict[str, Any]:
             "status": "degraded",
             "source": source,
             "events": [],
+            "insights": {"dominant_category": "aucune", "category_breakdown": {}, "top_roads": []},
             "error": str(exc),
         }
 
