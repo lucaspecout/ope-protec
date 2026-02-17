@@ -1,4 +1,4 @@
-const STORAGE_KEYS = { token: 'token', activePanel: 'activePanel', mapPointsCache: 'mapPointsCache' };
+const STORAGE_KEYS = { token: 'token', activePanel: 'activePanel', mapPointsCache: 'mapPointsCache', municipalitiesCache: 'municipalitiesCache' };
 const AUTO_REFRESH_MS = 30000;
 const HOME_LIVE_REFRESH_MS = 30000;
 const API_CACHE_TTL_MS = 30000;
@@ -1419,7 +1419,21 @@ async function loadApiInterconnections() {
 }
 
 async function loadMunicipalities() {
-  const municipalities = await api('/municipalities');
+  let municipalities = [];
+  try {
+    const payload = await api('/municipalities');
+    municipalities = Array.isArray(payload) ? payload : [];
+    localStorage.setItem(STORAGE_KEYS.municipalitiesCache, JSON.stringify(municipalities));
+  } catch (error) {
+    try {
+      const cached = JSON.parse(localStorage.getItem(STORAGE_KEYS.municipalitiesCache) || '[]');
+      municipalities = Array.isArray(cached) ? cached : [];
+    } catch (_) {
+      municipalities = [];
+    }
+    setMapFeedback(`Liste des communes indisponible via API, affichage du cache local (${municipalities.length}).`, true);
+  }
+
   cachedMunicipalityRecords = municipalities;
   document.getElementById('municipalities-list').innerHTML = municipalities.map((m) => {
     const dangerColor = levelColor(m.vigilance_color || 'vert');
@@ -2162,6 +2176,16 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
     loadHomeLiveStatus();
     if (token) refreshAll();
   });
+
+  try {
+    const cachedMunicipalities = JSON.parse(localStorage.getItem(STORAGE_KEYS.municipalitiesCache) || '[]');
+    if (Array.isArray(cachedMunicipalities)) {
+      populateLogMunicipalityOptions(cachedMunicipalities);
+      syncLogScopeFields();
+    }
+  } catch (_) {
+    // ignore cache parsing issues
+  }
 
   if (!token) return showHome();
   try {

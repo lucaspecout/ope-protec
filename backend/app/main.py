@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from .config import settings
@@ -602,7 +602,8 @@ def list_municipalities(db: Session = Depends(get_db), user: User = Depends(requ
     if user.role == "mairie":
         if not user.municipality_name:
             return []
-        return db.query(Municipality).filter(Municipality.name == user.municipality_name).all()
+        normalized_name = user.municipality_name.strip().lower()
+        return db.query(Municipality).filter(func.lower(Municipality.name) == normalized_name).all()
     return db.query(Municipality).order_by(Municipality.name).all()
 
 
