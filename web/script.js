@@ -1,6 +1,7 @@
 const STORAGE_KEYS = { token: 'token', activePanel: 'activePanel', mapPointsCache: 'mapPointsCache' };
 const AUTO_REFRESH_MS = 30000;
 const HOME_LIVE_REFRESH_MS = 30000;
+const API_CACHE_TTL_MS = 30000;
 const PANEL_TITLES = {
   'situation-panel': 'Situation opérationnelle',
   'services-panel': 'Services connectés',
@@ -25,6 +26,8 @@ let currentUser = null;
 let pendingCurrentPassword = '';
 let refreshTimer = null;
 let homeLiveTimer = null;
+const apiGetCache = new Map();
+const apiInFlight = new Map();
 
 let leafletMap = null;
 let boundaryLayer = null;
@@ -128,30 +131,81 @@ function sanitizeErrorMessage(message) {
   return message;
 }
 
+function clonePayload(payload) {
+  if (payload == null) return payload;
+  return JSON.parse(JSON.stringify(payload));
+}
+
+function isCacheableRequest(path, fetchOptions = {}) {
+  const method = String(fetchOptions.method || 'GET').toUpperCase();
+  if (method !== 'GET') return false;
+  return !path.includes('/auth/login');
+}
+
+function clearApiCache() {
+  apiGetCache.clear();
+  apiInFlight.clear();
+}
+
+function getRequestCacheKey(path, fetchOptions = {}) {
+  const method = String(fetchOptions.method || 'GET').toUpperCase();
+  return `${method} ${path}`;
+}
+
 async function api(path, options = {}) {
   const { logoutOn401 = true, omitAuth = false, ...fetchOptions } = options;
-  const headers = { ...(fetchOptions.headers || {}) };
-  if (token && !omitAuth) headers.Authorization = `Bearer ${token}`;
+  const cacheable = isCacheableRequest(path, fetchOptions);
+  const cacheKey = getRequestCacheKey(path, fetchOptions);
 
-  let lastError = null;
-  for (const origin of apiOrigins()) {
-    const url = buildApiUrl(path, origin);
-    try {
-      const response = await fetch(url, { ...fetchOptions, headers });
-      const payload = await parseJsonResponse(response, path);
-      if (!response.ok) {
-        const message = payload?.detail || payload?.message || `Erreur API (${response.status})`;
-        if (response.status === 401 && logoutOn401) logout();
-        throw new Error(message);
-      }
-      return payload;
-    } catch (error) {
-      lastError = error;
-      if (!String(error.message || '').includes('Réponse non-JSON')) break;
+  if (cacheable) {
+    const cached = apiGetCache.get(cacheKey);
+    if (cached && (Date.now() - cached.timestamp) < API_CACHE_TTL_MS) {
+      return clonePayload(cached.payload);
+    }
+    if (apiInFlight.has(cacheKey)) {
+      return clonePayload(await apiInFlight.get(cacheKey));
     }
   }
 
-  throw new Error(sanitizeErrorMessage(lastError?.message || 'API indisponible'));
+  const headers = { ...(fetchOptions.headers || {}) };
+  if (token && !omitAuth) headers.Authorization = `Bearer ${token}`;
+
+  const requestPromise = (async () => {
+    let lastError = null;
+    for (const origin of apiOrigins()) {
+      const url = buildApiUrl(path, origin);
+      try {
+        const response = await fetch(url, { ...fetchOptions, headers });
+        const payload = await parseJsonResponse(response, path);
+        if (!response.ok) {
+          const message = payload?.detail || payload?.message || `Erreur API (${response.status})`;
+          if (response.status === 401 && logoutOn401) logout();
+          throw new Error(message);
+        }
+        return payload;
+      } catch (error) {
+        lastError = error;
+        if (!String(error.message || '').includes('Réponse non-JSON')) break;
+      }
+    }
+
+    throw new Error(sanitizeErrorMessage(lastError?.message || 'API indisponible'));
+  })();
+
+  if (!cacheable) {
+    const responsePayload = await requestPromise;
+    clearApiCache();
+    return responsePayload;
+  }
+
+  apiInFlight.set(cacheKey, requestPromise);
+  try {
+    const payload = await requestPromise;
+    apiGetCache.set(cacheKey, { timestamp: Date.now(), payload: clonePayload(payload) });
+    return clonePayload(payload);
+  } finally {
+    apiInFlight.delete(cacheKey);
+  }
 }
 
 
@@ -1903,6 +1957,7 @@ function bindAppInteractions() {
 function logout() {
   token = null;
   currentUser = null;
+  clearApiCache();
   localStorage.removeItem(STORAGE_KEYS.token);
   if (refreshTimer) clearInterval(refreshTimer);
   showHome();
