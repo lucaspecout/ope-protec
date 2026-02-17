@@ -1548,8 +1548,7 @@ function renderLogsList() {
 
 async function loadLogs() {
   const logs = await api('/logs');
-  cachedLogs = Array.isArray(logs) ? logs : [];
-  renderLogsList();
+  document.getElementById('logs-list').innerHTML = (logs || []).map((l) => `<li>${new Date(l.created_at).toLocaleString()} · <span class="badge neutral">${formatLogScope(l)}</span> ${l.danger_emoji || ''} <strong style="color:${levelColor(l.danger_level)}">${l.event_type}</strong> · ${escapeHtml(l.description || '')}</li>`).join('') || '<li>Aucun log.</li>';
 }
 
 async function loadUsers() {
@@ -2234,12 +2233,10 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        event_type: form.get('event_type') || 'MCO',
-        description: [String(form.get('description') || '').trim(), form.get('location') ? `Lieu: ${String(form.get('location')).trim()}` : '']
-          .filter(Boolean)
-          .join(' · '),
-        danger_level: form.get('danger_level') || 'vert',
-        danger_emoji: form.get('danger_emoji') || '🟢',
+        event_type: 'MCO',
+        description: form.get('description'),
+        danger_level: 'vert',
+        danger_emoji: '🟢',
         target_scope: form.get('target_scope'),
         municipality_id: form.get('municipality_id') ? Number(form.get('municipality_id')) : null,
       }),

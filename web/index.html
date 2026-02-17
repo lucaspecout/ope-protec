@@ -303,28 +303,7 @@
             <select name="municipality_id" id="log-municipality-id" disabled>
               <option value="">Sélectionnez une commune</option>
             </select>
-            <select name="event_type" id="log-event-type" required>
-              <option value="MCO" selected>MCO</option>
-              <option value="Alerte météo">Alerte météo</option>
-              <option value="Crue">Crue</option>
-              <option value="Incident terrain">Incident terrain</option>
-              <option value="Réseaux / voirie">Réseaux / voirie</option>
-              <option value="Sécurité">Sécurité</option>
-            </select>
-            <input name="location" placeholder="Lieu concerné (commune, quartier, rue...)" />
-            <textarea name="description" placeholder="Information MCO" rows="2" required></textarea>
-            <select name="danger_level">
-              <option value="vert">🟢 Vert</option>
-              <option value="jaune">🟡 Jaune</option>
-              <option value="orange">🟠 Orange</option>
-              <option value="rouge">🔴 Rouge</option>
-            </select>
-            <select name="danger_emoji">
-              <option value="🟢">🟢 Stable</option>
-              <option value="🟡">🟡 À surveiller</option>
-              <option value="🟠">🟠 Tension</option>
-              <option value="🔴">🔴 Critique</option>
-            </select>
+            <input name="description" placeholder="Information (commune ou lieu concerné)" required />
             <button type="submit">Ajouter</button>
           </form>
           <div class="form" id="logs-filters">
