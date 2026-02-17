@@ -1,5 +1,5 @@
 const STORAGE_KEYS = { token: 'token', activePanel: 'activePanel', mapPointsCache: 'mapPointsCache', municipalitiesCache: 'municipalitiesCache' };
-const AUTO_REFRESH_MS = 30000;
+const AUTO_REFRESH_MS = 10000;
 const HOME_LIVE_REFRESH_MS = 30000;
 const API_CACHE_TTL_MS = 30000;
 const API_PANEL_REFRESH_MS = 10000;
@@ -1704,7 +1704,7 @@ async function loadUsers() {
   }).join('') || '<tr><td colspan="6">Aucun utilisateur.</td></tr>';
 }
 
-async function refreshAll() {
+async function refreshAll(forceRefresh = false) {
   const loaders = [
     { label: 'tableau de bord', loader: loadDashboard, optional: false },
     { label: 'risques externes', loader: loadExternalRisks, optional: false },
@@ -1716,6 +1716,7 @@ async function refreshAll() {
     { label: 'points cartographiques', loader: loadMapPoints, optional: true },
   ];
 
+  if (forceRefresh) clearApiCache();
   const results = await Promise.allSettled(loaders.map(({ loader }) => loader()));
   const failures = results
     .map((result, index) => ({ result, config: loaders[index] }))
@@ -2283,7 +2284,7 @@ function logout() {
 
 function startAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
-  refreshTimer = setInterval(() => token && refreshAll(), AUTO_REFRESH_MS);
+  refreshTimer = setInterval(() => token && refreshAll(true), AUTO_REFRESH_MS);
 }
 
 function startApiPanelAutoRefresh() {
@@ -2462,11 +2463,11 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
     loadHomeLiveStatus();
-    if (token) refreshAll();
+    if (token) refreshAll(true);
   });
   window.addEventListener('focus', () => {
     loadHomeLiveStatus();
-    if (token) refreshAll();
+    if (token) refreshAll(true);
   });
 
   try {
