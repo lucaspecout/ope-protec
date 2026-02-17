@@ -211,18 +211,19 @@ def _cached_external_payload(
     force_refresh: bool,
     loader: Any,
 ) -> dict[str, Any]:
+    now = datetime.utcnow()
     with lock:
-        now = datetime.utcnow()
         cached_payload = cache.get("payload")
         expires_at = cache.get("expires_at") or datetime.min
         if not force_refresh and cached_payload and now < expires_at:
             return deepcopy(cached_payload)
 
-        payload = loader()
-        if payload.get("status") in {"online", "partial", "stale"}:
+    payload = loader()
+    if payload.get("status") in {"online", "partial", "stale"}:
+        with lock:
             cache["payload"] = deepcopy(payload)
             cache["expires_at"] = datetime.utcnow() + timedelta(seconds=ttl_seconds)
-        return payload
+    return payload
 
 
 def _highest_vigilance_level(alerts: list[dict[str, Any]]) -> str:
