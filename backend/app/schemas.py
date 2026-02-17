@@ -8,6 +8,7 @@ ALLOWED_WEATHER_LEVELS = {"vert", "jaune", "orange", "rouge"}
 ALLOWED_VIGILANCE_COLORS = {"vert", "jaune", "orange", "rouge"}
 ALLOWED_DANGER_LEVELS = {"vert", "jaune", "orange", "rouge"}
 ALLOWED_LOG_SCOPES = {"commune", "pcs", "departemental"}
+ALLOWED_LOG_STATUS = {"nouveau", "en_cours", "suivi", "clos"}
 
 
 class Token(BaseModel):
@@ -240,6 +241,14 @@ class OperationalLogCreate(BaseModel):
     danger_level: str = "vert"
     danger_emoji: str = "🟢"
     target_scope: str = "departemental"
+    status: str = "nouveau"
+    event_time: datetime | None = None
+    location: str | None = None
+    source: str | None = None
+    actions_taken: str | None = None
+    next_update_due: datetime | None = None
+    assigned_to: str | None = None
+    tags: str | None = None
     municipality_id: int | None = None
 
     @field_validator("event_type", "description")
@@ -266,6 +275,22 @@ class OperationalLogCreate(BaseModel):
             raise ValueError("Cible invalide")
         return normalized
 
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, value: str) -> str:
+        normalized = value.lower().strip()
+        if normalized not in ALLOWED_LOG_STATUS:
+            raise ValueError("Statut invalide")
+        return normalized
+
+    @field_validator("location", "source", "actions_taken", "assigned_to", "tags")
+    @classmethod
+    def strip_optional_fields(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        sanitized = value.strip()
+        return sanitized or None
+
 
 class OperationalLogOut(BaseModel):
     id: int
@@ -274,6 +299,14 @@ class OperationalLogOut(BaseModel):
     danger_level: str
     danger_emoji: str
     target_scope: str
+    status: str
+    event_time: datetime
+    location: str | None = None
+    source: str | None = None
+    actions_taken: str | None = None
+    next_update_due: datetime | None = None
+    assigned_to: str | None = None
+    tags: str | None = None
     municipality_id: int | None = None
     created_at: datetime
     created_by_id: int
