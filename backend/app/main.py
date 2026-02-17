@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import re
 import secrets
+from threading import Thread
 from typing import Callable
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
@@ -245,6 +246,23 @@ def serialize_document(document: MunicipalityDocument, db: Session) -> Municipal
         uploaded_by=uploader.username if uploader else "inconnu",
         created_at=document.created_at,
     )
+
+
+def _warmup_external_sources() -> None:
+    try:
+        fetch_meteo_france_isere(force_refresh=True)
+        fetch_vigicrues_isere(force_refresh=True)
+        fetch_itinisere_disruptions(force_refresh=True)
+        fetch_bison_fute_traffic(force_refresh=True)
+        fetch_georisques_isere_summary(force_refresh=True)
+    except Exception:
+        # Le warmup ne doit jamais empêcher le démarrage de l'API.
+        return
+
+
+@app.on_event("startup")
+def startup_warmup_external_sources() -> None:
+    Thread(target=_warmup_external_sources, daemon=True).start()
 
 
 @app.get("/health")
