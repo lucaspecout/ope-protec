@@ -1978,7 +1978,6 @@ function bindAppInteractions() {
         if (!municipality) return;
         document.getElementById('municipality-feedback').textContent = `Commune ${municipality.name}: ${municipality.crisis_mode ? 'en crise' : 'en veille'} · vigilance ${normalizeLevel(municipality.vigilance_color)}.`;
         openMunicipalityDetailsModal(municipality);
-        openMunicipalityDetailsInlineFallback(municipality);
         return;
       }
 
@@ -1987,7 +1986,6 @@ function bindAppInteractions() {
         if (!municipality) return;
         document.getElementById('municipality-feedback').textContent = `Commune ${municipality.name}: ${municipality.crisis_mode ? 'en crise' : 'en veille'} · vigilance ${normalizeLevel(municipality.vigilance_color)}.`;
         openMunicipalityDetailsModal(municipality);
-        openMunicipalityDetailsInlineFallback(municipality);
         return;
       }
 
