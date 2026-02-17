@@ -1068,22 +1068,34 @@ async function uploadMunicipalityDocumentWithFallback(municipalityId, formData, 
 }
 
 async function openMunicipalityFile(municipalityId, fileId) {
-  const { blob } = await apiFile(`/municipalities/${municipalityId}/files/${fileId}`);
+  const { blob, contentType } = await apiFile(`/municipalities/${municipalityId}/files/${fileId}`);
   const objectUrl = URL.createObjectURL(blob);
-  const tab = window.open(objectUrl, '_blank', 'noopener,noreferrer');
-  if (!tab) {
-    const link = document.createElement('a');
-    link.href = objectUrl;
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
-    link.download = `document-${fileId}`;
-    link.click();
+  const previewHost = document.getElementById('municipality-document-preview');
+
+  if (currentMunicipalityPreviewUrl) {
+    URL.revokeObjectURL(currentMunicipalityPreviewUrl);
+    currentMunicipalityPreviewUrl = null;
   }
-  setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
+
+  if (previewHost) {
+    currentMunicipalityPreviewUrl = objectUrl;
+    previewHost.innerHTML = municipalityPreviewMarkup(contentType || '', objectUrl);
+    previewHost.classList.remove('hidden');
+    previewHost.hidden = false;
+    previewHost.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    return;
+  }
+
+  window.open(objectUrl, '_blank', 'noopener,noreferrer');
+  currentMunicipalityPreviewUrl = objectUrl;
 }
 
 function closeMunicipalityDetailsModal() {
   const modal = document.getElementById('municipality-details-modal');
+  if (currentMunicipalityPreviewUrl) {
+    URL.revokeObjectURL(currentMunicipalityPreviewUrl);
+    currentMunicipalityPreviewUrl = null;
+  }
   if (!modal) return;
   if (typeof modal.close === 'function') {
     modal.close();
