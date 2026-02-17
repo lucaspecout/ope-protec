@@ -1305,11 +1305,10 @@ function closeMunicipalityDetailsModal() {
     currentMunicipalityPreviewUrl = null;
   }
   if (!modal) return;
-
   try {
-    if (typeof modal.close === 'function') modal.close('dismiss');
+    if (typeof modal.close === 'function' && modal.open) modal.close();
   } catch (_) {
-    // ignore close errors and continue with hard fallback
+    // ignore close errors and fallback to attribute cleanup
   }
 
   modal.open = false;
@@ -2050,14 +2049,11 @@ function bindAppInteractions() {
     closeMunicipalityEditor();
   });
   document.getElementById('municipality-details-close')?.addEventListener('click', (event) => {
-    event.stopPropagation();
+    event.preventDefault();
     closeMunicipalityDetailsModal();
   });
   document.getElementById('municipality-details-modal')?.addEventListener('cancel', (event) => {
     event.preventDefault();
-    closeMunicipalityDetailsModal();
-  });
-  document.getElementById('municipality-details-modal')?.addEventListener('close', () => {
     closeMunicipalityDetailsModal();
   });
   document.getElementById('municipality-details-modal')?.addEventListener('click', (event) => {
