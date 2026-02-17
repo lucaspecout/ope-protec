@@ -315,6 +315,18 @@ class OperationalLogOut(BaseModel):
         from_attributes = True
 
 
+class OperationalLogStatusUpdate(BaseModel):
+    status: str
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, value: str) -> str:
+        normalized = value.lower().strip()
+        if normalized not in ALLOWED_LOG_STATUS:
+            raise ValueError("Statut invalide")
+        return normalized
+
+
 class ShareAccessRequest(BaseModel):
     password: str
 
