@@ -31,37 +31,79 @@ def generate_pdf_report(db: Session, report_name: str = "rapport_veille.pdf") ->
     Path(settings.report_dir).mkdir(parents=True, exist_ok=True)
     report_path = str(Path(settings.report_dir) / report_name)
     c = canvas.Canvas(report_path, pagesize=A4)
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(40, 800, "Protection Civile de l'Isère")
-    c.drawString(40, 780, "Rapport de veille et gestion de crise")
-    c.setFont("Helvetica", 10)
-    y = 750
+    width, height = A4
 
     latest_alert = db.query(WeatherAlert).order_by(WeatherAlert.created_at.desc()).first()
     crisis_count = db.query(Municipality).filter(Municipality.crisis_mode.is_(True)).count()
     logs = db.query(OperationalLog).order_by(OperationalLog.created_at.desc()).limit(20).all()
 
-    c.drawString(40, y, f"Date: {datetime.utcnow().isoformat()}")
-    y -= 20
-    c.drawString(40, y, f"Synthèse: vigilance={latest_alert.level if latest_alert else 'vert'} ; communes en crise={crisis_count}")
-    y -= 20
-    c.drawString(40, y, "Carte: incluse via l'interface web (capture opérationnelle)")
-    y -= 20
-    c.drawString(40, y, "Graphiques: tendances vigilance/crues visualisées dans le tableau de bord")
-
-    y -= 30
-    c.setFont("Helvetica-Bold", 12)
-    c.drawString(40, y, "Chronologie main courante")
-    y -= 20
+    c.setTitle("Rapport opérationnel Isère")
+    c.setFont("Helvetica-Bold", 17)
+    c.drawString(40, height - 45, "CRISIS38 · Rapport opérationnel")
     c.setFont("Helvetica", 10)
-    for log in logs:
-        c.drawString(45, y, f"- {log.created_at:%d/%m %H:%M} {log.event_type}: {log.description[:78]}")
-        y -= 14
-        if y < 80:
-            c.showPage()
-            y = 800
+    c.drawString(40, height - 62, "Protection Civile de l'Isère")
+    c.drawRightString(width - 40, height - 62, f"Édité le {datetime.utcnow():%d/%m/%Y à %H:%M UTC}")
 
-    c.drawString(40, 60, "Signature: ____________________")
+    y = height - 95
+    c.setLineWidth(0.8)
+    c.rect(40, y - 45, width - 80, 45)
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(48, y - 17, "Synthèse")
+    c.setFont("Helvetica", 10)
+    c.drawString(48, y - 34, f"Vigilance: {(latest_alert.level if latest_alert else 'vert').upper()}")
+    c.drawString(210, y - 34, f"Communes en crise: {crisis_count}")
+    c.drawString(390, y - 34, "Périmètre: Isère (38)")
+
+    y -= 68
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(40, y, "Chronologie principale")
+    y -= 12
+
+    table_x = 40
+    col_sizes = [88, 70, 78, width - 80 - (88 + 70 + 78)]
+    row_h = 18
+    c.setFont("Helvetica-Bold", 9)
+    headers = ["Horodatage", "Portée", "Niveau", "Évènement"]
+    x = table_x
+    for head, size in zip(headers, col_sizes):
+        c.rect(x, y - row_h, size, row_h)
+        c.drawString(x + 4, y - 12, head)
+        x += size
+
+    y -= row_h
+    c.setFont("Helvetica", 8.8)
+    for log in logs:
+        if y < 75:
+            c.showPage()
+            y = height - 60
+            c.setFont("Helvetica-Bold", 11)
+            c.drawString(40, y, "Chronologie principale (suite)")
+            y -= 12
+            c.setFont("Helvetica-Bold", 9)
+            x = table_x
+            for head, size in zip(headers, col_sizes):
+                c.rect(x, y - row_h, size, row_h)
+                c.drawString(x + 4, y - 12, head)
+                x += size
+            y -= row_h
+            c.setFont("Helvetica", 8.8)
+
+        when = log.event_time or log.created_at
+        scope = str(log.target_scope or "departemental")[:18]
+        level = str(log.danger_level or "vert")[:12]
+        event = f"{log.event_type or 'MCO'} · {(log.description or '')[:90]}"
+        row = [f"{when:%d/%m %H:%M}", scope, level, event]
+
+        x = table_x
+        for value, size in zip(row, col_sizes):
+            c.rect(x, y - row_h, size, row_h)
+            c.drawString(x + 4, y - 12, str(value))
+            x += size
+        y -= row_h
+
+    c.setFont("Helvetica", 9)
+    c.drawString(40, 45, "Document généré automatiquement par CRISIS38.")
+    c.drawRightString(width - 40, 45, "Signature: ____________________")
     c.save()
     return report_path
 

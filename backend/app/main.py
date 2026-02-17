@@ -3,6 +3,7 @@ from pathlib import Path
 import re
 import secrets
 from threading import Thread
+from time import sleep
 from typing import Callable
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
@@ -260,9 +261,17 @@ def _warmup_external_sources() -> None:
         return
 
 
+def _continuous_external_refresh() -> None:
+    """Met à jour les caches de supervision même sans utilisateur connecté."""
+    while True:
+        sleep(120)
+        _warmup_external_sources()
+
+
 @app.on_event("startup")
 def startup_warmup_external_sources() -> None:
     Thread(target=_warmup_external_sources, daemon=True).start()
+    Thread(target=_continuous_external_refresh, daemon=True).start()
 
 
 @app.get("/health")
@@ -288,8 +297,7 @@ def public_live_status(db: Session = Depends(get_db)):
     meteo = fetch_meteo_france_isere()
     meteo_level = (meteo.get("level") or db_meteo_level).lower()
     global_risk = compute_global_risk(meteo_level, crues_level)
-    priority_names = [m.name for m in db.query(Municipality).filter(Municipality.pcs_active.is_(True)).all()]
-    vigicrues = fetch_vigicrues_isere(priority_names=priority_names)
+    vigicrues = fetch_vigicrues_isere()
     itinisere = fetch_itinisere_disruptions(limit=8)
     bison_fute = fetch_bison_fute_traffic()
     georisques = fetch_georisques_isere_summary()
@@ -529,12 +537,10 @@ def dashboard(db: Session = Depends(get_db), user: User = Depends(require_roles(
 @app.get("/external/isere/risks")
 def isere_external_risks(
     refresh: bool = False,
-    db: Session = Depends(get_db),
     _: User = Depends(require_roles(*READ_ROLES)),
 ):
     meteo = fetch_meteo_france_isere(force_refresh=refresh)
-    priority_names = [m.name for m in db.query(Municipality).filter(Municipality.pcs_active.is_(True)).all()]
-    vigicrues = fetch_vigicrues_isere(priority_names=priority_names, force_refresh=refresh)
+    vigicrues = fetch_vigicrues_isere(force_refresh=refresh)
     itinisere = fetch_itinisere_disruptions(force_refresh=refresh)
     bison_fute = fetch_bison_fute_traffic(force_refresh=refresh)
     georisques = fetch_georisques_isere_summary(force_refresh=refresh)
@@ -556,11 +562,9 @@ def interactive_map_meteo_vigilance():
 @app.get("/api/vigicrues/geojson")
 def interactive_map_vigicrues_geojson(
     refresh: bool = False,
-    db: Session = Depends(get_db),
     _: User = Depends(require_roles(*READ_ROLES)),
 ):
-    priority_names = [m.name for m in db.query(Municipality).filter(Municipality.pcs_active.is_(True)).all()]
-    vigicrues = fetch_vigicrues_isere(priority_names=priority_names, station_limit=60, force_refresh=refresh)
+    vigicrues = fetch_vigicrues_isere(station_limit=60, force_refresh=refresh)
     return vigicrues_geojson_from_stations(vigicrues.get("stations", []))
 
 
@@ -576,8 +580,7 @@ def supervision_overview(
     _: User = Depends(require_roles(*READ_ROLES)),
 ):
     meteo = fetch_meteo_france_isere(force_refresh=refresh)
-    priority_names = [m.name for m in db.query(Municipality).filter(Municipality.pcs_active.is_(True)).all()]
-    vigicrues = fetch_vigicrues_isere(priority_names=priority_names, station_limit=12, force_refresh=refresh)
+    vigicrues = fetch_vigicrues_isere(station_limit=12, force_refresh=refresh)
     itinisere = fetch_itinisere_disruptions(limit=8, force_refresh=refresh)
     bison_fute = fetch_bison_fute_traffic(force_refresh=refresh)
     georisques = fetch_georisques_isere_summary(force_refresh=refresh)
