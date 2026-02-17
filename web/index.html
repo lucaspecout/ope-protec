@@ -296,16 +296,23 @@
         <section id="logs-panel" class="panel view hidden" hidden>
           <h3>Main courante</h3>
           <form id="log-form" class="form" data-requires-edit>
-            <input name="event_type" placeholder="Type d'évènement" required />
-            <input name="description" placeholder="Description opérationnelle" required />
             <select name="target_scope" id="log-target-scope">
               <option value="departemental">Départemental</option>
               <option value="commune">Commune</option>
-              <option value="pcs">PCS (commune avec plan actif)</option>
             </select>
             <select name="municipality_id" id="log-municipality-id" disabled>
               <option value="">Sélectionnez une commune</option>
             </select>
+            <select name="event_type" id="log-event-type" required>
+              <option value="MCO" selected>MCO</option>
+              <option value="Alerte météo">Alerte météo</option>
+              <option value="Crue">Crue</option>
+              <option value="Incident terrain">Incident terrain</option>
+              <option value="Réseaux / voirie">Réseaux / voirie</option>
+              <option value="Sécurité">Sécurité</option>
+            </select>
+            <input name="location" placeholder="Lieu concerné (commune, quartier, rue...)" />
+            <textarea name="description" placeholder="Information MCO" rows="2" required></textarea>
             <select name="danger_level">
               <option value="vert">🟢 Vert</option>
               <option value="jaune">🟡 Jaune</option>
@@ -320,6 +327,25 @@
             </select>
             <button type="submit">Ajouter</button>
           </form>
+          <div class="form" id="logs-filters">
+            <input id="logs-search" type="search" placeholder="Rechercher (catégorie, texte, lieu, commune...)" />
+            <select id="logs-municipality-filter">
+              <option value="all">Toutes les communes</option>
+            </select>
+            <select id="logs-scope-filter">
+              <option value="all">Tous les périmètres</option>
+              <option value="departemental">Départemental</option>
+              <option value="commune">Commune</option>
+              <option value="pcs">PCS</option>
+            </select>
+            <select id="logs-sort">
+              <option value="date_desc">Tri: plus récent</option>
+              <option value="date_asc">Tri: plus ancien</option>
+              <option value="danger_desc">Tri: criticité</option>
+              <option value="type_asc">Tri: catégorie A→Z</option>
+            </select>
+          </div>
+          <p class="muted">Entrées affichées: <strong id="logs-count">0</strong></p>
           <ul id="logs-list" class="list"></ul>
         </section>
 
