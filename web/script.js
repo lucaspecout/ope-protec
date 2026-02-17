@@ -1404,6 +1404,10 @@ async function openMunicipalityDetailsModal(municipality) {
     ${quickActions}
   `;
 
+  content.querySelectorAll('button').forEach((button) => {
+    if ((button.textContent || '').trim().toLowerCase() === 'éditer la fiche') button.remove();
+  });
+
   if (typeof modal.showModal === 'function') {
     if (modal.open) return;
     modal.showModal();
