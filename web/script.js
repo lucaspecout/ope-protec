@@ -50,6 +50,7 @@ let cachedItinisereEvents = [];
 let cachedBisonFute = {};
 let geocodeCache = new Map();
 let municipalityContourCache = new Map();
+const municipalityDocumentsUiState = new Map();
 let trafficGeocodeCache = new Map();
 let mapStats = { stations: 0, pcs: 0, resources: 0, custom: 0, traffic: 0 };
 let mapControlsCollapsed = false;
@@ -999,8 +1000,71 @@ async function loadMunicipalityFiles(municipalityId) {
 
 function municipalityFilesMarkup(files = [], municipalityId) {
   const canManage = canMunicipalityFiles();
-  const list = files.map((file) => `<li><strong>${escapeHtml(file.title)}</strong> · ${escapeHtml(file.doc_type)} · ${new Date(file.created_at).toLocaleDateString()} · par ${escapeHtml(file.uploaded_by)} <button type="button" class="ghost inline-action" data-muni-file-open="${file.id}" data-muni-id="${municipalityId}">Consulter</button> ${canManage ? `<button type="button" class="ghost inline-action danger" data-muni-file-delete="${file.id}" data-muni-id="${municipalityId}">Supprimer</button>` : ''}</li>`).join('');
+  const list = files.map((file) => `<li><strong>${escapeHtml(file.title)}</strong> · <span class="badge neutral">${escapeHtml(file.doc_type)}</span> · ${new Date(file.created_at).toLocaleDateString()} · par ${escapeHtml(file.uploaded_by)} <button type="button" class="ghost inline-action" data-muni-file-open="${file.id}" data-muni-id="${municipalityId}">Consulter</button> ${canManage ? `<button type="button" class="ghost inline-action danger" data-muni-file-delete="${file.id}" data-muni-id="${municipalityId}">Supprimer</button>` : ''}</li>`).join('');
   return list || '<li>Aucun fichier opérationnel.</li>';
+}
+
+function municipalityDocumentFiltersMarkup(state, municipalityId) {
+  return `<div class="municipality-doc-toolbar">
+    <input type="search" placeholder="Rechercher un document" value="${escapeHtml(state.search || '')}" data-muni-doc-search="${municipalityId}" />
+    <select data-muni-doc-type-filter="${municipalityId}">
+      <option value="all">Tous les types</option>
+      <option value="pcs" ${state.type === 'pcs' ? 'selected' : ''}>PCS</option>
+      <option value="orsec" ${state.type === 'orsec' ? 'selected' : ''}>ORSEC</option>
+      <option value="convention" ${state.type === 'convention' ? 'selected' : ''}>Convention</option>
+      <option value="cartographie" ${state.type === 'cartographie' ? 'selected' : ''}>Cartographie</option>
+      <option value="annexe" ${state.type === 'annexe' ? 'selected' : ''}>Annexe</option>
+      <option value="document" ${state.type === 'document' ? 'selected' : ''}>Document</option>
+    </select>
+    <select data-muni-doc-sort="${municipalityId}">
+      <option value="date_desc" ${state.sort === 'date_desc' ? 'selected' : ''}>Plus récent</option>
+      <option value="date_asc" ${state.sort === 'date_asc' ? 'selected' : ''}>Plus ancien</option>
+      <option value="title" ${state.sort === 'title' ? 'selected' : ''}>Titre A → Z</option>
+    </select>
+  </div>`;
+}
+
+function uploadMunicipalityDocument(origin, municipalityId, formData, onProgress) {
+  const url = buildApiUrl(`/municipalities/${municipalityId}/files`, origin);
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url, true);
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable || typeof onProgress !== 'function') return;
+      onProgress(Math.round((event.loaded / event.total) * 100));
+    };
+    xhr.onerror = () => reject(new Error('Failed to fetch'));
+    xhr.onload = () => {
+      if (xhr.status === 401) {
+        logout();
+        reject(new Error('Session expirée'));
+        return;
+      }
+      let payload = null;
+      if (xhr.responseText) {
+        try { payload = JSON.parse(xhr.responseText); } catch { payload = null; }
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(payload);
+        return;
+      }
+      reject(new Error(payload?.detail || payload?.message || `Erreur API (${xhr.status})`));
+    };
+    xhr.send(formData);
+  });
+}
+
+async function uploadMunicipalityDocumentWithFallback(municipalityId, formData, onProgress) {
+  let lastError = null;
+  for (const origin of apiOrigins()) {
+    try {
+      return await uploadMunicipalityDocument(origin, municipalityId, formData, onProgress);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw new Error(sanitizeErrorMessage(lastError?.message || 'Téléversement impossible'));
 }
 
 async function openMunicipalityFile(municipalityId, fileId) {
@@ -1034,11 +1098,49 @@ async function openMunicipalityDetailsModal(municipality) {
   if (!modal || !content || !municipality) return;
 
   const files = await loadMunicipalityFiles(municipality.id).catch(() => []);
+  const previousState = municipalityDocumentsUiState.get(String(municipality.id)) || { search: '', type: 'all', sort: 'date_desc', uploading: false, progress: 0 };
+  const state = { ...previousState, uploading: false, progress: 0 };
+  municipalityDocumentsUiState.set(String(municipality.id), state);
+  const filteredFiles = files
+    .filter((file) => {
+      const search = (state.search || '').trim().toLowerCase();
+      if (state.type !== 'all' && file.doc_type !== state.type) return false;
+      if (!search) return true;
+      return [file.title, file.doc_type, file.uploaded_by].some((value) => String(value || '').toLowerCase().includes(search));
+    })
+    .sort((left, right) => {
+      if (state.sort === 'title') return String(left.title || '').localeCompare(String(right.title || ''), 'fr');
+      const leftDate = new Date(left.created_at).getTime();
+      const rightDate = new Date(right.created_at).getTime();
+      if (state.sort === 'date_asc') return leftDate - rightDate;
+      return rightDate - leftDate;
+    });
+  const byType = files.reduce((acc, file) => {
+    const key = file.doc_type || 'document';
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
   const quickActions = canMunicipalityFiles()
     ? `<div class="municipality-actions municipality-actions--modal">
          ${canEdit() ? `<button type="button" class="ghost inline-action" data-muni-detail-crisis="${municipality.id}">${municipality.crisis_mode ? 'Sortir de crise' : 'Passer en crise'}</button>
          <button type="button" class="ghost inline-action" data-muni-detail-edit="${municipality.id}">Éditer la fiche</button>` : ''}
-         <button type="button" class="ghost inline-action" data-muni-file-upload="${municipality.id}">Ajouter un document</button>
+         <form class="municipality-upload-form" data-muni-upload-form="${municipality.id}">
+           <input name="title" placeholder="Titre du document" required />
+           <select name="doc_type">
+             <option value="pcs">PCS</option>
+             <option value="orsec">ORSEC</option>
+             <option value="convention">Convention</option>
+             <option value="cartographie">Cartographie</option>
+             <option value="annexe">Annexe</option>
+             <option value="document" selected>Document</option>
+           </select>
+           <input name="file" type="file" accept=".pdf,.png,.jpg,.jpeg" required />
+           <button type="submit" class="ghost inline-action">Ajouter</button>
+         </form>
+         <div class="municipality-upload-progress hidden" data-muni-upload-progress="${municipality.id}" hidden>
+           <div class="municipality-upload-progress__bar" style="width:${state.progress}%"></div>
+           <span data-muni-upload-progress-label="${municipality.id}">${state.progress}%</span>
+         </div>
        </div>`
     : '';
 
@@ -1053,7 +1155,9 @@ async function openMunicipalityDetailsModal(municipality) {
     <p><strong>Contacts d'astreinte:</strong><br>${escapeHtml(municipality.contacts || 'Aucun')}</p>
     <p><strong>Informations complémentaires:</strong><br>${escapeHtml(municipality.additional_info || 'Aucune')}</p>
     <h5>Documents partagés</h5>
-    <ul class="list compact">${municipalityFilesMarkup(files, municipality.id)}</ul>
+    <p class="muted">Total: <strong>${files.length}</strong>${Object.entries(byType).map(([type, count]) => ` · ${escapeHtml(type)}: ${count}`).join('')}</p>
+    ${municipalityDocumentFiltersMarkup(state, municipality.id)}
+    <ul class="list compact">${municipalityFilesMarkup(filteredFiles, municipality.id)}</ul>
     ${quickActions}
   `;
 
@@ -1084,6 +1188,34 @@ async function pickMunicipalityFile(municipalityId) {
     if (refreshed) await openMunicipalityDetailsModal(refreshed);
   };
   picker.click();
+}
+
+async function submitMunicipalityUploadForm(form, municipalityId) {
+  const file = form.elements.file.files?.[0];
+  if (!file) return;
+  const title = form.elements.title.value.trim() || file.name;
+  const docType = form.elements.doc_type.value || 'document';
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('title', title);
+  formData.append('doc_type', docType);
+
+  const progressWrap = document.querySelector(`[data-muni-upload-progress="${municipalityId}"]`);
+  const progressLabel = document.querySelector(`[data-muni-upload-progress-label="${municipalityId}"]`);
+  if (progressWrap) {
+    progressWrap.hidden = false;
+    progressWrap.classList.remove('hidden');
+  }
+
+  await uploadMunicipalityDocumentWithFallback(municipalityId, formData, (progress) => {
+    const bar = progressWrap?.querySelector('.municipality-upload-progress__bar');
+    if (bar) bar.style.width = `${progress}%`;
+    if (progressLabel) progressLabel.textContent = `${progress}%`;
+  });
+
+  await loadMunicipalities();
+  const refreshed = cachedMunicipalityRecords.find((m) => String(m.id) === String(municipalityId));
+  if (refreshed) await openMunicipalityDetailsModal(refreshed);
 }
 
 function renderCriticalRisks(meteo = {}) {
@@ -1652,6 +1784,34 @@ function bindAppInteractions() {
         return;
       }
 
+    } catch (error) {
+      document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
+    }
+  });
+  document.getElementById('municipality-details-content')?.addEventListener('change', async (event) => {
+    const search = event.target.closest('[data-muni-doc-search]');
+    const typeFilter = event.target.closest('[data-muni-doc-type-filter]');
+    const sortFilter = event.target.closest('[data-muni-doc-sort]');
+    if (!search && !typeFilter && !sortFilter) return;
+    const municipalityId = search?.getAttribute('data-muni-doc-search') || typeFilter?.getAttribute('data-muni-doc-type-filter') || sortFilter?.getAttribute('data-muni-doc-sort');
+    const municipality = cachedMunicipalityRecords.find((m) => String(m.id) === String(municipalityId));
+    if (!municipality) return;
+    const state = municipalityDocumentsUiState.get(String(municipalityId)) || { search: '', type: 'all', sort: 'date_desc' };
+    municipalityDocumentsUiState.set(String(municipalityId), {
+      ...state,
+      search: search ? search.value || '' : state.search,
+      type: typeFilter ? typeFilter.value : state.type,
+      sort: sortFilter ? sortFilter.value : state.sort,
+    });
+    await openMunicipalityDetailsModal(municipality);
+  });
+  document.getElementById('municipality-details-content')?.addEventListener('submit', async (event) => {
+    const form = event.target.closest('[data-muni-upload-form]');
+    if (!form) return;
+    event.preventDefault();
+    try {
+      await submitMunicipalityUploadForm(form, form.getAttribute('data-muni-upload-form'));
+      document.getElementById('municipality-feedback').textContent = 'Document chargé avec succès.';
     } catch (error) {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
     }
