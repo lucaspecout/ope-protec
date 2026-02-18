@@ -1688,7 +1688,7 @@ async function loadMunicipalities() {
 
   cachedMunicipalityRecords = municipalities;
   cachedMunicipalities = municipalities;
-  document.getElementById('municipalities-list').innerHTML = municipalities.map((m) => {
+  const municipalitiesMarkup = municipalities.map((m) => {
     const dangerColor = levelColor(m.vigilance_color || 'vert');
     const actions = canEdit()
       ? `<div class="municipality-actions">
@@ -1719,6 +1719,7 @@ async function loadMunicipalities() {
       ${actions}
     </article>`;
   }).join('') || '<p class="muted">Aucune commune.</p>';
+  setHtml('municipalities-list', municipalitiesMarkup);
   populateLogMunicipalityOptions(municipalities);
   syncLogScopeFields();
   syncLogOtherFields();
@@ -1999,6 +2000,24 @@ function bindAppInteractions() {
       document.getElementById('dashboard-error').textContent = '';
     } catch (error) {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
+    }
+  });
+  document.getElementById('situation-refresh-btn')?.addEventListener('click', async () => {
+    const button = document.getElementById('situation-refresh-btn');
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Actualisation...';
+    }
+    try {
+      await refreshAll(true);
+      document.getElementById('dashboard-error').textContent = '';
+    } catch (error) {
+      document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = 'Actualiser la situation';
+      }
     }
   });
   document.getElementById('map-search')?.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); handleMapSearch(); } });
