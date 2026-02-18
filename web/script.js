@@ -2758,11 +2758,11 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
     loadHomeLiveStatus();
-    if (token) refreshAll(true);
+    if (token) refreshAll(false);
   });
   window.addEventListener('focus', () => {
     loadHomeLiveStatus();
-    if (token) refreshAll(true);
+    if (token) refreshAll(false);
   });
 
   try {
