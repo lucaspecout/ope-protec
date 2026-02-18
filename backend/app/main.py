@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from pathlib import Path
 import re
 import secrets
@@ -119,6 +120,21 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 ALLOWED_WEATHER_TRANSITIONS = {("jaune", "orange"), ("orange", "rouge")}
 READ_ROLES = {"admin", "ope", "securite", "visiteur", "mairie"}
 EDIT_ROLES = {"admin", "ope"}
+
+EXTERNAL_REFRESH_INTERVAL_SECONDS = 90
+_external_risks_snapshot_lock = Lock()
+_external_risks_snapshot: dict = {
+    "updated_at": None,
+    "payload": {
+        "updated_at": None,
+        "meteo_france": {},
+        "vigicrues": {},
+        "itinisere": {},
+        "bison_fute": {},
+        "georisques": {},
+        "prefecture_isere": {},
+    },
+}
 ALLOWED_DOC_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
 
 
@@ -265,11 +281,27 @@ def _warmup_external_sources() -> None:
         return
 
 
+def _set_external_risks_snapshot(payload: dict) -> None:
+    with _external_risks_snapshot_lock:
+        _external_risks_snapshot["updated_at"] = datetime.utcnow()
+        _external_risks_snapshot["payload"] = deepcopy(payload)
+
+
+def _get_external_risks_snapshot() -> dict:
+    with _external_risks_snapshot_lock:
+        return deepcopy(_external_risks_snapshot.get("payload") or {})
+
+
 def _continuous_external_refresh() -> None:
     """Met à jour les caches de supervision même sans utilisateur connecté."""
     while True:
-        sleep(120)
-        _warmup_external_sources()
+        try:
+            payload = build_external_risks_payload(refresh=True)
+            _set_external_risks_snapshot(payload)
+        except Exception:
+            # La boucle continue même en cas d'erreur externe.
+            pass
+        sleep(EXTERNAL_REFRESH_INTERVAL_SECONDS)
 
 
 @app.on_event("startup")
@@ -298,14 +330,15 @@ def public_live_status(db: Session = Depends(get_db)):
     db_meteo_level = (latest_alert.level if latest_alert else "vert").lower()
     crues_level = (latest_station.level if latest_station else "vert").lower()
 
-    meteo = fetch_meteo_france_isere()
+    risks_snapshot = get_external_risks_payload(refresh=False)
+    meteo = risks_snapshot.get("meteo_france") or {}
     meteo_level = (meteo.get("level") or db_meteo_level).lower()
     global_risk = compute_global_risk(meteo_level, crues_level)
-    vigicrues = fetch_vigicrues_isere()
-    itinisere = fetch_itinisere_disruptions(limit=8)
-    bison_fute = fetch_bison_fute_traffic()
-    georisques = fetch_georisques_isere_summary()
-    prefecture = fetch_prefecture_isere_news(limit=4)
+    vigicrues = risks_snapshot.get("vigicrues") or {}
+    itinisere = risks_snapshot.get("itinisere") or {}
+    bison_fute = risks_snapshot.get("bison_fute") or {}
+    georisques = risks_snapshot.get("georisques") or {}
+    prefecture = risks_snapshot.get("prefecture_isere") or {}
     weather_situation = [
         {
             "label": alert.get("phenomenon", "Risque météo"),
@@ -513,10 +546,11 @@ def toggle_2fa(payload: TwoFactorToggleRequest, db: Session = Depends(get_db), u
 
 @app.get("/dashboard")
 def dashboard(db: Session = Depends(get_db), user: User = Depends(require_roles(*READ_ROLES))):
-    return build_dashboard_payload(db, user)
+    risks_payload = get_external_risks_payload(refresh=False)
+    return build_dashboard_payload(db, user, external_risks=risks_payload)
 
 
-def build_dashboard_payload(db: Session, user: User) -> dict:
+def build_dashboard_payload(db: Session, user: User, external_risks: dict | None = None) -> dict:
     latest_alert = db.query(WeatherAlert).order_by(WeatherAlert.created_at.desc()).first()
     river_level = db.query(RiverStation).order_by(RiverStation.updated_at.desc()).first()
     crisis_count = db.query(Municipality).filter(Municipality.crisis_mode.is_(True)).count()
@@ -529,7 +563,9 @@ def build_dashboard_payload(db: Session, user: User) -> dict:
 
     logs = logs_query.order_by(OperationalLog.created_at.desc()).limit(5).all()
 
-    meteo = fetch_meteo_france_isere()
+    meteo = external_risks.get("meteo_france") if external_risks else None
+    if not isinstance(meteo, dict) or not meteo:
+        meteo = fetch_meteo_france_isere()
     db_meteo_level = latest_alert.level if latest_alert else "vert"
     meteo_level = meteo.get("level") or db_meteo_level
     crues_level = river_level.level if river_level else "vert"
@@ -592,12 +628,27 @@ def build_external_risks_payload(refresh: bool = False) -> dict:
     return payload
 
 
+def get_external_risks_payload(refresh: bool = False) -> dict:
+    if refresh:
+        payload = build_external_risks_payload(refresh=True)
+        _set_external_risks_snapshot(payload)
+        return payload
+
+    snapshot = _get_external_risks_snapshot()
+    if snapshot and any(snapshot.get(key) for key in ("meteo_france", "vigicrues", "itinisere", "bison_fute", "georisques", "prefecture_isere")):
+        return snapshot
+
+    payload = build_external_risks_payload(refresh=True)
+    _set_external_risks_snapshot(payload)
+    return payload
+
+
 @app.get("/external/isere/risks")
 def isere_external_risks(
     refresh: bool = False,
     _: User = Depends(require_roles(*READ_ROLES)),
 ):
-    return build_external_risks_payload(refresh=refresh)
+    return get_external_risks_payload(refresh=refresh)
 
 
 @app.get("/operations/bootstrap")
@@ -607,8 +658,8 @@ def operations_bootstrap(
     user: User = Depends(require_roles(*READ_ROLES)),
 ):
     started_at = datetime.utcnow()
-    dashboard_payload = build_dashboard_payload(db, user)
-    risks_payload = build_external_risks_payload(refresh=refresh)
+    risks_payload = get_external_risks_payload(refresh=refresh)
+    dashboard_payload = build_dashboard_payload(db, user, external_risks=risks_payload)
     municipalities_payload = list_municipalities(db=db, user=user)
     logs_payload = list_logs(db=db, user=user)
 
@@ -658,12 +709,13 @@ def supervision_overview(
     db: Session = Depends(get_db),
     _: User = Depends(require_roles(*READ_ROLES)),
 ):
-    meteo = fetch_meteo_france_isere(force_refresh=refresh)
-    vigicrues = fetch_vigicrues_isere(station_limit=12, force_refresh=refresh)
-    itinisere = fetch_itinisere_disruptions(limit=8, force_refresh=refresh)
-    bison_fute = fetch_bison_fute_traffic(force_refresh=refresh)
-    georisques = fetch_georisques_isere_summary(force_refresh=refresh)
-    prefecture = fetch_prefecture_isere_news(force_refresh=refresh)
+    risks_payload = get_external_risks_payload(refresh=refresh)
+    meteo = risks_payload.get("meteo_france") or {}
+    vigicrues = risks_payload.get("vigicrues") or {}
+    itinisere = risks_payload.get("itinisere") or {}
+    bison_fute = risks_payload.get("bison_fute") or {}
+    georisques = risks_payload.get("georisques") or {}
+    prefecture = risks_payload.get("prefecture_isere") or {}
     crisis = db.query(Municipality).filter(Municipality.crisis_mode.is_(True)).all()
     latest_logs = db.query(OperationalLog).order_by(OperationalLog.created_at.desc()).limit(10).all()
     return {
