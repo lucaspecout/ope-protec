@@ -349,30 +349,47 @@ def _fetch_meteo_france_isere_live() -> dict[str, Any]:
     info_state = desc_match.group(1).replace("&#039;", "'") if desc_match else "Informations disponibles"
     hazards = _extract_meteo_hazards(bulletin_title, info_state)
 
-    token = _extract_mf_token_from_page()
-    dictionary = _meteo_france_wsft_get("warning/dictionary", token, {"domain": "FRA", "warning_type": "vigilance"})
-    warning_today = _meteo_france_wsft_get(
-        "warning/currentphenomenons",
-        token,
-        {"domain": "38", "warning_type": "vigilance", "formatDate": "timestamp", "echeance": "J0", "depth": 1},
-    )
-    warning_tomorrow = _meteo_france_wsft_get(
-        "warning/currentphenomenons",
-        token,
-        {"domain": "38", "warning_type": "vigilance", "formatDate": "timestamp", "echeance": "J1", "depth": 1},
-    )
-    bulletin_today = _meteo_france_wsft_get(
-        "report",
-        token,
-        {"domain": "38", "report_type": "vigilanceV6", "report_subtype": "Bulletin de suivi", "echeance": "J0"},
-        version="v2",
-    )
-    bulletin_tomorrow = _meteo_france_wsft_get(
-        "report",
-        token,
-        {"domain": "38", "report_type": "vigilanceV6", "report_subtype": "Bulletin de suivi", "echeance": "J1"},
-        version="v2",
-    )
+    try:
+        token = _extract_mf_token_from_page()
+        dictionary = _meteo_france_wsft_get("warning/dictionary", token, {"domain": "FRA", "warning_type": "vigilance"})
+        warning_today = _meteo_france_wsft_get(
+            "warning/currentphenomenons",
+            token,
+            {"domain": "38", "warning_type": "vigilance", "formatDate": "timestamp", "echeance": "J0", "depth": 1},
+        )
+        warning_tomorrow = _meteo_france_wsft_get(
+            "warning/currentphenomenons",
+            token,
+            {"domain": "38", "warning_type": "vigilance", "formatDate": "timestamp", "echeance": "J1", "depth": 1},
+        )
+        bulletin_today = _meteo_france_wsft_get(
+            "report",
+            token,
+            {"domain": "38", "report_type": "vigilanceV6", "report_subtype": "Bulletin de suivi", "echeance": "J0"},
+            version="v2",
+        )
+        bulletin_tomorrow = _meteo_france_wsft_get(
+            "report",
+            token,
+            {"domain": "38", "report_type": "vigilanceV6", "report_subtype": "Bulletin de suivi", "echeance": "J1"},
+            version="v2",
+        )
+    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+        return {
+            "service": "Météo-France Vigilance",
+            "department": "Isère (38)",
+            "status": "partial",
+            "source": source_url,
+            "level": level,
+            "bulletin_title": bulletin_title,
+            "info_state": f"Données de synthèse disponibles (API WSFT indisponible: {exc})",
+            "hazards": hazards,
+            "current_alerts": [],
+            "tomorrow_alerts": [],
+            "bulletin_today": [],
+            "bulletin_tomorrow": [],
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
 
     phenomenon_names = {str(item.get("id")): item.get("name", "") for item in dictionary.get("phenomenons") or []}
     color_names = {int(item.get("id")): item.get("name", "inconnu") for item in dictionary.get("colors") or []}
