@@ -159,8 +159,11 @@ label { display: block; margin-bottom: .8rem; }
 #risk.orange { color: #b46a00; }
 #risk.jaune { color: #907100; }
 #risk.vert { color: var(--ok); }
+.risk-vert { color: #2f9e44; font-weight: 700; }
+.risk-jaune { color: #907100; font-weight: 700; }
 .risk-orange { color: #b46a00; font-weight: 700; }
 .risk-rouge { color: #c22f43; font-weight: 700; }
+.meteo-detail { display: inline-block; margin-top: .2rem; color: #334155; }
 
 .list { list-style: none; margin: .6rem 0 0; padding: 0; display: grid; gap: .45rem; }
 .list li { background: #f7faff; border: 1px solid var(--line); border-radius: 11px; padding: .63rem .75rem; }

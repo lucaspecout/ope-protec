@@ -111,6 +111,12 @@ function riskRank(level) {
   return ({ rouge: 4, orange: 3, jaune: 2, vert: 1 }[normalizeLevel(level)] || 0);
 }
 
+function stationStatusLevel(station = {}) {
+  const status = normalizeLevel(station.control_status || station.status || '');
+  if (['vert', 'jaune', 'orange', 'rouge'].includes(status)) return status;
+  return normalizeLevel(station.level || 'vert');
+}
+
 function formatLogLine(log = {}) {
   const statusKey = String(log.status || 'nouveau');
   const status = LOG_STATUS_LABEL[statusKey] || 'Nouveau';
@@ -637,7 +643,10 @@ async function loadIsereBoundary() {
 function renderStations(stations = []) {
   cachedStations = stations;
   const visible = document.getElementById('filter-hydro')?.checked ?? true;
-  setHtml('hydro-stations-list', stations.slice(0, 40).map((s) => `<li><strong>${s.station || s.code}</strong> · ${s.river || ''} · <span style="color:${levelColor(s.level)}">${normalizeLevel(s.level)}</span> · Contrôle: ${escapeHtml(s.control_status || 'inconnu')} · ${s.height_m} m</li>`).join('') || '<li>Aucune station.</li>');
+  setHtml('hydro-stations-list', stations.slice(0, 40).map((s) => {
+    const statusLevel = stationStatusLevel(s);
+    return `<li><strong>${s.station || s.code}</strong> · ${s.river || ''} · <span style="color:${levelColor(statusLevel)}">${statusLevel}</span> · Contrôle: ${escapeHtml(s.control_status || 'inconnu')} · ${s.height_m} m</li>`;
+  }).join('') || '<li>Aucune station.</li>');
   if (!hydroLayer || !hydroLineLayer) return;
   hydroLayer.clearLayers();
   hydroLineLayer.clearLayers();
@@ -650,8 +659,9 @@ function renderStations(stations = []) {
   const stationsWithPoints = stations.filter((s) => s.lat != null && s.lon != null);
   mapStats.stations = stationsWithPoints.length;
   stationsWithPoints.forEach((s) => {
-    window.L.circleMarker([s.lat, s.lon], { radius: 7, color: '#fff', weight: 1.5, fillColor: levelColor(s.level), fillOpacity: 0.95 })
-      .bindPopup(`<strong>${s.station || s.code}</strong><br>${s.river || ''}<br>Département: Isère (38)<br>Niveau: ${normalizeLevel(s.level)}<br>Contrôle station: ${escapeHtml(s.control_status || 'inconnu')}<br>Hauteur: ${s.height_m} m`)
+    const statusLevel = stationStatusLevel(s);
+    window.L.circleMarker([s.lat, s.lon], { radius: 7, color: '#fff', weight: 1.5, fillColor: levelColor(statusLevel), fillOpacity: 0.95 })
+      .bindPopup(`<strong>${s.station || s.code}</strong><br>${s.river || ''}<br>Département: Isère (38)<br>Statut: ${statusLevel}<br>Contrôle station: ${escapeHtml(s.control_status || 'inconnu')}<br>Hauteur: ${s.height_m} m`)
       .addTo(hydroLayer);
   });
 
@@ -1161,7 +1171,15 @@ function onMapClickAddPoint(event) {
 function renderMeteoAlerts(meteo = {}) {
   const current = meteo.current_alerts || [];
   const tomorrow = meteo.tomorrow_alerts || [];
-  const section = (title, alerts) => `<li><strong>${title}</strong><ul>${alerts.map((alert) => `<li><strong>${alert.phenomenon}</strong> · <span style="color:${levelColor(alert.level)}">${normalizeLevel(alert.level)}</span>${(alert.details || []).length ? `<br>${alert.details[0]}` : ''}</li>`).join('') || '<li>Aucune alerte significative.</li>'}</ul></li>`;
+  const alertDetailMarkup = (alert = {}) => {
+    const level = normalizeLevel(alert.level);
+    const details = (alert.details || []).filter(Boolean);
+    const detailsText = ['orange', 'rouge'].includes(level) && details.length
+      ? `<br><span class="meteo-detail">${details.map((detail) => escapeHtml(detail)).join('<br>')}</span>`
+      : '';
+    return `<li><strong>${escapeHtml(alert.phenomenon || '-')}</strong> · <span class="risk-${level}">${level}</span>${detailsText}</li>`;
+  };
+  const section = (title, alerts) => `<li><strong>${title}</strong><ul>${alerts.map((alert) => alertDetailMarkup(alert)).join('') || '<li>Aucune alerte significative.</li>'}</ul></li>`;
   setHtml('meteo-alerts-list', `${section('En cours (J0)', current)}${section('Demain (J1)', tomorrow)}`);
 }
 
@@ -1603,8 +1621,9 @@ function buildCriticalRisksMarkup(dashboard = {}, externalRisks = {}) {
 
   currentAlerts.forEach((alert) => {
     const level = normalizeLevel(alert.level);
-    const details = (alert.details || []).slice(0, 1).join(' ');
-    risks.push(`<li><strong>${escapeHtml(alert.phenomenon || 'Phénomène météo')}</strong> · <span class="risk-${level}">${level}</span>${details ? `<br>${escapeHtml(details)}` : ''}</li>`);
+    const details = (alert.details || []).filter(Boolean);
+    const detailsText = details.length ? `<br>${details.map((detail) => escapeHtml(detail)).join('<br>')}` : '';
+    risks.push(`<li><strong>${escapeHtml(alert.phenomenon || 'Phénomène météo')}</strong> · <span class="risk-${level}">${level}</span>${detailsText}</li>`);
   });
 
   const itinisereEvents = externalRisks?.itinisere?.events || [];
@@ -1645,14 +1664,6 @@ function renderSituationOverview() {
   const logs = Array.isArray(dashboard.latest_logs) ? dashboard.latest_logs : (Array.isArray(cachedLogs) ? cachedLogs.slice(0, 8) : []);
   const openLogs = logs.filter((log) => String(log.status || '').toLowerCase() !== 'clos');
   const closedLogs = logs.filter((log) => String(log.status || '').toLowerCase() === 'clos');
-  const criticalLogs = logs.filter((log) => ['orange', 'rouge'].includes(normalizeLevel(log.danger_level || 'vert')));
-  const lastUpdated = safeDateToLocale(
-    dashboard.updated_at
-    || logs.map((log) => new Date(log.event_time || log.created_at || 0).getTime()).filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => b - a)[0]
-    || Date.now(),
-    { hour: '2-digit', minute: '2-digit', second: '2-digit' },
-  );
-
   const kpiCards = [
     { label: 'Vigilance météo', value: vigilance, info: 'Source Météo-France', css: normalizeLevel(vigilance) },
     { label: 'Niveau crues', value: crues, info: 'Source Vigicrues', css: normalizeLevel(crues) },
@@ -1671,8 +1682,6 @@ function renderSituationOverview() {
         <div class="situation-summary-grid">
           <p><span>Évènements ouverts</span><strong>${openLogs.length}</strong></p>
           <p><span>Évènements clôturés</span><strong>${closedLogs.length}</strong></p>
-          <p><span>Évènements critiques</span><strong>${criticalLogs.length}</strong></p>
-          <p><span>Dernière mise à jour</span><strong>${lastUpdated}</strong></p>
         </div>
       </article>
       <article class="tile situation-risks">
@@ -1734,7 +1743,10 @@ function renderExternalRisks(data = {}) {
   setText('meteo-info', sanitizeMeteoInformation(meteo.info_state) || meteo.bulletin_title || '');
   setRiskText('vigicrues-status', `${vigicrues.status || 'inconnu'} · niveau ${normalizeLevel(vigicrues.water_alert_level || 'inconnu')}`, vigicrues.water_alert_level || 'vert');
   setText('vigicrues-info', `${(vigicrues.stations || []).length} station(s) suivie(s)`);
-  setHtml('stations-list', (vigicrues.stations || []).slice(0, 10).map((s) => `<li>${s.station || s.code} · ${s.river || ''} · ${normalizeLevel(s.level)} · Contrôle: ${escapeHtml(s.control_status || 'inconnu')} · ${s.height_m} m</li>`).join('') || '<li>Aucune station disponible.</li>');
+  setHtml('stations-list', (vigicrues.stations || []).slice(0, 10).map((s) => {
+    const statusLevel = stationStatusLevel(s);
+    return `<li>${s.station || s.code} · ${s.river || ''} · <span style="color:${levelColor(statusLevel)}">${statusLevel}</span> · Contrôle: ${escapeHtml(s.control_status || 'inconnu')} · ${s.height_m} m</li>`;
+  }).join('') || '<li>Aucune station disponible.</li>');
   setText('itinisere-status', `${itinisere.status || 'inconnu'} · ${(itinisere.events || []).length} événements`);
   renderBisonFuteSummary(bisonFute);
   renderPrefectureNews(prefecture);
