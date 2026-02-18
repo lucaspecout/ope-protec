@@ -167,6 +167,19 @@ label { display: block; margin-bottom: .8rem; }
 .list.compact { margin-top: .35rem; gap: .35rem; }
 .list.compact li { padding: .45rem .6rem; font-size: .9rem; }
 
+
+.situation-panel { display: grid; gap: .95rem; }
+.situation-top-grid { display: grid; gap: .7rem; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.situation-middle-grid { display: grid; gap: .7rem; grid-template-columns: minmax(260px, 1.3fr) minmax(260px, 1fr); }
+.situation-tile p { margin-bottom: .2rem; }
+.situation-summary-grid { display: grid; gap: .55rem; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); margin-top: .45rem; }
+.situation-summary-grid p { margin: 0; border: 1px solid var(--line); border-radius: 10px; padding: .55rem .65rem; background: #f7faff; }
+.situation-summary-grid span { display: block; font-size: .82rem; color: var(--muted); }
+.situation-summary-grid strong { display: block; margin-top: .2rem; font-size: 1.02rem; }
+
+@media (max-width: 900px) {
+  .situation-middle-grid { grid-template-columns: 1fr; }
+}
 .situation-log-columns { display: grid; gap: .8rem; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
 .situation-log-columns h4 { margin: .35rem 0; }
 .map-inline-actions .inline-action { margin-top: 0; white-space: nowrap; }

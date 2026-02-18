@@ -1528,11 +1528,27 @@ function renderDashboard(dashboard = {}) {
   const formatSituationLog = (log) => {
     const status = LOG_STATUS_LABEL[String(log.status || 'nouveau')] || 'Nouveau';
     const at = new Date(log.event_time || log.created_at || Date.now()).toLocaleString();
-    return `<li><strong>${at}</strong> · <span class="badge neutral">${status}</span> · <span class="badge neutral">${formatLogScope(log)}</span><br>${log.danger_emoji || ''} <strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'Évènement')}</strong> · ${escapeHtml(log.description || '')}</li>`;
+    const scope = formatLogScope(log);
+    const icon = log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢';
+    return `<li><strong>${at}</strong> · <span class="badge neutral">${status}</span> · <span class="badge neutral">${scope}</span><br>${icon} <strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'Évènement')}</strong> · ${escapeHtml(log.description || '')}</li>`;
   };
 
   const openLogs = logs.filter((log) => String(log.status || '').toLowerCase() !== 'clos');
   const closedLogs = logs.filter((log) => String(log.status || '').toLowerCase() === 'clos');
+  const criticalLogs = logs.filter((log) => {
+    const level = normalizeLevel(log.danger_level || 'vert');
+    return level === 'orange' || level === 'rouge';
+  });
+
+  const latestTimestamp = logs
+    .map((log) => new Date(log.event_time || log.created_at || 0).getTime())
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .sort((a, b) => b - a)[0];
+
+  setText('situation-open-count', String(openLogs.length));
+  setText('situation-closed-count', String(closedLogs.length));
+  setText('situation-critical-count', String(criticalLogs.length));
+  setText('situation-last-update', latestTimestamp ? new Date(latestTimestamp).toLocaleTimeString() : '-');
 
   setHtml('latest-logs-open', openLogs.map(formatSituationLog).join('') || '<li>Aucune crise en cours.</li>');
   setHtml('latest-logs-closed', closedLogs.map(formatSituationLog).join('') || '<li>Aucune crise clôturée récente.</li>');
