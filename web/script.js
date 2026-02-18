@@ -331,13 +331,19 @@ function getRequestCacheKey(path, fetchOptions = {}) {
 }
 
 async function api(path, options = {}) {
-  const { logoutOn401 = true, omitAuth = false, ...fetchOptions } = options;
-  const cacheable = isCacheableRequest(path, fetchOptions);
+  const {
+    logoutOn401 = true,
+    omitAuth = false,
+    cacheTtlMs = API_CACHE_TTL_MS,
+    bypassCache = false,
+    ...fetchOptions
+  } = options;
+  const cacheable = !bypassCache && isCacheableRequest(path, fetchOptions);
   const cacheKey = getRequestCacheKey(path, fetchOptions);
 
   if (cacheable) {
     const cached = apiGetCache.get(cacheKey);
-    if (cached && (Date.now() - cached.timestamp) < API_CACHE_TTL_MS) {
+    if (cached && (Date.now() - cached.timestamp) < cacheTtlMs) {
       return clonePayload(cached.payload);
     }
     if (apiInFlight.has(cacheKey)) {
@@ -2579,7 +2585,7 @@ function logout() {
 
 function startAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
-  refreshTimer = setInterval(() => token && refreshAll(false), AUTO_REFRESH_MS);
+  refreshTimer = setInterval(() => token && refreshAll(true), AUTO_REFRESH_MS);
 }
 
 function startApiPanelAutoRefresh() {
@@ -2587,7 +2593,7 @@ function startApiPanelAutoRefresh() {
   apiPanelTimer = setInterval(() => {
     const activePanel = localStorage.getItem(STORAGE_KEYS.activePanel);
     if (!token || activePanel !== 'api-panel' || document.hidden) return;
-    loadApiInterconnections(false).catch((error) => {
+    loadApiInterconnections(true).catch((error) => {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
     });
   }, API_PANEL_REFRESH_MS);
@@ -2595,7 +2601,12 @@ function startApiPanelAutoRefresh() {
 
 async function loadHomeLiveStatus() {
   try {
-    const data = await api('/public/live', { logoutOn401: false, omitAuth: true });
+    const data = await api('/public/live', {
+      logoutOn401: false,
+      omitAuth: true,
+      cacheTtlMs: 0,
+      bypassCache: true,
+    });
     const dashboard = data?.dashboard || {};
     setRiskText('home-meteo-state', normalizeLevel(dashboard.vigilance || '-'), dashboard.vigilance || 'vert');
     setRiskText('home-river-state', normalizeLevel(dashboard.crues || '-'), dashboard.crues || 'vert');
