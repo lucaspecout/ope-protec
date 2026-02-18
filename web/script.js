@@ -656,7 +656,12 @@ function renderStations(stations = []) {
     return;
   }
 
-  const stationsWithPoints = stations.filter((s) => s.lat != null && s.lon != null);
+  const stationsWithPoints = stations
+    .map((s) => {
+      const coords = normalizeMapCoordinates(s.lat, s.lon);
+      return coords ? { ...s, ...coords } : null;
+    })
+    .filter(Boolean);
   mapStats.stations = stationsWithPoints.length;
   stationsWithPoints.forEach((s) => {
     const statusLevel = stationStatusLevel(s);
@@ -702,7 +707,8 @@ async function geocodeMunicipality(municipality) {
       const payload = await parseJsonResponse(response, url);
       const center = payload?.[0]?.centre?.coordinates;
       if (!Array.isArray(center) || center.length !== 2) continue;
-      const point = { lat: center[1], lon: center[0] };
+      const point = normalizeMapCoordinates(center[1], center[0]);
+      if (!point) continue;
       geocodeCache.set(key, point);
       return point;
     }
@@ -810,7 +816,9 @@ function renderResources() {
   if (!resourceLayer) return;
   resourceLayer.clearLayers();
   resources.forEach((r) => {
-    window.L.circleMarker([r.lat, r.lon], { radius: 7, color: '#fff', weight: 1.5, fillColor: r.active ? '#2f9e44' : '#f59f00', fillOpacity: 0.95 })
+    const coords = normalizeMapCoordinates(r.lat, r.lon);
+    if (!coords) return;
+    window.L.circleMarker([coords.lat, coords.lon], { radius: 7, color: '#fff', weight: 1.5, fillColor: r.active ? '#2f9e44' : '#f59f00', fillOpacity: 0.95 })
       .bindPopup(`<strong>${r.name}</strong><br>Type: ${r.type.replace('_', ' ')}<br>Adresse: ${r.address}<br>Activation: ${r.active ? 'oui' : 'non'}`)
       .addTo(resourceLayer);
   });
@@ -827,17 +835,25 @@ function tryLocalMapSearch(query = '') {
     if (point) return { ...point, label: `${municipality.name} (commune)` };
   }
   const resource = RESOURCE_POINTS.find((item) => `${item.name} ${item.address}`.toLowerCase().includes(needle));
-  if (resource) return { lat: resource.lat, lon: resource.lon, label: `${resource.name} (${resource.address})` };
+  if (resource) {
+    const coords = normalizeMapCoordinates(resource.lat, resource.lon);
+    if (coords) return { ...coords, label: `${resource.name} (${resource.address})` };
+  }
   const point = mapPoints.find((item) => String(item.name || '').toLowerCase().includes(needle));
-  if (point) return { lat: point.lat, lon: point.lon, label: `${point.icon || '📍'} ${point.name} (point opérationnel)` };
+  if (point) {
+    const coords = normalizeMapCoordinates(point.lat, point.lon);
+    if (coords) return { ...coords, label: `${point.icon || '📍'} ${point.name} (point opérationnel)` };
+  }
   return null;
 }
 
 function placeSearchResult(lat, lon, label) {
   if (!leafletMap || !searchLayer) return;
+  const coords = normalizeMapCoordinates(lat, lon);
+  if (!coords) return;
   searchLayer.clearLayers();
-  window.L.marker([lat, lon]).bindPopup(`Résultat: ${escapeHtml(label)}`).addTo(searchLayer).openPopup();
-  leafletMap.setView([lat, lon], 12);
+  window.L.marker([coords.lat, coords.lon]).bindPopup(`Résultat: ${escapeHtml(label)}`).addTo(searchLayer).openPopup();
+  leafletMap.setView([coords.lat, coords.lon], 12);
 }
 
 async function handleMapSearch() {
@@ -948,6 +964,32 @@ function trafficLevelColor(level) {
 
 function trafficLevelEmoji(level) {
   return ({ vert: '🟢', jaune: '🟡', orange: '🟠', rouge: '🔴', noir: '⚫' })[normalizeLevel(level)] || '⚪';
+}
+
+const ISERE_BOUNDS = {
+  latMin: 44.6,
+  latMax: 46.0,
+  lonMin: 4.2,
+  lonMax: 6.8,
+};
+
+function normalizeMapCoordinates(lat, lon) {
+  let safeLat = Number(lat);
+  let safeLon = Number(lon);
+  if (!Number.isFinite(safeLat) || !Number.isFinite(safeLon)) return null;
+
+  const inIsere = safeLat >= ISERE_BOUNDS.latMin && safeLat <= ISERE_BOUNDS.latMax
+    && safeLon >= ISERE_BOUNDS.lonMin && safeLon <= ISERE_BOUNDS.lonMax;
+  const inIsereIfSwapped = safeLon >= ISERE_BOUNDS.latMin && safeLon <= ISERE_BOUNDS.latMax
+    && safeLat >= ISERE_BOUNDS.lonMin && safeLat <= ISERE_BOUNDS.lonMax;
+
+  if (!inIsere && inIsereIfSwapped) [safeLat, safeLon] = [safeLon, safeLat];
+
+  if (safeLat < -90 || safeLat > 90 || safeLon < -180 || safeLon > 180) return null;
+  return {
+    lat: Number(safeLat.toFixed(6)),
+    lon: Number(safeLon.toFixed(6)),
+  };
 }
 
 function detectItinisereIcon(text = '') {
@@ -1110,7 +1152,13 @@ async function loadMapPoints() {
     setMapFeedback(`Points personnalisés indisponibles (API): ${sanitizeErrorMessage(error.message)}. Affichage du cache local (${loadedPoints.length}).`, true);
   }
 
-  mapPoints = loadedPoints;
+  mapPoints = loadedPoints
+    .map((point) => {
+      const coords = normalizeMapCoordinates(point.lat, point.lon);
+      if (!coords) return null;
+      return { ...point, lat: coords.lat, lon: coords.lon };
+    })
+    .filter(Boolean);
   renderCustomPoints(!usedCacheFallback);
   return { usedCacheFallback, count: loadedPoints.length };
 }
@@ -1177,7 +1225,8 @@ function renderMeteoAlerts(meteo = {}) {
     const detailsText = ['orange', 'rouge'].includes(level) && details.length
       ? `<br><span class="meteo-detail">${details.map((detail) => escapeHtml(detail)).join('<br>')}</span>`
       : '';
-    return `<li><strong>${escapeHtml(alert.phenomenon || '-')}</strong> · <span class="risk-${level}">${level}</span>${detailsText}</li>`;
+    const label = ({ vert: 'Vert', jaune: 'Jaune', orange: 'Orange', rouge: 'Rouge' })[level] || level;
+    return `<li><strong>${escapeHtml(alert.phenomenon || '-')}</strong> · <span class="meteo-alert-level ${level}">${label}</span>${detailsText}</li>`;
   };
   const section = (title, alerts) => `<li><strong>${title}</strong><ul>${alerts.map((alert) => alertDetailMarkup(alert)).join('') || '<li>Aucune alerte significative.</li>'}</ul></li>`;
   setHtml('meteo-alerts-list', `${section('En cours (J0)', current)}${section('Demain (J1)', tomorrow)}`);
