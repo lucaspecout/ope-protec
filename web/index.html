@@ -137,73 +137,31 @@
 
         <section id="situation-panel" class="panel view situation-panel">
           <div class="situation-toolbar">
-            <p class="muted">Tableau de bord opérationnel consolidé (Météo, crues, main courante).</p>
+            <div>
+              <h3>Situation opérationnelle consolidée</h3>
+              <p class="muted">Vue unique des signaux météo, hydrologiques et de la main courante.</p>
+            </div>
             <div class="situation-toolbar__actions">
               <span id="operations-perf" class="muted">Perf: -</span>
               <button id="situation-refresh-btn" type="button" class="ghost">Actualiser la situation</button>
-            </div>
-          </div>
-          <div class="situation-top-grid">
-            <article class="tile situation-tile">
-              <h3>Vigilance météo</h3>
-              <p id="vigilance" class="kpi-value">-</p>
-              <p class="muted">Source Météo-France</p>
-            </article>
-            <article class="tile situation-tile">
-              <h3>Niveau crues</h3>
-              <p id="crues" class="kpi-value">-</p>
-              <p class="muted">Source Vigicrues</p>
-            </article>
-            <article class="tile situation-tile">
-              <h3>Risque global</h3>
-              <p id="risk" class="kpi-value">-</p>
-              <p class="muted">Calcul consolidé</p>
-            </article>
-            <article class="tile situation-tile">
-              <h3>Communes en crise</h3>
-              <p id="crisis" class="kpi-value">0</p>
-              <p class="muted">PCS actif</p>
-            </article>
-          </div>
-
-          <div class="situation-middle-grid">
-            <article class="tile situation-summary">
-              <h3>Résumé opérationnel</h3>
-              <div class="situation-summary-grid">
-                <p><span>Évènements ouverts</span><strong id="situation-open-count">0</strong></p>
-                <p><span>Évènements clôturés</span><strong id="situation-closed-count">0</strong></p>
-                <p><span>Évènements critiques</span><strong id="situation-critical-count">0</strong></p>
-                <p><span>Dernière mise à jour</span><strong id="situation-last-update">-</strong></p>
-              </div>
-            </article>
-            <article class="tile situation-risks">
-              <h3>Risques en cours (orange / rouge)</h3>
-              <ul id="critical-risks-list" class="list compact"></ul>
-            </article>
-          </div>
-
-          <h3>Fil de situation</h3>
-          <div class="situation-log-columns">
-            <div>
-              <h4>Crises en cours</h4>
-              <ul id="latest-logs-open" class="list"></ul>
-            </div>
-            <div>
-              <h4>Crises clôturées</h4>
-              <ul id="latest-logs-closed" class="list"></ul>
             </div>
           </div>
           <div id="situation-content" class="situation-content"></div>
         </section>
 
         <section id="services-panel" class="panel view hidden" hidden>
-          <h3>Écosystème de données et services connectés (Isère)</h3>
+          <div class="panel-heading">
+            <h3>Services connectés</h3>
+            <p class="muted">Disponibilité des flux utiles à la cellule de crise en Isère et raccourcis vers les portails officiels.</p>
+          </div>
           <div class="services-grid">
             <article class="service-card">
-              <h4>Météo-France Vigilance</h4>
-              <p id="meteo-status">-</p>
+              <div class="service-card__head">
+                <h4>Météo-France Vigilance</h4>
+                <a href="https://vigilance.meteofrance.fr" target="_blank" rel="noreferrer">Ouvrir</a>
+              </div>
+              <p id="meteo-status" class="service-status">-</p>
               <p id="meteo-info" class="muted"></p>
-              <!-- Debut code vignette vigilance départementale  Météo-France -->
               <iframe
                 class="meteo-widget"
                 src="https://vigilance.meteofrance.fr/fr/widget-vigilance/vigilance-departement/38"
@@ -213,25 +171,66 @@
                 title="Vignette vigilance départementale Météo-France"
                 loading="lazy"
               ></iframe>
-              <!-- FIN -->
             </article>
-            <article class="service-card"><h4>Vigicrues</h4><p id="vigicrues-status">-</p><p id="vigicrues-info" class="muted"></p></article>
-            <article class="service-card"><h4>Préfecture de l'Isère</h4><p>Coordination institutionnelle</p><a href="https://www.isere.gouv.fr" target="_blank" rel="noreferrer">isère.gouv.fr</a></article>
-            <article class="service-card"><h4>Vigicrues Flash</h4><p>Veille pluie-inondation</p><a href="https://www.vigicrues.gouv.fr" target="_blank" rel="noreferrer">vigicrues.gouv.fr</a></article>
-            <article class="service-card"><h4>GEORISQUES</h4><p id="georisques-status">-</p><p id="georisques-info" class="muted"></p><a href="https://www.georisques.gouv.fr" target="_blank" rel="noreferrer">georisques.gouv.fr</a></article>
-            <article class="service-card"><h4>Info route Isère</h4><p id="itinisere-status">-</p><a href="https://www.itinisere.fr" target="_blank" rel="noreferrer">itinisere.fr</a></article>
-            <article class="service-card"><h4>Bison Futé</h4><p id="bison-status">-</p><p id="bison-info" class="muted"></p><a href="https://www.bison-fute.gouv.fr" target="_blank" rel="noreferrer">bison-fute.gouv.fr</a></article>
+            <article class="service-card">
+              <div class="service-card__head">
+                <h4>Vigicrues</h4>
+                <a href="https://www.vigicrues.gouv.fr" target="_blank" rel="noreferrer">Ouvrir</a>
+              </div>
+              <p id="vigicrues-status" class="service-status">-</p>
+              <p id="vigicrues-info" class="muted"></p>
+            </article>
+            <article class="service-card">
+              <div class="service-card__head">
+                <h4>Géorisques</h4>
+                <a href="https://www.georisques.gouv.fr" target="_blank" rel="noreferrer">Ouvrir</a>
+              </div>
+              <p id="georisques-status" class="service-status">-</p>
+              <p id="georisques-info" class="muted"></p>
+            </article>
+            <article class="service-card">
+              <div class="service-card__head">
+                <h4>Info route Isère</h4>
+                <a href="https://www.itinisere.fr" target="_blank" rel="noreferrer">Ouvrir</a>
+              </div>
+              <p id="itinisere-status" class="service-status">-</p>
+              <p class="muted">État des perturbations et routes impactées.</p>
+            </article>
+            <article class="service-card">
+              <div class="service-card__head">
+                <h4>Bison Futé</h4>
+                <a href="https://www.bison-fute.gouv.fr" target="_blank" rel="noreferrer">Ouvrir</a>
+              </div>
+              <p id="bison-status" class="service-status">-</p>
+              <p id="bison-info" class="muted"></p>
+            </article>
+            <article class="service-card">
+              <div class="service-card__head">
+                <h4>Préfecture de l'Isère</h4>
+                <a href="https://www.isere.gouv.fr" target="_blank" rel="noreferrer">Ouvrir</a>
+              </div>
+              <p class="service-status">Portail institutionnel</p>
+              <p class="muted">Communication officielle, arrêtés et points de situation.</p>
+            </article>
           </div>
-          <h4>Alertes météo Isère (en cours / demain)</h4>
-          <ul id="meteo-alerts-list" class="list"></ul>
-          <h4>Stations Vigicrues prioritaires</h4>
-          <ul id="stations-list" class="list"></ul>
+          <div class="services-lists">
+            <article class="tile">
+              <h4>Alertes météo Isère (en cours / demain)</h4>
+              <ul id="meteo-alerts-list" class="list"></ul>
+            </article>
+            <article class="tile">
+              <h4>Stations Vigicrues prioritaires</h4>
+              <ul id="stations-list" class="list"></ul>
+            </article>
+          </div>
         </section>
 
         <section id="georisques-panel" class="panel view hidden" hidden>
-          <h3>Page Géorisques · Tableau d'aide à la décision Isère</h3>
-          <p class="muted">Vue opérationnelle des aléas les plus exploitables pour une cellule de crise: sismicité, inondation, mouvements de terrain, radon et PPR.</p>
-          <div class="kpis">
+          <div class="panel-heading">
+            <h3>Page Géorisques</h3>
+            <p class="muted">Tableau d'aide à la décision : exposition sismique, inondation, mouvements de terrain, radon et PPR des communes suivies.</p>
+          </div>
+          <div class="kpis georisques-kpis">
             <article class="tile"><h3>Statut service</h3><p id="georisques-page-status">-</p></article>
             <article class="tile"><h3>Sismicité max</h3><p id="georisques-page-seismic">-</p></article>
             <article class="tile"><h3>Docs inondation (AZI)</h3><p id="georisques-page-flood-docs">0</p></article>
@@ -239,16 +238,28 @@
             <article class="tile"><h3>Mouvements de terrain</h3><p id="georisques-page-ground-movements">0</p></article>
             <article class="tile"><h3>Communes radon ≥ moyen</h3><p id="georisques-page-radon-alert">0</p></article>
           </div>
-          <p id="georisques-page-source" class="muted">Source: -</p>
-          <p id="georisques-page-debug" class="muted"></p>
-          <h4>Répartition des mouvements de terrain (type)</h4>
-          <ul id="georisques-movement-types-list" class="list compact"></ul>
-          <h4>Derniers mouvements de terrain signalés</h4>
-          <ul id="georisques-recent-movements-list" class="list"></ul>
-          <h4>Communes suivies · synthèse multi-risques</h4>
-          <ul id="georisques-communes-list" class="list"></ul>
-          <h4>Documents inondation détaillés (AZI)</h4>
-          <ul id="georisques-documents-list" class="list"></ul>
+          <article class="tile georisques-meta">
+            <p id="georisques-page-source" class="muted">Source: -</p>
+            <p id="georisques-page-debug" class="muted"></p>
+          </article>
+          <div class="georisques-lists">
+            <article class="tile">
+              <h4>Répartition des mouvements de terrain (type)</h4>
+              <ul id="georisques-movement-types-list" class="list compact"></ul>
+            </article>
+            <article class="tile">
+              <h4>Derniers mouvements de terrain signalés</h4>
+              <ul id="georisques-recent-movements-list" class="list"></ul>
+            </article>
+          </div>
+          <article class="tile">
+            <h4>Communes suivies · synthèse multi-risques</h4>
+            <ul id="georisques-communes-list" class="list"></ul>
+          </article>
+          <article class="tile">
+            <h4>Documents inondation détaillés (AZI)</h4>
+            <ul id="georisques-documents-list" class="list"></ul>
+          </article>
         </section>
 
         <section id="api-panel" class="panel view hidden" hidden>
