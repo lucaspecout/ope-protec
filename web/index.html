@@ -136,56 +136,11 @@
         </header>
 
         <section id="situation-panel" class="panel view situation-panel">
-          <div class="situation-top-grid">
-            <article class="tile situation-tile">
-              <h3>Vigilance météo</h3>
-              <p id="vigilance">-</p>
-              <p class="muted">Source Météo-France</p>
-            </article>
-            <article class="tile situation-tile">
-              <h3>Niveau crues</h3>
-              <p id="crues">-</p>
-              <p class="muted">Source Vigicrues</p>
-            </article>
-            <article class="tile situation-tile">
-              <h3>Risque global</h3>
-              <p id="risk">-</p>
-              <p class="muted">Calcul consolidé</p>
-            </article>
-            <article class="tile situation-tile">
-              <h3>Communes en crise</h3>
-              <p id="crisis">0</p>
-              <p class="muted">PCS actif</p>
-            </article>
+          <div class="situation-toolbar">
+            <p class="muted">Tableau de bord opérationnel consolidé (Météo, crues, main courante).</p>
+            <button id="situation-refresh-btn" type="button" class="ghost">Actualiser la situation</button>
           </div>
-
-          <div class="situation-middle-grid">
-            <article class="tile situation-summary">
-              <h3>Résumé opérationnel</h3>
-              <div class="situation-summary-grid">
-                <p><span>Évènements ouverts</span><strong id="situation-open-count">0</strong></p>
-                <p><span>Évènements clôturés</span><strong id="situation-closed-count">0</strong></p>
-                <p><span>Évènements critiques</span><strong id="situation-critical-count">0</strong></p>
-                <p><span>Dernière mise à jour</span><strong id="situation-last-update">-</strong></p>
-              </div>
-            </article>
-            <article class="tile situation-risks">
-              <h3>Risques en cours (orange / rouge)</h3>
-              <ul id="critical-risks-list" class="list compact"></ul>
-            </article>
-          </div>
-
-          <h3>Fil de situation</h3>
-          <div class="situation-log-columns">
-            <div>
-              <h4>Crises en cours</h4>
-              <ul id="latest-logs-open" class="list"></ul>
-            </div>
-            <div>
-              <h4>Crises clôturées</h4>
-              <ul id="latest-logs-closed" class="list"></ul>
-            </div>
-          </div>
+          <div id="situation-content" class="situation-content"></div>
         </section>
 
         <section id="services-panel" class="panel view hidden" hidden>
