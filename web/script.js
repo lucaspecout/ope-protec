@@ -2021,7 +2021,6 @@ async function refreshAll(forceRefresh = false) {
       await loadMapPoints();
       await renderTrafficOnMap();
       renderResources();
-      fitMapToData();
       document.getElementById('dashboard-error').textContent = '';
       return;
     } catch (bootstrapError) {
@@ -2045,7 +2044,6 @@ async function refreshAll(forceRefresh = false) {
       const optionalFailures = failures.filter(({ config }) => config.optional);
 
       renderResources();
-      fitMapToData();
 
       if (!blockingFailures.length) {
         const errorTarget = document.getElementById('dashboard-error');
