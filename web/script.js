@@ -1520,10 +1520,8 @@ function renderDashboard(dashboard = {}) {
   setRiskText('vigilance', normalizeLevel(dashboard.vigilance), dashboard.vigilance);
   setRiskText('crues', normalizeLevel(dashboard.crues), dashboard.crues);
   setRiskText('risk', normalizeLevel(dashboard.global_risk), dashboard.global_risk);
-
-  const riskNode = document.getElementById('risk');
-  if (riskNode) riskNode.className = normalizeLevel(dashboard.global_risk);
-  setText('crisis', String(dashboard.communes_crise || 0));
+  document.getElementById('risk').className = normalizeLevel(dashboard.global_risk);
+  document.getElementById('crisis').textContent = String(dashboard.communes_crise || 0);
 
   const logs = Array.isArray(dashboard.latest_logs) ? dashboard.latest_logs : [];
   const formatSituationLog = (log) => {
@@ -1535,16 +1533,8 @@ function renderDashboard(dashboard = {}) {
   const openLogs = logs.filter((log) => String(log.status || '').toLowerCase() !== 'clos');
   const closedLogs = logs.filter((log) => String(log.status || '').toLowerCase() === 'clos');
 
-  const openMarkup = openLogs.map(formatSituationLog).join('') || '<li>Aucune crise en cours.</li>';
-  const closedMarkup = closedLogs.map(formatSituationLog).join('') || '<li>Aucune crise clôturée récente.</li>';
-
-  if (document.getElementById('latest-logs-open') || document.getElementById('latest-logs-closed')) {
-    setHtml('latest-logs-open', openMarkup);
-    setHtml('latest-logs-closed', closedMarkup);
-    return;
-  }
-
-  setHtml('latest-logs', `${openMarkup}${closedMarkup}`);
+  setHtml('latest-logs-open', openLogs.map(formatSituationLog).join('') || '<li>Aucune crise en cours.</li>');
+  setHtml('latest-logs-closed', closedLogs.map(formatSituationLog).join('') || '<li>Aucune crise clôturée récente.</li>');
 }
 
 async function loadDashboard() {
