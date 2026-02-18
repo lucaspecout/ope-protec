@@ -60,6 +60,8 @@ let mapStats = { stations: 0, pcs: 0, resources: 0, custom: 0, traffic: 0 };
 let mapControlsCollapsed = false;
 let cachedCrisisPoints = [];
 let cachedLogs = [];
+let cachedDashboardSnapshot = {};
+let cachedExternalRisksSnapshot = {};
 
 const ISERE_BOUNDARY_STYLE = { color: '#163a87', weight: 2, fillColor: '#63c27d', fillOpacity: 0.2 };
 const TRAFFIC_COMMUNES = ['Grenoble', 'Voiron', 'Vienne', 'Bourgoin-Jallieu', 'Pont-de-Claix', 'Meylan', 'Échirolles', 'L\'Isle-d\'Abeau', 'Saint-Martin-d\'Hères', 'La Tour-du-Pin', 'Rives', 'Sassenage', 'Crolles', 'Tullins'];
@@ -1497,13 +1499,31 @@ async function submitMunicipalityUploadForm(form, municipalityId) {
   if (refreshed) await openMunicipalityDetailsModal(refreshed);
 }
 
-function renderCriticalRisks(meteo = {}, externalRisks = {}) {
+function safeDateToLocale(value, options = {}) {
+  const timestamp = new Date(value || 0);
+  return Number.isFinite(timestamp.getTime()) && timestamp.getTime() > 0
+    ? timestamp.toLocaleString('fr-FR', options)
+    : '-';
+}
+
+function buildSituationLogMarkup(log = {}) {
+  const status = LOG_STATUS_LABEL[String(log.status || 'nouveau')] || 'Nouveau';
+  const at = safeDateToLocale(log.event_time || log.created_at || Date.now());
+  const scope = formatLogScope(log);
+  const icon = log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢';
+  return `<li><strong>${at}</strong> · <span class="badge neutral">${status}</span> · <span class="badge neutral">${scope}</span><br>${icon} <strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'Évènement')}</strong> · ${escapeHtml(log.description || '')}</li>`;
+}
+
+function buildCriticalRisksMarkup(dashboard = {}, externalRisks = {}) {
+  const risks = [];
+  const meteo = externalRisks?.meteo_france || {};
   const criticalLevels = new Set(['orange', 'rouge']);
   const currentAlerts = (meteo.current_alerts || []).filter((alert) => criticalLevels.has(normalizeLevel(alert.level)));
-  const meteoMarkup = currentAlerts.map((alert) => {
+
+  currentAlerts.forEach((alert) => {
     const level = normalizeLevel(alert.level);
     const details = (alert.details || []).slice(0, 1).join(' ');
-    return `<li><strong>${escapeHtml(alert.phenomenon || 'Phénomène')}</strong> · <span class="risk-${level}">${level}</span>${details ? `<br>${escapeHtml(details)}` : ''}</li>`;
+    risks.push(`<li><strong>${escapeHtml(alert.phenomenon || 'Phénomène météo')}</strong> · <span class="risk-${level}">${level}</span>${details ? `<br>${escapeHtml(details)}` : ''}</li>`);
   });
 
   const itinisereEvents = externalRisks?.itinisere?.events || [];
@@ -1512,73 +1532,113 @@ function renderCriticalRisks(meteo = {}, externalRisks = {}) {
     ? { ...externalRisks.georisques.data, ...externalRisks.georisques }
     : (externalRisks?.georisques || {});
 
-  const externalMarkup = [
-    `<li><strong>Itinisère</strong> · ${escapeHtml(externalRisks?.itinisere?.status || 'inconnu')}<br>${itinisereEvents.length} activité(s) routière(s) en cours.</li>`,
-    `<li><strong>Bison Futé</strong> · Départs ${escapeHtml(bisonIsere.departure || 'inconnu')} / Retours ${escapeHtml(bisonIsere.return || 'inconnu')}<br>Tendance trafic Isère du jour.</li>`,
-    `<li><strong>Géorisques</strong> · ${escapeHtml(georisques.status || 'inconnu')}<br>Sismicité ${escapeHtml(georisques.highest_seismic_zone_label || 'inconnue')} · ${Number(georisques.flood_documents_total ?? 0)} document(s) inondation.</li>`,
+  risks.push(`<li><strong>Itinisère</strong> · ${(itinisereEvents || []).length} événement(s) actif(s) · Statut ${escapeHtml(externalRisks?.itinisere?.status || 'inconnu')}</li>`);
+  risks.push(`<li><strong>Bison Futé</strong> · Départs ${escapeHtml(bisonIsere.departure || 'inconnu')} · Retours ${escapeHtml(bisonIsere.return || 'inconnu')}</li>`);
+  risks.push(`<li><strong>Géorisques</strong> · Sismicité ${escapeHtml(georisques.highest_seismic_zone_label || 'inconnue')} · ${Number(georisques.flood_documents_total ?? 0)} document(s) inondation</li>`);
+
+  const fromDashboard = Array.isArray(dashboard?.latest_logs) ? dashboard.latest_logs : [];
+  const criticalLogs = fromDashboard.filter((log) => ['orange', 'rouge'].includes(normalizeLevel(log.danger_level)));
+  if (criticalLogs.length) {
+    risks.unshift(`<li><strong>Main courante</strong> · ${criticalLogs.length} évènement(s) critique(s) orange/rouge.</li>`);
+  }
+
+  return risks.join('') || '<li>Aucun risque critique détecté.</li>';
+}
+
+function renderSituationOverview() {
+  const target = document.getElementById('situation-content');
+  if (!target) return;
+
+  const dashboard = cachedDashboardSnapshot && Object.keys(cachedDashboardSnapshot).length
+    ? cachedDashboardSnapshot
+    : (readSnapshot(STORAGE_KEYS.dashboardSnapshot) || {});
+  const externalRisks = cachedExternalRisksSnapshot && Object.keys(cachedExternalRisksSnapshot).length
+    ? cachedExternalRisksSnapshot
+    : (readSnapshot(STORAGE_KEYS.externalRisksSnapshot) || {});
+
+  const vigilance = normalizeLevel(dashboard.vigilance || externalRisks?.meteo_france?.level || 'vert');
+  const crues = normalizeLevel(dashboard.crues || externalRisks?.vigicrues?.water_alert_level || 'vert');
+  const globalRisk = normalizeLevel(dashboard.global_risk || vigilance);
+  const crisisCount = Number(dashboard.communes_crise ?? 0);
+
+  const logs = Array.isArray(dashboard.latest_logs) ? dashboard.latest_logs : (Array.isArray(cachedLogs) ? cachedLogs.slice(0, 8) : []);
+  const openLogs = logs.filter((log) => String(log.status || '').toLowerCase() !== 'clos');
+  const closedLogs = logs.filter((log) => String(log.status || '').toLowerCase() === 'clos');
+  const criticalLogs = logs.filter((log) => ['orange', 'rouge'].includes(normalizeLevel(log.danger_level || 'vert')));
+  const lastUpdated = safeDateToLocale(
+    dashboard.updated_at
+    || logs.map((log) => new Date(log.event_time || log.created_at || 0).getTime()).filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => b - a)[0]
+    || Date.now(),
+    { hour: '2-digit', minute: '2-digit', second: '2-digit' },
+  );
+
+  const kpiCards = [
+    { label: 'Vigilance météo', value: vigilance, info: 'Source Météo-France', css: normalizeLevel(vigilance) },
+    { label: 'Niveau crues', value: crues, info: 'Source Vigicrues', css: normalizeLevel(crues) },
+    { label: 'Risque global', value: globalRisk, info: 'Calcul consolidé', css: normalizeLevel(globalRisk) },
+    { label: 'Communes en crise', value: String(crisisCount), info: 'PCS actif', css: crisisCount > 0 ? 'rouge' : 'vert' },
   ];
 
-  const markup = [...meteoMarkup, ...externalMarkup].join('') || '<li>Aucun risque orange ou rouge en cours.</li>';
-  setHtml('critical-risks-list', markup);
+  setHtml('situation-content', `
+    <div class="situation-top-grid">
+      ${kpiCards.map((card) => `<article class="tile situation-tile"><h3>${card.label}</h3><p class="kpi-value ${card.css}">${escapeHtml(card.value)}</p><p class="muted">${card.info}</p></article>`).join('')}
+    </div>
+
+    <div class="situation-middle-grid">
+      <article class="tile situation-summary">
+        <h3>Résumé opérationnel</h3>
+        <div class="situation-summary-grid">
+          <p><span>Évènements ouverts</span><strong>${openLogs.length}</strong></p>
+          <p><span>Évènements clôturés</span><strong>${closedLogs.length}</strong></p>
+          <p><span>Évènements critiques</span><strong>${criticalLogs.length}</strong></p>
+          <p><span>Dernière mise à jour</span><strong>${lastUpdated}</strong></p>
+        </div>
+      </article>
+      <article class="tile situation-risks">
+        <h3>Risques en cours (orange / rouge)</h3>
+        <ul class="list compact">${buildCriticalRisksMarkup(dashboard, externalRisks)}</ul>
+      </article>
+    </div>
+
+    <h3>Fil de situation</h3>
+    <div class="situation-log-columns">
+      <div>
+        <h4>Crises en cours</h4>
+        <ul class="list">${openLogs.slice(0, 8).map((log) => buildSituationLogMarkup(log)).join('') || '<li>Aucune crise en cours.</li>'}</ul>
+      </div>
+      <div>
+        <h4>Crises clôturées</h4>
+        <ul class="list">${closedLogs.slice(0, 8).map((log) => buildSituationLogMarkup(log)).join('') || '<li>Aucune crise clôturée récente.</li>'}</ul>
+      </div>
+    </div>
+  `);
 }
 
 function renderDashboard(dashboard = {}) {
-  setRiskText('vigilance', normalizeLevel(dashboard.vigilance), dashboard.vigilance);
-  setRiskText('crues', normalizeLevel(dashboard.crues), dashboard.crues);
-  setRiskText('risk', normalizeLevel(dashboard.global_risk), dashboard.global_risk);
-  const riskNode = document.getElementById('risk');
-  if (riskNode) riskNode.className = normalizeLevel(dashboard.global_risk);
-  setText('crisis', String(dashboard.communes_crise || 0));
-
-  const logs = Array.isArray(dashboard.latest_logs) ? dashboard.latest_logs : [];
-  const formatSituationLog = (log) => {
-    const status = LOG_STATUS_LABEL[String(log.status || 'nouveau')] || 'Nouveau';
-    const at = new Date(log.event_time || log.created_at || Date.now()).toLocaleString();
-    const scope = formatLogScope(log);
-    const icon = log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢';
-    return `<li><strong>${at}</strong> · <span class="badge neutral">${status}</span> · <span class="badge neutral">${scope}</span><br>${icon} <strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'Évènement')}</strong> · ${escapeHtml(log.description || '')}</li>`;
-  };
-
-  const openLogs = logs.filter((log) => String(log.status || '').toLowerCase() !== 'clos');
-  const closedLogs = logs.filter((log) => String(log.status || '').toLowerCase() === 'clos');
-  const criticalLogs = logs.filter((log) => {
-    const level = normalizeLevel(log.danger_level || 'vert');
-    return level === 'orange' || level === 'rouge';
-  });
-
-  const latestTimestamp = logs
-    .map((log) => new Date(log.event_time || log.created_at || 0).getTime())
-    .filter((value) => Number.isFinite(value) && value > 0)
-    .sort((a, b) => b - a)[0];
-
-  setText('situation-open-count', String(openLogs.length));
-  setText('situation-closed-count', String(closedLogs.length));
-  setText('situation-critical-count', String(criticalLogs.length));
-  setText('situation-last-update', latestTimestamp ? new Date(latestTimestamp).toLocaleTimeString() : '-');
-
-  setHtml('latest-logs-open', openLogs.map(formatSituationLog).join('') || '<li>Aucune crise en cours.</li>');
-  setHtml('latest-logs-closed', closedLogs.map(formatSituationLog).join('') || '<li>Aucune crise clôturée récente.</li>');
+  cachedDashboardSnapshot = dashboard && typeof dashboard === 'object' ? dashboard : {};
+  renderSituationOverview();
 }
 
 async function loadDashboard() {
   const cached = readSnapshot(STORAGE_KEYS.dashboardSnapshot);
-  if (cached) {
-    try {
-      renderDashboard(cached);
-    } catch (_) {
-      // continue with live payload
-    }
-  }
-  const dashboard = await api('/dashboard');
+  if (cached) renderDashboard(cached);
+  else renderSituationOverview();
+
   try {
+    const dashboard = await api('/dashboard');
     renderDashboard(dashboard);
-  } catch (_) {
-    return;
+    saveSnapshot(STORAGE_KEYS.dashboardSnapshot, dashboard);
+  } catch (error) {
+    if (cached) {
+      document.getElementById('dashboard-error').textContent = `tableau de bord (cache): ${sanitizeErrorMessage(error.message)}`;
+      return;
+    }
+    throw error;
   }
-  saveSnapshot(STORAGE_KEYS.dashboardSnapshot, dashboard);
 }
 
 function renderExternalRisks(data = {}) {
+  cachedExternalRisksSnapshot = data && typeof data === 'object' ? data : {};
   const meteo = data?.meteo_france || {};
   const vigicrues = data?.vigicrues || {};
   const itinisere = data?.itinisere || {};
@@ -1598,7 +1658,6 @@ function renderExternalRisks(data = {}) {
   setRiskText('georisques-status', `${georisques.status || 'inconnu'} · sismicité ${georisques.highest_seismic_zone_label || 'inconnue'}`, georisques.status === 'online' ? 'vert' : 'jaune');
   setText('georisques-info', `${georisques.flood_documents_total ?? 0} AZI · ${georisques.ppr_total ?? 0} PPR · ${georisques.ground_movements_total ?? 0} mouvements`);
   renderGeorisquesDetails(georisques);
-  renderCriticalRisks(meteo, data);
   renderMeteoAlerts(meteo);
   renderItinisereEvents(itinisere.events || []);
   setText('meteo-level', normalizeLevel(meteo.level || 'vert'));
@@ -1611,6 +1670,7 @@ function renderExternalRisks(data = {}) {
   setText('map-seismic-level', georisques.highest_seismic_zone_label || 'inconnue');
   setText('map-flood-docs', String(georisques.flood_documents_total ?? 0));
   renderStations(vigicrues.stations || []);
+  renderSituationOverview();
 }
 
 async function loadExternalRisks() {
@@ -1771,6 +1831,7 @@ async function loadLogs() {
   const logs = await api('/logs');
   cachedLogs = Array.isArray(logs) ? logs : [];
   renderLogsList();
+  renderSituationOverview();
 }
 
 async function exportLogsCsv() {
