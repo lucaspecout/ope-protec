@@ -1,8 +1,9 @@
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import re
 import secrets
-from threading import Thread
+from threading import Lock, Thread
 from time import sleep
 from typing import Callable
 
@@ -545,33 +546,46 @@ def build_dashboard_payload(db: Session, user: User) -> dict:
 
 def build_external_risks_payload(refresh: bool = False) -> dict:
     errors: dict[str, str] = {}
+    errors_lock = Lock()
 
     def safe_fetch(key: str, fetcher: Callable[[], dict], fallback: dict) -> dict:
         try:
             return fetcher()
         except Exception as exc:
-            errors[key] = str(exc)
+            with errors_lock:
+                errors[key] = str(exc)
             payload = dict(fallback)
             payload.setdefault("status", "unavailable")
             payload.setdefault("error", str(exc))
             payload.setdefault("updated_at", utc_timestamp())
             return payload
 
-    meteo = safe_fetch("meteo_france", lambda: fetch_meteo_france_isere(force_refresh=refresh), {"level": "vert", "title": "Météo-France indisponible"})
-    vigicrues = safe_fetch("vigicrues", lambda: fetch_vigicrues_isere(force_refresh=refresh), {"level": "vert", "stations": [], "alerts": []})
-    itinisere = safe_fetch("itinisere", lambda: fetch_itinisere_disruptions(force_refresh=refresh), {"status": "degraded", "events": [], "events_total": 0})
-    bison_fute = safe_fetch("bison_fute", lambda: fetch_bison_fute_traffic(force_refresh=refresh), {"status": "degraded", "alerts": []})
-    georisques = safe_fetch("georisques", lambda: fetch_georisques_isere_summary(force_refresh=refresh), {"status": "degraded", "details": []})
-    prefecture = safe_fetch("prefecture_isere", lambda: fetch_prefecture_isere_news(force_refresh=refresh), {"status": "degraded", "articles": []})
+    fetch_jobs: dict[str, tuple[Callable[[], dict], dict]] = {
+        "meteo_france": (lambda: fetch_meteo_france_isere(force_refresh=refresh), {"level": "vert", "title": "Météo-France indisponible"}),
+        "vigicrues": (lambda: fetch_vigicrues_isere(force_refresh=refresh), {"level": "vert", "stations": [], "alerts": []}),
+        "itinisere": (lambda: fetch_itinisere_disruptions(force_refresh=refresh), {"status": "degraded", "events": [], "events_total": 0}),
+        "bison_fute": (lambda: fetch_bison_fute_traffic(force_refresh=refresh), {"status": "degraded", "alerts": []}),
+        "georisques": (lambda: fetch_georisques_isere_summary(force_refresh=refresh), {"status": "degraded", "details": []}),
+        "prefecture_isere": (lambda: fetch_prefecture_isere_news(force_refresh=refresh), {"status": "degraded", "articles": []}),
+    }
+
+    results: dict[str, dict] = {}
+    with ThreadPoolExecutor(max_workers=len(fetch_jobs)) as executor:
+        future_map = {
+            key: executor.submit(safe_fetch, key, fetcher, fallback)
+            for key, (fetcher, fallback) in fetch_jobs.items()
+        }
+        for key, future in future_map.items():
+            results[key] = future.result()
 
     payload = {
         "updated_at": utc_timestamp(),
-        "meteo_france": meteo,
-        "vigicrues": vigicrues,
-        "itinisere": itinisere,
-        "bison_fute": bison_fute,
-        "georisques": georisques,
-        "prefecture_isere": prefecture,
+        "meteo_france": results["meteo_france"],
+        "vigicrues": results["vigicrues"],
+        "itinisere": results["itinisere"],
+        "bison_fute": results["bison_fute"],
+        "georisques": results["georisques"],
+        "prefecture_isere": results["prefecture_isere"],
     }
     if errors:
         payload["errors"] = errors
