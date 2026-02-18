@@ -29,6 +29,8 @@ let refreshTimer = null;
 let liveEventsTimer = null;
 let homeLiveTimer = null;
 let apiPanelTimer = null;
+let apiResyncTimer = null;
+let lastApiResyncAt = null;
 const apiGetCache = new Map();
 const apiInFlight = new Map();
 
@@ -265,6 +267,24 @@ function sanitizeErrorMessage(message) {
     return "L'API renvoie une page HTML au lieu d'un JSON. Vérifiez que le backend tourne bien sur le même hôte (docker compose up -d).";
   }
   return normalized;
+}
+
+
+function formatElapsedSince(timestamp) {
+  if (!timestamp) return 'inconnue';
+  const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return 'inconnue';
+  const elapsed = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+  if (elapsed < 60) return `il y a ${elapsed}s`;
+  const minutes = Math.floor(elapsed / 60);
+  if (minutes < 60) return `il y a ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return `il y a ${hours}h${remainingMinutes ? ` ${remainingMinutes}min` : ''}`;
+}
+
+function renderApiResyncClock() {
+  setText('api-resync-ago', formatElapsedSince(lastApiResyncAt));
 }
 
 function normalizeApiErrorMessage(payload, status) {
@@ -1751,6 +1771,8 @@ function renderApiInterconnections(data = {}) {
     .map(({ label, payload }) => `${label}: ${serviceErrorLabel(payload)}`);
 
   setText('api-updated-at', data.updated_at ? new Date(data.updated_at).toLocaleString() : 'inconnue');
+  lastApiResyncAt = data.updated_at || new Date().toISOString();
+  renderApiResyncClock();
   setText('api-error-banner', activeErrors.join(' · ') || 'Aucune erreur active sur les interconnexions.');
   setHtml('api-service-grid', cards || '<p>Aucun service disponible.</p>');
   setHtml('api-raw-list', rawBlocks || '<p>Aucun retour JSON disponible.</p>');
@@ -2583,6 +2605,7 @@ function logout() {
   if (refreshTimer) clearInterval(refreshTimer);
   if (liveEventsTimer) clearInterval(liveEventsTimer);
   if (apiPanelTimer) clearInterval(apiPanelTimer);
+  if (apiResyncTimer) clearInterval(apiResyncTimer);
   showHome();
 }
 
@@ -2627,6 +2650,12 @@ function startLiveEventsRefresh() {
 
 function startApiPanelAutoRefresh() {
   if (apiPanelTimer) clearInterval(apiPanelTimer);
+  if (apiResyncTimer) clearInterval(apiResyncTimer);
+  apiResyncTimer = setInterval(() => {
+    const activePanel = localStorage.getItem(STORAGE_KEYS.activePanel);
+    if (activePanel === 'api-panel') renderApiResyncClock();
+  }, 1000);
+
   apiPanelTimer = setInterval(() => {
     const activePanel = localStorage.getItem(STORAGE_KEYS.activePanel);
     if (!token || activePanel !== 'api-panel' || document.hidden) return;
