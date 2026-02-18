@@ -822,8 +822,14 @@ function setText(id, value) {
 }
 
 function setHtml(id, value) {
-  const node = document.getElementById(id);
-  if (node) node.innerHTML = value;
+  try {
+    const node = document.getElementById(id);
+    if (!node) return false;
+    node.innerHTML = value;
+    return true;
+  } catch (_) {
+    return false;
+  }
 }
 
 function formatApiJson(payload) {
@@ -1556,9 +1562,19 @@ function renderDashboard(dashboard = {}) {
 
 async function loadDashboard() {
   const cached = readSnapshot(STORAGE_KEYS.dashboardSnapshot);
-  if (cached) renderDashboard(cached);
+  if (cached) {
+    try {
+      renderDashboard(cached);
+    } catch (_) {
+      // continue with live payload
+    }
+  }
   const dashboard = await api('/dashboard');
-  renderDashboard(dashboard);
+  try {
+    renderDashboard(dashboard);
+  } catch (_) {
+    return;
+  }
   saveSnapshot(STORAGE_KEYS.dashboardSnapshot, dashboard);
 }
 
