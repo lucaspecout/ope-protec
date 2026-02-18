@@ -48,6 +48,7 @@ from .services import (
     fetch_isere_boundary_geojson,
     fetch_meteo_france_isere,
     fetch_itinisere_disruptions,
+    fetch_prefecture_isere_news,
     fetch_vigicrues_isere,
     generate_pdf_report,
     vigicrues_geojson_from_stations,
@@ -303,6 +304,7 @@ def public_live_status(db: Session = Depends(get_db)):
     itinisere = fetch_itinisere_disruptions(limit=8)
     bison_fute = fetch_bison_fute_traffic()
     georisques = fetch_georisques_isere_summary()
+    prefecture = fetch_prefecture_isere_news(limit=4)
     weather_situation = [
         {
             "label": alert.get("phenomenon", "Risque météo"),
@@ -337,6 +339,7 @@ def public_live_status(db: Session = Depends(get_db)):
         },
         "bison_fute": bison_fute,
         "georisques": georisques,
+        "prefecture_isere": prefecture,
     }
 
 
@@ -546,6 +549,7 @@ def build_external_risks_payload(refresh: bool = False) -> dict:
     itinisere = fetch_itinisere_disruptions(force_refresh=refresh)
     bison_fute = fetch_bison_fute_traffic(force_refresh=refresh)
     georisques = fetch_georisques_isere_summary(force_refresh=refresh)
+    prefecture = fetch_prefecture_isere_news(force_refresh=refresh)
     return {
         "updated_at": utc_timestamp(),
         "meteo_france": meteo,
@@ -553,6 +557,7 @@ def build_external_risks_payload(refresh: bool = False) -> dict:
         "itinisere": itinisere,
         "bison_fute": bison_fute,
         "georisques": georisques,
+        "prefecture_isere": prefecture,
     }
 
 
@@ -627,6 +632,7 @@ def supervision_overview(
     itinisere = fetch_itinisere_disruptions(limit=8, force_refresh=refresh)
     bison_fute = fetch_bison_fute_traffic(force_refresh=refresh)
     georisques = fetch_georisques_isere_summary(force_refresh=refresh)
+    prefecture = fetch_prefecture_isere_news(force_refresh=refresh)
     crisis = db.query(Municipality).filter(Municipality.crisis_mode.is_(True)).all()
     latest_logs = db.query(OperationalLog).order_by(OperationalLog.created_at.desc()).limit(10).all()
     return {
@@ -637,6 +643,7 @@ def supervision_overview(
             "itinisere": itinisere,
             "bison_fute": bison_fute,
             "georisques": georisques,
+            "prefecture_isere": prefecture,
         },
         "crisis_municipalities": [MunicipalityOut.model_validate(c).model_dump() for c in crisis],
         "timeline": [OperationalLogOut.model_validate(log).model_dump() for log in latest_logs],

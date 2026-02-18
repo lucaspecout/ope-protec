@@ -1134,6 +1134,20 @@ function renderItinisereEvents(events = [], targetId = 'itinerary-list') {
   }).join('') || '<li>Aucune perturbation publiée.</li>');
 }
 
+
+function renderPrefectureNews(prefecture = {}) {
+  const items = Array.isArray(prefecture.items) ? prefecture.items : [];
+  setText('prefecture-status', `${prefecture.status || 'inconnu'} · ${items.length} actualité(s)`);
+  setText('prefecture-info', `Dernière mise à jour: ${prefecture.updated_at ? new Date(prefecture.updated_at).toLocaleString() : 'inconnue'}`);
+  setHtml('prefecture-news-list', items.slice(0, 6).map((item) => {
+    const title = escapeHtml(item.title || 'Actualité Préfecture');
+    const description = escapeHtml(item.description || '');
+    const published = item.published_at ? escapeHtml(item.published_at) : 'Date non précisée';
+    const safeLink = String(item.link || '').startsWith('http') ? item.link : 'https://www.isere.gouv.fr';
+    return `<li><strong>${title}</strong><br><span class="muted">${published}</span>${description ? `<br>${description}` : ''}<br><a href="${safeLink}" target="_blank" rel="noreferrer">Lire l'actualité</a></li>`;
+  }).join('') || '<li>Aucune actualité disponible pour le moment.</li>');
+}
+
 function renderBisonFuteSummary(bison = {}) {
   cachedBisonFute = bison || {};
   const today = bison.today || {};
@@ -1655,6 +1669,7 @@ function renderExternalRisks(data = {}) {
   const vigicrues = data?.vigicrues || {};
   const itinisere = data?.itinisere || {};
   const bisonFute = data?.bison_fute || {};
+  const prefecture = data?.prefecture_isere || {};
   const georisquesPayload = data?.georisques || {};
   const georisques = georisquesPayload?.data && typeof georisquesPayload.data === 'object'
     ? { ...georisquesPayload.data, ...georisquesPayload }
@@ -1667,6 +1682,7 @@ function renderExternalRisks(data = {}) {
   setHtml('stations-list', (vigicrues.stations || []).slice(0, 10).map((s) => `<li>${s.station || s.code} · ${s.river || ''} · ${normalizeLevel(s.level)} · Contrôle: ${escapeHtml(s.control_status || 'inconnu')} · ${s.height_m} m</li>`).join('') || '<li>Aucune station disponible.</li>');
   setText('itinisere-status', `${itinisere.status || 'inconnu'} · ${(itinisere.events || []).length} événements`);
   renderBisonFuteSummary(bisonFute);
+  renderPrefectureNews(prefecture);
   setRiskText('georisques-status', `${georisques.status || 'inconnu'} · sismicité ${georisques.highest_seismic_zone_label || 'inconnue'}`, georisques.status === 'online' ? 'vert' : 'jaune');
   setText('georisques-info', `${georisques.flood_documents_total ?? 0} AZI · ${georisques.ppr_total ?? 0} PPR · ${georisques.ground_movements_total ?? 0} mouvements`);
   renderGeorisquesDetails(georisques);
@@ -1705,6 +1721,7 @@ function renderApiInterconnections(data = {}) {
     { key: 'itinisere', label: 'Itinisère', level: `${(data.itinisere?.events || []).length} événement(s)`, details: data.itinisere?.source || '-' },
     { key: 'bison_fute', label: 'Bison Futé', level: data.bison_fute?.today?.isere?.departure || 'inconnu', details: data.bison_fute?.source || '-' },
     { key: 'georisques', label: 'Géorisques', level: data.georisques?.highest_seismic_zone_label || 'inconnue', details: `${data.georisques?.flood_documents_total ?? 0} document(s) inondation` },
+    { key: 'prefecture_isere', label: 'Préfecture Isère (RSS)', level: `${(data.prefecture_isere?.items || []).length} actualité(s)`, details: data.prefecture_isere?.source || '-' },
   ];
 
   const cards = services.map((service) => {
