@@ -136,25 +136,29 @@
         </header>
 
         <section id="situation-panel" class="panel view situation-panel">
+          <div class="situation-toolbar">
+            <p class="muted">Tableau de bord opérationnel consolidé (Météo, crues, main courante).</p>
+            <button id="situation-refresh-btn" type="button" class="ghost">Actualiser la situation</button>
+          </div>
           <div class="situation-top-grid">
             <article class="tile situation-tile">
               <h3>Vigilance météo</h3>
-              <p id="vigilance">-</p>
+              <p id="vigilance" class="kpi-value">-</p>
               <p class="muted">Source Météo-France</p>
             </article>
             <article class="tile situation-tile">
               <h3>Niveau crues</h3>
-              <p id="crues">-</p>
+              <p id="crues" class="kpi-value">-</p>
               <p class="muted">Source Vigicrues</p>
             </article>
             <article class="tile situation-tile">
               <h3>Risque global</h3>
-              <p id="risk">-</p>
+              <p id="risk" class="kpi-value">-</p>
               <p class="muted">Calcul consolidé</p>
             </article>
             <article class="tile situation-tile">
               <h3>Communes en crise</h3>
-              <p id="crisis">0</p>
+              <p id="crisis" class="kpi-value">0</p>
               <p class="muted">PCS actif</p>
             </article>
           </div>
