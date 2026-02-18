@@ -170,9 +170,9 @@ label { display: block; margin-bottom: .8rem; }
 
 
 .situation-panel { display: grid; gap: .95rem; }
-.situation-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: .65rem; padding: .75rem .9rem; border: 1px solid var(--line); border-radius: 12px; background: linear-gradient(180deg, #f9fbff, #f1f6ff); }
+.situation-toolbar { display: flex; align-items: center; justify-content: space-between; gap: .65rem; padding: .65rem .75rem; border: 1px solid var(--line); border-radius: 12px; background: #f7faff; }
 .situation-toolbar p { margin: 0; }
-.situation-toolbar button { margin-top: 0; white-space: nowrap; min-width: 210px; }
+.situation-toolbar button { margin-top: 0; white-space: nowrap; }
 .situation-top-grid { display: grid; gap: .7rem; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
 .situation-middle-grid { display: grid; gap: .7rem; grid-template-columns: minmax(260px, 1.3fr) minmax(260px, 1fr); }
 .situation-tile .kpi-value { margin: .3rem 0 .15rem; font-size: clamp(1.6rem, 2.3vw, 2rem); font-weight: 800; line-height: 1.1; }
@@ -184,8 +184,7 @@ label { display: block; margin-bottom: .8rem; }
 
 @media (max-width: 900px) {
   .situation-middle-grid { grid-template-columns: 1fr; }
-  .situation-toolbar { grid-template-columns: 1fr; }
-  .situation-toolbar button { width: 100%; min-width: 0; }
+  .situation-toolbar { flex-direction: column; align-items: flex-start; }
 }
 .situation-log-columns { display: grid; gap: .8rem; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
 .situation-log-columns h4 { margin: .35rem 0; }
