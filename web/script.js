@@ -2645,31 +2645,33 @@ function startAutoRefresh() {
 
 async function refreshLiveEvents() {
   if (!token || document.hidden) return;
-  try {
-    const [logs, risks] = await Promise.all([
-      api('/logs', { cacheTtlMs: 0, bypassCache: true }),
-      api('/external/isere/risks', { cacheTtlMs: 0, bypassCache: true }),
-    ]);
+  return withPreservedScroll(async () => {
+    try {
+      const [logs, risks] = await Promise.all([
+        api('/logs', { cacheTtlMs: 0, bypassCache: true }),
+        api('/external/isere/risks', { cacheTtlMs: 0, bypassCache: true }),
+      ]);
 
-    cachedLogs = Array.isArray(logs) ? logs : [];
-    renderLogsList();
+      cachedLogs = Array.isArray(logs) ? logs : [];
+      renderLogsList();
 
-    if (cachedDashboardSnapshot && typeof cachedDashboardSnapshot === 'object') {
-      cachedDashboardSnapshot = {
-        ...cachedDashboardSnapshot,
-        latest_logs: cachedLogs.slice(0, 8),
-        updated_at: new Date().toISOString(),
-      };
-      saveSnapshot(STORAGE_KEYS.dashboardSnapshot, cachedDashboardSnapshot);
+      if (cachedDashboardSnapshot && typeof cachedDashboardSnapshot === 'object') {
+        cachedDashboardSnapshot = {
+          ...cachedDashboardSnapshot,
+          latest_logs: cachedLogs.slice(0, 8),
+          updated_at: new Date().toISOString(),
+        };
+        saveSnapshot(STORAGE_KEYS.dashboardSnapshot, cachedDashboardSnapshot);
+      }
+
+      renderExternalRisks(risks);
+      saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, risks);
+      saveSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot, risks);
+      document.getElementById('dashboard-error').textContent = '';
+    } catch (error) {
+      document.getElementById('dashboard-error').textContent = `Actualisation live des évènements: ${sanitizeErrorMessage(error.message)}`;
     }
-
-    renderExternalRisks(risks);
-    saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, risks);
-    saveSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot, risks);
-    document.getElementById('dashboard-error').textContent = '';
-  } catch (error) {
-    document.getElementById('dashboard-error').textContent = `Actualisation live des évènements: ${sanitizeErrorMessage(error.message)}`;
-  }
+  });
 }
 
 function startLiveEventsRefresh() {
@@ -2688,46 +2690,50 @@ function startApiPanelAutoRefresh() {
   apiPanelTimer = setInterval(() => {
     const activePanel = localStorage.getItem(STORAGE_KEYS.activePanel);
     if (!token || activePanel !== 'api-panel' || document.hidden) return;
-    loadApiInterconnections(false).catch((error) => {
+    withPreservedScroll(async () => {
+      await loadApiInterconnections(false);
+    }).catch((error) => {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
     });
   }, API_PANEL_REFRESH_MS);
 }
 
 async function loadHomeLiveStatus() {
-  try {
-    const data = await api('/public/live', {
-      logoutOn401: false,
-      omitAuth: true,
-      cacheTtlMs: 0,
-      bypassCache: true,
-    });
-    const dashboard = data?.dashboard || {};
-    setRiskText('home-meteo-state', normalizeLevel(dashboard.vigilance || '-'), dashboard.vigilance || 'vert');
-    setRiskText('home-river-state', normalizeLevel(dashboard.crues || '-'), dashboard.crues || 'vert');
-    setRiskText('home-global-risk', normalizeLevel(dashboard.global_risk || '-'), dashboard.global_risk || 'vert');
-    document.getElementById('home-crisis-count').textContent = String(dashboard.communes_crise ?? 0);
-    document.getElementById('home-seismic-state').textContent = data.georisques?.highest_seismic_zone_label || 'inconnue';
-    document.getElementById('home-flood-docs').textContent = String(data.georisques?.flood_documents_total ?? 0);
+  return withPreservedScroll(async () => {
+    try {
+      const data = await api('/public/live', {
+        logoutOn401: false,
+        omitAuth: true,
+        cacheTtlMs: 0,
+        bypassCache: true,
+      });
+      const dashboard = data?.dashboard || {};
+      setRiskText('home-meteo-state', normalizeLevel(dashboard.vigilance || '-'), dashboard.vigilance || 'vert');
+      setRiskText('home-river-state', normalizeLevel(dashboard.crues || '-'), dashboard.crues || 'vert');
+      setRiskText('home-global-risk', normalizeLevel(dashboard.global_risk || '-'), dashboard.global_risk || 'vert');
+      document.getElementById('home-crisis-count').textContent = String(dashboard.communes_crise ?? 0);
+      document.getElementById('home-seismic-state').textContent = data.georisques?.highest_seismic_zone_label || 'inconnue';
+      document.getElementById('home-flood-docs').textContent = String(data.georisques?.flood_documents_total ?? 0);
 
-    document.getElementById('home-feature-global-risk').textContent = normalizeLevel(dashboard.global_risk || '-');
-    document.getElementById('home-feature-river-risk').textContent = normalizeLevel(dashboard.crues || '-');
-    document.getElementById('home-feature-seismic-risk').textContent = data.georisques?.highest_seismic_zone_label || 'inconnue';
+      document.getElementById('home-feature-global-risk').textContent = normalizeLevel(dashboard.global_risk || '-');
+      document.getElementById('home-feature-river-risk').textContent = normalizeLevel(dashboard.crues || '-');
+      document.getElementById('home-feature-seismic-risk').textContent = data.georisques?.highest_seismic_zone_label || 'inconnue';
 
-    setRiskText('home-feature-meteo', normalizeLevel(dashboard.vigilance || '-'), dashboard.vigilance || 'vert');
-    setRiskText('home-feature-vigicrues', normalizeLevel(data.vigicrues?.water_alert_level || '-'), data.vigicrues?.water_alert_level || 'vert');
-    document.getElementById('home-feature-crisis-count').textContent = String(dashboard.communes_crise ?? 0);
+      setRiskText('home-feature-meteo', normalizeLevel(dashboard.vigilance || '-'), dashboard.vigilance || 'vert');
+      setRiskText('home-feature-vigicrues', normalizeLevel(data.vigicrues?.water_alert_level || '-'), data.vigicrues?.water_alert_level || 'vert');
+      document.getElementById('home-feature-crisis-count').textContent = String(dashboard.communes_crise ?? 0);
 
-    document.getElementById('home-feature-itinisere-status').textContent = data.itinisere?.status || 'inconnu';
-    document.getElementById('home-feature-itinisere-events').textContent = String(data.itinisere?.events_count ?? 0);
-    document.getElementById('home-feature-bison-isere').textContent = `${data.bison_fute?.today?.isere?.departure || 'inconnu'} / ${data.bison_fute?.today?.isere?.return || 'inconnu'}`;
-    renderHomeMeteoSituation(data.meteo_france?.current_situation || []);
-    const updatedLabel = data?.updated_at ? new Date(data.updated_at).toLocaleString() : 'inconnue';
-    document.getElementById('home-live-updated').textContent = `Dernière mise à jour: ${updatedLabel}`;
-    document.getElementById('home-live-error').textContent = '';
-  } catch (error) {
-    document.getElementById('home-live-error').textContent = error.message;
-  }
+      document.getElementById('home-feature-itinisere-status').textContent = data.itinisere?.status || 'inconnu';
+      document.getElementById('home-feature-itinisere-events').textContent = String(data.itinisere?.events_count ?? 0);
+      document.getElementById('home-feature-bison-isere').textContent = `${data.bison_fute?.today?.isere?.departure || 'inconnu'} / ${data.bison_fute?.today?.isere?.return || 'inconnu'}`;
+      renderHomeMeteoSituation(data.meteo_france?.current_situation || []);
+      const updatedLabel = data?.updated_at ? new Date(data.updated_at).toLocaleString() : 'inconnue';
+      document.getElementById('home-live-updated').textContent = `Dernière mise à jour: ${updatedLabel}`;
+      document.getElementById('home-live-error').textContent = '';
+    } catch (error) {
+      document.getElementById('home-live-error').textContent = error.message;
+    }
+  });
 }
 
 function startHomeLiveRefresh() {
