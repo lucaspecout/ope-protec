@@ -464,3 +464,10 @@ svg text { font-size: 14px; fill: #17335f; }
   text-align: center;
   padding: .2rem .5rem;
 }
+
+
+.situation-toolbar__actions { display: inline-flex; align-items: center; gap: .6rem; }
+.municipality-filters { margin: .55rem 0 .35rem; }
+@media (max-width: 760px) {
+  .situation-toolbar__actions { width: 100%; justify-content: space-between; }
+}

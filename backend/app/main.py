@@ -9,6 +9,7 @@ from typing import Callable
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from sqlalchemy import func, text
@@ -110,6 +111,7 @@ with engine.begin() as conn:
 
 app = FastAPI(title=settings.app_name)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(GZipMiddleware, minimum_size=800)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 ALLOWED_WEATHER_TRANSITIONS = {("jaune", "orange"), ("orange", "rouge")}
@@ -507,6 +509,10 @@ def toggle_2fa(payload: TwoFactorToggleRequest, db: Session = Depends(get_db), u
 
 @app.get("/dashboard")
 def dashboard(db: Session = Depends(get_db), user: User = Depends(require_roles(*READ_ROLES))):
+    return build_dashboard_payload(db, user)
+
+
+def build_dashboard_payload(db: Session, user: User) -> dict:
     latest_alert = db.query(WeatherAlert).order_by(WeatherAlert.created_at.desc()).first()
     river_level = db.query(RiverStation).order_by(RiverStation.updated_at.desc()).first()
     crisis_count = db.query(Municipality).filter(Municipality.crisis_mode.is_(True)).count()
@@ -534,11 +540,7 @@ def dashboard(db: Session = Depends(get_db), user: User = Depends(require_roles(
     }
 
 
-@app.get("/external/isere/risks")
-def isere_external_risks(
-    refresh: bool = False,
-    _: User = Depends(require_roles(*READ_ROLES)),
-):
+def build_external_risks_payload(refresh: bool = False) -> dict:
     meteo = fetch_meteo_france_isere(force_refresh=refresh)
     vigicrues = fetch_vigicrues_isere(force_refresh=refresh)
     itinisere = fetch_itinisere_disruptions(force_refresh=refresh)
@@ -551,6 +553,47 @@ def isere_external_risks(
         "itinisere": itinisere,
         "bison_fute": bison_fute,
         "georisques": georisques,
+    }
+
+
+@app.get("/external/isere/risks")
+def isere_external_risks(
+    refresh: bool = False,
+    _: User = Depends(require_roles(*READ_ROLES)),
+):
+    return build_external_risks_payload(refresh=refresh)
+
+
+@app.get("/operations/bootstrap")
+def operations_bootstrap(
+    refresh: bool = False,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*READ_ROLES)),
+):
+    started_at = datetime.utcnow()
+    dashboard_payload = build_dashboard_payload(db, user)
+    risks_payload = build_external_risks_payload(refresh=refresh)
+    municipalities_payload = list_municipalities(db=db, user=user)
+    logs_payload = list_logs(db=db, user=user)
+
+    users_payload = []
+    if user.role == "admin":
+        users_payload = db.query(User).order_by(User.created_at.desc()).all()
+
+    duration_ms = int((datetime.utcnow() - started_at).total_seconds() * 1000)
+    return {
+        "updated_at": utc_timestamp(),
+        "refresh": refresh,
+        "perf": {
+            "backend_duration_ms": duration_ms,
+            "municipality_count": len(municipalities_payload),
+            "log_count": len(logs_payload),
+        },
+        "dashboard": dashboard_payload,
+        "external_risks": risks_payload,
+        "municipalities": [MunicipalityOut.model_validate(item).model_dump() for item in municipalities_payload],
+        "logs": [OperationalLogOut.model_validate(item).model_dump() for item in logs_payload],
+        "users": [UserOut.model_validate(item).model_dump() for item in users_payload],
     }
 
 
