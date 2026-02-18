@@ -1536,7 +1536,7 @@ function renderDashboard(dashboard = {}) {
     const at = new Date(log.event_time || log.created_at || Date.now()).toLocaleString();
     const scope = formatLogScope(log);
     const icon = log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢';
-    return `<li><strong>${at}</strong> · <span class="badge neutral">${status}</span> · <span class="badge neutral">${scope}</span> · ${icon} <strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'Évènement')}</strong> · ${escapeHtml(log.description || '')}</li>`;
+    return `<li><strong>${at}</strong> · <span class="badge neutral">${status}</span> · <span class="badge neutral">${scope}</span><br>${icon} <strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'Évènement')}</strong> · ${escapeHtml(log.description || '')}</li>`;
   };
 
   const openLogs = logs.filter((log) => String(log.status || '').toLowerCase() !== 'clos');
