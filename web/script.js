@@ -1621,40 +1621,19 @@ function renderDashboard(dashboard = {}) {
 
 async function loadDashboard() {
   const cached = readSnapshot(STORAGE_KEYS.dashboardSnapshot);
-  if (cached) {
-    try {
-      renderDashboard(cached);
-    } catch (_) {
-      cachedDashboardSnapshot = {};
-      renderSituationOverview();
-    }
-  } else {
-    renderSituationOverview();
-  }
+  if (cached) renderDashboard(cached);
+  else renderSituationOverview();
 
   try {
     const dashboard = await api('/dashboard');
     renderDashboard(dashboard);
     saveSnapshot(STORAGE_KEYS.dashboardSnapshot, dashboard);
-    return true;
   } catch (error) {
-    const errorTarget = document.getElementById('dashboard-error');
     if (cached) {
-      if (errorTarget) errorTarget.textContent = `tableau de bord (cache): ${sanitizeErrorMessage(error.message)}`;
-      return false;
+      document.getElementById('dashboard-error').textContent = `tableau de bord (cache): ${sanitizeErrorMessage(error.message)}`;
+      return;
     }
-
-    cachedDashboardSnapshot = {
-      vigilance: 'vert',
-      crues: 'vert',
-      global_risk: 'vert',
-      communes_crise: 0,
-      latest_logs: Array.isArray(cachedLogs) ? cachedLogs.slice(0, 8) : [],
-      updated_at: new Date().toISOString(),
-    };
-    renderSituationOverview();
-    if (errorTarget) errorTarget.textContent = `tableau de bord indisponible: ${sanitizeErrorMessage(error.message)}`;
-    return false;
+    throw error;
   }
 }
 
