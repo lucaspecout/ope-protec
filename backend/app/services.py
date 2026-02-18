@@ -4,6 +4,7 @@ from html import unescape
 import json
 from pathlib import Path
 import re
+from time import sleep
 from threading import Lock
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -108,16 +109,44 @@ def generate_pdf_report(db: Session, report_name: str = "rapport_veille.pdf") ->
     return report_path
 
 
-def _http_get_json(url: str, timeout: int = 10) -> Any:
-    request = Request(url, headers={"User-Agent": "ope-protec/1.0"})
-    with urlopen(request, timeout=timeout) as response:
-        return json.loads(response.read().decode("utf-8"))
+_RETRYABLE_HTTP_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
-def _http_get_text(url: str, timeout: int = 10) -> str:
+def _is_retryable_network_error(exc: Exception) -> bool:
+    if isinstance(exc, TimeoutError):
+        return True
+    if isinstance(exc, HTTPError):
+        return exc.code in _RETRYABLE_HTTP_STATUS_CODES
+    if isinstance(exc, URLError):
+        reason = str(exc.reason).lower() if getattr(exc, "reason", None) is not None else ""
+        return any(token in reason for token in ("timed out", "timeout", "temporary", "reset", "refused", "unreachable"))
+    return False
+
+
+def _http_get_with_retries(request: Request, timeout: int = 10, retries: int = 2, retry_delay_seconds: float = 0.7) -> bytes:
+    last_error: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            with urlopen(request, timeout=timeout) as response:
+                return response.read()
+        except (HTTPError, URLError, TimeoutError) as exc:
+            last_error = exc
+            if attempt >= retries or not _is_retryable_network_error(exc):
+                raise
+            sleep(retry_delay_seconds * (attempt + 1))
+    raise last_error or RuntimeError("Échec HTTP inattendu")
+
+
+def _http_get_json(url: str, timeout: int = 12) -> Any:
     request = Request(url, headers={"User-Agent": "ope-protec/1.0"})
-    with urlopen(request, timeout=timeout) as response:
-        return response.read().decode("utf-8", errors="ignore")
+    payload = _http_get_with_retries(request=request, timeout=timeout)
+    return json.loads(payload.decode("utf-8"))
+
+
+def _http_get_text(url: str, timeout: int = 12) -> str:
+    request = Request(url, headers={"User-Agent": "ope-protec/1.0"})
+    payload = _http_get_with_retries(request=request, timeout=timeout)
+    return payload.decode("utf-8", errors="ignore")
 
 
 
@@ -151,8 +180,22 @@ def _rot13_letters(value: str) -> str:
 
 def _extract_mf_token_from_page() -> str:
     request = Request("https://vigilance.meteofrance.fr/fr/isere", headers={"User-Agent": "ope-protec/1.0"})
-    with urlopen(request, timeout=15) as response:
-        cookie_headers = response.headers.get_all("Set-Cookie") or []
+    cookie_headers: list[str] = []
+    last_error: Exception | None = None
+    for attempt in range(3):
+        try:
+            with urlopen(request, timeout=20) as response:
+                cookie_headers = response.headers.get_all("Set-Cookie") or []
+            break
+        except (HTTPError, URLError, TimeoutError) as exc:
+            last_error = exc
+            if attempt >= 2 or not _is_retryable_network_error(exc):
+                raise
+            sleep(0.7 * (attempt + 1))
+
+    if not cookie_headers and last_error:
+        raise last_error
+
     joined = "; ".join(cookie_headers)
     match = re.search(r"mfsession=([^;]+)", joined)
     if not match:
@@ -164,8 +207,8 @@ def _meteo_france_wsft_get(path: str, token: str, params: dict[str, Any], versio
     query = urlencode(params)
     url = f"https://rwg.meteofrance.com/wsft/{version}/{path}?{query}"
     request = Request(url, headers={"User-Agent": "ope-protec/1.0", "Authorization": f"Bearer {token}"})
-    with urlopen(request, timeout=20) as response:
-        return json.loads(response.read().decode("utf-8"))
+    payload = _http_get_with_retries(request=request, timeout=20)
+    return json.loads(payload.decode("utf-8"))
 
 
 def _parse_mf_bulletin_items(bulletin_payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -268,6 +311,16 @@ def _cached_external_payload(
         with lock:
             cache["payload"] = deepcopy(payload)
             cache["expires_at"] = datetime.utcnow() + timedelta(seconds=ttl_seconds)
+        return payload
+
+    with lock:
+        cached_payload = cache.get("payload")
+        if cached_payload:
+            stale_payload = deepcopy(cached_payload)
+            stale_payload["status"] = "stale"
+            stale_payload["stale_reason"] = payload.get("error") or payload.get("info_state") or "service indisponible"
+            stale_payload["updated_at"] = datetime.utcnow().isoformat() + "Z"
+            return stale_payload
     return payload
 
 
