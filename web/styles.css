@@ -170,12 +170,9 @@ label { display: block; margin-bottom: .8rem; }
 
 
 .situation-panel { display: grid; gap: .95rem; }
-
-.situation-content { display: grid; gap: .95rem; }
-.kpi-value.vert { color: #1b8a4f; }
-.kpi-value.jaune { color: #b46a00; }
-.kpi-value.orange { color: #c46500; }
-.kpi-value.rouge { color: #c22f43; }
+.situation-toolbar { display: flex; align-items: center; justify-content: space-between; gap: .65rem; padding: .65rem .75rem; border: 1px solid var(--line); border-radius: 12px; background: #f7faff; }
+.situation-toolbar p { margin: 0; }
+.situation-toolbar button { margin-top: 0; white-space: nowrap; }
 .situation-top-grid { display: grid; gap: .7rem; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
 .situation-middle-grid { display: grid; gap: .7rem; grid-template-columns: minmax(260px, 1.3fr) minmax(260px, 1fr); }
 .situation-tile .kpi-value { margin: .3rem 0 .15rem; font-size: clamp(1.6rem, 2.3vw, 2rem); font-weight: 800; line-height: 1.1; }
@@ -187,6 +184,7 @@ label { display: block; margin-bottom: .8rem; }
 
 @media (max-width: 900px) {
   .situation-middle-grid { grid-template-columns: 1fr; }
+  .situation-toolbar { flex-direction: column; align-items: flex-start; }
 }
 .situation-log-columns { display: grid; gap: .8rem; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
 .situation-log-columns h4 { margin: .35rem 0; }

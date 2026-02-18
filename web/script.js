@@ -1510,9 +1510,8 @@ function buildSituationLogMarkup(log = {}) {
   const status = LOG_STATUS_LABEL[String(log.status || 'nouveau')] || 'Nouveau';
   const at = safeDateToLocale(log.event_time || log.created_at || Date.now());
   const scope = formatLogScope(log);
-  const normalizedLevel = normalizeLevel(log.danger_level || 'vert');
-  const icon = log.danger_emoji || LOG_LEVEL_EMOJI[normalizedLevel] || '🟢';
-  return `<li><strong>${at}</strong> · <span class="badge neutral">${status}</span> · <span class="badge neutral">${scope}</span><br>${icon} <strong>${escapeHtml(log.event_type || 'Évènement')}</strong> <span class="level-chip ${normalizedLevel}">${normalizedLevel}</span><br>${escapeHtml(log.description || '')}</li>`;
+  const icon = log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢';
+  return `<li><strong>${at}</strong> · <span class="badge neutral">${status}</span> · <span class="badge neutral">${scope}</span><br>${icon} <strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'Évènement')}</strong> · ${escapeHtml(log.description || '')}</li>`;
 }
 
 function buildCriticalRisksMarkup(dashboard = {}, externalRisks = {}) {
@@ -1553,20 +1552,63 @@ function renderSituationOverview() {
   const dashboard = cachedDashboardSnapshot && Object.keys(cachedDashboardSnapshot).length
     ? cachedDashboardSnapshot
     : (readSnapshot(STORAGE_KEYS.dashboardSnapshot) || {});
-  const logs = Array.isArray(dashboard.latest_logs) ? dashboard.latest_logs : (Array.isArray(cachedLogs) ? cachedLogs.slice(0, 12) : []);
+  const externalRisks = cachedExternalRisksSnapshot && Object.keys(cachedExternalRisksSnapshot).length
+    ? cachedExternalRisksSnapshot
+    : (readSnapshot(STORAGE_KEYS.externalRisksSnapshot) || {});
+
+  const vigilance = normalizeLevel(dashboard.vigilance || externalRisks?.meteo_france?.level || 'vert');
+  const crues = normalizeLevel(dashboard.crues || externalRisks?.vigicrues?.water_alert_level || 'vert');
+  const globalRisk = normalizeLevel(dashboard.global_risk || vigilance);
+  const crisisCount = Number(dashboard.communes_crise ?? 0);
+
+  const logs = Array.isArray(dashboard.latest_logs) ? dashboard.latest_logs : (Array.isArray(cachedLogs) ? cachedLogs.slice(0, 8) : []);
   const openLogs = logs.filter((log) => String(log.status || '').toLowerCase() !== 'clos');
   const closedLogs = logs.filter((log) => String(log.status || '').toLowerCase() === 'clos');
+  const criticalLogs = logs.filter((log) => ['orange', 'rouge'].includes(normalizeLevel(log.danger_level || 'vert')));
+  const lastUpdated = safeDateToLocale(
+    dashboard.updated_at
+    || logs.map((log) => new Date(log.event_time || log.created_at || 0).getTime()).filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => b - a)[0]
+    || Date.now(),
+    { hour: '2-digit', minute: '2-digit', second: '2-digit' },
+  );
+
+  const kpiCards = [
+    { label: 'Vigilance météo', value: vigilance, info: 'Source Météo-France', css: normalizeLevel(vigilance) },
+    { label: 'Niveau crues', value: crues, info: 'Source Vigicrues', css: normalizeLevel(crues) },
+    { label: 'Risque global', value: globalRisk, info: 'Calcul consolidé', css: normalizeLevel(globalRisk) },
+    { label: 'Communes en crise', value: String(crisisCount), info: 'PCS actif', css: crisisCount > 0 ? 'rouge' : 'vert' },
+  ];
 
   setHtml('situation-content', `
+    <div class="situation-top-grid">
+      ${kpiCards.map((card) => `<article class="tile situation-tile"><h3>${card.label}</h3><p class="kpi-value ${card.css}">${escapeHtml(card.value)}</p><p class="muted">${card.info}</p></article>`).join('')}
+    </div>
+
+    <div class="situation-middle-grid">
+      <article class="tile situation-summary">
+        <h3>Résumé opérationnel</h3>
+        <div class="situation-summary-grid">
+          <p><span>Évènements ouverts</span><strong>${openLogs.length}</strong></p>
+          <p><span>Évènements clôturés</span><strong>${closedLogs.length}</strong></p>
+          <p><span>Évènements critiques</span><strong>${criticalLogs.length}</strong></p>
+          <p><span>Dernière mise à jour</span><strong>${lastUpdated}</strong></p>
+        </div>
+      </article>
+      <article class="tile situation-risks">
+        <h3>Risques en cours (orange / rouge)</h3>
+        <ul class="list compact">${buildCriticalRisksMarkup(dashboard, externalRisks)}</ul>
+      </article>
+    </div>
+
     <h3>Fil de situation</h3>
     <div class="situation-log-columns">
       <div>
         <h4>Crises en cours</h4>
-        <ul class="list">${openLogs.slice(0, 12).map((log) => buildSituationLogMarkup(log)).join('') || '<li>Aucune crise en cours.</li>'}</ul>
+        <ul class="list">${openLogs.slice(0, 8).map((log) => buildSituationLogMarkup(log)).join('') || '<li>Aucune crise en cours.</li>'}</ul>
       </div>
       <div>
         <h4>Crises clôturées</h4>
-        <ul class="list">${closedLogs.slice(0, 12).map((log) => buildSituationLogMarkup(log)).join('') || '<li>Aucune crise clôturée récente.</li>'}</ul>
+        <ul class="list">${closedLogs.slice(0, 8).map((log) => buildSituationLogMarkup(log)).join('') || '<li>Aucune crise clôturée récente.</li>'}</ul>
       </div>
     </div>
   `);
@@ -1579,40 +1621,19 @@ function renderDashboard(dashboard = {}) {
 
 async function loadDashboard() {
   const cached = readSnapshot(STORAGE_KEYS.dashboardSnapshot);
-  if (cached) {
-    try {
-      renderDashboard(cached);
-    } catch (_) {
-      cachedDashboardSnapshot = {};
-      renderSituationOverview();
-    }
-  } else {
-    renderSituationOverview();
-  }
+  if (cached) renderDashboard(cached);
+  else renderSituationOverview();
 
   try {
     const dashboard = await api('/dashboard');
     renderDashboard(dashboard);
     saveSnapshot(STORAGE_KEYS.dashboardSnapshot, dashboard);
-    return true;
   } catch (error) {
-    const errorTarget = document.getElementById('dashboard-error');
     if (cached) {
-      if (errorTarget) errorTarget.textContent = `tableau de bord (cache): ${sanitizeErrorMessage(error.message)}`;
-      return false;
+      document.getElementById('dashboard-error').textContent = `tableau de bord (cache): ${sanitizeErrorMessage(error.message)}`;
+      return;
     }
-
-    cachedDashboardSnapshot = {
-      vigilance: 'vert',
-      crues: 'vert',
-      global_risk: 'vert',
-      communes_crise: 0,
-      latest_logs: Array.isArray(cachedLogs) ? cachedLogs.slice(0, 8) : [],
-      updated_at: new Date().toISOString(),
-    };
-    renderSituationOverview();
-    if (errorTarget) errorTarget.textContent = `tableau de bord indisponible: ${sanitizeErrorMessage(error.message)}`;
-    return false;
+    throw error;
   }
 }
 
@@ -2043,6 +2064,24 @@ function bindAppInteractions() {
       document.getElementById('dashboard-error').textContent = '';
     } catch (error) {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
+    }
+  });
+  document.getElementById('situation-refresh-btn')?.addEventListener('click', async () => {
+    const button = document.getElementById('situation-refresh-btn');
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Actualisation...';
+    }
+    try {
+      await refreshAll(true);
+      document.getElementById('dashboard-error').textContent = '';
+    } catch (error) {
+      document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = 'Actualiser la situation';
+      }
     }
   });
   document.getElementById('map-search')?.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); handleMapSearch(); } });
