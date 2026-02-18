@@ -1183,6 +1183,8 @@ function renderItinisereEvents(events = [], targetId = 'itinerary-list') {
 
 function renderPrefectureNews(prefecture = {}) {
   const items = Array.isArray(prefecture.items) ? prefecture.items : [];
+  const latestTitle = items[0]?.title ? `Actualité : ${items[0].title}` : "Actualité Préfecture de l'Isère";
+  setText('prefecture-news-title', latestTitle);
   setText('prefecture-status', `${prefecture.status || 'inconnu'} · ${items.length} actualité(s)`);
   setText('prefecture-info', `Dernière mise à jour: ${prefecture.updated_at ? new Date(prefecture.updated_at).toLocaleString() : 'inconnue'}`);
   setHtml('prefecture-news-list', items.slice(0, 6).map((item) => {
@@ -1192,6 +1194,13 @@ function renderPrefectureNews(prefecture = {}) {
     const safeLink = String(item.link || '').startsWith('http') ? item.link : 'https://www.isere.gouv.fr';
     return `<li><strong>${title}</strong><br><span class="muted">${published}</span>${description ? `<br>${description}` : ''}<br><a href="${safeLink}" target="_blank" rel="noreferrer">Lire l'actualité</a></li>`;
   }).join('') || '<li>Aucune actualité disponible pour le moment.</li>');
+}
+
+function sanitizeMeteoInformation(info = '') {
+  const text = String(info || '').trim();
+  const unwanted = "Consultez la carte de Vigilance de Météo-France sur l'ISERE (38) : Information sur les risques météorologiques de la journée en cours.";
+  if (text === unwanted) return '';
+  return text;
 }
 
 function renderBisonFuteSummary(bison = {}) {
@@ -1722,7 +1731,7 @@ function renderExternalRisks(data = {}) {
     : georisquesPayload;
 
   setRiskText('meteo-status', `${meteo.status || 'inconnu'} · niveau ${normalizeLevel(meteo.level || 'inconnu')}`, meteo.level || 'vert');
-  setText('meteo-info', meteo.info_state || meteo.bulletin_title || '');
+  setText('meteo-info', sanitizeMeteoInformation(meteo.info_state) || meteo.bulletin_title || '');
   setRiskText('vigicrues-status', `${vigicrues.status || 'inconnu'} · niveau ${normalizeLevel(vigicrues.water_alert_level || 'inconnu')}`, vigicrues.water_alert_level || 'vert');
   setText('vigicrues-info', `${(vigicrues.stations || []).length} station(s) suivie(s)`);
   setHtml('stations-list', (vigicrues.stations || []).slice(0, 10).map((s) => `<li>${s.station || s.code} · ${s.river || ''} · ${normalizeLevel(s.level)} · Contrôle: ${escapeHtml(s.control_status || 'inconnu')} · ${s.height_m} m</li>`).join('') || '<li>Aucune station disponible.</li>');
@@ -1767,7 +1776,7 @@ function renderApiInterconnections(data = {}) {
     { key: 'itinisere', label: 'Itinisère', level: `${(data.itinisere?.events || []).length} événement(s)`, details: data.itinisere?.source || '-' },
     { key: 'bison_fute', label: 'Bison Futé', level: data.bison_fute?.today?.isere?.departure || 'inconnu', details: data.bison_fute?.source || '-' },
     { key: 'georisques', label: 'Géorisques', level: data.georisques?.highest_seismic_zone_label || 'inconnue', details: `${data.georisques?.flood_documents_total ?? 0} document(s) inondation` },
-    { key: 'prefecture_isere', label: 'Préfecture Isère (RSS)', level: `${(data.prefecture_isere?.items || []).length} actualité(s)`, details: data.prefecture_isere?.source || '-' },
+    { key: 'prefecture_isere', label: "Préfecture Isère · Actualités", level: `${(data.prefecture_isere?.items || []).length} actualité(s)`, details: data.prefecture_isere?.source || '-' },
   ];
 
   const cards = services.map((service) => {
