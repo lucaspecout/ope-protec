@@ -152,14 +152,14 @@ function populateLogMunicipalityOptions(municipalities = []) {
   const formSelect = document.getElementById('log-municipality-id');
   if (formSelect) {
     const current = formSelect.value;
-    formSelect.innerHTML = createOptions(true);
+    setHtml('log-municipality-id', createOptions(true));
     if (current) formSelect.value = current;
   }
 
   const filterSelect = document.getElementById('logs-municipality-filter');
   if (filterSelect) {
     const currentFilter = filterSelect.value;
-    filterSelect.innerHTML = createOptions(false, 'Toutes les communes');
+    setHtml('logs-municipality-filter', createOptions(false, 'Toutes les communes'));
     if (currentFilter) filterSelect.value = currentFilter;
   }
 }
@@ -1016,9 +1016,9 @@ function renderMapIconSuggestions(category = 'autre') {
   const container = document.getElementById('map-icon-suggestions');
   if (!container) return;
   const icons = MAP_ICON_SUGGESTIONS[category] || MAP_ICON_SUGGESTIONS.autre;
-  container.innerHTML = `${icons
+  setHtml('map-icon-suggestions', `${icons
     .map((icon) => `<button type="button" class="ghost inline-action map-icon-chip" data-map-icon="${escapeHtml(icon)}">${escapeHtml(icon)}</button>`)
-    .join('')}<span class="muted">ou saisissez votre emoji.</span>`;
+    .join('')}<span class="muted">ou saisissez votre emoji.</span>`);
 }
 
 async function loadMapPoints() {
@@ -1109,7 +1109,7 @@ function renderItinisereEvents(events = [], targetId = 'itinerary-list') {
   cachedItinisereEvents = Array.isArray(events) ? events : [];
   const target = document.getElementById(targetId);
   if (!target) return;
-  target.innerHTML = events.slice(0, 8).map((e) => {
+  setHtml(targetId, events.slice(0, 8).map((e) => {
     const title = escapeHtml(e.title || 'Évènement');
     const description = escapeHtml(e.description || '');
     const safeLink = String(e.link || '').startsWith('http') ? e.link : '#';
@@ -1117,7 +1117,7 @@ function renderItinisereEvents(events = [], targetId = 'itinerary-list') {
     const category = escapeHtml(e.category || 'trafic');
     const roads = Array.isArray(e.roads) && e.roads.length ? ` · Axes: ${escapeHtml(e.roads.join(', '))}` : '';
     return `<li><strong>${title}</strong> <span class="badge neutral">${category}</span>${roads}<br>${description}<br><a href="${safeLink}" target="_blank" rel="noreferrer">Détail</a><br><button type="button" class="ghost inline-action" data-map-query="${mapQuery}">Voir sur la carte</button></li>`;
-  }).join('') || '<li>Aucune perturbation publiée.</li>';
+  }).join('') || '<li>Aucune perturbation publiée.</li>');
 }
 
 function renderBisonFuteSummary(bison = {}) {
@@ -1318,7 +1318,7 @@ async function openMunicipalityFile(municipalityId, fileId) {
 
   if (previewHost) {
     currentMunicipalityPreviewUrl = objectUrl;
-    previewHost.innerHTML = municipalityPreviewMarkup(contentType || '', objectUrl);
+    setHtml('municipality-document-preview', municipalityPreviewMarkup(contentType || '', objectUrl));
     previewHost.classList.remove('hidden');
     previewHost.hidden = false;
     previewHost.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -1413,7 +1413,7 @@ async function openMunicipalityDetailsModal(municipality) {
        </div>`
     : '';
 
-  content.innerHTML = `
+  setHtml('municipality-details-content', `
     <h4>${escapeHtml(municipality.name)}</h4>
     <p><strong>Responsable:</strong> ${escapeHtml(municipality.manager || '-')}</p>
     <p><strong>Téléphone:</strong> ${escapeHtml(municipality.phone || '-')} · <strong>Email:</strong> ${escapeHtml(municipality.email || '-')}</p>
@@ -1433,7 +1433,7 @@ async function openMunicipalityDetailsModal(municipality) {
       return `<li><strong>${new Date(log.created_at).toLocaleString()}</strong> · ${log.danger_emoji || '🟢'} <strong>${escapeHtml(log.event_type || 'MCO')}</strong> · <span class="badge neutral">${status}</span><br>${escapeHtml(log.description || '')}</li>`;
     }).join('') || '<li>Aucune entrée main courante associée.</li>'}</ul>
     ${quickActions}
-  `;
+  `);
 
   content.querySelectorAll('button').forEach((button) => {
     if ((button.textContent || '').trim().toLowerCase() === 'éditer la fiche') button.remove();
@@ -1896,10 +1896,10 @@ function renderMapChecks(checks = []) {
   const target = document.getElementById('map-checks-list');
   if (!target) return;
   if (!checks.length) {
-    target.innerHTML = '<li>Aucun diagnostic exécuté.</li>';
+    setHtml('map-checks-list', '<li>Aucun diagnostic exécuté.</li>');
     return;
   }
-  target.innerHTML = checks.map((check) => `<li><span class="${check.ok ? 'ok' : 'ko'}">${check.ok ? 'OK' : 'KO'}</span> · ${escapeHtml(check.label)}${check.detail ? ` — ${escapeHtml(check.detail)}` : ''}</li>`).join('');
+  setHtml('map-checks-list', checks.map((check) => `<li><span class="${check.ok ? 'ok' : 'ko'}">${check.ok ? 'OK' : 'KO'}</span> · ${escapeHtml(check.label)}${check.detail ? ` — ${escapeHtml(check.detail)}` : ''}</li>`).join(''));
 }
 
 async function runMapChecks() {

@@ -153,7 +153,8 @@ label { display: block; margin-bottom: .8rem; }
 
 .kpis { display: grid; gap: .7rem; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: .9rem; }
 .tile { border: 1px solid var(--line); border-radius: 12px; padding: .8rem; background: linear-gradient(180deg, #fff, #f7faff); }
-.tile p { font-size: 1.5rem; margin: .4rem 0 0; font-weight: 800; }
+.tile p { margin: .4rem 0 0; }
+.kpis .tile p { font-size: 1.35rem; font-weight: 800; }
 #risk.rouge { color: #c22f43; }
 #risk.orange { color: #b46a00; }
 #risk.jaune { color: #907100; }
@@ -174,7 +175,8 @@ label { display: block; margin-bottom: .8rem; }
 .situation-toolbar button { margin-top: 0; white-space: nowrap; }
 .situation-top-grid { display: grid; gap: .7rem; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
 .situation-middle-grid { display: grid; gap: .7rem; grid-template-columns: minmax(260px, 1.3fr) minmax(260px, 1fr); }
-.situation-tile p { margin-bottom: .2rem; }
+.situation-tile .kpi-value { margin: .3rem 0 .15rem; font-size: clamp(1.6rem, 2.3vw, 2rem); font-weight: 800; line-height: 1.1; }
+.situation-tile .muted { margin: 0; font-size: .95rem; font-weight: 500; color: var(--muted); }
 .situation-summary-grid { display: grid; gap: .55rem; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); margin-top: .45rem; }
 .situation-summary-grid p { margin: 0; border: 1px solid var(--line); border-radius: 10px; padding: .55rem .65rem; background: #f7faff; }
 .situation-summary-grid span { display: block; font-size: .82rem; color: var(--muted); }
