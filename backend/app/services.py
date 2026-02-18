@@ -234,6 +234,7 @@ _VIGICRUES_CACHE_TTL_SECONDS = 120
 _ITINISERE_CACHE_TTL_SECONDS = 180
 _BISON_CACHE_TTL_SECONDS = 600
 _GEORISQUES_CACHE_TTL_SECONDS = 900
+_PREFECTURE_CACHE_TTL_SECONDS = 600
 
 _vigicrues_cache_lock = Lock()
 _vigicrues_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
@@ -243,6 +244,8 @@ _bison_cache_lock = Lock()
 _bison_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _georisques_cache_lock = Lock()
 _georisques_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_prefecture_cache_lock = Lock()
+_prefecture_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 
 
 def _cached_external_payload(
@@ -775,6 +778,77 @@ def fetch_itinisere_disruptions(limit: int = 20, force_refresh: bool = False) ->
         ttl_seconds=_ITINISERE_CACHE_TTL_SECONDS,
         force_refresh=force_refresh,
         loader=lambda: _fetch_itinisere_disruptions_live(limit=limit),
+    )
+
+
+def _strip_html_tags(value: str) -> str:
+    return re.sub(r"<[^>]+>", " ", value or "")
+
+
+def _fetch_prefecture_isere_news_live(limit: int = 6) -> dict[str, Any]:
+    source = "https://www.isere.gouv.fr/syndication/flux/actualites"
+    try:
+        xml_payload = _http_get_text(source)
+        root = ET.fromstring(xml_payload)
+        namespace = {"atom": "http://www.w3.org/2005/Atom"}
+        items: list[dict[str, Any]] = []
+
+        for item in root.findall(".//item")[:limit]:
+            title = unescape((item.findtext("title") or "Actualité Préfecture").strip())
+            description_html = (item.findtext("description") or "").strip()
+            description = unescape(re.sub(r"\s+", " ", _strip_html_tags(description_html))).strip()
+            published = (item.findtext("pubDate") or "").strip()
+            link = (item.findtext("link") or "https://www.isere.gouv.fr").strip()
+            items.append(
+                {
+                    "title": title,
+                    "description": description[:400],
+                    "published_at": published,
+                    "link": link,
+                }
+            )
+
+        if not items:
+            for entry in root.findall(".//atom:entry", namespace)[:limit]:
+                title = unescape((entry.findtext("atom:title", namespaces=namespace) or "Actualité Préfecture").strip())
+                summary_html = (entry.findtext("atom:summary", namespaces=namespace) or "").strip()
+                summary = unescape(re.sub(r"\s+", " ", _strip_html_tags(summary_html))).strip()
+                published = (entry.findtext("atom:published", namespaces=namespace) or "").strip()
+                link_tag = entry.find("atom:link", namespace)
+                link = (link_tag.get("href") if link_tag is not None else "") or "https://www.isere.gouv.fr"
+                items.append(
+                    {
+                        "title": title,
+                        "description": summary[:400],
+                        "published_at": published,
+                        "link": link,
+                    }
+                )
+
+        return {
+            "service": "Préfecture de l'Isère",
+            "status": "online",
+            "source": source,
+            "items": items,
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+    except (ET.ParseError, HTTPError, URLError, TimeoutError, ValueError) as exc:
+        return {
+            "service": "Préfecture de l'Isère",
+            "status": "degraded",
+            "source": source,
+            "items": [],
+            "error": str(exc),
+        }
+
+
+def fetch_prefecture_isere_news(limit: int = 6, force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_prefecture_cache,
+        lock=_prefecture_cache_lock,
+        ttl_seconds=_PREFECTURE_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=lambda: _fetch_prefecture_isere_news_live(limit=limit),
     )
 
 

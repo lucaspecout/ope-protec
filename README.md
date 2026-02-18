@@ -57,6 +57,7 @@ Retourne un bloc consolidé :
 - `meteo_france` : état de connexion au service vigilance Météo-France et bulletin Isère.
 - `vigicrues` : état de connexion, stations du département de l'Isère, vigilances des tronçons associés et niveau d'alerte eau courant (`vert`, `jaune`, `orange`, `rouge`).
 - `georisques` : synthèse multi-communes Isère (sismicité max et nombre de documents inondation).
+- `prefecture_isere` : flux RSS des actualités de la Préfecture de l'Isère (titres, dates, liens).
 
 
 ## Alignement besoins métier
