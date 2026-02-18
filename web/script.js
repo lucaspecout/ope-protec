@@ -1,5 +1,6 @@
 const STORAGE_KEYS = { token: 'token', activePanel: 'activePanel', mapPointsCache: 'mapPointsCache', municipalitiesCache: 'municipalitiesCache', dashboardSnapshot: 'dashboardSnapshot', externalRisksSnapshot: 'externalRisksSnapshot', apiInterconnectionsSnapshot: 'apiInterconnectionsSnapshot' };
 const AUTO_REFRESH_MS = 10000;
+const EVENTS_LIVE_REFRESH_MS = 5000;
 const HOME_LIVE_REFRESH_MS = 30000;
 const API_CACHE_TTL_MS = 30000;
 const API_PANEL_REFRESH_MS = 10000;
@@ -25,6 +26,7 @@ let token = localStorage.getItem(STORAGE_KEYS.token);
 let currentUser = null;
 let pendingCurrentPassword = '';
 let refreshTimer = null;
+let liveEventsTimer = null;
 let homeLiveTimer = null;
 let apiPanelTimer = null;
 const apiGetCache = new Map();
@@ -2579,6 +2581,7 @@ function logout() {
   clearApiCache();
   localStorage.removeItem(STORAGE_KEYS.token);
   if (refreshTimer) clearInterval(refreshTimer);
+  if (liveEventsTimer) clearInterval(liveEventsTimer);
   if (apiPanelTimer) clearInterval(apiPanelTimer);
   showHome();
 }
@@ -2586,6 +2589,40 @@ function logout() {
 function startAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
   refreshTimer = setInterval(() => token && refreshAll(true), AUTO_REFRESH_MS);
+}
+
+async function refreshLiveEvents() {
+  if (!token || document.hidden) return;
+  try {
+    const [logs, risks] = await Promise.all([
+      api('/logs', { cacheTtlMs: 0, bypassCache: true }),
+      api('/external/isere/risks?refresh=true', { cacheTtlMs: 0, bypassCache: true }),
+    ]);
+
+    cachedLogs = Array.isArray(logs) ? logs : [];
+    renderLogsList();
+
+    if (cachedDashboardSnapshot && typeof cachedDashboardSnapshot === 'object') {
+      cachedDashboardSnapshot = {
+        ...cachedDashboardSnapshot,
+        latest_logs: cachedLogs.slice(0, 8),
+        updated_at: new Date().toISOString(),
+      };
+      saveSnapshot(STORAGE_KEYS.dashboardSnapshot, cachedDashboardSnapshot);
+    }
+
+    renderExternalRisks(risks);
+    saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, risks);
+    saveSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot, risks);
+    document.getElementById('dashboard-error').textContent = '';
+  } catch (error) {
+    document.getElementById('dashboard-error').textContent = `Actualisation live des évènements: ${sanitizeErrorMessage(error.message)}`;
+  }
+}
+
+function startLiveEventsRefresh() {
+  if (liveEventsTimer) clearInterval(liveEventsTimer);
+  liveEventsTimer = setInterval(refreshLiveEvents, EVENTS_LIVE_REFRESH_MS);
 }
 
 function startApiPanelAutoRefresh() {
@@ -2672,6 +2709,7 @@ loginForm.addEventListener('submit', async (event) => {
     syncLogOtherFields();
     await refreshAll();
     startAutoRefresh();
+    startLiveEventsRefresh();
   } catch (error) {
     document.getElementById('login-error').textContent = error.message;
   }
@@ -2798,6 +2836,7 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
     syncLogScopeFields();
     await refreshAll();
     startAutoRefresh();
+    startLiveEventsRefresh();
   } catch {
     logout();
   }
