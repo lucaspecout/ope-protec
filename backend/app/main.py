@@ -544,13 +544,27 @@ def build_dashboard_payload(db: Session, user: User) -> dict:
 
 
 def build_external_risks_payload(refresh: bool = False) -> dict:
-    meteo = fetch_meteo_france_isere(force_refresh=refresh)
-    vigicrues = fetch_vigicrues_isere(force_refresh=refresh)
-    itinisere = fetch_itinisere_disruptions(force_refresh=refresh)
-    bison_fute = fetch_bison_fute_traffic(force_refresh=refresh)
-    georisques = fetch_georisques_isere_summary(force_refresh=refresh)
-    prefecture = fetch_prefecture_isere_news(force_refresh=refresh)
-    return {
+    errors: dict[str, str] = {}
+
+    def safe_fetch(key: str, fetcher: Callable[[], dict], fallback: dict) -> dict:
+        try:
+            return fetcher()
+        except Exception as exc:
+            errors[key] = str(exc)
+            payload = dict(fallback)
+            payload.setdefault("status", "unavailable")
+            payload.setdefault("error", str(exc))
+            payload.setdefault("updated_at", utc_timestamp())
+            return payload
+
+    meteo = safe_fetch("meteo_france", lambda: fetch_meteo_france_isere(force_refresh=refresh), {"level": "vert", "title": "Météo-France indisponible"})
+    vigicrues = safe_fetch("vigicrues", lambda: fetch_vigicrues_isere(force_refresh=refresh), {"level": "vert", "stations": [], "alerts": []})
+    itinisere = safe_fetch("itinisere", lambda: fetch_itinisere_disruptions(force_refresh=refresh), {"status": "degraded", "events": [], "events_total": 0})
+    bison_fute = safe_fetch("bison_fute", lambda: fetch_bison_fute_traffic(force_refresh=refresh), {"status": "degraded", "alerts": []})
+    georisques = safe_fetch("georisques", lambda: fetch_georisques_isere_summary(force_refresh=refresh), {"status": "degraded", "details": []})
+    prefecture = safe_fetch("prefecture_isere", lambda: fetch_prefecture_isere_news(force_refresh=refresh), {"status": "degraded", "articles": []})
+
+    payload = {
         "updated_at": utc_timestamp(),
         "meteo_france": meteo,
         "vigicrues": vigicrues,
@@ -559,6 +573,9 @@ def build_external_risks_payload(refresh: bool = False) -> dict:
         "georisques": georisques,
         "prefecture_isere": prefecture,
     }
+    if errors:
+        payload["errors"] = errors
+    return payload
 
 
 @app.get("/external/isere/risks")
