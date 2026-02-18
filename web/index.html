@@ -138,7 +138,10 @@
         <section id="situation-panel" class="panel view situation-panel">
           <div class="situation-toolbar">
             <p class="muted">Tableau de bord opérationnel consolidé (Météo, crues, main courante).</p>
-            <button id="situation-refresh-btn" type="button" class="ghost">Actualiser la situation</button>
+            <div class="situation-toolbar__actions">
+              <span id="operations-perf" class="muted">Perf: -</span>
+              <button id="situation-refresh-btn" type="button" class="ghost">Actualiser la situation</button>
+            </div>
           </div>
           <div class="situation-top-grid">
             <article class="tile situation-tile">
@@ -266,6 +269,20 @@
         <section id="municipalities-panel" class="panel view hidden" hidden>
           <h3>Communes & fiches pratiques</h3>
           <p class="muted">Créez vos communes PCS, puis utilisez les actions rapides pour basculer en crise, enrichir la fiche et joindre des documents.</p>
+          <div id="municipality-filters" class="form municipality-filters">
+            <input id="municipalities-search" type="search" placeholder="Rechercher une commune, responsable, contact..." />
+            <select id="municipalities-status-filter">
+              <option value="all">Tous les statuts</option>
+              <option value="crisis">Communes en crise</option>
+              <option value="watch">Communes en veille</option>
+            </select>
+            <select id="municipalities-sort">
+              <option value="name_asc">Tri: nom A→Z</option>
+              <option value="risk_desc">Tri: vigilance élevée</option>
+              <option value="population_desc">Tri: population décroissante</option>
+            </select>
+          </div>
+          <p class="muted">Communes affichées: <strong id="municipalities-count">0</strong></p>
           <form id="municipality-form" class="form" data-requires-edit>
             <input name="name" placeholder="Nom commune" required />
             <input name="manager" placeholder="Responsable" required />

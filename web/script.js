@@ -95,6 +95,18 @@ const levelColor = (level) => ({ vert: '#2f9e44', jaune: '#f59f00', orange: '#f7
 const LOG_LEVEL_EMOJI = { vert: '🟢', jaune: '🟡', orange: '🟠', rouge: '🔴' };
 const LOG_STATUS_LABEL = { nouveau: 'Nouveau', en_cours: 'En cours', suivi: 'Suivi', clos: 'Clos' };
 
+function debounce(fn, wait = 200) {
+  let timeoutId = null;
+  return (...args) => {
+    if (timeoutId) clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => fn(...args), wait);
+  };
+}
+
+function riskRank(level) {
+  return ({ rouge: 4, orange: 3, jaune: 2, vert: 1 }[normalizeLevel(level)] || 0);
+}
+
 function formatLogLine(log = {}) {
   const statusKey = String(log.status || 'nouveau');
   const status = LOG_STATUS_LABEL[statusKey] || 'Nouveau';
@@ -1730,24 +1742,7 @@ async function loadApiInterconnections(forceRefresh = false) {
   saveSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot, data);
 }
 
-async function loadMunicipalities() {
-  let municipalities = [];
-  try {
-    const payload = await api('/municipalities');
-    municipalities = Array.isArray(payload) ? payload : [];
-    localStorage.setItem(STORAGE_KEYS.municipalitiesCache, JSON.stringify(municipalities));
-  } catch (error) {
-    try {
-      const cached = JSON.parse(localStorage.getItem(STORAGE_KEYS.municipalitiesCache) || '[]');
-      municipalities = Array.isArray(cached) ? cached : [];
-    } catch (_) {
-      municipalities = [];
-    }
-    setMapFeedback(`Liste des communes indisponible via API, affichage du cache local (${municipalities.length}).`, true);
-  }
-
-  cachedMunicipalityRecords = municipalities;
-  cachedMunicipalities = municipalities;
+function renderMunicipalitiesList(municipalities = []) {
   const municipalitiesMarkup = municipalities.map((m) => {
     const dangerColor = levelColor(m.vigilance_color || 'vert');
     const actions = canEdit()
@@ -1779,16 +1774,75 @@ async function loadMunicipalities() {
       ${actions}
     </article>`;
   }).join('') || '<p class="muted">Aucune commune.</p>';
+
+  setText('municipalities-count', String(municipalities.length));
   setHtml('municipalities-list', municipalitiesMarkup);
+}
+
+function applyMunicipalityFilters() {
+  const search = String(document.getElementById('municipalities-search')?.value || '').trim().toLowerCase();
+  const statusFilter = String(document.getElementById('municipalities-status-filter')?.value || 'all');
+  const sort = String(document.getElementById('municipalities-sort')?.value || 'name_asc');
+
+  let filtered = [...cachedMunicipalityRecords];
+
+  if (statusFilter === 'crisis') filtered = filtered.filter((item) => Boolean(item.crisis_mode));
+  if (statusFilter === 'watch') filtered = filtered.filter((item) => !item.crisis_mode);
+
+  if (search) {
+    filtered = filtered.filter((item) => [
+      item.name,
+      item.manager,
+      item.phone,
+      item.email,
+      item.postal_code,
+      item.contacts,
+      item.additional_info,
+      item.radio_channel,
+    ].map((value) => String(value || '').toLowerCase()).join(' ').includes(search));
+  }
+
+  filtered.sort((a, b) => {
+    if (sort === 'risk_desc') return riskRank(b.vigilance_color) - riskRank(a.vigilance_color);
+    if (sort === 'population_desc') return Number(b.population || 0) - Number(a.population || 0);
+    return String(a.name || '').localeCompare(String(b.name || ''), 'fr');
+  });
+
+  renderMunicipalitiesList(filtered);
+}
+
+async function loadMunicipalities(preloaded = null) {
+  let municipalities = [];
+  if (Array.isArray(preloaded)) {
+    municipalities = preloaded;
+    localStorage.setItem(STORAGE_KEYS.municipalitiesCache, JSON.stringify(municipalities));
+  } else {
+    try {
+      const payload = await api('/municipalities');
+      municipalities = Array.isArray(payload) ? payload : [];
+      localStorage.setItem(STORAGE_KEYS.municipalitiesCache, JSON.stringify(municipalities));
+    } catch (error) {
+      try {
+        const cached = JSON.parse(localStorage.getItem(STORAGE_KEYS.municipalitiesCache) || '[]');
+        municipalities = Array.isArray(cached) ? cached : [];
+      } catch (_) {
+        municipalities = [];
+      }
+      setMapFeedback(`Liste des communes indisponible via API, affichage du cache local (${municipalities.length}).`, true);
+    }
+  }
+
+  cachedMunicipalityRecords = municipalities;
+  cachedMunicipalities = municipalities;
   populateLogMunicipalityOptions(municipalities);
   syncLogScopeFields();
   syncLogOtherFields();
+  applyMunicipalityFilters();
   await renderMunicipalitiesOnMap(municipalities);
 }
 
-
 function computeLogCriticality(level) {
-  return ({ rouge: 4, orange: 3, jaune: 2, vert: 1 }[normalizeLevel(level)] || 0);
+  return riskRank(level);
 }
 
 function renderLogsList() {
@@ -1827,8 +1881,8 @@ function renderLogsList() {
   setHtml('logs-list', filtered.map((l) => formatLogLine(l)).join('') || '<li>Aucun log.</li>');
 }
 
-async function loadLogs() {
-  const logs = await api('/logs');
+async function loadLogs(preloaded = null) {
+  const logs = Array.isArray(preloaded) ? preloaded : await api('/logs');
   cachedLogs = Array.isArray(logs) ? logs : [];
   renderLogsList();
   renderSituationOverview();
@@ -1846,9 +1900,9 @@ async function exportLogsCsv() {
   window.URL.revokeObjectURL(url);
 }
 
-async function loadUsers() {
+async function loadUsers(preloaded = null) {
   if (!canManageUsers()) return;
-  const users = await api('/auth/users');
+  const users = Array.isArray(preloaded) ? preloaded : await api('/auth/users');
   const isAdmin = currentUser?.role === 'admin';
   setHtml('users-table', users.map((u) => {
     const actionButtons = isAdmin
@@ -1858,41 +1912,81 @@ async function loadUsers() {
   }).join('') || '<tr><td colspan="6">Aucun utilisateur.</td></tr>');
 }
 
-async function refreshAll(forceRefresh = false) {
-  const loaders = [
-    { label: 'tableau de bord', loader: loadDashboard, optional: true },
-    { label: 'risques externes', loader: loadExternalRisks, optional: false },
-    { label: 'communes', loader: loadMunicipalities, optional: false },
-    { label: 'main courante', loader: loadLogs, optional: false },
-    { label: 'utilisateurs', loader: loadUsers, optional: true },
-    { label: 'interconnexions API', loader: loadApiInterconnections, optional: true },
-    { label: 'points cartographiques', loader: loadMapPoints, optional: true },
-  ];
+async function loadOperationsBootstrap(forceRefresh = false) {
+  const suffix = forceRefresh ? '?refresh=true' : '';
+  const payload = await api(`/operations/bootstrap${suffix}`, { cacheTtlMs: 5000 });
+  if (!payload || typeof payload !== 'object') throw new Error('Réponse bootstrap invalide');
 
-  const results = await Promise.allSettled(loaders.map(({ loader }) => loader()));
-  const failures = results
-    .map((result, index) => ({ result, config: loaders[index] }))
-    .filter(({ result }) => result.status === 'rejected');
-
-  const blockingFailures = failures.filter(({ config }) => !config.optional);
-  const optionalFailures = failures.filter(({ config }) => config.optional);
-
-  renderResources();
-  fitMapToData();
-
-  if (!blockingFailures.length) {
-    const errorTarget = document.getElementById('dashboard-error');
-    if (errorTarget && !errorTarget.textContent.trim()) {
-      errorTarget.textContent = optionalFailures.length
-        ? `Modules secondaires indisponibles: ${optionalFailures.map(({ config, result }) => `${config.label}: ${sanitizeErrorMessage(result.reason?.message || 'erreur')}`).join(' · ')}`
-        : '';
-    }
-    return;
+  if (payload.dashboard) {
+    renderDashboard(payload.dashboard);
+    saveSnapshot(STORAGE_KEYS.dashboardSnapshot, payload.dashboard);
+  }
+  if (payload.external_risks) {
+    renderExternalRisks(payload.external_risks);
+    renderApiInterconnections(payload.external_risks);
+    saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, payload.external_risks);
+    saveSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot, payload.external_risks);
   }
 
-  const message = blockingFailures.map(({ config, result }) => `${config.label}: ${sanitizeErrorMessage(result.reason?.message || 'erreur')}`).join(' · ');
-  document.getElementById('dashboard-error').textContent = message;
-  setMapFeedback(message, true);
+  await loadMunicipalities(payload.municipalities || []);
+  await loadLogs(payload.logs || []);
+  if (canManageUsers()) await loadUsers(payload.users || []);
+
+  const perf = payload.perf || {};
+  const duration = Number(perf.backend_duration_ms || 0);
+  const countM = Number(perf.municipality_count || (payload.municipalities || []).length || 0);
+  const countL = Number(perf.log_count || (payload.logs || []).length || 0);
+  setText('operations-perf', `Perf: ${duration} ms · ${countM} communes · ${countL} événements`);
+  return payload;
+}
+
+async function refreshAll(forceRefresh = false) {
+  try {
+    await loadOperationsBootstrap(forceRefresh);
+    await loadMapPoints();
+    await renderTrafficOnMap();
+    renderResources();
+    fitMapToData();
+    document.getElementById('dashboard-error').textContent = '';
+    return;
+  } catch (bootstrapError) {
+    setText('operations-perf', 'Perf: mode dégradé (chargement par modules)');
+    const loaders = [
+      { label: 'tableau de bord', loader: loadDashboard, optional: true },
+      { label: 'risques externes', loader: loadExternalRisks, optional: false },
+      { label: 'communes', loader: loadMunicipalities, optional: false },
+      { label: 'main courante', loader: loadLogs, optional: false },
+      { label: 'utilisateurs', loader: loadUsers, optional: true },
+      { label: 'interconnexions API', loader: loadApiInterconnections, optional: true },
+      { label: 'points cartographiques', loader: loadMapPoints, optional: true },
+    ];
+
+    const results = await Promise.allSettled(loaders.map(({ loader }) => loader()));
+    const failures = results
+      .map((result, index) => ({ result, config: loaders[index] }))
+      .filter(({ result }) => result.status === 'rejected');
+
+    const blockingFailures = failures.filter(({ config }) => !config.optional);
+    const optionalFailures = failures.filter(({ config }) => config.optional);
+
+    renderResources();
+    fitMapToData();
+
+    if (!blockingFailures.length) {
+      const errorTarget = document.getElementById('dashboard-error');
+      if (errorTarget && !errorTarget.textContent.trim()) {
+        const warning = optionalFailures.length
+          ? `Modules secondaires indisponibles: ${optionalFailures.map(({ config, result }) => `${config.label}: ${sanitizeErrorMessage(result.reason?.message || 'erreur')}`).join(' · ')}`
+          : '';
+        errorTarget.textContent = warning || `Bootstrap indisponible: ${sanitizeErrorMessage(bootstrapError.message)}`;
+      }
+      return;
+    }
+
+    const message = blockingFailures.map(({ config, result }) => `${config.label}: ${sanitizeErrorMessage(result.reason?.message || 'erreur')}`).join(' · ');
+    document.getElementById('dashboard-error').textContent = `Bootstrap: ${sanitizeErrorMessage(bootstrapError.message)} · ${message}`;
+    setMapFeedback(message, true);
+  }
 }
 
 function applyRoleVisibility() {
@@ -2335,9 +2429,16 @@ function bindAppInteractions() {
   document.getElementById('log-municipality-id')?.addEventListener('focus', () => {
     ensureLogMunicipalitiesLoaded();
   });
+  const debouncedLogsRender = debounce(renderLogsList, 180);
   ['logs-search', 'logs-municipality-filter', 'logs-scope-filter', 'logs-sort'].forEach((id) => {
-    document.getElementById(id)?.addEventListener('input', renderLogsList);
+    document.getElementById(id)?.addEventListener('input', debouncedLogsRender);
     document.getElementById(id)?.addEventListener('change', renderLogsList);
+  });
+
+  const debouncedMunicipalityFilter = debounce(applyMunicipalityFilters, 180);
+  ['municipalities-search', 'municipalities-status-filter', 'municipalities-sort'].forEach((id) => {
+    document.getElementById(id)?.addEventListener('input', debouncedMunicipalityFilter);
+    document.getElementById(id)?.addEventListener('change', applyMunicipalityFilters);
   });
   document.getElementById('logs-export')?.addEventListener('click', async () => {
     try {
