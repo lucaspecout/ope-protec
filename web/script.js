@@ -577,7 +577,7 @@ async function loadIsereBoundary() {
 function renderStations(stations = []) {
   cachedStations = stations;
   const visible = document.getElementById('filter-hydro')?.checked ?? true;
-  document.getElementById('hydro-stations-list').innerHTML = stations.slice(0, 40).map((s) => `<li><strong>${s.station || s.code}</strong> · ${s.river || ''} · <span style="color:${levelColor(s.level)}">${normalizeLevel(s.level)}</span> · Contrôle: ${escapeHtml(s.control_status || 'inconnu')} · ${s.height_m} m</li>`).join('') || '<li>Aucune station.</li>';
+  setHtml('hydro-stations-list', stations.slice(0, 40).map((s) => `<li><strong>${s.station || s.code}</strong> · ${s.river || ''} · <span style="color:${levelColor(s.level)}">${normalizeLevel(s.level)}</span> · Contrôle: ${escapeHtml(s.control_status || 'inconnu')} · ${s.height_m} m</li>`).join('') || '<li>Aucune station.</li>');
   if (!hydroLayer || !hydroLineLayer) return;
   hydroLayer.clearLayers();
   hydroLineLayer.clearLayers();
@@ -674,7 +674,7 @@ async function fetchMunicipalityContour(municipality) {
 async function renderMunicipalitiesOnMap(municipalities = []) {
   cachedMunicipalities = municipalities;
   const pcs = municipalities.filter((m) => m.pcs_active);
-  document.getElementById('pcs-list').innerHTML = pcs.slice(0, 15).map((m) => `<li><strong>${m.name}</strong> · ${m.postal_code || 'CP ?'} · ${m.manager} · ${m.crisis_mode ? '🔴 CRISE' : 'veille'}</li>`).join('') || '<li>Aucune commune PCS.</li>';
+  setHtml('pcs-list', pcs.slice(0, 15).map((m) => `<li><strong>${m.name}</strong> · ${m.postal_code || 'CP ?'} · ${m.manager} · ${m.crisis_mode ? '🔴 CRISE' : 'veille'}</li>`).join('') || '<li>Aucune commune PCS.</li>');
   if (!pcsLayer) return;
   pcsLayer.clearLayers();
   if (pcsBoundaryLayer) pcsBoundaryLayer.clearLayers();
@@ -734,7 +734,7 @@ function renderResources() {
   const type = document.getElementById('resource-type-filter')?.value || 'all';
   const query = (document.getElementById('map-search')?.value || '').trim().toLowerCase();
   const resources = RESOURCE_POINTS.filter((r) => (!onlyActive || r.active) && (type === 'all' || r.type === type) && (!query || `${r.name} ${r.address}`.toLowerCase().includes(query)));
-  document.getElementById('resources-list').innerHTML = resources.map((r) => `<li><strong>${r.name}</strong> · ${r.address} · ${r.active ? 'activée' : 'en attente'}</li>`).join('') || '<li>Aucune ressource avec ces filtres.</li>';
+  setHtml('resources-list', resources.map((r) => `<li><strong>${r.name}</strong> · ${r.address} · ${r.active ? 'activée' : 'en attente'}</li>`).join('') || '<li>Aucune ressource avec ces filtres.</li>');
   mapStats.resources = resources.length;
   updateMapSummary();
   if (!resourceLayer) return;
@@ -1520,18 +1520,35 @@ function renderDashboard(dashboard = {}) {
   setRiskText('vigilance', normalizeLevel(dashboard.vigilance), dashboard.vigilance);
   setRiskText('crues', normalizeLevel(dashboard.crues), dashboard.crues);
   setRiskText('risk', normalizeLevel(dashboard.global_risk), dashboard.global_risk);
-  document.getElementById('risk').className = normalizeLevel(dashboard.global_risk);
-  document.getElementById('crisis').textContent = String(dashboard.communes_crise || 0);
+  const riskNode = document.getElementById('risk');
+  if (riskNode) riskNode.className = normalizeLevel(dashboard.global_risk);
+  setText('crisis', String(dashboard.communes_crise || 0));
 
   const logs = Array.isArray(dashboard.latest_logs) ? dashboard.latest_logs : [];
   const formatSituationLog = (log) => {
     const status = LOG_STATUS_LABEL[String(log.status || 'nouveau')] || 'Nouveau';
     const at = new Date(log.event_time || log.created_at || Date.now()).toLocaleString();
-    return `<li><strong>${at}</strong> · <span class="badge neutral">${status}</span> · <span class="badge neutral">${formatLogScope(log)}</span><br>${log.danger_emoji || ''} <strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'Évènement')}</strong> · ${escapeHtml(log.description || '')}</li>`;
+    const scope = formatLogScope(log);
+    const icon = log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢';
+    return `<li><strong>${at}</strong> · <span class="badge neutral">${status}</span> · <span class="badge neutral">${scope}</span><br>${icon} <strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'Évènement')}</strong> · ${escapeHtml(log.description || '')}</li>`;
   };
 
   const openLogs = logs.filter((log) => String(log.status || '').toLowerCase() !== 'clos');
   const closedLogs = logs.filter((log) => String(log.status || '').toLowerCase() === 'clos');
+  const criticalLogs = logs.filter((log) => {
+    const level = normalizeLevel(log.danger_level || 'vert');
+    return level === 'orange' || level === 'rouge';
+  });
+
+  const latestTimestamp = logs
+    .map((log) => new Date(log.event_time || log.created_at || 0).getTime())
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .sort((a, b) => b - a)[0];
+
+  setText('situation-open-count', String(openLogs.length));
+  setText('situation-closed-count', String(closedLogs.length));
+  setText('situation-critical-count', String(criticalLogs.length));
+  setText('situation-last-update', latestTimestamp ? new Date(latestTimestamp).toLocaleTimeString() : '-');
 
   setHtml('latest-logs-open', openLogs.map(formatSituationLog).join('') || '<li>Aucune crise en cours.</li>');
   setHtml('latest-logs-closed', closedLogs.map(formatSituationLog).join('') || '<li>Aucune crise clôturée récente.</li>');
@@ -1729,8 +1746,8 @@ function renderLogsList() {
     return new Date(b.event_time || b.created_at).getTime() - new Date(a.event_time || a.created_at).getTime();
   });
 
-  document.getElementById('logs-count').textContent = String(filtered.length);
-  document.getElementById('logs-list').innerHTML = filtered.map((l) => formatLogLine(l)).join('') || '<li>Aucun log.</li>';
+  setText('logs-count', String(filtered.length));
+  setHtml('logs-list', filtered.map((l) => formatLogLine(l)).join('') || '<li>Aucun log.</li>');
 }
 
 async function loadLogs() {
@@ -1755,12 +1772,12 @@ async function loadUsers() {
   if (!canManageUsers()) return;
   const users = await api('/auth/users');
   const isAdmin = currentUser?.role === 'admin';
-  document.getElementById('users-table').innerHTML = users.map((u) => {
+  setHtml('users-table', users.map((u) => {
     const actionButtons = isAdmin
       ? `<div class="users-actions"><button type="button" data-user-edit="${u.id}">Modifier</button><button type="button" data-user-reset="${u.id}">Réinitialiser mot de passe</button><button type="button" class="ghost" data-user-delete="${u.id}">Supprimer</button></div>`
       : '-';
     return `<tr><td>${escapeHtml(u.username)}</td><td>${roleLabel(u.role)}</td><td>${escapeHtml(u.municipality_name || '-')}</td><td>${new Date(u.created_at).toLocaleDateString()}</td><td>${u.must_change_password ? 'Changement requis' : 'Actif'}</td><td>${actionButtons}</td></tr>`;
-  }).join('') || '<tr><td colspan="6">Aucun utilisateur.</td></tr>';
+  }).join('') || '<tr><td colspan="6">Aucun utilisateur.</td></tr>');
 }
 
 async function refreshAll(forceRefresh = false) {
