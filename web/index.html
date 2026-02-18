@@ -114,12 +114,11 @@
           <button class="menu-btn" data-target="situation-panel">Situation</button>
           <button class="menu-btn" data-target="services-panel">Services connectés</button>
           <button class="menu-btn" data-target="georisques-panel">Page Géorisques</button>
-          <button class="menu-btn" data-target="api-panel">Interconnexions API</button>
-          <button class="menu-btn" data-target="supervision-panel">Supervision crise</button>
           <button class="menu-btn" data-target="municipalities-panel">Communes</button>
           <button class="menu-btn" data-target="logs-panel">Main courante</button>
           <button class="menu-btn" data-target="map-panel">Carte Isère</button>
           <button class="menu-btn" data-target="users-panel">Utilisateurs</button>
+          <button class="menu-btn" data-target="api-panel">Interconnexions API</button>
         </nav>
         <button id="logout-btn" class="danger">Déconnexion</button>
       </aside>
@@ -146,23 +145,16 @@
           <h3>Risques en cours (orange / rouge)</h3>
           <ul id="critical-risks-list" class="list"></ul>
           <h3>Derniers évènements</h3>
-          <ul id="latest-logs" class="list"></ul>
-        </section>
-
-        <section id="supervision-panel" class="panel view hidden" hidden>
-          <h3>Supervision multi-aléas Isère</h3>
-          <div class="kpis">
-            <article class="tile"><h3>Météo-France</h3><p id="supervision-meteo">-</p></article>
-            <article class="tile"><h3>Vigicrues</h3><p id="supervision-vigicrues">-</p></article>
-            <article class="tile"><h3>Itinisère</h3><p id="supervision-itinisere">-</p></article>
-            <article class="tile"><h3>Bison Futé</h3><p id="supervision-bison">-</p></article>
-            <article class="tile"><h3>Géorisques</h3><p id="supervision-georisques">-</p></article>
-            <article class="tile"><h3>Communes en crise</h3><p id="supervision-crisis-count">0</p></article>
+          <div class="situation-log-columns">
+            <div>
+              <h4>Crises en cours</h4>
+              <ul id="latest-logs-open" class="list"></ul>
+            </div>
+            <div>
+              <h4>Crises clôturées</h4>
+              <ul id="latest-logs-closed" class="list"></ul>
+            </div>
           </div>
-          <h4>Historique opérationnel récent</h4>
-          <ul id="supervision-timeline" class="list"></ul>
-          <h4>Perturbations mobilité (Itinisère)</h4>
-          <ul id="supervision-itinisere-events" class="list"></ul>
         </section>
 
         <section id="services-panel" class="panel view hidden" hidden>
@@ -258,7 +250,7 @@
           <dialog id="municipality-details-modal" class="municipality-details-modal">
             <div class="municipality-details-modal__head">
               <h4>Détail commune</h4>
-              <form method="dialog"><button type="submit" id="municipality-details-close" class="ghost">Fermer</button></form>
+              <button type="button" id="municipality-details-close" class="ghost">Fermer</button>
             </div>
             <div id="municipality-details-content"></div>
           </dialog>
