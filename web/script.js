@@ -1860,7 +1860,7 @@ async function loadUsers() {
 
 async function refreshAll(forceRefresh = false) {
   const loaders = [
-    { label: 'tableau de bord', loader: loadDashboard, optional: false },
+    { label: 'tableau de bord', loader: loadDashboard, optional: true },
     { label: 'risques externes', loader: loadExternalRisks, optional: false },
     { label: 'communes', loader: loadMunicipalities, optional: false },
     { label: 'main courante', loader: loadLogs, optional: false },
@@ -1881,9 +1881,12 @@ async function refreshAll(forceRefresh = false) {
   fitMapToData();
 
   if (!blockingFailures.length) {
-    document.getElementById('dashboard-error').textContent = optionalFailures.length
-      ? `Modules secondaires indisponibles: ${optionalFailures.map(({ config, result }) => `${config.label}: ${sanitizeErrorMessage(result.reason?.message || 'erreur')}`).join(' · ')}`
-      : '';
+    const errorTarget = document.getElementById('dashboard-error');
+    if (errorTarget && !errorTarget.textContent.trim()) {
+      errorTarget.textContent = optionalFailures.length
+        ? `Modules secondaires indisponibles: ${optionalFailures.map(({ config, result }) => `${config.label}: ${sanitizeErrorMessage(result.reason?.message || 'erreur')}`).join(' · ')}`
+        : '';
+    }
     return;
   }
 
