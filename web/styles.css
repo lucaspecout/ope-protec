@@ -164,6 +164,19 @@ label { display: block; margin-bottom: .8rem; }
 .risk-orange { color: #b46a00; font-weight: 700; }
 .risk-rouge { color: #c22f43; font-weight: 700; }
 .meteo-detail { display: inline-block; margin-top: .2rem; color: #334155; }
+.meteo-alert-level {
+  margin-left: .2rem;
+  padding: .08rem .45rem;
+  border-radius: 999px;
+  font-size: .78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+.meteo-alert-level.vert { color: #0f6f3e; background: #e4f7ec; border-color: #b7e7c8; }
+.meteo-alert-level.jaune { color: #7f6200; background: #fff7c5; border-color: #f5d257; }
+.meteo-alert-level.orange { color: #944200; background: #ffe2c2; border-color: #ffb067; }
+.meteo-alert-level.rouge { color: #9f1f32; background: #ffe2e7; border-color: #f5aab8; }
 
 .list { list-style: none; margin: .6rem 0 0; padding: 0; display: grid; gap: .45rem; }
 .list li { background: #f7faff; border: 1px solid var(--line); border-radius: 11px; padding: .63rem .75rem; }
@@ -173,6 +186,18 @@ label { display: block; margin-bottom: .8rem; }
 
 
 .situation-panel { display: grid; gap: .95rem; }
+.situation-vigilance-legend {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f7faff;
+  padding: .55rem .65rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .45rem;
+}
 .situation-toolbar { display: flex; align-items: center; justify-content: space-between; gap: .65rem; padding: .65rem .75rem; border: 1px solid var(--line); border-radius: 12px; background: #f7faff; }
 .situation-toolbar p { margin: 0; }
 .situation-toolbar button { margin-top: 0; white-space: nowrap; }
