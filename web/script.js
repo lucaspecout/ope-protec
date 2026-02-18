@@ -1,9 +1,9 @@
 const STORAGE_KEYS = { token: 'token', activePanel: 'activePanel', mapPointsCache: 'mapPointsCache', municipalitiesCache: 'municipalitiesCache', dashboardSnapshot: 'dashboardSnapshot', externalRisksSnapshot: 'externalRisksSnapshot', apiInterconnectionsSnapshot: 'apiInterconnectionsSnapshot' };
-const AUTO_REFRESH_MS = 10000;
-const EVENTS_LIVE_REFRESH_MS = 5000;
+const AUTO_REFRESH_MS = 30000;
+const EVENTS_LIVE_REFRESH_MS = 30000;
 const HOME_LIVE_REFRESH_MS = 30000;
 const API_CACHE_TTL_MS = 30000;
-const API_PANEL_REFRESH_MS = 10000;
+const API_PANEL_REFRESH_MS = 30000;
 const PANEL_TITLES = {
   'situation-panel': 'Situation opérationnelle',
   'services-panel': 'Services connectés',
@@ -468,6 +468,24 @@ function setActivePanel(panelId) {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
     });
   }
+}
+
+function withPreservedScroll(runUpdate) {
+  const pageScroll = window.scrollY || document.documentElement.scrollTop || 0;
+  const activePanelId = localStorage.getItem(STORAGE_KEYS.activePanel);
+  const activePanel = activePanelId ? document.getElementById(activePanelId) : null;
+  const panelScroll = activePanel ? activePanel.scrollTop : 0;
+  const panelScrollLeft = activePanel ? activePanel.scrollLeft : 0;
+
+  return Promise.resolve()
+    .then(runUpdate)
+    .finally(() => {
+      if (activePanel && activePanel.id === (localStorage.getItem(STORAGE_KEYS.activePanel) || '')) {
+        activePanel.scrollTop = panelScroll;
+        activePanel.scrollLeft = panelScrollLeft;
+      }
+      window.scrollTo({ top: pageScroll, left: 0, behavior: 'auto' });
+    });
 }
 
 
@@ -1988,52 +2006,54 @@ async function loadOperationsBootstrap(forceRefresh = false) {
 }
 
 async function refreshAll(forceRefresh = false) {
-  try {
-    await loadOperationsBootstrap(forceRefresh);
-    await loadMapPoints();
-    await renderTrafficOnMap();
-    renderResources();
-    fitMapToData();
-    document.getElementById('dashboard-error').textContent = '';
-    return;
-  } catch (bootstrapError) {
-    setText('operations-perf', 'Perf: mode dégradé (chargement par modules)');
-    const loaders = [
-      { label: 'tableau de bord', loader: loadDashboard, optional: true },
-      { label: 'risques externes', loader: loadExternalRisks, optional: false },
-      { label: 'communes', loader: loadMunicipalities, optional: false },
-      { label: 'main courante', loader: loadLogs, optional: false },
-      { label: 'utilisateurs', loader: loadUsers, optional: true },
-      { label: 'interconnexions API', loader: loadApiInterconnections, optional: true },
-      { label: 'points cartographiques', loader: loadMapPoints, optional: true },
-    ];
-
-    const results = await Promise.allSettled(loaders.map(({ loader }) => loader()));
-    const failures = results
-      .map((result, index) => ({ result, config: loaders[index] }))
-      .filter(({ result }) => result.status === 'rejected');
-
-    const blockingFailures = failures.filter(({ config }) => !config.optional);
-    const optionalFailures = failures.filter(({ config }) => config.optional);
-
-    renderResources();
-    fitMapToData();
-
-    if (!blockingFailures.length) {
-      const errorTarget = document.getElementById('dashboard-error');
-      if (errorTarget && !errorTarget.textContent.trim()) {
-        const warning = optionalFailures.length
-          ? `Modules secondaires indisponibles: ${optionalFailures.map(({ config, result }) => `${config.label}: ${sanitizeErrorMessage(result.reason?.message || 'erreur')}`).join(' · ')}`
-          : '';
-        errorTarget.textContent = warning || `Bootstrap indisponible: ${sanitizeErrorMessage(bootstrapError.message)}`;
-      }
+  return withPreservedScroll(async () => {
+    try {
+      await loadOperationsBootstrap(forceRefresh);
+      await loadMapPoints();
+      await renderTrafficOnMap();
+      renderResources();
+      fitMapToData();
+      document.getElementById('dashboard-error').textContent = '';
       return;
-    }
+    } catch (bootstrapError) {
+      setText('operations-perf', 'Perf: mode dégradé (chargement par modules)');
+      const loaders = [
+        { label: 'tableau de bord', loader: loadDashboard, optional: true },
+        { label: 'risques externes', loader: loadExternalRisks, optional: false },
+        { label: 'communes', loader: loadMunicipalities, optional: false },
+        { label: 'main courante', loader: loadLogs, optional: false },
+        { label: 'utilisateurs', loader: loadUsers, optional: true },
+        { label: 'interconnexions API', loader: loadApiInterconnections, optional: true },
+        { label: 'points cartographiques', loader: loadMapPoints, optional: true },
+      ];
 
-    const message = blockingFailures.map(({ config, result }) => `${config.label}: ${sanitizeErrorMessage(result.reason?.message || 'erreur')}`).join(' · ');
-    document.getElementById('dashboard-error').textContent = `Bootstrap: ${sanitizeErrorMessage(bootstrapError.message)} · ${message}`;
-    setMapFeedback(message, true);
-  }
+      const results = await Promise.allSettled(loaders.map(({ loader }) => loader()));
+      const failures = results
+        .map((result, index) => ({ result, config: loaders[index] }))
+        .filter(({ result }) => result.status === 'rejected');
+
+      const blockingFailures = failures.filter(({ config }) => !config.optional);
+      const optionalFailures = failures.filter(({ config }) => config.optional);
+
+      renderResources();
+      fitMapToData();
+
+      if (!blockingFailures.length) {
+        const errorTarget = document.getElementById('dashboard-error');
+        if (errorTarget && !errorTarget.textContent.trim()) {
+          const warning = optionalFailures.length
+            ? `Modules secondaires indisponibles: ${optionalFailures.map(({ config, result }) => `${config.label}: ${sanitizeErrorMessage(result.reason?.message || 'erreur')}`).join(' · ')}`
+            : '';
+          errorTarget.textContent = warning || `Bootstrap indisponible: ${sanitizeErrorMessage(bootstrapError.message)}`;
+        }
+        return;
+      }
+
+      const message = blockingFailures.map(({ config, result }) => `${config.label}: ${sanitizeErrorMessage(result.reason?.message || 'erreur')}`).join(' · ');
+      document.getElementById('dashboard-error').textContent = `Bootstrap: ${sanitizeErrorMessage(bootstrapError.message)} · ${message}`;
+      setMapFeedback(message, true);
+    }
+  });
 }
 
 function applyRoleVisibility() {
@@ -2611,7 +2631,7 @@ function logout() {
 
 function startAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
-  refreshTimer = setInterval(() => token && refreshAll(true), AUTO_REFRESH_MS);
+  refreshTimer = setInterval(() => token && refreshAll(false), AUTO_REFRESH_MS);
 }
 
 async function refreshLiveEvents() {
@@ -2619,7 +2639,7 @@ async function refreshLiveEvents() {
   try {
     const [logs, risks] = await Promise.all([
       api('/logs', { cacheTtlMs: 0, bypassCache: true }),
-      api('/external/isere/risks?refresh=true', { cacheTtlMs: 0, bypassCache: true }),
+      api('/external/isere/risks', { cacheTtlMs: 0, bypassCache: true }),
     ]);
 
     cachedLogs = Array.isArray(logs) ? logs : [];
@@ -2659,7 +2679,7 @@ function startApiPanelAutoRefresh() {
   apiPanelTimer = setInterval(() => {
     const activePanel = localStorage.getItem(STORAGE_KEYS.activePanel);
     if (!token || activePanel !== 'api-panel' || document.hidden) return;
-    loadApiInterconnections(true).catch((error) => {
+    loadApiInterconnections(false).catch((error) => {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
     });
   }, API_PANEL_REFRESH_MS);
