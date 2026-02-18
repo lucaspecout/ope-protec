@@ -189,6 +189,28 @@ label { display: block; margin-bottom: .8rem; }
 .situation-log-columns { display: grid; gap: .8rem; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
 .situation-log-columns h4 { margin: .35rem 0; }
 
+
+.panel-heading h3 { margin: 0; }
+.panel-heading .muted { margin: .3rem 0 0; }
+
+.situation-content { display: grid; gap: .95rem; }
+.situation-toolbar h3 { margin: 0 0 .2rem; }
+
+.services-grid { display: grid; gap: .65rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.service-card { border: 1px solid var(--line); border-radius: 12px; padding: .8rem; background: linear-gradient(180deg, #fff, #f7faff); display: grid; gap: .35rem; align-content: flex-start; }
+.service-card__head { display: flex; align-items: center; justify-content: space-between; gap: .6rem; }
+.service-card__head h4 { margin: 0; }
+.service-card__head a { color: #0b4daa; font-weight: 700; text-decoration: none; }
+.service-card__head a:hover { text-decoration: underline; }
+.service-status { margin: 0; font-weight: 700; }
+.service-card a { color: #0b4daa; font-weight: 600; }
+.services-lists { display: grid; gap: .7rem; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); margin-top: .7rem; }
+
+.georisques-kpis .tile p { font-size: 1.15rem; }
+.georisques-meta { margin-bottom: .1rem; }
+.georisques-meta p { margin: .2rem 0; }
+.georisques-lists { display: grid; gap: .7rem; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+
 .level-chip {
   display: inline-flex;
   align-items: center;
@@ -264,9 +286,6 @@ label { display: block; margin-bottom: .8rem; }
 #municipality-details-content h4 { margin: 0 0 .45rem; }
 #municipality-details-content p { margin: .4rem 0; }
 #municipality-details-content .list li .inline-action { margin-top: 0; margin-left: .45rem; }
-.services-grid { display: grid; gap: .65rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
-.service-card { border: 1px solid var(--line); border-radius: 12px; padding: .8rem; background: linear-gradient(180deg, #fff, #f7faff); }
-.service-card a { color: #0b4daa; font-weight: 600; }
 .api-headline { display: flex; justify-content: space-between; align-items: flex-start; gap: .8rem; flex-wrap: wrap; }
 .api-service-grid { margin-top: .8rem; display: grid; gap: .65rem; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
 .api-card { border: 1px solid var(--line); border-radius: 12px; padding: .8rem; background: #f8fbff; }
