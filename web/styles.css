@@ -188,6 +188,22 @@ label { display: block; margin-bottom: .8rem; }
 }
 .situation-log-columns { display: grid; gap: .8rem; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
 .situation-log-columns h4 { margin: .35rem 0; }
+
+.level-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: .14rem .48rem;
+  border-radius: 999px;
+  margin-left: .45rem;
+  font-size: .75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+.level-chip.vert { color: #0f6f3e; background: #e4f7ec; border-color: #b7e7c8; }
+.level-chip.jaune { color: #8f6800; background: #fff7d6; border-color: #ffe082; }
+.level-chip.orange { color: #9b4f00; background: #ffe7d1; border-color: #ffc08c; }
+.level-chip.rouge { color: #9f1f32; background: #ffe2e7; border-color: #f5aab8; }
 .map-inline-actions .inline-action { margin-top: 0; white-space: nowrap; }
 .inline-action { margin-top: .4rem; padding: .35rem .6rem; border-radius: 8px; font-size: .78rem; }
 .inline-action.primary { background: #123b80; color: #fff; border-color: #123b80; }
