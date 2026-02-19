@@ -703,7 +703,8 @@ function renderStations(stations = []) {
   mapStats.stations = stationsWithPoints.length;
   stationsWithPoints.forEach((s) => {
     const statusLevel = stationStatusLevel(s);
-    window.L.circleMarker([s.lat, s.lon], { radius: 7, color: '#fff', weight: 1.5, fillColor: levelColor(statusLevel), fillOpacity: 0.95 })
+    const counter = ({ vert: 'V', jaune: 'J', orange: 'O', rouge: 'R' }[statusLevel] || 'V');
+    window.L.marker([s.lat, s.lon], { icon: vigicruesStationIcon(statusLevel, counter) })
       .bindPopup(`<strong>${s.station || s.code}</strong><br>${s.river || ''}<br>Département: Isère (38)<br>Statut: ${statusLevel}<br>Contrôle station: ${escapeHtml(s.control_status || 'inconnu')}<br>Hauteur: ${s.height_m} m`)
       .addTo(hydroLayer);
   });
@@ -996,6 +997,17 @@ function emojiDivIcon(emoji) {
   return window.L.divIcon({ className: 'map-emoji-icon', html: `<span>${escapeHtml(emoji)}</span>`, iconSize: [30, 30], iconAnchor: [15, 15], popupAnchor: [0, -15] });
 }
 
+function vigicruesStationIcon(level = 'vert', counter = '1') {
+  const normalizedLevel = normalizeLevel(level);
+  return window.L.divIcon({
+    className: 'vigicrues-station-icon-wrap',
+    html: `<span class="vigicrues-station-icon">💧<span class="vigicrues-station-counter ${escapeHtml(normalizedLevel)}">${escapeHtml(counter)}</span></span>`,
+    iconSize: [34, 34],
+    iconAnchor: [17, 28],
+    popupAnchor: [0, -24],
+  });
+}
+
 function imageMarkerIcon(iconUrl) {
   return window.L.icon({
     iconUrl,
@@ -1206,6 +1218,18 @@ async function renderTrafficOnMap() {
     const incidents = Array.isArray(cachedRealtimeTraffic?.incidents) ? cachedRealtimeTraffic.incidents : [];
     const filteredIncidents = incidents.filter((incident) => incident.subtype === 'road_closed');
     filteredIncidents.forEach((incident) => {
+      const coords = normalizeMapCoordinates(incident.lat, incident.lon);
+      if (coords) {
+        window.L.circleMarker([coords.lat, coords.lon], {
+          radius: 7,
+          color: '#fff',
+          weight: 1.5,
+          fillColor: trafficLevelColor('rouge'),
+          fillOpacity: 0.85,
+        })
+          .bindPopup(`<strong>⛔ ${escapeHtml(incident.title || 'Route fermée')}</strong><br/>${escapeHtml(incident.description || '')}<br/><span class="badge neutral">fermeture · rouge</span>`)
+          .addTo(realtimeTrafficLayer);
+      }
       if (Array.isArray(incident.line) && incident.line.length > 1) {
         const lineLatLng = incident.line
           .map((point) => normalizeMapCoordinates(point.lat, point.lon))
@@ -2401,6 +2425,20 @@ function bindAppInteractions() {
     setMapControlsCollapsed(!mapControlsCollapsed);
   });
   document.getElementById('map-fit-btn')?.addEventListener('click', () => fitMapToData(true));
+  document.getElementById('map-add-point-btn')?.addEventListener('click', () => {
+    if (!canEdit()) {
+      setMapFeedback('Vous n\'avez pas le droit de créer un POI.', true);
+      return;
+    }
+    mapAddPointMode = !mapAddPointMode;
+    pendingMapPointCoords = null;
+    const button = document.getElementById('map-add-point-btn');
+    button?.classList.toggle('active', mapAddPointMode);
+    button?.setAttribute('aria-pressed', String(mapAddPointMode));
+    setMapFeedback(mapAddPointMode
+      ? 'Mode création POI actif: cliquez sur la carte pour positionner le point.'
+      : 'Mode création POI désactivé.');
+  });
   document.getElementById('map-focus-crisis')?.addEventListener('click', focusOnCrisisAreas);
   document.getElementById('map-run-checks')?.addEventListener('click', runMapChecks);
   document.getElementById('map-toggle-contrast')?.addEventListener('click', toggleMapContrast);
@@ -2450,6 +2488,9 @@ function bindAppInteractions() {
   document.getElementById('map-point-category-filter')?.addEventListener('change', renderCustomPoints);
   document.getElementById('map-point-form-cancel')?.addEventListener('click', () => {
     const modal = document.getElementById('map-point-modal');
+    mapAddPointMode = false;
+    document.getElementById('map-add-point-btn')?.classList.remove('active');
+    document.getElementById('map-add-point-btn')?.setAttribute('aria-pressed', 'false');
     if (typeof modal?.close === 'function') modal.close();
     else modal?.removeAttribute('open');
   });
@@ -2495,6 +2536,9 @@ function bindAppInteractions() {
         lon: pendingMapPointCoords.lng,
       });
       pendingMapPointCoords = null;
+      mapAddPointMode = false;
+      document.getElementById('map-add-point-btn')?.classList.remove('active');
+      document.getElementById('map-add-point-btn')?.setAttribute('aria-pressed', 'false');
       const modal = document.getElementById('map-point-modal');
       if (typeof modal?.close === 'function') modal.close();
       else modal?.removeAttribute('open');

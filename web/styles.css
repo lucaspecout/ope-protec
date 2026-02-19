@@ -369,6 +369,13 @@ label { display: block; margin-bottom: .8rem; }
 .map-search-inline { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: .45rem; }
 .map-inline-actions { display: flex; flex-wrap: nowrap; gap: .45rem; overflow-x: auto; }
 .map-btn-lite { border-radius: 8px; font-weight: 600; }
+.map-btn-lite.active { background: #123b80; color: #fff; border-color: #123b80; }
+.vigicrues-station-icon { position: relative; display: inline-flex; align-items: center; justify-content: center; font-size: 1.05rem; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .45)); }
+.vigicrues-station-counter { position: absolute; top: -7px; right: -11px; min-width: 16px; height: 16px; border-radius: 999px; border: 1px solid #fff; color: #fff; font-size: .56rem; font-weight: 700; line-height: 1; display: inline-flex; align-items: center; justify-content: center; padding: 0 .2rem; }
+.vigicrues-station-counter.vert { background: #2f9e44; }
+.vigicrues-station-counter.jaune { background: #f59f00; }
+.vigicrues-station-counter.orange { background: #f76707; }
+.vigicrues-station-counter.rouge { background: #e03131; }
 .map-toggle-grid { display: grid; gap: .35rem; }
 .map-toggle-grid label { display: flex; align-items: center; gap: .35rem; margin: 0; font-size: .8rem; color: #2a436f; }
 .map-toggle-grid input { width: auto; margin: 0; }
