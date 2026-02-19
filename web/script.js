@@ -46,6 +46,7 @@ let customPointsLayer = null;
 let mapPointsLayer = null;
 let itinisereLayer = null;
 let bisonLayer = null;
+let realtimeTrafficLayer = null;
 let mapTileLayer = null;
 let mapAddPointMode = false;
 let mapPoints = [];
@@ -56,6 +57,7 @@ let cachedMunicipalities = [];
 let cachedMunicipalityRecords = [];
 let cachedItinisereEvents = [];
 let cachedBisonFute = {};
+let cachedRealtimeTraffic = {};
 let geocodeCache = new Map();
 let municipalityContourCache = new Map();
 const municipalityDocumentsUiState = new Map();
@@ -551,6 +553,7 @@ function initMap() {
   mapPointsLayer = window.L.layerGroup().addTo(leafletMap);
   itinisereLayer = window.L.layerGroup().addTo(leafletMap);
   bisonLayer = window.L.layerGroup().addTo(leafletMap);
+  realtimeTrafficLayer = window.L.layerGroup().addTo(leafletMap);
   leafletMap.on('click', onMapClickAddPoint);
 }
 
@@ -580,11 +583,13 @@ async function resetMapFilters() {
   const activeOnly = document.getElementById('filter-resources-active');
   const itinisere = document.getElementById('filter-itinisere');
   const bison = document.getElementById('filter-bison');
+  const realtime = document.getElementById('filter-realtime-traffic');
   if (hydro) hydro.checked = true;
   if (pcs) pcs.checked = true;
   if (activeOnly) activeOnly.checked = false;
   if (itinisere) itinisere.checked = true;
   if (bison) bison.checked = true;
+  if (realtime) realtime.checked = true;
   if (searchLayer) searchLayer.clearLayers();
   applyBasemap('osm');
   renderStations(cachedStations);
@@ -623,7 +628,7 @@ function toggleMapContrast() {
 
 function fitMapToData(showFeedback = false) {
   if (!leafletMap) return;
-  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsBoundaryLayer, pcsLayer, resourceLayer, searchLayer, customPointsLayer, mapPointsLayer, itinisereLayer, bisonLayer].filter(Boolean);
+  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsBoundaryLayer, pcsLayer, resourceLayer, searchLayer, customPointsLayer, mapPointsLayer, itinisereLayer, bisonLayer, realtimeTrafficLayer].filter(Boolean);
   const bounds = window.L.latLngBounds([]);
   layers.forEach((layer) => {
     if (layer?.getBounds) {
@@ -1014,7 +1019,6 @@ function detectItinisereIcon(text = '') {
   if (/travaux|chantier/.test(lowered)) return '🚧';
   if (/bouchon|ralenti|embouteillage/.test(lowered)) return '🐢';
   if (/manifestation|cortège|événement/.test(lowered)) return '🚶';
-  if (/transport|bus|tram/.test(lowered)) return '🚌';
   return '⚠️';
 }
 
@@ -1130,13 +1134,15 @@ async function buildItinisereMapPoints(events = []) {
 }
 
 async function renderTrafficOnMap() {
-  if (!itinisereLayer || !bisonLayer || typeof window.L === 'undefined') return;
+  if (!itinisereLayer || !bisonLayer || !realtimeTrafficLayer || typeof window.L === 'undefined') return;
   itinisereLayer.clearLayers();
   bisonLayer.clearLayers();
+  realtimeTrafficLayer.clearLayers();
   mapStats.traffic = 0;
 
   const showItinisere = document.getElementById('filter-itinisere')?.checked ?? true;
   const showBison = document.getElementById('filter-bison')?.checked ?? true;
+  const showRealtimeTraffic = document.getElementById('filter-realtime-traffic')?.checked ?? true;
   const severityFilter = document.getElementById('traffic-severity-filter')?.value || 'all';
 
   if (showItinisere) {
@@ -1171,6 +1177,34 @@ async function renderTrafficOnMap() {
         .addTo(bisonLayer);
     });
     mapStats.traffic += BISON_CORRIDORS.length;
+  }
+
+  if (showRealtimeTraffic) {
+    const incidents = Array.isArray(cachedRealtimeTraffic?.incidents) ? cachedRealtimeTraffic.incidents : [];
+    const filteredIncidents = severityFilter === 'all'
+      ? incidents
+      : incidents.filter((incident) => normalizeTrafficSeverity(incident.severity) === severityFilter);
+    filteredIncidents.forEach((incident) => {
+      if (Array.isArray(incident.line) && incident.line.length > 1) {
+        const lineLatLng = incident.line
+          .map((point) => normalizeMapCoordinates(point.lat, point.lon))
+          .filter(Boolean)
+          .map((point) => [point.lat, point.lon]);
+        if (lineLatLng.length > 1) {
+          window.L.polyline(lineLatLng, { color: trafficLevelColor(incident.severity), weight: 5, opacity: 0.75 })
+            .bindPopup(`<strong>🚗 ${escapeHtml(incident.title || 'Trafic temps réel')}</strong><br/>${escapeHtml(incident.description || '')}<br/><span class="badge neutral">${escapeHtml(normalizeTrafficSeverity(incident.severity))}</span>`)
+            .addTo(realtimeTrafficLayer);
+        }
+      }
+
+      const markerCoords = normalizeMapCoordinates(incident.lat, incident.lon);
+      if (markerCoords) {
+        window.L.marker([markerCoords.lat, markerCoords.lon], { icon: emojiDivIcon(incident.kind === 'jam' ? '🚗' : (incident.subtype === 'road_closed' ? '⛔' : '⚠️')) })
+          .bindPopup(`<strong>${escapeHtml(incident.title || 'Trafic temps réel')}</strong><br/>${escapeHtml(incident.description || '')}<br/><span class="badge neutral">${escapeHtml(normalizeTrafficSeverity(incident.severity || 'jaune'))}</span>`)
+          .addTo(realtimeTrafficLayer);
+      }
+    });
+    mapStats.traffic += filteredIncidents.length;
   }
 
   updateMapSummary();
@@ -1844,6 +1878,7 @@ function renderExternalRisks(data = {}) {
   const vigicrues = data?.vigicrues || {};
   const itinisere = data?.itinisere || {};
   const bisonFute = data?.bison_fute || {};
+  const realtimeTraffic = data?.waze || {};
   const prefecture = data?.prefecture_isere || {};
   const georisquesPayload = data?.georisques || {};
   const georisques = georisquesPayload?.data && typeof georisquesPayload.data === 'object'
@@ -1862,6 +1897,7 @@ function renderExternalRisks(data = {}) {
   const itinisereTotal = Number(itinisere.events_total ?? itinisereEvents.length);
   setText('itinisere-status', `${itinisere.status || 'inconnu'} · ${itinisereTotal} événements`);
   renderBisonFuteSummary(bisonFute);
+  cachedRealtimeTraffic = realtimeTraffic || {};
   renderPrefectureNews(prefecture);
   setRiskText('georisques-status', `${georisques.status || 'inconnu'} · sismicité ${georisques.highest_seismic_zone_label || 'inconnue'}`, georisques.status === 'online' ? 'vert' : 'jaune');
   setText('georisques-info', `${georisques.flood_documents_total ?? 0} AZI · ${georisques.ppr_total ?? 0} PPR · ${georisques.ground_movements_total ?? 0} mouvements`);
@@ -1879,6 +1915,7 @@ function renderExternalRisks(data = {}) {
   setText('map-itinisere-roads', topRoads || 'non renseigné');
   setText('map-itinisere-severity', `R${severityBreakdown.rouge || 0} / O${severityBreakdown.orange || 0} / J${severityBreakdown.jaune || 0} / V${severityBreakdown.vert || 0}`);
   setText('map-itinisere-precision', `${preciseLocations}/${itinisereEvents.length || 0} avec lieu identifié`);
+  setText('map-realtime-traffic', `${realtimeTraffic.incidents_total || 0} incidents temps réel`);
   setText('map-seismic-level', georisques.highest_seismic_zone_label || 'inconnue');
   setText('map-flood-docs', String(georisques.flood_documents_total ?? 0));
   renderStations(vigicrues.stations || []);
@@ -1904,6 +1941,7 @@ function renderApiInterconnections(data = {}) {
     { key: 'vigicrues', label: 'Vigicrues', level: normalizeLevel(data.vigicrues?.water_alert_level || 'inconnu'), details: `${(data.vigicrues?.stations || []).length} station(s)` },
     { key: 'itinisere', label: 'Itinisère', level: `${data.itinisere?.events_total ?? (data.itinisere?.events || []).length} événement(s)`, details: data.itinisere?.source || '-' },
     { key: 'bison_fute', label: 'Bison Futé', level: data.bison_fute?.today?.isere?.departure || 'inconnu', details: data.bison_fute?.source || '-' },
+    { key: 'waze', label: 'Trafic temps réel (Waze)', level: `${data.waze?.incidents_total || 0} incident(s)`, details: data.waze?.source || '-' },
     { key: 'georisques', label: 'Géorisques', level: data.georisques?.highest_seismic_zone_label || 'inconnue', details: `${data.georisques?.flood_documents_total ?? 0} document(s) inondation` },
     { key: 'prefecture_isere', label: "Préfecture Isère · Actualités", level: `${(data.prefecture_isere?.items || []).length} actualité(s)`, details: data.prefecture_isere?.source || '-' },
   ];
@@ -2741,7 +2779,7 @@ function bindAppInteractions() {
       document.getElementById('users-error').textContent = sanitizeErrorMessage(error.message);
     }
   });
-  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'resource-type-filter', 'filter-itinisere', 'filter-bison', 'traffic-severity-filter'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'resource-type-filter', 'filter-itinisere', 'filter-bison', 'filter-realtime-traffic', 'traffic-severity-filter'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       renderStations(cachedStations);
       await renderMunicipalitiesOnMap(cachedMunicipalities);
