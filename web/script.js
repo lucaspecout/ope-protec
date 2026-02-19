@@ -594,7 +594,6 @@ async function resetMapFilters() {
     'map-search': '',
     'map-point-category-filter': 'all',
     'resource-type-filter': 'all',
-    'traffic-severity-filter': 'all',
     'map-basemap-select': 'osm',
   };
   Object.entries(defaults).forEach(([id, value]) => {
@@ -606,15 +605,11 @@ async function resetMapFilters() {
   const pcs = document.getElementById('filter-pcs');
   const activeOnly = document.getElementById('filter-resources-active');
   const itinisere = document.getElementById('filter-itinisere');
-  const bison = document.getElementById('filter-bison');
-  const realtime = document.getElementById('filter-realtime-traffic');
   const googleFlow = document.getElementById('filter-google-traffic-flow');
   if (hydro) hydro.checked = true;
   if (pcs) pcs.checked = true;
   if (activeOnly) activeOnly.checked = false;
   if (itinisere) itinisere.checked = true;
-  if (bison) bison.checked = true;
-  if (realtime) realtime.checked = true;
   if (googleFlow) googleFlow.checked = true;
   if (searchLayer) searchLayer.clearLayers();
   applyBasemap('osm');
@@ -1167,49 +1162,28 @@ async function renderTrafficOnMap() {
   mapStats.traffic = 0;
 
   const showItinisere = document.getElementById('filter-itinisere')?.checked ?? true;
-  const showBison = document.getElementById('filter-bison')?.checked ?? true;
-  const showRealtimeTraffic = document.getElementById('filter-realtime-traffic')?.checked ?? true;
-  const severityFilter = document.getElementById('traffic-severity-filter')?.value || 'all';
-
   if (showItinisere) {
     const points = await buildItinisereMapPoints(cachedItinisereEvents || []);
-    const filtered = severityFilter === 'all' ? points : points.filter((point) => normalizeTrafficSeverity(point.severity) === severityFilter);
+    const filtered = points.filter((point) => String(point.category || '').toLowerCase() === 'fermeture');
     mapStats.traffic += filtered.length;
     filtered.forEach((point) => {
       const roadsText = point.roads?.length ? `Axes détectés: ${point.roads.join(', ')}<br/>` : '';
       const locations = Array.isArray(point.locations) && point.locations.length ? point.locations.join(', ') : point.anchor;
       const marker = window.L.circleMarker([point.lat, point.lon], {
         radius: 9,
-        color: trafficLevelColor(point.severity),
+        color: trafficLevelColor('rouge'),
         weight: 2,
-        fillColor: trafficLevelColor(point.severity),
+        fillColor: trafficLevelColor('rouge'),
         fillOpacity: 0.7,
       });
-      marker.bindPopup(`<strong>${escapeHtml(point.icon || '⚠️')} ${escapeHtml(point.title || 'Perturbation Itinisère')}</strong><br/><span class="badge neutral">${escapeHtml(point.category || 'trafic')} · ${escapeHtml(normalizeTrafficSeverity(point.severity))}</span><br/>${escapeHtml(point.description || '')}<br/>Localisation: ${escapeHtml(locations || 'Isère')} (${escapeHtml(point.precision || 'estimée')})<br/>${roadsText}<a href="${escapeHtml(point.link || '#')}" target="_blank" rel="noreferrer">Détail Itinisère</a>`);
+      marker.bindPopup(`<strong>⛔ ${escapeHtml(point.title || 'Fermeture Itinisère')}</strong><br/><span class="badge neutral">fermeture · rouge</span><br/>${escapeHtml(point.description || '')}<br/>Localisation: ${escapeHtml(locations || 'Isère')} (${escapeHtml(point.precision || 'estimée')})<br/>${roadsText}<a href="${escapeHtml(point.link || '#')}" target="_blank" rel="noreferrer">Détail Itinisère</a>`);
       marker.addTo(itinisereLayer);
     });
   }
 
-  if (showBison) {
-    const departureLevel = cachedBisonFute?.today?.isere?.departure || 'vert';
-    const returnLevel = cachedBisonFute?.today?.isere?.return || 'vert';
-    BISON_CORRIDORS.forEach((corridor) => {
-      window.L.polyline(corridor.points, { color: trafficLevelColor(departureLevel), weight: 6, opacity: 0.6 })
-        .bindPopup(`<strong>${escapeHtml(corridor.name)}</strong><br/>Départs: ${trafficLevelEmoji(departureLevel)} ${escapeHtml(departureLevel)}<br/>Retours: ${trafficLevelEmoji(returnLevel)} ${escapeHtml(returnLevel)}<br/><a href="https://www.bison-fute.gouv.fr" target="_blank" rel="noreferrer">Carte Bison Futé</a>`)
-        .addTo(bisonLayer);
-      const mid = corridor.points[Math.floor(corridor.points.length / 2)];
-      window.L.marker(mid, { icon: emojiDivIcon(trafficLevelEmoji(departureLevel)) })
-        .bindPopup(`<strong>${escapeHtml(corridor.name)}</strong><br/>Tendance Isère (départs): ${escapeHtml(departureLevel)}`)
-        .addTo(bisonLayer);
-    });
-    mapStats.traffic += BISON_CORRIDORS.length;
-  }
-
-  if (showRealtimeTraffic) {
+  {
     const incidents = Array.isArray(cachedRealtimeTraffic?.incidents) ? cachedRealtimeTraffic.incidents : [];
-    const filteredIncidents = severityFilter === 'all'
-      ? incidents
-      : incidents.filter((incident) => normalizeTrafficSeverity(incident.severity) === severityFilter);
+    const filteredIncidents = incidents.filter((incident) => incident.subtype === 'road_closed');
     filteredIncidents.forEach((incident) => {
       if (Array.isArray(incident.line) && incident.line.length > 1) {
         const lineLatLng = incident.line
@@ -1217,16 +1191,16 @@ async function renderTrafficOnMap() {
           .filter(Boolean)
           .map((point) => [point.lat, point.lon]);
         if (lineLatLng.length > 1) {
-          window.L.polyline(lineLatLng, { color: trafficLevelColor(incident.severity), weight: 5, opacity: 0.75 })
-            .bindPopup(`<strong>🚗 ${escapeHtml(incident.title || 'Trafic temps réel')}</strong><br/>${escapeHtml(incident.description || '')}<br/><span class="badge neutral">${escapeHtml(normalizeTrafficSeverity(incident.severity))}</span>`)
+          window.L.polyline(lineLatLng, { color: trafficLevelColor('rouge'), weight: 5, opacity: 0.75 })
+            .bindPopup(`<strong>⛔ ${escapeHtml(incident.title || 'Route fermée')}</strong><br/>${escapeHtml(incident.description || '')}<br/><span class="badge neutral">fermeture · rouge</span>`)
             .addTo(realtimeTrafficLayer);
         }
       }
 
       const markerCoords = normalizeMapCoordinates(incident.lat, incident.lon);
       if (markerCoords) {
-        window.L.marker([markerCoords.lat, markerCoords.lon], { icon: emojiDivIcon(incident.kind === 'jam' ? '🚗' : (incident.subtype === 'road_closed' ? '⛔' : '⚠️')) })
-          .bindPopup(`<strong>${escapeHtml(incident.title || 'Trafic temps réel')}</strong><br/>${escapeHtml(incident.description || '')}<br/><span class="badge neutral">${escapeHtml(normalizeTrafficSeverity(incident.severity || 'jaune'))}</span>`)
+        window.L.marker([markerCoords.lat, markerCoords.lon], { icon: emojiDivIcon('⛔') })
+          .bindPopup(`<strong>${escapeHtml(incident.title || 'Route fermée')}</strong><br/>${escapeHtml(incident.description || '')}<br/><span class="badge neutral">fermeture · rouge</span>`)
           .addTo(realtimeTrafficLayer);
       }
     });
@@ -1941,7 +1915,6 @@ function renderExternalRisks(data = {}) {
   setText('map-itinisere-roads', topRoads || 'non renseigné');
   setText('map-itinisere-severity', `R${severityBreakdown.rouge || 0} / O${severityBreakdown.orange || 0} / J${severityBreakdown.jaune || 0} / V${severityBreakdown.vert || 0}`);
   setText('map-itinisere-precision', `${preciseLocations}/${itinisereEvents.length || 0} avec lieu identifié`);
-  setText('map-realtime-traffic', `${realtimeTraffic.incidents_total || 0} incidents temps réel`);
   setText('map-seismic-level', georisques.highest_seismic_zone_label || 'inconnue');
   setText('map-flood-docs', String(georisques.flood_documents_total ?? 0));
   renderStations(vigicrues.stations || []);
@@ -2454,14 +2427,6 @@ function bindAppInteractions() {
     renderResources();
     setMapFeedback('Recherche effacée, ressources remises à jour.');
   });
-  document.getElementById('map-add-point-toggle')?.addEventListener('click', () => {
-    mapAddPointMode = !mapAddPointMode;
-    setText('map-add-point-toggle', `Ajout: ${mapAddPointMode ? 'on' : 'off'}`);
-    document.getElementById('map-add-point-toggle')?.setAttribute('aria-pressed', String(mapAddPointMode));
-    const mapCanvas = document.getElementById('isere-map-leaflet');
-    if (mapCanvas) mapCanvas.style.cursor = mapAddPointMode ? 'crosshair' : '';
-    setMapFeedback(mapAddPointMode ? 'Cliquez sur la carte pour ajouter un point opérationnel avec icône.' : 'Mode ajout désactivé.');
-  });
   document.getElementById('map-point-category-filter')?.addEventListener('change', renderCustomPoints);
   document.getElementById('map-point-form-cancel')?.addEventListener('click', () => {
     const modal = document.getElementById('map-point-modal');
@@ -2806,7 +2771,7 @@ function bindAppInteractions() {
       document.getElementById('users-error').textContent = sanitizeErrorMessage(error.message);
     }
   });
-  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'resource-type-filter', 'filter-itinisere', 'filter-bison', 'filter-realtime-traffic', 'traffic-severity-filter'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'resource-type-filter', 'filter-itinisere'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       renderStations(cachedStations);
       await renderMunicipalitiesOnMap(cachedMunicipalities);
