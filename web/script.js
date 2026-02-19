@@ -1119,10 +1119,10 @@ function itinisereDivIcon(point = {}) {
   if (styleType === 'closure') {
     return window.L.divIcon({
       className: 'itinisere-icon-wrap',
-      html: `<span class="itinisere-icon itinisere-icon--closure">ROUTE<br/>BARRÉE</span><span class="itinisere-road-dot">${escapeHtml(road)}</span>`,
-      iconSize: [64, 38],
-      iconAnchor: [32, 28],
-      popupAnchor: [0, -24],
+      html: '<span class="itinisere-icon itinisere-icon--closure">ROUTE<br/>BARRÉE</span>',
+      iconSize: [52, 30],
+      iconAnchor: [26, 22],
+      popupAnchor: [0, -18],
     });
   }
 
@@ -1387,6 +1387,17 @@ async function buildItinisereMapPoints(events = []) {
       precision = 'source';
     }
 
+    if (!position && isClosureEvent && communeHints.length) {
+      for (const commune of communeHints) {
+        const communePoint = await geocodeTrafficLabel(commune);
+        if (!communePoint) continue;
+        position = { lat: communePoint.lat, lon: communePoint.lon };
+        anchor = `Mairie de ${commune}`;
+        precision = 'centre-ville';
+        break;
+      }
+    }
+
     if (!position && isClosureEvent && roads.length) {
       for (const road of roads) {
         const roadPoint = await geocodeRoadWithContext(road, candidateLocationHints);
@@ -1502,7 +1513,7 @@ async function renderTrafficOnMap() {
     const points = await buildItinisereMapPoints(cachedItinisereEvents || []);
     mapStats.traffic += points.length;
     points.forEach((point) => {
-      const roadsText = point.roads?.length ? `Axes détectés: ${point.roads.join(', ')}<br/>` : '';
+      const roadsText = point.precision === 'centre-ville' ? '' : (point.roads?.length ? `Axes détectés: ${point.roads.join(', ')}<br/>` : '');
       const locations = Array.isArray(point.locations) && point.locations.length ? point.locations.join(', ') : point.anchor;
       const icon = trafficMarkerIcon('itinisere', point.category, `${point.title || ''} ${point.description || ''}`);
       const marker = window.L.marker([point.lat, point.lon], { icon: itinisereDivIcon(point) });

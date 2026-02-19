@@ -525,10 +525,11 @@ svg text { font-size: 14px; fill: #17335f; }
 }
 
 .itinisere-icon--closure {
-  min-width: 58px;
-  min-height: 30px;
+  min-width: 46px;
+  min-height: 24px;
   border-radius: 3px;
   background: #ffe800;
+  font-size: .52rem;
 }
 
 .itinisere-icon--pass {
