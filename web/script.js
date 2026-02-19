@@ -517,6 +517,7 @@ function updateMapSummary() {
 
 function applyBasemap(style = 'osm') {
   if (!leafletMap || typeof window.L === 'undefined') return;
+  ensureTrafficPanes();
   if (mapTileLayer) leafletMap.removeLayer(mapTileLayer);
   const layers = {
     osm: {
@@ -539,6 +540,19 @@ function applyBasemap(style = 'osm') {
   const selected = layers[style] || layers.osm;
   mapTileLayer = window.L.tileLayer(selected.url, selected.options).addTo(leafletMap);
   applyGoogleTrafficFlowOverlay();
+}
+
+function ensureTrafficPanes() {
+  if (!leafletMap || typeof window.L === 'undefined') return;
+  if (!leafletMap.getPane('traffic-flow-pane')) {
+    const pane = leafletMap.createPane('traffic-flow-pane');
+    pane.style.zIndex = '660';
+    pane.style.pointerEvents = 'none';
+  }
+  if (!leafletMap.getPane('waze-closures-pane')) {
+    const pane = leafletMap.createPane('waze-closures-pane');
+    pane.style.zIndex = '665';
+  }
 }
 
 function applyGoogleTrafficFlowOverlay() {
@@ -566,6 +580,7 @@ function applyGoogleTrafficFlowOverlay() {
 function initMap() {
   if (leafletMap || typeof window.L === 'undefined') return;
   leafletMap = window.L.map('isere-map-leaflet', { zoomControl: true }).setView([45.2, 5.72], 9);
+  ensureTrafficPanes();
   applyBasemap(document.getElementById('map-basemap-select')?.value || 'osm');
   hydroLayer = window.L.layerGroup().addTo(leafletMap);
   hydroLineLayer = window.L.layerGroup().addTo(leafletMap);
@@ -1194,7 +1209,7 @@ async function renderTrafficOnMap() {
           .filter(Boolean)
           .map((point) => [point.lat, point.lon]);
         if (lineLatLng.length > 1) {
-          window.L.polyline(lineLatLng, { color: trafficLevelColor('rouge'), weight: 5, opacity: 0.75 })
+          window.L.polyline(lineLatLng, { color: trafficLevelColor('rouge'), weight: 7, opacity: 0.9, pane: 'waze-closures-pane' })
             .bindPopup(`<strong>⛔ ${escapeHtml(incident.title || 'Route fermée')}</strong><br/>${escapeHtml(incident.description || '')}<br/><span class="badge neutral">fermeture · rouge</span>`)
             .addTo(realtimeTrafficLayer);
         }
@@ -1204,6 +1219,7 @@ async function renderTrafficOnMap() {
     mapStats.traffic += filteredIncidents.length;
   }
 
+  realtimeTrafficLayer?.bringToFront();
   updateMapSummary();
 }
 
