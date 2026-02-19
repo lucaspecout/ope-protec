@@ -1181,6 +1181,7 @@ async function buildItinisereMapPoints(events = []) {
     let position = null;
     let anchor = '';
     let precision = 'estimée';
+    let communeAnchor = null;
 
     const providedCoords = normalizeMapCoordinates(event.lat, event.lon);
     if (providedCoords) {
@@ -1197,6 +1198,26 @@ async function buildItinisereMapPoints(events = []) {
           precision = position.precision || 'localité';
           break;
         }
+      }
+    }
+
+    if (!position && communeHints.length) {
+      for (const commune of communeHints) {
+        communeAnchor = await geocodeTrafficLabel(commune);
+        if (communeAnchor) break;
+      }
+    }
+
+    if (!position) {
+      for (const road of roads) {
+        const corridor = ITINISERE_ROAD_CORRIDORS[road];
+        if (!corridor) continue;
+        const roadPoint = nearestPointOnCorridor(corridor, communeAnchor);
+        if (!roadPoint) continue;
+        position = roadPoint;
+        anchor = communeHints[0] ? `${road} · ${communeHints[0]}` : `Axe ${road}`;
+        precision = communeAnchor ? 'axe+commune' : 'axe';
+        break;
       }
     }
 
