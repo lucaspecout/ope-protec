@@ -994,8 +994,12 @@ function iconForCategory(category) {
   return MAP_POINT_ICONS[category] || '📍';
 }
 
-function emojiDivIcon(emoji) {
-  return window.L.divIcon({ className: 'map-emoji-icon', html: `<span>${escapeHtml(emoji)}</span>`, iconSize: [30, 30], iconAnchor: [15, 15], popupAnchor: [0, -15] });
+function emojiDivIcon(emoji, options = {}) {
+  const iconSize = Array.isArray(options.iconSize) ? options.iconSize : [30, 30];
+  const iconAnchor = Array.isArray(options.iconAnchor) ? options.iconAnchor : [Math.round(iconSize[0] / 2), Math.round(iconSize[1] / 2)];
+  const popupAnchor = Array.isArray(options.popupAnchor) ? options.popupAnchor : [0, -Math.round(iconSize[1] / 2)];
+  const className = options.className ? `map-emoji-icon ${options.className}` : 'map-emoji-icon';
+  return window.L.divIcon({ className, html: `<span>${escapeHtml(emoji)}</span>`, iconSize, iconAnchor, popupAnchor });
 }
 
 function vigicruesStationIcon(level = 'vert', counter = '1') {
@@ -1222,17 +1226,15 @@ async function renderTrafficOnMap() {
     const incidents = Array.isArray(cachedRealtimeTraffic?.incidents) ? cachedRealtimeTraffic.incidents : [];
     const filteredIncidents = incidents.filter((incident) => incident.subtype === 'road_closed');
     filteredIncidents.forEach((incident) => {
+      const popupHtml = `<strong>⛔ ${escapeHtml(incident.title || 'Route fermée')}</strong><br/>${escapeHtml(incident.description || '')}<br/><span class="badge neutral">fermeture · rouge</span>`;
+      const pointIcon = emojiDivIcon('⛔', { className: 'map-emoji-icon--traffic-closed', iconSize: [18, 18], iconAnchor: [9, 9], popupAnchor: [0, -10] });
       const coords = normalizeMapCoordinates(incident.lat, incident.lon);
+      let markerPlaced = false;
       if (coords) {
-        window.L.circleMarker([coords.lat, coords.lon], {
-          radius: 7,
-          color: '#fff',
-          weight: 1.5,
-          fillColor: trafficLevelColor('rouge'),
-          fillOpacity: 0.85,
-        })
-          .bindPopup(`<strong>⛔ ${escapeHtml(incident.title || 'Route fermée')}</strong><br/>${escapeHtml(incident.description || '')}<br/><span class="badge neutral">fermeture · rouge</span>`)
+        window.L.marker([coords.lat, coords.lon], { icon: pointIcon })
+          .bindPopup(popupHtml)
           .addTo(realtimeTrafficLayer);
+        markerPlaced = true;
       }
       if (Array.isArray(incident.line) && incident.line.length > 1) {
         const lineLatLng = incident.line
@@ -1240,8 +1242,14 @@ async function renderTrafficOnMap() {
           .filter(Boolean)
           .map((point) => [point.lat, point.lon]);
         if (lineLatLng.length > 1) {
+          if (!markerPlaced) {
+            const midPoint = lineLatLng[Math.floor(lineLatLng.length / 2)];
+            if (midPoint) {
+              window.L.marker(midPoint, { icon: pointIcon }).bindPopup(popupHtml).addTo(realtimeTrafficLayer);
+            }
+          }
           window.L.polyline(lineLatLng, { color: trafficLevelColor('rouge'), weight: 5, opacity: 0.75 })
-            .bindPopup(`<strong>⛔ ${escapeHtml(incident.title || 'Route fermée')}</strong><br/>${escapeHtml(incident.description || '')}<br/><span class="badge neutral">fermeture · rouge</span>`)
+            .bindPopup(popupHtml)
             .addTo(realtimeTrafficLayer);
         }
       }
