@@ -48,6 +48,7 @@ let itinisereLayer = null;
 let bisonLayer = null;
 let realtimeTrafficLayer = null;
 let mapTileLayer = null;
+let googleTrafficFlowLayer = null;
 let mapAddPointMode = false;
 let mapPoints = [];
 let pendingMapPointCoords = null;
@@ -537,6 +538,29 @@ function applyBasemap(style = 'osm') {
   };
   const selected = layers[style] || layers.osm;
   mapTileLayer = window.L.tileLayer(selected.url, selected.options).addTo(leafletMap);
+  applyGoogleTrafficFlowOverlay();
+}
+
+function applyGoogleTrafficFlowOverlay() {
+  if (!leafletMap || typeof window.L === 'undefined') return;
+  const enabled = document.getElementById('filter-google-traffic-flow')?.checked ?? true;
+  if (!enabled) {
+    if (googleTrafficFlowLayer) {
+      leafletMap.removeLayer(googleTrafficFlowLayer);
+      googleTrafficFlowLayer = null;
+    }
+    return;
+  }
+
+  if (!googleTrafficFlowLayer) {
+    googleTrafficFlowLayer = window.L.tileLayer('https://mt1.google.com/vt/lyrs=h,traffic&x={x}&y={y}&z={z}', {
+      maxZoom: 20,
+      opacity: 0.85,
+      attribution: 'Données trafic style Google Maps',
+    });
+  }
+
+  if (!leafletMap.hasLayer(googleTrafficFlowLayer)) googleTrafficFlowLayer.addTo(leafletMap);
 }
 
 function initMap() {
@@ -584,12 +608,14 @@ async function resetMapFilters() {
   const itinisere = document.getElementById('filter-itinisere');
   const bison = document.getElementById('filter-bison');
   const realtime = document.getElementById('filter-realtime-traffic');
+  const googleFlow = document.getElementById('filter-google-traffic-flow');
   if (hydro) hydro.checked = true;
   if (pcs) pcs.checked = true;
   if (activeOnly) activeOnly.checked = false;
   if (itinisere) itinisere.checked = true;
   if (bison) bison.checked = true;
   if (realtime) realtime.checked = true;
+  if (googleFlow) googleFlow.checked = true;
   if (searchLayer) searchLayer.clearLayers();
   applyBasemap('osm');
   renderStations(cachedStations);
@@ -2393,6 +2419,7 @@ function bindAppInteractions() {
     }
   });
   document.getElementById('map-basemap-select')?.addEventListener('change', (event) => applyBasemap(event.target.value));
+  document.getElementById('filter-google-traffic-flow')?.addEventListener('change', () => applyGoogleTrafficFlowOverlay());
   document.getElementById('api-refresh-btn')?.addEventListener('click', async () => {
     try {
       await loadApiInterconnections(true);
