@@ -827,6 +827,51 @@ def _itinisere_is_public_transport_event(title: str, description: str) -> bool:
     return not has_road_hint
 
 
+def _itinisere_is_isere_event(title: str, description: str, roads: list[str] | None = None, locations: list[str] | None = None) -> bool:
+    text = f"{title} {description} {' '.join(locations or [])}".lower()
+    isere_tokens = (
+        "isère",
+        "isere",
+        "grenoble",
+        "voiron",
+        "vienne",
+        "bourgoin",
+        "pontcharra",
+        "la mure",
+        "rives",
+        "le touvet",
+        "villard-de-lans",
+    )
+    if any(token in text for token in isere_tokens):
+        return True
+
+    isere_roads = {
+        "A41",
+        "A43",
+        "A48",
+        "A49",
+        "N85",
+        "N87",
+        "D1075",
+        "D1090",
+        "D1532",
+        "D520",
+    }
+    return bool(set(roads or []) & isere_roads)
+
+
+def _itinisere_is_road_closure_pass_or_camera_event(title: str, description: str, category: str) -> bool:
+    text = f"{title} {description}".lower()
+    closure_tokens = ("fermet", "route coup", "interdit", "barr", "réouvert", "reouvert", "ouvert")
+    pass_tokens = ("col ", "cols ", "col du", "col de", "col des")
+    camera_tokens = ("caméra", "camera", "webcam", "vidéo", "video")
+
+    has_closure_signal = category == "fermeture" or any(token in text for token in closure_tokens)
+    has_pass_signal = any(token in text for token in pass_tokens)
+    has_camera_signal = any(token in text for token in camera_tokens)
+    return has_closure_signal or has_pass_signal or has_camera_signal
+
+
 def _itinisere_extract_locations(*chunks: str) -> list[str]:
     blob = " ".join(chunk or "" for chunk in chunks)
     cleaned = re.sub(r"<[^>]+>", " ", blob)
@@ -983,6 +1028,10 @@ def _fetch_itinisere_disruptions_live(limit: int = 60) -> dict[str, Any]:
             severity = _itinisere_severity(final_title, final_description, category)
             locations = detail.get("locations") or _itinisere_extract_locations(final_title, final_description)
             if _itinisere_is_public_transport_event(final_title, final_description):
+                continue
+            if not _itinisere_is_isere_event(final_title, final_description, roads=roads, locations=locations):
+                continue
+            if not _itinisere_is_road_closure_pass_or_camera_event(final_title, final_description, category):
                 continue
             events.append(
                 {
