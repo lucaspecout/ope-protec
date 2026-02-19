@@ -242,6 +242,7 @@ function setVisibility(node, visible) {
 }
 
 function canEdit() { return ['admin', 'ope'].includes(currentUser?.role); }
+function canCreateMapPoints() { return ['admin', 'ope', 'mairie'].includes(currentUser?.role); }
 function canMunicipalityFiles() { return ['admin', 'ope', 'mairie'].includes(currentUser?.role); }
 function canManageUsers() { return ['admin', 'ope'].includes(currentUser?.role); }
 function roleLabel(role) { return { admin: 'Admin', ope: 'Opérateur', securite: 'Sécurité', visiteur: 'Visiteur', mairie: 'Mairie' }[role] || role; }
@@ -978,15 +979,15 @@ const MAP_POINT_ICONS = {
 };
 
 const MAP_ICON_SUGGESTIONS = {
-  incident: ['🚨', '🔥', '⚠️'],
-  evacuation: ['🏃', '🏘️', '🚌'],
-  water: ['💧', '🌊', '🛶'],
-  roadblock: ['🚧', '⛔', '🚦'],
-  medical: ['🏥', '🚑', '🩺'],
-  logistics: ['📦', '🚛', '🛠️'],
-  command: ['🛰️', '📡', '🧭'],
-  poi: ['📌', '📍', '⭐'],
-  autre: ['📍', '📌', '⭐'],
+  incident: ['🚨', '🔥', '⚠️', '💥', '🚓', '🚒', '🧯'],
+  evacuation: ['🏃', '🏘️', '🚌', '🚶', '🏟️', '🏫', '🧒'],
+  water: ['💧', '🌊', '🛶', '🌧️', '🏞️', '🚤', '🪵'],
+  roadblock: ['⛔', '🚧', '🚦', '🛑', '🚫', '🚓', '⚠️'],
+  medical: ['🏥', '🚑', '🩺', '💊', '🧑‍⚕️', '❤️', '🫁'],
+  logistics: ['📦', '🚛', '🛠️', '⛽', '🔋', '🧰', '🏗️'],
+  command: ['🛰️', '📡', '🧭', '🖥️', '📞', '📢', '🗺️'],
+  poi: ['📌', '📍', '⭐', '🏢', '🏠', '🏫', '🏛️', '🏬', '🅿️'],
+  autre: ['📍', '📌', '⭐', '🧩', '❗', '📎', '🔖'],
 };
 
 function iconForCategory(category) {
@@ -1037,6 +1038,14 @@ function trafficLevelColor(level) {
 
 function trafficLevelEmoji(level) {
   return ({ vert: '🟢', jaune: '🟡', orange: '🟠', rouge: '🔴' })[normalizeTrafficSeverity(level)] || '⚪';
+}
+
+function trafficMarkerIcon(kind = 'incident', category = '', text = '') {
+  const lowered = `${category} ${text}`.toLowerCase();
+  if (kind === 'waze-road-closed') return '⛔';
+  if (/travaux|chantier|coup(é|e)|route coup/.test(lowered)) return '🚧';
+  if (/ferm|barr|interdit/.test(lowered)) return '⛔';
+  return detectItinisereIcon(text);
 }
 
 const ISERE_BOUNDS = {
@@ -1120,6 +1129,7 @@ async function buildItinisereMapPoints(events = []) {
     const fullText = `${event.title || ''} ${event.description || ''}`;
     const roads = Array.isArray(event.roads) && event.roads.length ? event.roads : detectRoadCodes(fullText);
     const locations = Array.isArray(event.locations) ? event.locations.filter(Boolean) : [];
+    const locationHints = [event.address, event.city, ...(Array.isArray(event.addresses) ? event.addresses : []), ...locations].filter(Boolean);
     let position = null;
     let anchor = '';
     let precision = 'estimée';
@@ -1143,7 +1153,7 @@ async function buildItinisereMapPoints(events = []) {
     }
 
     if (!position) {
-      for (const location of locations) {
+      for (const location of locationHints) {
         position = await geocodeTrafficLabel(location);
         anchor = location;
         if (position) {
@@ -1176,7 +1186,7 @@ async function buildItinisereMapPoints(events = []) {
       ...event,
       lat: position.lat,
       lon: position.lon,
-      icon: detectItinisereIcon(fullText),
+      icon: trafficMarkerIcon('itinisere', event.category, fullText),
       roads,
       anchor,
       precision,
@@ -1196,19 +1206,13 @@ async function renderTrafficOnMap() {
   const showItinisere = document.getElementById('filter-itinisere')?.checked ?? true;
   if (showItinisere) {
     const points = await buildItinisereMapPoints(cachedItinisereEvents || []);
-    const filtered = points.filter((point) => String(point.category || '').toLowerCase() === 'fermeture');
-    mapStats.traffic += filtered.length;
-    filtered.forEach((point) => {
+    mapStats.traffic += points.length;
+    points.forEach((point) => {
       const roadsText = point.roads?.length ? `Axes détectés: ${point.roads.join(', ')}<br/>` : '';
       const locations = Array.isArray(point.locations) && point.locations.length ? point.locations.join(', ') : point.anchor;
-      const marker = window.L.circleMarker([point.lat, point.lon], {
-        radius: 9,
-        color: trafficLevelColor('rouge'),
-        weight: 2,
-        fillColor: trafficLevelColor('rouge'),
-        fillOpacity: 0.7,
-      });
-      marker.bindPopup(`<strong>⛔ ${escapeHtml(point.title || 'Fermeture Itinisère')}</strong><br/><span class="badge neutral">fermeture · rouge</span><br/>${escapeHtml(point.description || '')}<br/>Localisation: ${escapeHtml(locations || 'Isère')} (${escapeHtml(point.precision || 'estimée')})<br/>${roadsText}<a href="${escapeHtml(point.link || '#')}" target="_blank" rel="noreferrer">Détail Itinisère</a>`);
+      const icon = trafficMarkerIcon('itinisere', point.category, `${point.title || ''} ${point.description || ''}`);
+      const marker = window.L.marker([point.lat, point.lon], { icon: emojiDivIcon(icon) });
+      marker.bindPopup(`<strong>${escapeHtml(icon)} ${escapeHtml(point.title || 'Évènement Itinisère')}</strong><br/><span class="badge neutral">${escapeHtml(point.category || 'trafic')} · ${escapeHtml(point.severity || 'jaune')}</span><br/>${escapeHtml(point.description || '')}<br/>Localisation: ${escapeHtml(locations || 'Commune Isère')} (${escapeHtml(point.precision || 'estimée')})<br/>${roadsText}<a href="${escapeHtml(point.link || '#')}" target="_blank" rel="noreferrer">Détail Itinisère</a>`);
       marker.addTo(itinisereLayer);
     });
   }
@@ -1332,16 +1336,21 @@ function renderCustomPoints(showFeedback = true) {
 function onMapClickAddPoint(event) {
   if (!mapAddPointMode) return;
   pendingMapPointCoords = event.latlng;
+  openMapPointModal('poi');
+}
+
+function openMapPointModal(defaultCategory = 'autre') {
   const modal = document.getElementById('map-point-modal');
   if (!modal) return;
   const form = document.getElementById('map-point-form');
   if (form) {
     form.reset();
+    form.elements.namedItem('category').value = defaultCategory;
     form.elements.namedItem('name').value = `Point ${new Date().toLocaleTimeString()}`;
-    form.elements.namedItem('icon').value = iconForCategory('autre');
+    form.elements.namedItem('icon').value = iconForCategory(defaultCategory);
     form.elements.namedItem('icon_url').value = '';
     mapIconTouched = false;
-    renderMapIconSuggestions('autre');
+    renderMapIconSuggestions(defaultCategory);
   }
   if (typeof modal.showModal === 'function') modal.showModal();
   else modal.setAttribute('open', 'open');
@@ -2275,6 +2284,7 @@ async function refreshAll(forceRefresh = false) {
 
 function applyRoleVisibility() {
   document.querySelectorAll('[data-requires-edit]').forEach((node) => setVisibility(node, canEdit()));
+  document.querySelectorAll('[data-requires-map-point]').forEach((node) => setVisibility(node, canCreateMapPoints()));
   document.querySelectorAll('[data-admin-only]').forEach((node) => setVisibility(node, currentUser?.role === 'admin'));
   setVisibility(document.querySelector('[data-target="users-panel"]'), canManageUsers());
 }
