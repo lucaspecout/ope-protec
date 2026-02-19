@@ -1139,15 +1139,9 @@ function extractItinisereLocationHints(event = {}, fullText = '', roads = []) {
     'itinisere',
     'infos route',
     'perturbation',
-    'adresse ajustée',
-    'adresse ajustee',
-    'localisation',
   ]);
   const pushHint = (value) => {
-    const label = String(value || '')
-      .replace(/\([^)]*\)/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
+    const label = String(value || '').replace(/\s+/g, ' ').trim();
     const normalized = label.toLowerCase();
     if (!label || blockedHints.has(normalized)) return;
     if (/^(lieux?|signaler|d[ée]tail)\s*:?$/i.test(label)) return;
