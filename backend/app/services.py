@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from copy import deepcopy
 from html import unescape
+from http.client import RemoteDisconnected
 import json
 from pathlib import Path
 import re
@@ -118,6 +119,8 @@ def _is_retryable_network_error(exc: Exception) -> bool:
         return True
     if isinstance(exc, HTTPError):
         return exc.code in _RETRYABLE_HTTP_STATUS_CODES
+    if isinstance(exc, RemoteDisconnected):
+        return True
     if isinstance(exc, URLError):
         reason = str(exc.reason).lower() if getattr(exc, "reason", None) is not None else ""
         return any(token in reason for token in ("timed out", "timeout", "temporary", "reset", "refused", "unreachable"))
@@ -130,7 +133,7 @@ def _http_get_with_retries(request: Request, timeout: int = 10, retries: int = 2
         try:
             with urlopen(request, timeout=timeout) as response:
                 return response.read()
-        except (HTTPError, URLError, TimeoutError) as exc:
+        except (HTTPError, URLError, TimeoutError, RemoteDisconnected) as exc:
             last_error = exc
             if attempt >= retries or not _is_retryable_network_error(exc):
                 raise
@@ -188,7 +191,7 @@ def _extract_mf_token_from_page() -> str:
             with urlopen(request, timeout=20) as response:
                 cookie_headers = response.headers.get_all("Set-Cookie") or []
             break
-        except (HTTPError, URLError, TimeoutError) as exc:
+        except (HTTPError, URLError, TimeoutError, RemoteDisconnected) as exc:
             last_error = exc
             if attempt >= 2 or not _is_retryable_network_error(exc):
                 raise
@@ -274,7 +277,7 @@ _MF_CACHE_TTL_SECONDS = 180
 _meteo_cache_lock = Lock()
 _meteo_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 
-_VIGICRUES_CACHE_TTL_SECONDS = 120
+_VIGICRUES_CACHE_TTL_SECONDS = 300
 _ITINISERE_CACHE_TTL_SECONDS = 180
 _BISON_CACHE_TTL_SECONDS = 600
 _WAZE_CACHE_TTL_SECONDS = 120
@@ -548,7 +551,7 @@ def _commune_center(code_insee: str) -> tuple[float, float] | None:
             return None
         lon, lat = coordinates
         return float(lat), float(lon)
-    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
+    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError):
         return None
 
 
@@ -588,13 +591,17 @@ def _vigicrues_station_control(details: dict[str, Any]) -> str:
     return "inconnu"
 
 
-def _vigicrues_build_station_entry(source: str, station_code: str, priority_names: list[str]) -> dict[str, Any] | None:
+def _vigicrues_build_station_entry(
+    source: str,
+    station_code: str,
+    priority_names: list[str],
+) -> dict[str, Any] | None:
     try:
         details = _http_get_json(
             f"{source}/services/station.json?CdStationHydro={quote_plus(station_code)}",
             timeout=6,
         )
-    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
+    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError):
         return None
 
     commune_code = str(details.get("CdCommune") or "")
@@ -626,6 +633,33 @@ def _vigicrues_build_station_entry(source: str, station_code: str, priority_name
         "troncon_code": "",
         "source_link": f"{source}/station/{station_code}",
     }
+
+
+
+def _fetch_hubeau_isere_station_codes() -> set[str]:
+    station_codes: set[str] = set()
+    page = 1
+    page_size = 1000
+
+    while True:
+        payload = _http_get_json(
+            f"https://hubeau.eaufrance.fr/api/v1/hydrometrie/referentiel/stations?code_departement=38&size={page_size}&page={page}",
+            timeout=10,
+        )
+        stations = payload.get("data") or []
+        if not stations:
+            break
+
+        for station in stations:
+            code = str(station.get("code_station") or "").strip()
+            if code:
+                station_codes.add(code)
+
+        if len(stations) < page_size:
+            break
+        page += 1
+
+    return station_codes
 
 
 def _fetch_vigicrues_isere_live(
@@ -666,20 +700,22 @@ def _fetch_vigicrues_isere_live(
             if territory_code in stations_by_territory:
                 stations_by_territory[territory_code].append(station_code)
 
+        try:
+            isere_catalog_codes = _fetch_hubeau_isere_station_codes()
+        except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
+            isere_catalog_codes = set()
         prioritized_codes = [
             code
             for territory_code in preferred_territory_codes
             for code in stations_by_territory.get(territory_code, [])
+            if not isere_catalog_codes or code in isere_catalog_codes
         ]
         seen_codes = set(prioritized_codes)
-        remaining_codes = [code for code in all_codes if code not in seen_codes]
+        remaining_codes = [code for code in all_codes if (not isere_catalog_codes or code in isere_catalog_codes) and code not in seen_codes]
 
-        target_isere_count = max(station_limit or 0, 12)
-        max_lookups = max(220, target_isere_count * 40)
+        candidate_codes = prioritized_codes + remaining_codes + list(fallback_isere_codes)
         if sample_size > 0:
-            max_lookups = min(max_lookups, sample_size)
-
-        candidate_codes = (prioritized_codes + remaining_codes + list(fallback_isere_codes))[:max_lookups]
+            candidate_codes = candidate_codes[:sample_size]
         candidate_codes = [code for code in candidate_codes if code]
         if not candidate_codes:
             raise ValueError("Aucune station candidate détectée pour l'Isère")
@@ -693,7 +729,8 @@ def _fetch_vigicrues_isere_live(
             seen_codes.add(code)
             unique_candidate_codes.append(code)
 
-        worker_count = min(16, max(4, target_isere_count))
+        target_isere_count = station_limit if station_limit is not None else len(unique_candidate_codes)
+        worker_count = min(16, max(4, min(max(target_isere_count, 1), 60)))
         executor = ThreadPoolExecutor(max_workers=worker_count)
         futures = [
             executor.submit(_vigicrues_build_station_entry, source, code, priority_names)
@@ -705,7 +742,7 @@ def _fetch_vigicrues_isere_live(
                 if not station:
                     continue
                 isere_stations.append(station)
-                if len(isere_stations) >= target_isere_count:
+                if station_limit is not None and len(isere_stations) >= target_isere_count:
                     break
         finally:
             executor.shutdown(wait=False, cancel_futures=True)

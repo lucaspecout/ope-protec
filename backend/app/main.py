@@ -123,7 +123,7 @@ ALLOWED_WEATHER_TRANSITIONS = {("jaune", "orange"), ("orange", "rouge")}
 READ_ROLES = {"admin", "ope", "securite", "visiteur", "mairie"}
 EDIT_ROLES = {"admin", "ope"}
 
-EXTERNAL_REFRESH_INTERVAL_SECONDS = 90
+EXTERNAL_REFRESH_INTERVAL_SECONDS = 300
 _external_risks_snapshot_lock = Lock()
 _external_risks_snapshot: dict = {
     "updated_at": None,
@@ -698,9 +698,11 @@ def interactive_map_meteo_vigilance():
 @app.get("/api/vigicrues/geojson")
 def interactive_map_vigicrues_geojson(
     refresh: bool = False,
+    limit: int | None = None,
     _: User = Depends(require_roles(*READ_ROLES)),
 ):
-    vigicrues = fetch_vigicrues_isere(station_limit=60, force_refresh=refresh)
+    safe_limit = None if limit is None else max(10, min(limit, 500))
+    vigicrues = fetch_vigicrues_isere(station_limit=safe_limit, force_refresh=refresh)
     return vigicrues_geojson_from_stations(vigicrues.get("stations", []))
 
 
