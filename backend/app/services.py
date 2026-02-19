@@ -887,16 +887,40 @@ def _itinisere_extract_locations(*chunks: str) -> list[str]:
     for pattern in patterns:
         candidates.extend(re.findall(pattern, cleaned))
 
-    banlist = {"Ligne", "Perturbation", "Isère", "Infos", "Du", "Le", "Les"}
+    banlist = {
+        "Ligne",
+        "Perturbation",
+        "Isère",
+        "Infos",
+        "Du",
+        "Le",
+        "Les",
+        "Route",
+        "Routes",
+        "Infos route",
+        "Coupure",
+        "Fermeture",
+        "Signaler",
+        "Détail",
+        "Detail",
+        "Itinisère",
+        "Itinisere",
+    }
     normalized: list[str] = []
     for candidate in candidates:
         label = re.sub(r"\s+", " ", candidate).strip(" -·,.")
-        if len(label) < 4 or label in banlist:
+        normalized_label = re.sub(r"\s+", " ", label).strip()
+        if len(normalized_label) < 4 or normalized_label in banlist:
             continue
-        if label.lower().startswith("ligne "):
+        lowered = normalized_label.lower()
+        if lowered.startswith("ligne "):
             continue
-        if label not in normalized:
-            normalized.append(label)
+        if lowered.startswith(("lieux", "lieu", "signaler", "détail", "detail")):
+            continue
+        if lowered in {"coupure", "fermeture", "travaux", "perturbation"}:
+            continue
+        if normalized_label not in normalized:
+            normalized.append(normalized_label)
     return normalized[:8]
 
 

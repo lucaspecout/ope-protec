@@ -1129,8 +1129,22 @@ async function geocodeTrafficLabel(label) {
 
 function extractItinisereLocationHints(event = {}, fullText = '', roads = []) {
   const hints = [];
+  const blockedHints = new Set([
+    'coupure',
+    'fermeture',
+    'signaler',
+    'détail',
+    'detail',
+    'itinisère',
+    'itinisere',
+    'infos route',
+    'perturbation',
+  ]);
   const pushHint = (value) => {
     const label = String(value || '').replace(/\s+/g, ' ').trim();
+    const normalized = label.toLowerCase();
+    if (!label || blockedHints.has(normalized)) return;
+    if (/^(lieux?|signaler|d[ée]tail)\s*:?$/i.test(label)) return;
     if (!label || hints.includes(label)) return;
     hints.push(label);
   };
@@ -1178,6 +1192,10 @@ async function buildItinisereMapPoints(events = []) {
     const roads = Array.isArray(event.roads) && event.roads.length ? event.roads : detectRoadCodes(fullText);
     const locationHints = extractItinisereLocationHints(event, fullText, roads);
     const locations = Array.isArray(event.locations) ? event.locations.filter(Boolean) : locationHints;
+    const communeHints = TRAFFIC_COMMUNES.filter((commune) => {
+      const escaped = commune.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return new RegExp(`\\b${escaped}\\b`, 'i').test(`${fullText} ${locationHints.join(' ')}`);
+    });
     let position = null;
     let anchor = '';
     let precision = 'estimée';
