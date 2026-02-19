@@ -1119,10 +1119,10 @@ function itinisereDivIcon(point = {}) {
   if (styleType === 'closure') {
     return window.L.divIcon({
       className: 'itinisere-icon-wrap',
-      html: `<span class="itinisere-icon itinisere-icon--closure">ROUTE<br/>BARRÉE</span><span class="itinisere-road-dot">${escapeHtml(road)}</span>`,
-      iconSize: [64, 38],
-      iconAnchor: [32, 28],
-      popupAnchor: [0, -24],
+      html: '<span class="itinisere-icon itinisere-icon--closure">ROUTE<br/>BARRÉE</span>',
+      iconSize: [52, 30],
+      iconAnchor: [26, 22],
+      popupAnchor: [0, -18],
     });
   }
 
@@ -1303,6 +1303,43 @@ function extractItinisereLocationHints(event = {}, fullText = '', roads = []) {
   return hints.slice(0, 12);
 }
 
+function extractAlertDynamicHints(fullText = '') {
+  const blockedHints = new Set([
+    'isère',
+    'isere',
+    'trafic',
+    'route',
+    'routes',
+    'alerte',
+    'info',
+    'infos',
+    'incident',
+    'perturbation',
+  ]);
+  const hints = [];
+  const pushHint = (value) => {
+    const label = String(value || '').replace(/\s+/g, ' ').trim();
+    const normalized = label.toLowerCase();
+    if (!label || blockedHints.has(normalized) || hints.includes(label)) return;
+    hints.push(label);
+  };
+
+  const blob = String(fullText || '');
+  const scopedMatches = [...blob.matchAll(/\b(?:sur|secteur|entre|vers|au niveau de)\s+([^\n.;:]+)/gi)];
+  scopedMatches.forEach((match) => {
+    String(match?.[1] || '')
+      .split(/[,/]|\s+-\s+/)
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .forEach(pushHint);
+  });
+
+  const cityAfterA = [...blob.matchAll(/\b(?:à|au|aux)\s+([A-ZÀ-ÖØ-Ý][\wÀ-ÖØ-öø-ÿ'\-]+(?:\s+[A-ZÀ-ÖØ-Ý][\wÀ-ÖØ-öø-ÿ'\-]+){0,3})/g)];
+  cityAfterA.forEach((match) => pushHint(match?.[1]));
+
+  return hints.slice(0, 8);
+}
+
 function spreadOverlappingTrafficPoints(points = []) {
   const overlapCounters = new Map();
   return points.map((point) => {
@@ -1337,7 +1374,7 @@ async function buildItinisereMapPoints(events = []) {
       const escaped = commune.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       return new RegExp(`\\b${escaped}\\b`, 'i').test(`${fullText} ${locationHints.join(' ')}`);
     });
-    const candidateLocationHints = [...new Set([...locations, ...locationHints, ...communeHints])];
+    const candidateLocationHints = [...new Set([...locations, ...locationHints, ...dynamicAlertHints, ...communeHints])];
     let position = null;
     let anchor = '';
     let precision = 'estimée';
@@ -1348,6 +1385,17 @@ async function buildItinisereMapPoints(events = []) {
       position = providedCoords;
       anchor = locations[0] || roads[0] || 'Itinisère';
       precision = 'source';
+    }
+
+    if (!position && isClosureEvent && communeHints.length) {
+      for (const commune of communeHints) {
+        const communePoint = await geocodeTrafficLabel(commune);
+        if (!communePoint) continue;
+        position = { lat: communePoint.lat, lon: communePoint.lon };
+        anchor = `Mairie de ${commune}`;
+        precision = 'centre-ville';
+        break;
+      }
     }
 
     if (!position && isClosureEvent && roads.length) {
@@ -1465,7 +1513,7 @@ async function renderTrafficOnMap() {
     const points = await buildItinisereMapPoints(cachedItinisereEvents || []);
     mapStats.traffic += points.length;
     points.forEach((point) => {
-      const roadsText = point.roads?.length ? `Axes détectés: ${point.roads.join(', ')}<br/>` : '';
+      const roadsText = point.precision === 'centre-ville' ? '' : (point.roads?.length ? `Axes détectés: ${point.roads.join(', ')}<br/>` : '');
       const locations = Array.isArray(point.locations) && point.locations.length ? point.locations.join(', ') : point.anchor;
       const icon = trafficMarkerIcon('itinisere', point.category, `${point.title || ''} ${point.description || ''}`);
       const marker = window.L.marker([point.lat, point.lon], { icon: itinisereDivIcon(point) });
