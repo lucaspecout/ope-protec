@@ -5,6 +5,7 @@ from html import unescape
 import json
 from pathlib import Path
 import re
+import unicodedata
 from time import sleep
 from threading import Lock
 from typing import Any
@@ -588,7 +589,35 @@ def _vigicrues_station_control(details: dict[str, Any]) -> str:
     return "inconnu"
 
 
-def _vigicrues_build_station_entry(source: str, station_code: str, priority_names: list[str]) -> dict[str, Any] | None:
+def _normalize_station_search_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value or "")
+    without_diacritics = "".join(char for char in normalized if not unicodedata.combining(char))
+    lowered = without_diacritics.lower()
+    lowered = lowered.replace("saint", "st")
+    lowered = lowered.replace("'", " ")
+    lowered = re.sub(r"[^a-z0-9]+", " ", lowered)
+    return re.sub(r"\s+", " ", lowered).strip()
+
+
+def _station_matches_focus_filters(station: dict[str, Any], focus_filters: list[tuple[str, ...]]) -> bool:
+    haystack = _normalize_station_search_text(
+        f"{station.get('LbStationHydro') or ''} {station.get('LbCoursEau') or ''}"
+    )
+    if not haystack:
+        return False
+
+    for required_tokens in focus_filters:
+        if all(token in haystack for token in required_tokens):
+            return True
+    return False
+
+
+def _vigicrues_build_station_entry(
+    source: str,
+    station_code: str,
+    priority_names: list[str],
+    force_include_codes: set[str] | None = None,
+) -> dict[str, Any] | None:
     try:
         details = _http_get_json(
             f"{source}/services/station.json?CdStationHydro={quote_plus(station_code)}",
@@ -598,7 +627,8 @@ def _vigicrues_build_station_entry(source: str, station_code: str, priority_name
         return None
 
     commune_code = str(details.get("CdCommune") or "")
-    if not commune_code.startswith("38"):
+    force_include_codes = force_include_codes or set()
+    if not commune_code.startswith("38") and station_code not in force_include_codes:
         return None
 
     coords = details.get("CoordStationHydro") or {}
@@ -644,6 +674,22 @@ def _fetch_vigicrues_isere_live(
         "W141001001", "W140000101", "W130001002", "W131001002", "W320001002",
         "W283201001", "W283201102", "W114402001", "W274601201", "W274601302",
     )
+    focus_station_filters = [
+        ("pontcharra", "breda"),
+        ("chamousset", "pont", "royal", "isere"),
+        ("crolles", "isere"),
+        ("la", "gache", "isere"),
+        ("cheylas", "isere"),
+        ("montmelian", "debitmetre", "isere"),
+        ("grenoble", "bastille", "isere"),
+        ("st", "gervais", "isere"),
+        ("domene", "domenon"),
+        ("fontaine", "drac"),
+        ("pont", "de", "claix", "drac"),
+        ("gresse", "vercors", "gresse"),
+        ("st", "just", "claix", "bourne"),
+        ("meaudre", "meaudret"),
+    ]
     priority_names = [name.lower() for name in (priority_names or [])]
 
     try:
@@ -671,15 +717,23 @@ def _fetch_vigicrues_isere_live(
             for territory_code in preferred_territory_codes
             for code in stations_by_territory.get(territory_code, [])
         ]
+        focused_codes = [
+            str(item.get("CdStationHydro") or "").strip()
+            for item in all_stations
+            if _station_matches_focus_filters(item, focus_station_filters)
+        ]
+        focused_codes = [code for code in focused_codes if code]
         seen_codes = set(prioritized_codes)
         remaining_codes = [code for code in all_codes if code not in seen_codes]
 
-        target_isere_count = max(station_limit or 0, 12)
+        target_isere_count = max(station_limit or 0, len(focus_station_filters))
         max_lookups = max(220, target_isere_count * 40)
         if sample_size > 0:
             max_lookups = min(max_lookups, sample_size)
+        if focused_codes:
+            max_lookups = min(max_lookups, max(target_isere_count * 3, len(focused_codes) + 8))
 
-        candidate_codes = (prioritized_codes + remaining_codes + list(fallback_isere_codes))[:max_lookups]
+        candidate_codes = (focused_codes + prioritized_codes + remaining_codes + list(fallback_isere_codes))[:max_lookups]
         candidate_codes = [code for code in candidate_codes if code]
         if not candidate_codes:
             raise ValueError("Aucune station candidate détectée pour l'Isère")
@@ -695,8 +749,9 @@ def _fetch_vigicrues_isere_live(
 
         worker_count = min(16, max(4, target_isere_count))
         executor = ThreadPoolExecutor(max_workers=worker_count)
+        force_include_codes = set(focused_codes)
         futures = [
-            executor.submit(_vigicrues_build_station_entry, source, code, priority_names)
+            executor.submit(_vigicrues_build_station_entry, source, code, priority_names, force_include_codes)
             for code in unique_candidate_codes
         ]
         try:
