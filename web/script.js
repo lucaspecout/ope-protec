@@ -1171,47 +1171,12 @@ function spreadOverlappingTrafficPoints(points = []) {
   });
 }
 
-function detectTrafficCommunes(text = '') {
-  const blob = ` ${String(text || '').toLowerCase()} `;
-  const communes = [];
-  TRAFFIC_COMMUNES.forEach((commune) => {
-    const escaped = commune.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').toLowerCase();
-    if (new RegExp(`(^|\\W)${escaped}(?=$|\\W)`, 'i').test(blob) && !communes.includes(commune)) communes.push(commune);
-  });
-  return communes;
-}
-
-function nearestPointOnCorridor(corridor = [], anchor = null) {
-  if (!Array.isArray(corridor) || !corridor.length) return null;
-  if (!anchor) {
-    const mid = corridor[Math.floor(corridor.length / 2)];
-    return Array.isArray(mid) ? { lat: mid[0], lon: mid[1] } : null;
-  }
-  let best = null;
-  let bestDist = Number.POSITIVE_INFINITY;
-  corridor.forEach((pair) => {
-    if (!Array.isArray(pair) || pair.length !== 2) return;
-    const dLat = pair[0] - anchor.lat;
-    const dLon = pair[1] - anchor.lon;
-    const dist = (dLat * dLat) + (dLon * dLon);
-    if (dist < bestDist) {
-      bestDist = dist;
-      best = { lat: pair[0], lon: pair[1] };
-    }
-  });
-  return best;
-}
-
 async function buildItinisereMapPoints(events = []) {
   const points = [];
   for (const event of events.slice(0, 80)) {
     const fullText = `${event.title || ''} ${event.description || ''}`;
     const roads = Array.isArray(event.roads) && event.roads.length ? event.roads : detectRoadCodes(fullText);
     const locationHints = extractItinisereLocationHints(event, fullText, roads);
-    const communeHints = detectTrafficCommunes(`${fullText} ${locationHints.join(' ')}`);
-    communeHints.forEach((commune) => {
-      roads.forEach((road) => locationHints.push(`${road} ${commune}`));
-    });
     const locations = Array.isArray(event.locations) ? event.locations.filter(Boolean) : locationHints;
     let position = null;
     let anchor = '';
@@ -1252,6 +1217,17 @@ async function buildItinisereMapPoints(events = []) {
         position = roadPoint;
         anchor = communeHints[0] ? `${road} · ${communeHints[0]}` : `Axe ${road}`;
         precision = communeAnchor ? 'axe+commune' : 'axe';
+        break;
+      }
+    }
+
+    if (!position) {
+      for (const road of roads) {
+        const corridor = ITINISERE_ROAD_CORRIDORS[road];
+        if (!corridor) continue;
+        position = { lat: corridor[0][0], lon: corridor[0][1] };
+        anchor = `Axe ${road}`;
+        precision = 'axe';
         break;
       }
     }
