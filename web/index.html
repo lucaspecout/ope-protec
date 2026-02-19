@@ -426,7 +426,6 @@
                 </div>
                 <div class="map-inline-actions">
                   <button id="map-fit-btn" type="button" class="ghost map-btn-lite">Tout voir</button>
-                  <button id="map-add-point-toggle" type="button" class="ghost map-btn-lite">Ajout: off</button>
                 </div>
                 <select id="map-basemap-select" aria-label="Choisir le fond de carte">
                   <option value="osm">Fond standard (OSM)</option>
@@ -450,17 +449,8 @@
                   <label><input id="filter-pcs" type="checkbox" checked /> Communes PCS</label>
                   <label><input id="filter-resources-active" type="checkbox" checked /> Ressources actives</label>
                   <label><input id="filter-itinisere" type="checkbox" checked /> Itinisère</label>
-                  <label><input id="filter-bison" type="checkbox" checked /> Bison Futé</label>
-                  <label><input id="filter-realtime-traffic" type="checkbox" checked /> Trafic temps réel</label>
                   <label><input id="filter-google-traffic-flow" type="checkbox" checked /> Trafic continu (style Google Maps)</label>
                 </div>
-                <select id="traffic-severity-filter" aria-label="Filtrer le trafic par criticité">
-                  <option value="all">Trafic: toutes criticités</option>
-                  <option value="rouge">Trafic bloquant (rouge)</option>
-                  <option value="orange">Trafic perturbé fort (orange)</option>
-                  <option value="jaune">Trafic perturbé (jaune)</option>
-                  <option value="vert">Trafic léger / information (vert)</option>
-                </select>
                 <select id="resource-type-filter">
                   <option value="all">Toutes les ressources</option>
                   <option value="poste_commandement">Postes de commandement</option>
@@ -490,7 +480,6 @@
               <p>Itinisère · axes les plus touchés <strong id="map-itinisere-roads">-</strong></p>
               <p>Itinisère · criticité (R/O/J/V) <strong id="map-itinisere-severity">-</strong></p>
               <p>Itinisère · localisation précise <strong id="map-itinisere-precision">-</strong></p>
-              <p>Trafic temps réel (Waze) <strong id="map-realtime-traffic">-</strong></p>
               <p>Sismicité max <strong id="map-seismic-level">-</strong></p>
               <p>Docs inondation suivis <strong id="map-flood-docs">0</strong></p>
               <p class="muted" id="map-source">Source carte: chargement…</p>
