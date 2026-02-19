@@ -1098,6 +1098,53 @@ function trafficMarkerIcon(kind = 'incident', category = '', text = '') {
   return detectItinisereIcon(text);
 }
 
+function itinisereRoadBadge(point = {}) {
+  const road = Array.isArray(point.roads) && point.roads.length ? point.roads[0] : '';
+  return String(road || '').toUpperCase().replace(/\s+/g, '');
+}
+
+function itinisereStyleType(point = {}) {
+  const blob = `${point.category || ''} ${point.title || ''} ${point.description || ''}`.toLowerCase();
+  if (/col\b/.test(blob)) return 'pass';
+  if (/ferm|barr|interdit|coup/.test(blob)) return 'closure';
+  if (/travaux|chantier/.test(blob)) return 'works';
+  return 'warning';
+}
+
+function itinisereDivIcon(point = {}) {
+  const styleType = itinisereStyleType(point);
+  const roadBadge = itinisereRoadBadge(point);
+  const road = roadBadge || '?';
+  const warning = styleType === 'works' ? '🚧' : '⚠️';
+  if (styleType === 'closure') {
+    return window.L.divIcon({
+      className: 'itinisere-icon-wrap',
+      html: `<span class="itinisere-icon itinisere-icon--closure">ROUTE<br/>BARRÉE</span><span class="itinisere-road-dot">${escapeHtml(road)}</span>`,
+      iconSize: [64, 38],
+      iconAnchor: [32, 28],
+      popupAnchor: [0, -24],
+    });
+  }
+
+  if (styleType === 'pass') {
+    return window.L.divIcon({
+      className: 'itinisere-icon-wrap',
+      html: `<span class="itinisere-icon itinisere-icon--pass">Col</span><span class="itinisere-pass-state">${escapeHtml(road)}</span>`,
+      iconSize: [64, 32],
+      iconAnchor: [32, 22],
+      popupAnchor: [0, -19],
+    });
+  }
+
+  return window.L.divIcon({
+    className: 'itinisere-icon-wrap',
+    html: `<span class="itinisere-icon itinisere-icon--warning">${warning}</span><span class="itinisere-road-dot">${escapeHtml(road)}</span>`,
+    iconSize: [42, 42],
+    iconAnchor: [21, 30],
+    popupAnchor: [0, -26],
+  });
+}
+
 const ISERE_BOUNDS = {
   latMin: 44.6,
   latMax: 46.0,
@@ -1362,7 +1409,7 @@ async function renderTrafficOnMap() {
       const roadsText = point.roads?.length ? `Axes détectés: ${point.roads.join(', ')}<br/>` : '';
       const locations = Array.isArray(point.locations) && point.locations.length ? point.locations.join(', ') : point.anchor;
       const icon = trafficMarkerIcon('itinisere', point.category, `${point.title || ''} ${point.description || ''}`);
-      const marker = window.L.marker([point.lat, point.lon], { icon: emojiDivIcon(icon) });
+      const marker = window.L.marker([point.lat, point.lon], { icon: itinisereDivIcon(point) });
       marker.bindPopup(`<strong>${escapeHtml(icon)} ${escapeHtml(point.title || 'Évènement Itinisère')}</strong><br/><span class="badge neutral">${escapeHtml(point.category || 'trafic')} · ${escapeHtml(point.severity || 'jaune')}</span><br/>${escapeHtml(point.description || '')}<br/>Localisation: ${escapeHtml(locations || 'Commune Isère')} (${escapeHtml(point.precision || 'estimée')})<br/>${roadsText}<a href="${escapeHtml(point.link || '#')}" target="_blank" rel="noreferrer">Détail Itinisère</a>`);
       marker.addTo(itinisereLayer);
     });
