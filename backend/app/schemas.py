@@ -362,6 +362,7 @@ class MapPointCreate(BaseModel):
     name: str
     category: str = "autre"
     icon: str = "📍"
+    icon_url: str | None = None
     notes: str | None = None
     lat: float
     lon: float
@@ -378,6 +379,14 @@ class MapPointCreate(BaseModel):
     @field_validator("notes")
     @classmethod
     def normalize_map_point_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        sanitized = value.strip()
+        return sanitized or None
+
+    @field_validator("icon_url")
+    @classmethod
+    def normalize_map_point_icon_url(cls, value: str | None) -> str | None:
         if value is None:
             return None
         sanitized = value.strip()
@@ -403,6 +412,7 @@ class MapPointOut(BaseModel):
     name: str
     category: str
     icon: str
+    icon_url: str | None = None
     notes: str | None = None
     lat: float
     lon: float

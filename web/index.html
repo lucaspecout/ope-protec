@@ -442,6 +442,7 @@
                   <option value="medical">Médical</option>
                   <option value="logistics">Logistique</option>
                   <option value="command">Commandement</option>
+                  <option value="poi">POI</option>
                   <option value="autre">Autres</option>
                 </select>
                 <div class="map-toggle-grid">
@@ -450,7 +451,7 @@
                   <label><input id="filter-resources-active" type="checkbox" checked /> Ressources actives</label>
                   <label><input id="filter-itinisere" type="checkbox" checked /> Itinisère</label>
                   <label><input id="filter-waze-closed-roads" type="checkbox" checked /> Routes barrées Isère (Waze)</label>
-                  <label><input id="filter-google-traffic-flow" type="checkbox" checked /> Trafic continu (style Google Maps)</label>
+                  <label><input id="filter-google-traffic-flow" type="checkbox" /> Trafic continu (style Google Maps)</label>
                 </div>
                 <select id="resource-type-filter">
                   <option value="all">Toutes les ressources</option>
@@ -513,7 +514,7 @@
               <button type="button" id="map-point-form-cancel" class="ghost">Fermer</button>
             </div>
             <form id="map-point-form" class="municipality-edit-form">
-              <label>Nom du point<input name="name" required maxlength="120" /></label>
+              <label>Titre du marqueur<input name="name" required maxlength="120" placeholder="Ex: Point de rassemblement" /></label>
               <label>Catégorie
                 <select id="map-point-category" name="category">
                   <option value="incident">Incident</option>
@@ -523,10 +524,14 @@
                   <option value="medical">Médical</option>
                   <option value="logistics">Logistique</option>
                   <option value="command">Commandement</option>
+                  <option value="poi">POI</option>
                   <option value="autre">Autre</option>
                 </select>
               </label>
               <label>Icône (emoji)<input id="map-point-icon" name="icon" maxlength="4" placeholder="📍" /></label>
+              <label class="span-full">Icône personnalisée (URL)
+                <input id="map-point-icon-url" name="icon_url" type="url" placeholder="https://.../icone-poi.png" />
+              </label>
               <div id="map-icon-suggestions" class="map-icon-suggestions span-full" aria-label="Suggestions d'icônes"></div>
               <label class="span-full">Notes
                 <textarea name="notes" rows="3" placeholder="Ex: route coupée, équipe envoyée, heure de début..."></textarea>
