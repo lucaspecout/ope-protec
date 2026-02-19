@@ -88,6 +88,7 @@ class MapPoint(Base):
     name: Mapped[str] = mapped_column(String(120))
     category: Mapped[str] = mapped_column(String(40), default="autre")
     icon: Mapped[str] = mapped_column(String(16), default="📍")
+    icon_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     lat: Mapped[float] = mapped_column(Float)
     lon: Mapped[float] = mapped_column(Float)

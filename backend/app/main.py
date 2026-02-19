@@ -111,6 +111,7 @@ with engine.begin() as conn:
             created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
         )
     """))
+    conn.execute(text("ALTER TABLE map_points ADD COLUMN IF NOT EXISTS icon_url VARCHAR(512)"))
 
 
 app = FastAPI(title=settings.app_name)

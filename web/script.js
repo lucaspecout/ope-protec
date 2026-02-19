@@ -512,7 +512,6 @@ function updateMapSummary() {
   setText('map-summary-pcs', String(mapStats.pcs));
   setText('map-summary-resources', String(mapStats.resources));
   setText('map-summary-custom', String(mapStats.custom));
-  setText('map-summary-traffic', String(mapStats.traffic));
 }
 
 function applyBasemap(style = 'osm') {
@@ -543,7 +542,7 @@ function applyBasemap(style = 'osm') {
 
 function applyGoogleTrafficFlowOverlay() {
   if (!leafletMap || typeof window.L === 'undefined') return;
-  const enabled = document.getElementById('filter-google-traffic-flow')?.checked ?? true;
+  const enabled = document.getElementById('filter-google-traffic-flow')?.checked ?? false;
   if (!enabled) {
     if (googleTrafficFlowLayer) {
       leafletMap.removeLayer(googleTrafficFlowLayer);
@@ -588,6 +587,13 @@ function setMapFeedback(message = '', isError = false) {
   target.className = isError ? 'error' : 'muted';
 }
 
+function setMapAddPointMode(enabled) {
+  mapAddPointMode = Boolean(enabled);
+  const button = document.getElementById('map-add-poi-btn');
+  if (!button) return;
+  button.setAttribute('aria-pressed', String(mapAddPointMode));
+  button.textContent = mapAddPointMode ? '✅ Cliquez sur la carte pour placer le POI' : '➕ Créer un POI';
+}
 
 async function resetMapFilters() {
   const defaults = {
@@ -612,7 +618,7 @@ async function resetMapFilters() {
   if (activeOnly) activeOnly.checked = false;
   if (itinisere) itinisere.checked = true;
   if (wazeClosedRoads) wazeClosedRoads.checked = true;
-  if (googleFlow) googleFlow.checked = true;
+  if (googleFlow) googleFlow.checked = false;
   if (searchLayer) searchLayer.clearLayers();
   applyBasemap('osm');
   renderStations(cachedStations);
@@ -972,6 +978,7 @@ const MAP_POINT_ICONS = {
   medical: '🏥',
   logistics: '📦',
   command: '🛰️',
+  poi: '📌',
   autre: '📍',
 };
 
@@ -983,6 +990,7 @@ const MAP_ICON_SUGGESTIONS = {
   medical: ['🏥', '🚑', '🩺'],
   logistics: ['📦', '🚛', '🛠️'],
   command: ['🛰️', '📡', '🧭'],
+  poi: ['📌', '📍', '⭐'],
   autre: ['📍', '📌', '⭐'],
 };
 
@@ -992,6 +1000,22 @@ function iconForCategory(category) {
 
 function emojiDivIcon(emoji) {
   return window.L.divIcon({ className: 'map-emoji-icon', html: `<span>${escapeHtml(emoji)}</span>`, iconSize: [30, 30], iconAnchor: [15, 15], popupAnchor: [0, -15] });
+}
+
+function imageMarkerIcon(iconUrl) {
+  return window.L.icon({
+    iconUrl,
+    iconSize: [30, 30],
+    iconAnchor: [15, 30],
+    popupAnchor: [0, -28],
+    className: 'map-poi-icon',
+  });
+}
+
+function markerIconForPoint(point = {}) {
+  const iconUrl = String(point.icon_url || '').trim();
+  if (/^https?:\/\//i.test(iconUrl)) return imageMarkerIcon(iconUrl);
+  return emojiDivIcon(point.icon || iconForCategory(point.category));
 }
 
 function normalizeTrafficSeverity(level) {
@@ -1268,7 +1292,10 @@ function renderCustomPoints(showFeedback = true) {
   const selectedCategory = document.getElementById('map-point-category-filter')?.value || 'all';
   const filteredPoints = mapPoints.filter((point) => selectedCategory === 'all' || point.category === selectedCategory);
   const listMarkup = filteredPoints
-    .map((point) => `<li><strong>${escapeHtml(point.icon || iconForCategory(point.category))} ${escapeHtml(point.name)}</strong> · ${point.lat.toFixed(4)}, ${point.lon.toFixed(4)} <button type="button" data-remove-point="${point.id}">Supprimer</button></li>`)
+    .map((point) => {
+      const pointIcon = point.icon_url ? '🖼️' : (point.icon || iconForCategory(point.category));
+      return `<li><strong>${escapeHtml(pointIcon)} ${escapeHtml(point.name)}</strong> · ${point.lat.toFixed(4)}, ${point.lon.toFixed(4)} <button type="button" data-remove-point="${point.id}">Supprimer</button></li>`;
+    })
     .join('') || '<li>Aucun point personnalisé.</li>';
   setHtml('custom-points-list', listMarkup);
 
@@ -1276,25 +1303,29 @@ function renderCustomPoints(showFeedback = true) {
   updateMapSummary();
   if (!mapPointsLayer) return;
   filteredPoints.forEach((point) => {
-    const marker = window.L.marker([point.lat, point.lon], { icon: emojiDivIcon(point.icon || iconForCategory(point.category)) });
-    marker.bindPopup(`<strong>${escapeHtml(point.icon || iconForCategory(point.category))} ${escapeHtml(point.name)}</strong><br/>Catégorie: ${escapeHtml(point.category)}<br/>${escapeHtml(point.notes || 'Sans note')}`);
+    const marker = window.L.marker([point.lat, point.lon], { icon: markerIconForPoint(point) });
+    const popupIcon = point.icon_url ? '🖼️' : (point.icon || iconForCategory(point.category));
+    marker.bindPopup(`<strong>${escapeHtml(popupIcon)} ${escapeHtml(point.name)}</strong><br/>Catégorie: ${escapeHtml(point.category)}${point.icon_url ? '<br/>Type: POI avec icône personnalisée' : ''}<br/>${escapeHtml(point.notes || 'Sans note')}`);
     marker.addTo(mapPointsLayer);
   });
-  if (showFeedback) setMapFeedback(`${filteredPoints.length} point(s) opérationnel(s) affiché(s).`);
+  if (showFeedback) setMapFeedback(`${filteredPoints.length} marqueur(s) opérationnel(s)/POI affiché(s).`);
 }
 
 function onMapClickAddPoint(event) {
   if (!mapAddPointMode) return;
   pendingMapPointCoords = event.latlng;
+  setMapAddPointMode(false);
   const modal = document.getElementById('map-point-modal');
   if (!modal) return;
   const form = document.getElementById('map-point-form');
   if (form) {
     form.reset();
-    form.elements.namedItem('name').value = `Point ${new Date().toLocaleTimeString()}`;
-    form.elements.namedItem('icon').value = iconForCategory('autre');
+    form.elements.namedItem('name').value = `POI ${new Date().toLocaleTimeString()}`;
+    form.elements.namedItem('category').value = 'poi';
+    form.elements.namedItem('icon').value = iconForCategory('poi');
+    form.elements.namedItem('icon_url').value = '';
     mapIconTouched = false;
-    renderMapIconSuggestions('autre');
+    renderMapIconSuggestions('poi');
   }
   if (typeof modal.showModal === 'function') modal.showModal();
   else modal.setAttribute('open', 'open');
@@ -2373,11 +2404,17 @@ function bindAppInteractions() {
   });
   document.getElementById('logout-btn').addEventListener('click', logout);
   setMapControlsCollapsed(false);
+  setMapAddPointMode(false);
   document.getElementById('map-search-btn')?.addEventListener('click', handleMapSearch);
   document.getElementById('map-controls-toggle')?.addEventListener('click', () => {
     setMapControlsCollapsed(!mapControlsCollapsed);
   });
   document.getElementById('map-fit-btn')?.addEventListener('click', () => fitMapToData(true));
+  document.getElementById('map-add-poi-btn')?.addEventListener('click', () => {
+    const nextMode = !mapAddPointMode;
+    setMapAddPointMode(nextMode);
+    setMapFeedback(nextMode ? 'Mode création POI activé: cliquez sur la carte pour choisir l\'emplacement.' : 'Mode création POI désactivé.');
+  });
   document.getElementById('map-focus-crisis')?.addEventListener('click', focusOnCrisisAreas);
   document.getElementById('map-run-checks')?.addEventListener('click', runMapChecks);
   document.getElementById('map-toggle-contrast')?.addEventListener('click', toggleMapContrast);
@@ -2460,11 +2497,13 @@ function bindAppInteractions() {
     const form = event.target;
     const category = form.elements.category.value || 'autre';
     const icon = form.elements.icon.value.trim() || iconForCategory(category);
+    const iconUrl = form.elements.icon_url.value.trim() || null;
     try {
       await saveMapPoint({
         name: form.elements.name.value.trim(),
         category,
         icon,
+        icon_url: iconUrl,
         notes: form.elements.notes.value.trim() || null,
         lat: pendingMapPointCoords.lat,
         lon: pendingMapPointCoords.lng,
