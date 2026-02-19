@@ -553,7 +553,7 @@ function applyGoogleTrafficFlowOverlay() {
   }
 
   if (!googleTrafficFlowLayer) {
-    googleTrafficFlowLayer = window.L.tileLayer('https://mt1.google.com/vt/lyrs=traffic&x={x}&y={y}&z={z}', {
+    googleTrafficFlowLayer = window.L.tileLayer('https://mt1.google.com/vt?lyrs=h,traffic&x={x}&y={y}&z={z}', {
       maxZoom: 20,
       opacity: 0.85,
       attribution: 'Flux trafic (lignes colorées) style Google Maps',
