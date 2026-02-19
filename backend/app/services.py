@@ -802,6 +802,98 @@ def _itinisere_extract_roads(text: str) -> list[str]:
     return sorted(roads)
 
 
+def _itinisere_extract_locations(*chunks: str) -> list[str]:
+    blob = " ".join(chunk or "" for chunk in chunks)
+    cleaned = re.sub(r"<[^>]+>", " ", blob)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    if not cleaned:
+        return []
+
+    patterns = [
+        r"\b(?:secteur|zone|quartier|arr[êe]t|gare|pont|avenue|rue|route|boulevard|place|sortie|échangeur)\s+[A-ZÀ-ÖØ-Ý][\wÀ-ÖØ-öø-ÿ'\- ]{2,60}",
+        r"\b[A-ZÀ-ÖØ-Ý][\wÀ-ÖØ-öø-ÿ'\-]+(?:\s+[A-ZÀ-ÖØ-Ý][\wÀ-ÖØ-öø-ÿ'\-]+){0,3}\b",
+    ]
+    candidates: list[str] = []
+    for pattern in patterns:
+        candidates.extend(re.findall(pattern, cleaned))
+
+    banlist = {"Ligne", "Perturbation", "Isère", "Infos", "Du", "Le", "Les"}
+    normalized: list[str] = []
+    for candidate in candidates:
+        label = re.sub(r"\s+", " ", candidate).strip(" -·,.")
+        if len(label) < 4 or label in banlist:
+            continue
+        if label.lower().startswith("ligne "):
+            continue
+        if label not in normalized:
+            normalized.append(label)
+    return normalized[:8]
+
+
+def _itinisere_severity(title: str, description: str, category: str) -> str:
+    text = f"{title} {description}".lower()
+    if any(token in text for token in ("route coup", "fermet", "interdit", "impossible", "bloqu", "suspendu", "annul")):
+        return "rouge"
+    if any(token in text for token in ("accident", "collision", "fort", "gros ralent", "très perturb", "dév")):
+        return "orange"
+    if category in {"travaux", "incident", "évènement"} or any(token in text for token in ("travaux", "chantier", "retard", "ralenti", "manifest")):
+        return "jaune"
+    return "vert"
+
+
+def _itinisere_extract_period(text: str) -> tuple[str | None, str | None]:
+    compact = re.sub(r"\s+", " ", text or "")
+    interval = re.search(r"Du\s+([^,]+?)\s+au\s+([^,]+?)(?:,|\.|$)", compact, flags=re.IGNORECASE)
+    if interval:
+        return interval.group(1).strip(), interval.group(2).strip()
+    single = re.search(r"(?:Jusqu['’]au|jusqu['’]au)\s+([^,]+?)(?:,|\.|$)", compact)
+    if single:
+        return None, single.group(1).strip()
+    return None, None
+
+
+def _itinisere_fetch_detail(link: str, fallback_title: str) -> dict[str, Any]:
+    safe_link = link if str(link).startswith("http") else "https://www.itinisere.fr"
+    try:
+        html_payload = _http_get_text(safe_link, timeout=10)
+    except (HTTPError, URLError, TimeoutError, ValueError):
+        return {}
+
+    title = _extract_html_title(html_payload) or fallback_title
+    content = re.sub(r"<script[\s\S]*?</script>", " ", html_payload, flags=re.IGNORECASE)
+    content = re.sub(r"<style[\s\S]*?</style>", " ", content, flags=re.IGNORECASE)
+    content = unescape(re.sub(r"<[^>]+>", "\n", content))
+    lines = [re.sub(r"\s+", " ", line).strip() for line in content.splitlines()]
+    lines = [line for line in lines if line and "itinisère" not in line.lower() and "plan du site" not in line.lower()]
+
+    description = ""
+    for line in lines:
+        lowered = line.lower()
+        if len(line) < 20:
+            continue
+        if any(token in lowered for token in ("ligne", "travaux", "arrêt", "accident", "perturb", "route", "ralent", "dévi", "bus")):
+            description = line
+            break
+    if not description:
+        description = next((line for line in lines if len(line) > 30), "")
+
+    period_start, period_end = _itinisere_extract_period(description)
+    published = ""
+    for line in lines:
+        if re.search(r"\b\d{1,2}/\d{1,2}/\d{2,4}\b", line):
+            published = line
+            break
+
+    return {
+        "title": title,
+        "description": description,
+        "published_at": published,
+        "period_start": period_start,
+        "period_end": period_end,
+        "locations": _itinisere_extract_locations(title, description),
+    }
+
+
 def _itinisere_insights(events: list[dict[str, Any]]) -> dict[str, Any]:
     category_counts: dict[str, int] = {}
     road_counts: dict[str, int] = {}
@@ -821,35 +913,75 @@ def _itinisere_insights(events: list[dict[str, Any]]) -> dict[str, Any]:
         "top_roads": [{"road": road, "count": count} for road, count in top_roads],
     }
 
-def _fetch_itinisere_disruptions_live(limit: int = 20) -> dict[str, Any]:
+def _fetch_itinisere_disruptions_live(limit: int = 60) -> dict[str, Any]:
     source = "https://www.itinisere.fr/fr/rss/Disruptions"
     try:
         xml_payload = _http_get_text(source)
         root = ET.fromstring(xml_payload)
         events: list[dict[str, Any]] = []
-        for item in root.findall(".//item")[:limit]:
-            title = (item.findtext("title") or "Perturbation").strip()
-            description = re.sub(r"\s+", " ", (item.findtext("description") or "").strip())
-            published = (item.findtext("pubDate") or "").strip()
-            link = (item.findtext("link") or "https://www.itinisere.fr").strip()
-            roads = _itinisere_extract_roads(f"{title} {description}")
-            category = _itinisere_category(title, description)
+        raw_items = root.findall(".//item")[: max(1, min(limit, 120))]
+        normalized_items = [
+            {
+                "title": re.sub(r"\s+", " ", (item.findtext("title") or "Perturbation").strip()),
+                "description": re.sub(r"\s+", " ", (item.findtext("description") or "").strip()),
+                "published": re.sub(r"\s+", " ", (item.findtext("pubDate") or "").strip()),
+                "link": (item.findtext("link") or "https://www.itinisere.fr").strip(),
+            }
+            for item in raw_items
+        ]
+
+        details_by_link: dict[str, dict[str, Any]] = {}
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            future_map = {
+                executor.submit(_itinisere_fetch_detail, payload["link"], payload["title"]): payload["link"]
+                for payload in normalized_items
+                if payload["link"].startswith("http")
+            }
+            for future in as_completed(future_map):
+                link = future_map[future]
+                try:
+                    details_by_link[link] = future.result() or {}
+                except Exception:
+                    details_by_link[link] = {}
+
+        for item in normalized_items:
+            title = item["title"]
+            description = item["description"]
+            published = item["published"]
+            link = item["link"]
+
+            detail = details_by_link.get(link) or {}
+            final_title = detail.get("title") or title
+            final_description = detail.get("description") or description
+            roads = _itinisere_extract_roads(f"{final_title} {final_description}")
+            category = _itinisere_category(final_title, final_description)
+            severity = _itinisere_severity(final_title, final_description, category)
+            locations = detail.get("locations") or _itinisere_extract_locations(final_title, final_description)
             events.append(
                 {
-                    "title": title,
-                    "description": description[:400],
-                    "published_at": published,
+                    "title": final_title,
+                    "description": final_description[:550],
+                    "published_at": detail.get("published_at") or published,
                     "link": link,
                     "roads": roads,
                     "category": category,
+                    "severity": severity,
+                    "period_start": detail.get("period_start"),
+                    "period_end": detail.get("period_end"),
+                    "locations": locations,
                 }
             )
         insights = _itinisere_insights(events)
+        insights["severity_breakdown"] = {
+            level: len([event for event in events if event.get("severity") == level])
+            for level in ("rouge", "orange", "jaune", "vert")
+        }
         return {
             "service": "Itinisère",
             "status": "online",
             "source": source,
             "events": events,
+            "events_total": len(events),
             "insights": insights,
             "updated_at": datetime.utcnow().isoformat() + "Z",
         }
@@ -859,12 +991,13 @@ def _fetch_itinisere_disruptions_live(limit: int = 20) -> dict[str, Any]:
             "status": "degraded",
             "source": source,
             "events": [],
+            "events_total": 0,
             "insights": {"dominant_category": "aucune", "category_breakdown": {}, "top_roads": []},
             "error": str(exc),
         }
 
 
-def fetch_itinisere_disruptions(limit: int = 20, force_refresh: bool = False) -> dict[str, Any]:
+def fetch_itinisere_disruptions(limit: int = 60, force_refresh: bool = False) -> dict[str, Any]:
     return _cached_external_payload(
         cache=_itinisere_cache,
         lock=_itinisere_cache_lock,
