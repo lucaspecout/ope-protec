@@ -571,8 +571,6 @@ function applyGoogleTrafficFlowOverlay() {
       maxZoom: 20,
       opacity: 0.85,
       attribution: 'Flux trafic (lignes colorées) style Google Maps',
-      pane: 'traffic-flow-pane',
-      zIndex: 660,
     });
   }
 
