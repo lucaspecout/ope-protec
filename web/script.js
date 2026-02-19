@@ -1127,13 +1127,57 @@ async function geocodeTrafficLabel(label) {
   }
 }
 
+function extractItinisereLocationHints(event = {}, fullText = '', roads = []) {
+  const hints = [];
+  const pushHint = (value) => {
+    const label = String(value || '').replace(/\s+/g, ' ').trim();
+    if (!label || hints.includes(label)) return;
+    hints.push(label);
+  };
+
+  [event.address, event.city, ...(Array.isArray(event.addresses) ? event.addresses : []), ...(Array.isArray(event.locations) ? event.locations : [])]
+    .forEach(pushHint);
+
+  const blob = String(fullText || '');
+  const cityAfterA = [...blob.matchAll(/\b(?:à|au|aux)\s+([A-ZÀ-ÖØ-Ý][\wÀ-ÖØ-öø-ÿ'\-]+(?:\s+[A-ZÀ-ÖØ-Ý][\wÀ-ÖØ-öø-ÿ'\-]+){0,3})/g)];
+  cityAfterA.forEach((match) => pushHint(match?.[1]));
+
+  const streetMatches = [...blob.matchAll(/\b(?:rue|route|avenue|boulevard|chemin|quai|pont|échangeur|sortie)\s+[A-Z0-9À-ÖØ-Ý][\wÀ-ÖØ-öø-ÿ'\- ]{2,70}/gi)];
+  streetMatches.forEach((match) => pushHint(match?.[0]));
+
+  roads.forEach((road) => {
+    if (event.city) pushHint(`${road} ${event.city}`);
+    if (event.address) pushHint(`${road} ${event.address}`);
+  });
+
+  return hints.slice(0, 12);
+}
+
+function spreadOverlappingTrafficPoints(points = []) {
+  const overlapCounters = new Map();
+  return points.map((point) => {
+    const key = `${Number(point.lat).toFixed(4)},${Number(point.lon).toFixed(4)}`;
+    const count = overlapCounters.get(key) || 0;
+    overlapCounters.set(key, count + 1);
+    if (count === 0) return point;
+    const angle = (count * 42) * (Math.PI / 180);
+    const radius = 0.0015 + (Math.floor(count / 8) * 0.0006);
+    return {
+      ...point,
+      lat: Number((point.lat + (Math.sin(angle) * radius)).toFixed(6)),
+      lon: Number((point.lon + (Math.cos(angle) * radius)).toFixed(6)),
+      precision: `${point.precision || 'estimée'} · ajustée`,
+    };
+  });
+}
+
 async function buildItinisereMapPoints(events = []) {
   const points = [];
   for (const event of events.slice(0, 80)) {
     const fullText = `${event.title || ''} ${event.description || ''}`;
     const roads = Array.isArray(event.roads) && event.roads.length ? event.roads : detectRoadCodes(fullText);
-    const locations = Array.isArray(event.locations) ? event.locations.filter(Boolean) : [];
-    const locationHints = [event.address, event.city, ...(Array.isArray(event.addresses) ? event.addresses : []), ...locations].filter(Boolean);
+    const locationHints = extractItinisereLocationHints(event, fullText, roads);
+    const locations = Array.isArray(event.locations) ? event.locations.filter(Boolean) : locationHints;
     let position = null;
     let anchor = '';
     let precision = 'estimée';
@@ -1143,17 +1187,6 @@ async function buildItinisereMapPoints(events = []) {
       position = providedCoords;
       anchor = locations[0] || roads[0] || 'Itinisère';
       precision = 'source';
-    }
-
-    if (!position) {
-      for (const road of roads) {
-        const corridor = ITINISERE_ROAD_CORRIDORS[road];
-        if (!corridor) continue;
-        position = { lat: corridor[0][0], lon: corridor[0][1] };
-        anchor = `Axe ${road}`;
-        precision = 'axe';
-        break;
-      }
     }
 
     if (!position) {
@@ -1168,9 +1201,20 @@ async function buildItinisereMapPoints(events = []) {
     }
 
     if (!position) {
+      for (const road of roads) {
+        const corridor = ITINISERE_ROAD_CORRIDORS[road];
+        if (!corridor) continue;
+        position = { lat: corridor[0][0], lon: corridor[0][1] };
+        anchor = `Axe ${road}`;
+        precision = 'axe';
+        break;
+      }
+    }
+
+    if (!position) {
       for (const commune of TRAFFIC_COMMUNES) {
         const escaped = commune.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        if (!new RegExp(`\b${escaped}\b`, 'i').test(fullText)) continue;
+        if (!new RegExp(`\\b${escaped}\\b`, 'i').test(fullText)) continue;
         position = await geocodeTrafficLabel(commune);
         anchor = commune;
         if (position) {
@@ -1197,7 +1241,7 @@ async function buildItinisereMapPoints(events = []) {
       severity: normalizeTrafficSeverity(event.severity || (event.category === 'fermeture' ? 'rouge' : 'jaune')),
     });
   }
-  return points;
+  return spreadOverlappingTrafficPoints(points);
 }
 
 async function renderTrafficOnMap() {
