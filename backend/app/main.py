@@ -45,6 +45,7 @@ from .schemas import (
 from .security import create_access_token, hash_password, verify_password
 from .services import (
     fetch_bison_fute_traffic,
+    fetch_waze_isere_traffic,
     cleanup_old_weather_alerts,
     fetch_georisques_isere_summary,
     fetch_isere_boundary_geojson,
@@ -131,6 +132,7 @@ _external_risks_snapshot: dict = {
         "vigicrues": {},
         "itinisere": {},
         "bison_fute": {},
+        "waze": {},
         "georisques": {},
         "prefecture_isere": {},
     },
@@ -275,6 +277,7 @@ def _warmup_external_sources() -> None:
         fetch_vigicrues_isere(force_refresh=True)
         fetch_itinisere_disruptions(force_refresh=True)
         fetch_bison_fute_traffic(force_refresh=True)
+        fetch_waze_isere_traffic(force_refresh=True)
         fetch_georisques_isere_summary(force_refresh=True)
     except Exception:
         # Le warmup ne doit jamais empêcher le démarrage de l'API.
@@ -601,6 +604,7 @@ def build_external_risks_payload(refresh: bool = False) -> dict:
         "vigicrues": (lambda: fetch_vigicrues_isere(force_refresh=refresh), {"level": "vert", "stations": [], "alerts": []}),
         "itinisere": (lambda: fetch_itinisere_disruptions(force_refresh=refresh), {"status": "degraded", "events": [], "events_total": 0}),
         "bison_fute": (lambda: fetch_bison_fute_traffic(force_refresh=refresh), {"status": "degraded", "alerts": []}),
+        "waze": (lambda: fetch_waze_isere_traffic(force_refresh=refresh), {"status": "degraded", "incidents": [], "incidents_total": 0}),
         "georisques": (lambda: fetch_georisques_isere_summary(force_refresh=refresh), {"status": "degraded", "details": []}),
         "prefecture_isere": (lambda: fetch_prefecture_isere_news(force_refresh=refresh), {"status": "degraded", "articles": []}),
     }
@@ -620,6 +624,7 @@ def build_external_risks_payload(refresh: bool = False) -> dict:
         "vigicrues": results["vigicrues"],
         "itinisere": results["itinisere"],
         "bison_fute": results["bison_fute"],
+        "waze": results["waze"],
         "georisques": results["georisques"],
         "prefecture_isere": results["prefecture_isere"],
     }
@@ -635,7 +640,7 @@ def get_external_risks_payload(refresh: bool = False) -> dict:
         return payload
 
     snapshot = _get_external_risks_snapshot()
-    if snapshot and any(snapshot.get(key) for key in ("meteo_france", "vigicrues", "itinisere", "bison_fute", "georisques", "prefecture_isere")):
+    if snapshot and any(snapshot.get(key) for key in ("meteo_france", "vigicrues", "itinisere", "bison_fute", "waze", "georisques", "prefecture_isere")):
         return snapshot
 
     payload = build_external_risks_payload(refresh=True)
@@ -719,6 +724,7 @@ def supervision_overview(
     vigicrues = risks_payload.get("vigicrues") or {}
     itinisere = risks_payload.get("itinisere") or {}
     bison_fute = risks_payload.get("bison_fute") or {}
+    waze = risks_payload.get("waze") or {}
     georisques = risks_payload.get("georisques") or {}
     prefecture = risks_payload.get("prefecture_isere") or {}
     crisis = db.query(Municipality).filter(Municipality.crisis_mode.is_(True)).all()
@@ -730,6 +736,7 @@ def supervision_overview(
             "vigicrues": vigicrues,
             "itinisere": itinisere,
             "bison_fute": bison_fute,
+            "waze": waze,
             "georisques": georisques,
             "prefecture_isere": prefecture,
         },

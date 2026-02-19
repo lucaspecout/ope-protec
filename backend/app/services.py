@@ -277,6 +277,7 @@ _meteo_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _VIGICRUES_CACHE_TTL_SECONDS = 120
 _ITINISERE_CACHE_TTL_SECONDS = 180
 _BISON_CACHE_TTL_SECONDS = 600
+_WAZE_CACHE_TTL_SECONDS = 120
 _GEORISQUES_CACHE_TTL_SECONDS = 900
 _PREFECTURE_CACHE_TTL_SECONDS = 600
 
@@ -286,6 +287,8 @@ _itinisere_cache_lock = Lock()
 _itinisere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _bison_cache_lock = Lock()
 _bison_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_waze_cache_lock = Lock()
+_waze_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _georisques_cache_lock = Lock()
 _georisques_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _prefecture_cache_lock = Lock()
@@ -802,6 +805,28 @@ def _itinisere_extract_roads(text: str) -> list[str]:
     return sorted(roads)
 
 
+def _itinisere_is_public_transport_event(title: str, description: str) -> bool:
+    text = f"{title} {description}".lower()
+    transport_tokens = (
+        "transport en commun",
+        "ligne",
+        "tram",
+        "bus",
+        "cars",
+        "car scolaire",
+        "arrêt",
+        "gare routière",
+        "tag ",
+        "transisère",
+    )
+    road_hint_tokens = ("autoroute", "route", "échangeur", "sortie", "rocade", "déviation")
+    has_transport_token = any(token in text for token in transport_tokens)
+    if not has_transport_token:
+        return False
+    has_road_hint = bool(_itinisere_extract_roads(text)) or any(token in text for token in road_hint_tokens)
+    return not has_road_hint
+
+
 def _itinisere_extract_locations(*chunks: str) -> list[str]:
     blob = " ".join(chunk or "" for chunk in chunks)
     cleaned = re.sub(r"<[^>]+>", " ", blob)
@@ -957,6 +982,8 @@ def _fetch_itinisere_disruptions_live(limit: int = 60) -> dict[str, Any]:
             category = _itinisere_category(final_title, final_description)
             severity = _itinisere_severity(final_title, final_description, category)
             locations = detail.get("locations") or _itinisere_extract_locations(final_title, final_description)
+            if _itinisere_is_public_transport_event(final_title, final_description):
+                continue
             events.append(
                 {
                     "title": final_title,
@@ -993,6 +1020,87 @@ def _fetch_itinisere_disruptions_live(limit: int = 60) -> dict[str, Any]:
             "events": [],
             "events_total": 0,
             "insights": {"dominant_category": "aucune", "category_breakdown": {}, "top_roads": []},
+            "error": str(exc),
+        }
+
+
+def _fetch_waze_isere_traffic_live() -> dict[str, Any]:
+    source = "https://www.waze.com/live-map/api/georss"
+    params = {
+        "top": 46.05,
+        "bottom": 44.55,
+        "left": 4.1,
+        "right": 6.9,
+        "env": "row",
+        "types": "alerts,traffic",
+    }
+    try:
+        url = f"{source}?{urlencode(params)}"
+        payload = _http_get_json(url, timeout=12)
+        alerts = payload.get("alerts") or []
+        jams = payload.get("jams") or payload.get("traffic") or []
+
+        incidents: list[dict[str, Any]] = []
+        for alert in alerts[:250]:
+            subtype = str(alert.get("subtype") or alert.get("type") or "incident").lower()
+            if subtype in {"jam", "road_closed"}:
+                severity = "rouge" if subtype == "road_closed" else "orange"
+            else:
+                severity = "jaune"
+            incidents.append(
+                {
+                    "kind": "alert",
+                    "title": alert.get("title") or alert.get("street") or "Signalement trafic",
+                    "description": alert.get("reportDescription") or alert.get("description") or "",
+                    "subtype": subtype,
+                    "severity": severity,
+                    "lat": alert.get("location", {}).get("y"),
+                    "lon": alert.get("location", {}).get("x"),
+                    "reliability": alert.get("reliability"),
+                }
+            )
+
+        for jam in jams[:250]:
+            line = jam.get("line") or []
+            if not line:
+                continue
+            first = line[0]
+            speed = float(jam.get("speed") or 0)
+            delay = float(jam.get("delay") or 0)
+            if delay >= 900 or speed < 12:
+                severity = "rouge"
+            elif delay >= 420 or speed < 25:
+                severity = "orange"
+            else:
+                severity = "jaune"
+            incidents.append(
+                {
+                    "kind": "jam",
+                    "title": jam.get("street") or "Ralentissement",
+                    "description": f"Vitesse {int(speed)} km/h · retard {int(delay // 60)} min",
+                    "severity": severity,
+                    "lat": first.get("y"),
+                    "lon": first.get("x"),
+                    "line": [{"lat": point.get("y"), "lon": point.get("x")} for point in line[:80]],
+                    "length": jam.get("length"),
+                }
+            )
+
+        return {
+            "service": "Waze",
+            "status": "online",
+            "source": source,
+            "incidents": incidents,
+            "incidents_total": len(incidents),
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+        return {
+            "service": "Waze",
+            "status": "degraded",
+            "source": source,
+            "incidents": [],
+            "incidents_total": 0,
             "error": str(exc),
         }
 
@@ -1211,6 +1319,16 @@ def fetch_bison_fute_traffic(force_refresh: bool = False) -> dict[str, Any]:
         ttl_seconds=_BISON_CACHE_TTL_SECONDS,
         force_refresh=force_refresh,
         loader=_fetch_bison_fute_traffic_live,
+    )
+
+
+def fetch_waze_isere_traffic(force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_waze_cache,
+        lock=_waze_cache_lock,
+        ttl_seconds=_WAZE_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=_fetch_waze_isere_traffic_live,
     )
 
 
