@@ -1340,6 +1340,26 @@ function extractAlertDynamicHints(fullText = '') {
   return hints.slice(0, 8);
 }
 
+function extractClosureCommuneHints(event = {}, fullText = '') {
+  const hints = [];
+  const pushHint = (value) => {
+    const label = String(value || '').replace(/\s+/g, ' ').trim();
+    if (!label || hints.includes(label)) return;
+    hints.push(label);
+  };
+
+  const blob = `${fullText || ''} ${event.city || ''} ${event.address || ''}`;
+  TRAFFIC_COMMUNES.forEach((commune) => {
+    const escaped = commune.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (new RegExp(`\\b${escaped}\\b`, 'i').test(blob)) pushHint(commune);
+  });
+
+  const scopedCityMatches = [...blob.matchAll(/\b(?:commune(?:\s+de)?|mairie\s+de|[àa]u?x?)\s+([A-ZÀ-ÖØ-Ý][\wÀ-ÖØ-öø-ÿ'\-]+(?:\s+[A-ZÀ-ÖØ-Ý][\wÀ-ÖØ-öø-ÿ'\-]+){0,3})/gi)];
+  scopedCityMatches.forEach((match) => pushHint(match?.[1]));
+
+  return hints.slice(0, 8);
+}
+
 function spreadOverlappingTrafficPoints(points = []) {
   const overlapCounters = new Map();
   return points.map((point) => {
@@ -1380,52 +1400,30 @@ async function buildItinisereMapPoints(events = []) {
     let precision = 'estimée';
     let communeAnchor = null;
 
-    const providedCoords = normalizeMapCoordinates(event.lat, event.lon);
-    if (providedCoords && (!isClosureEvent || !roads.length)) {
-      position = providedCoords;
-      anchor = locations[0] || roads[0] || 'Itinisère';
-      precision = 'source';
-    }
-
-    if (!position && isClosureEvent && communeHints.length) {
-      for (const commune of communeHints) {
+    if (isClosureEvent) {
+      const closureCommuneHints = extractClosureCommuneHints(event, fullText);
+      for (const commune of closureCommuneHints) {
         const communePoint = await geocodeTrafficLabel(commune);
         if (!communePoint) continue;
         position = { lat: communePoint.lat, lon: communePoint.lon };
         anchor = `Mairie de ${commune}`;
-        precision = 'centre-ville';
+        precision = 'mairie';
         break;
       }
+      if (!position) continue;
     }
 
-    if (!position && isClosureEvent && roads.length) {
-      for (const road of roads) {
-        const roadPoint = await geocodeRoadWithContext(road, candidateLocationHints);
-        if (!roadPoint) continue;
-        position = { lat: roadPoint.lat, lon: roadPoint.lon };
-        anchor = roadPoint.anchor || `${road} · Isère`;
-        precision = roadPoint.precision || 'route+commune';
-        break;
-      }
+    const providedCoords = normalizeMapCoordinates(event.lat, event.lon);
+    if (!isClosureEvent && providedCoords && !roads.length) {
+      position = providedCoords;
+      anchor = locations[0] || roads[0] || 'Itinisère';
+      precision = 'source';
     }
-
     if (!position && providedCoords) {
       position = providedCoords;
       anchor = locations[0] || roads[0] || 'Itinisère';
       precision = 'source';
     }
-
-    if (!position && isClosureEvent && roads.length) {
-      for (const road of roads) {
-        const roadPoint = await geocodeRoadWithContext(road, candidateLocationHints);
-        if (!roadPoint) continue;
-        position = { lat: roadPoint.lat, lon: roadPoint.lon };
-        anchor = roadPoint.anchor || `${road} · Isère`;
-        precision = roadPoint.precision || 'route+commune';
-        break;
-      }
-    }
-
     if (!position) {
       for (const location of candidateLocationHints) {
         position = await geocodeTrafficLabel(location);
