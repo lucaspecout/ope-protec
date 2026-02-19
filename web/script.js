@@ -1303,6 +1303,43 @@ function extractItinisereLocationHints(event = {}, fullText = '', roads = []) {
   return hints.slice(0, 12);
 }
 
+function extractAlertDynamicHints(fullText = '') {
+  const blockedHints = new Set([
+    'isère',
+    'isere',
+    'trafic',
+    'route',
+    'routes',
+    'alerte',
+    'info',
+    'infos',
+    'incident',
+    'perturbation',
+  ]);
+  const hints = [];
+  const pushHint = (value) => {
+    const label = String(value || '').replace(/\s+/g, ' ').trim();
+    const normalized = label.toLowerCase();
+    if (!label || blockedHints.has(normalized) || hints.includes(label)) return;
+    hints.push(label);
+  };
+
+  const blob = String(fullText || '');
+  const scopedMatches = [...blob.matchAll(/\b(?:sur|secteur|entre|vers|au niveau de)\s+([^\n.;:]+)/gi)];
+  scopedMatches.forEach((match) => {
+    String(match?.[1] || '')
+      .split(/[,/]|\s+-\s+/)
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .forEach(pushHint);
+  });
+
+  const cityAfterA = [...blob.matchAll(/\b(?:à|au|aux)\s+([A-ZÀ-ÖØ-Ý][\wÀ-ÖØ-öø-ÿ'\-]+(?:\s+[A-ZÀ-ÖØ-Ý][\wÀ-ÖØ-öø-ÿ'\-]+){0,3})/g)];
+  cityAfterA.forEach((match) => pushHint(match?.[1]));
+
+  return hints.slice(0, 8);
+}
+
 function spreadOverlappingTrafficPoints(points = []) {
   const overlapCounters = new Map();
   return points.map((point) => {
@@ -1337,7 +1374,7 @@ async function buildItinisereMapPoints(events = []) {
       const escaped = commune.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       return new RegExp(`\\b${escaped}\\b`, 'i').test(`${fullText} ${locationHints.join(' ')}`);
     });
-    const candidateLocationHints = [...new Set([...locations, ...locationHints, ...communeHints])];
+    const candidateLocationHints = [...new Set([...locations, ...locationHints, ...dynamicAlertHints, ...communeHints])];
     let position = null;
     let anchor = '';
     let precision = 'estimée';
