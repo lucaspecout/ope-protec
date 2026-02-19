@@ -477,6 +477,7 @@ function setActivePanel(panelId) {
 }
 
 function withPreservedScroll(runUpdate) {
+  const SCROLL_RESTORE_TOLERANCE_PX = 4;
   const pageScroll = window.scrollY || document.documentElement.scrollTop || 0;
   const activePanelId = localStorage.getItem(STORAGE_KEYS.activePanel);
   const activePanel = activePanelId ? document.getElementById(activePanelId) : null;
@@ -487,10 +488,18 @@ function withPreservedScroll(runUpdate) {
     .then(runUpdate)
     .finally(() => {
       if (activePanel && activePanel.id === (localStorage.getItem(STORAGE_KEYS.activePanel) || '')) {
-        activePanel.scrollTop = panelScroll;
-        activePanel.scrollLeft = panelScrollLeft;
+        const panelStillAtInitialPosition = Math.abs(activePanel.scrollTop - panelScroll) <= SCROLL_RESTORE_TOLERANCE_PX
+          && Math.abs(activePanel.scrollLeft - panelScrollLeft) <= SCROLL_RESTORE_TOLERANCE_PX;
+        if (panelStillAtInitialPosition) {
+          activePanel.scrollTop = panelScroll;
+          activePanel.scrollLeft = panelScrollLeft;
+        }
       }
-      window.scrollTo({ top: pageScroll, left: 0, behavior: 'auto' });
+      const latestPageScroll = window.scrollY || document.documentElement.scrollTop || 0;
+      const pageStillAtInitialPosition = Math.abs(latestPageScroll - pageScroll) <= SCROLL_RESTORE_TOLERANCE_PX;
+      if (pageStillAtInitialPosition) {
+        window.scrollTo({ top: pageScroll, left: 0, behavior: 'auto' });
+      }
     });
 }
 
