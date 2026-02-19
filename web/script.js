@@ -1713,6 +1713,9 @@ function renderSituationOverview() {
   const logs = Array.isArray(dashboard.latest_logs) ? dashboard.latest_logs : (Array.isArray(cachedLogs) ? cachedLogs.slice(0, 8) : []);
   const openLogs = logs.filter((log) => String(log.status || '').toLowerCase() !== 'clos');
   const closedLogs = logs.filter((log) => String(log.status || '').toLowerCase() === 'clos');
+  const prefectureItems = Array.isArray(externalRisks?.prefecture_isere?.items)
+    ? externalRisks.prefecture_isere.items.slice(0, 4)
+    : [];
   const kpiCards = [
     { label: 'Vigilance météo', value: vigilance, info: 'Source Météo-France', css: normalizeLevel(vigilance) },
     { label: 'Niveau crues', value: crues, info: 'Source Vigicrues', css: normalizeLevel(crues) },
@@ -1727,11 +1730,15 @@ function renderSituationOverview() {
 
     <div class="situation-middle-grid">
       <article class="tile situation-summary">
-        <h3>Résumé opérationnel</h3>
-        <div class="situation-summary-grid">
-          <p><span>Évènements ouverts</span><strong>${openLogs.length}</strong></p>
-          <p><span>Évènements clôturés</span><strong>${closedLogs.length}</strong></p>
-        </div>
+        <h3>Dernières informations Préfecture</h3>
+        <ul class="list compact">
+          ${prefectureItems.map((item) => {
+            const title = escapeHtml(item.title || 'Actualité Préfecture');
+            const published = item.published_at ? escapeHtml(item.published_at) : '';
+            const safeLink = String(item.link || '').startsWith('http') ? item.link : 'https://www.isere.gouv.fr';
+            return `<li><strong>${title}</strong>${published ? `<br><span class="muted">${published}</span>` : ''}<br><a href="${safeLink}" target="_blank" rel="noreferrer">Lire l'actualité</a></li>`;
+          }).join('') || '<li>Aucune actualité Préfecture disponible.</li>'}
+        </ul>
       </article>
       <article class="tile situation-risks">
         <h3>Risques en cours (orange / rouge)</h3>
