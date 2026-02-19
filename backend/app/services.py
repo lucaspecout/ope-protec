@@ -8,7 +8,7 @@ from time import sleep
 from threading import Lock
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote_plus, urlencode
+from urllib.parse import quote_plus, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 import xml.etree.ElementTree as ET
 
@@ -855,6 +855,57 @@ def _strip_html_tags(value: str) -> str:
     return re.sub(r"<[^>]+>", " ", value or "")
 
 
+def _extract_html_title(value: str) -> str:
+    if not value:
+        return ""
+
+    patterns = (
+        r"<title[^>]*>(?P<content>.*?)</title>",
+        r"<h1[^>]*>(?P<content>.*?)</h1>",
+        r'<meta[^>]+property=(["\'])og:title\1[^>]+content=(["\'])(?P<content>.*?)\2',
+        r'<meta[^>]+content=(["\'])(?P<content>.*?)\1[^>]+property=(["\'])og:title\3',
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE | re.DOTALL)
+        if not match:
+            continue
+        candidate = unescape(re.sub(r"\s+", " ", _strip_html_tags(match.group("content")))).strip()
+        if candidate:
+            cleaned = re.sub(r"\s*[\|\-–]\s*isere\.gouv\.fr$", "", candidate, flags=re.IGNORECASE).strip()
+            if "Les services de l'État en Isère" in cleaned and " - " in cleaned:
+                cleaned = cleaned.split(" - ", 1)[0].strip()
+            return cleaned
+
+    return ""
+
+
+def _title_from_link_slug(link: str) -> str:
+    path = urlparse(link or "").path.rstrip("/")
+    slug = path.split("/")[-1] if path else ""
+    if not slug:
+        return ""
+    return unescape(unquote(slug)).replace("-", " ").strip()
+
+
+def _resolve_prefecture_news_title(title: str, link: str) -> str:
+    cleaned_title = (title or "").strip()
+    if cleaned_title:
+        return unescape(cleaned_title)
+
+    try:
+        article_html = _http_get_text(link, timeout=10)
+        extracted_title = _extract_html_title(article_html)
+        if extracted_title:
+            return extracted_title
+    except (HTTPError, URLError, TimeoutError, ValueError):
+        pass
+
+    slug_title = _title_from_link_slug(link)
+    if slug_title:
+        return slug_title
+    return "Actualité Préfecture"
+
+
 def _fetch_prefecture_isere_news_live(limit: int = 6) -> dict[str, Any]:
     source = "https://www.isere.gouv.fr/syndication/flux/actualites"
     try:
@@ -864,11 +915,11 @@ def _fetch_prefecture_isere_news_live(limit: int = 6) -> dict[str, Any]:
         items: list[dict[str, Any]] = []
 
         for item in root.findall(".//item")[:limit]:
-            title = unescape((item.findtext("title") or "Actualité Préfecture").strip())
+            link = (item.findtext("link") or "https://www.isere.gouv.fr").strip()
+            title = _resolve_prefecture_news_title(item.findtext("title") or "", link)
             description_html = (item.findtext("description") or "").strip()
             description = unescape(re.sub(r"\s+", " ", _strip_html_tags(description_html))).strip()
             published = (item.findtext("pubDate") or "").strip()
-            link = (item.findtext("link") or "https://www.isere.gouv.fr").strip()
             items.append(
                 {
                     "title": title,
@@ -880,12 +931,12 @@ def _fetch_prefecture_isere_news_live(limit: int = 6) -> dict[str, Any]:
 
         if not items:
             for entry in root.findall(".//atom:entry", namespace)[:limit]:
-                title = unescape((entry.findtext("atom:title", namespaces=namespace) or "Actualité Préfecture").strip())
+                link_tag = entry.find("atom:link", namespace)
+                link = (link_tag.get("href") if link_tag is not None else "") or "https://www.isere.gouv.fr"
+                title = _resolve_prefecture_news_title(entry.findtext("atom:title", namespaces=namespace) or "", link)
                 summary_html = (entry.findtext("atom:summary", namespaces=namespace) or "").strip()
                 summary = unescape(re.sub(r"\s+", " ", _strip_html_tags(summary_html))).strip()
                 published = (entry.findtext("atom:published", namespaces=namespace) or "").strip()
-                link_tag = entry.find("atom:link", namespace)
-                link = (link_tag.get("href") if link_tag is not None else "") or "https://www.isere.gouv.fr"
                 items.append(
                     {
                         "title": title,
