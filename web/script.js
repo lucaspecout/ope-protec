@@ -1120,9 +1120,9 @@ function itinisereDivIcon(point = {}) {
     return window.L.divIcon({
       className: 'itinisere-icon-wrap',
       html: `<span class="itinisere-icon itinisere-icon--closure">ROUTE<br/>BARRÉE</span><span class="itinisere-road-dot">${escapeHtml(road)}</span>`,
-      iconSize: [56, 34],
-      iconAnchor: [28, 24],
-      popupAnchor: [0, -20],
+      iconSize: [64, 38],
+      iconAnchor: [32, 28],
+      popupAnchor: [0, -24],
     });
   }
 
@@ -1130,18 +1130,18 @@ function itinisereDivIcon(point = {}) {
     return window.L.divIcon({
       className: 'itinisere-icon-wrap',
       html: `<span class="itinisere-icon itinisere-icon--pass">Col</span><span class="itinisere-pass-state">${escapeHtml(road)}</span>`,
-      iconSize: [56, 28],
-      iconAnchor: [28, 20],
-      popupAnchor: [0, -16],
+      iconSize: [64, 32],
+      iconAnchor: [32, 22],
+      popupAnchor: [0, -19],
     });
   }
 
   return window.L.divIcon({
     className: 'itinisere-icon-wrap',
     html: `<span class="itinisere-icon itinisere-icon--warning">${warning}</span><span class="itinisere-road-dot">${escapeHtml(road)}</span>`,
-    iconSize: [36, 36],
-    iconAnchor: [18, 25],
-    popupAnchor: [0, -22],
+    iconSize: [42, 42],
+    iconAnchor: [21, 30],
+    popupAnchor: [0, -26],
   });
 }
 
@@ -1211,29 +1211,6 @@ async function geocodeRoadWithContext(road = '', contextHints = []) {
   const fallback = await geocodeTrafficLabel(`${normalizedRoad} Isère`);
   if (fallback) return { ...fallback, anchor: `${normalizedRoad} · Isère` };
   return null;
-}
-
-function extractAlertDynamicHints(fullText = '') {
-  const hints = [];
-  const pushHint = (value) => {
-    const clean = String(value || '').replace(/\s+/g, ' ').trim();
-    if (!clean || hints.includes(clean)) return;
-    hints.push(clean);
-  };
-
-  const betweenMatches = [...String(fullText).matchAll(/\bentre\s+([^,.;]{2,80})\s+et\s+([^,.;]{2,80})/gi)];
-  betweenMatches.forEach((match) => {
-    pushHint(match?.[1]);
-    pushHint(match?.[2]);
-  });
-
-  const junctionMatches = [...String(fullText).matchAll(/\b(?:échangeur|sortie|giratoire|carrefour)\s*(?:n[°o]\s*)?(\d{1,3}[A-Z]?)/gi)];
-  junctionMatches.forEach((match) => pushHint(`sortie ${match?.[1] || ''}`));
-
-  const sectorMatches = [...String(fullText).matchAll(/\b(?:secteur|quartier|zone|hameau)\s+([^,.;]{2,70})/gi)];
-  sectorMatches.forEach((match) => pushHint(match?.[1]));
-
-  return hints.slice(0, 8);
 }
 
 async function geocodeTrafficLabel(label) {
@@ -1360,7 +1337,7 @@ async function buildItinisereMapPoints(events = []) {
       const escaped = commune.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       return new RegExp(`\\b${escaped}\\b`, 'i').test(`${fullText} ${locationHints.join(' ')}`);
     });
-    const candidateLocationHints = [...new Set([...locations, ...locationHints, ...dynamicAlertHints, ...communeHints])];
+    const candidateLocationHints = [...new Set([...locations, ...locationHints, ...communeHints])];
     let position = null;
     let anchor = '';
     let precision = 'estimée';
@@ -1388,6 +1365,17 @@ async function buildItinisereMapPoints(events = []) {
       position = providedCoords;
       anchor = locations[0] || roads[0] || 'Itinisère';
       precision = 'source';
+    }
+
+    if (!position && isClosureEvent && roads.length) {
+      for (const road of roads) {
+        const roadPoint = await geocodeRoadWithContext(road, candidateLocationHints);
+        if (!roadPoint) continue;
+        position = { lat: roadPoint.lat, lon: roadPoint.lon };
+        anchor = roadPoint.anchor || `${road} · Isère`;
+        precision = roadPoint.precision || 'route+commune';
+        break;
+      }
     }
 
     if (!position) {

@@ -518,63 +518,63 @@ svg text { font-size: 14px; fill: #17335f; }
   line-height: 1.05;
   border: 2px solid #111;
   font-weight: 800;
-  font-size: .56rem;
+  font-size: .62rem;
   color: #111;
   box-shadow: 0 2px 8px rgba(0, 0, 0, .25);
   user-select: none;
 }
 
 .itinisere-icon--closure {
-  min-width: 50px;
-  min-height: 26px;
+  min-width: 58px;
+  min-height: 30px;
   border-radius: 3px;
   background: #ffe800;
 }
 
 .itinisere-icon--pass {
-  min-width: 31px;
-  min-height: 18px;
+  min-width: 35px;
+  min-height: 20px;
   border-color: #fff;
   color: #fff;
   background: #1f4ec9;
   border-radius: 3px 3px 0 0;
-  font-size: .66rem;
+  font-size: .75rem;
   text-transform: uppercase;
 }
 
 .itinisere-pass-state {
   display: inline-flex;
   justify-content: center;
-  min-width: 31px;
+  min-width: 35px;
   border-radius: 0 0 3px 3px;
-  padding: 1px 3px;
+  padding: 2px 4px;
   border: 2px solid #fff;
   border-top: 0;
   background: #2f9e44;
   color: #fff;
-  font-size: .48rem;
+  font-size: .52rem;
   font-weight: 700;
   text-transform: uppercase;
   box-shadow: 0 2px 8px rgba(0, 0, 0, .25);
 }
 
 .itinisere-icon--warning {
-  width: 27px;
-  height: 25px;
+  width: 32px;
+  height: 30px;
   clip-path: polygon(50% 0, 100% 100%, 0 100%);
   background: #ffe800;
-  font-size: .84rem;
+  font-size: 1rem;
   border-radius: 2px;
   align-items: flex-end;
-  padding-bottom: 2px;
+  padding-bottom: 3px;
 }
 
 .itinisere-road-dot {
   position: absolute;
-  right: -9px;
-  bottom: -4px;
-  width: 22px;
-  height: 22px;
+  right: -11px;
+  bottom: -5px;
+  width: 26px;
+  height: 26px;
   border-radius: 999px;
   display: inline-flex;
   align-items: center;
@@ -582,7 +582,7 @@ svg text { font-size: 14px; fill: #17335f; }
   border: 2px solid #fff;
   background: #fff;
   color: #cc1515;
-  font-size: .5rem;
+  font-size: .58rem;
   font-weight: 800;
   box-shadow: 0 1px 6px rgba(0, 0, 0, .28);
 }
