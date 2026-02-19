@@ -512,7 +512,6 @@ function updateMapSummary() {
   setText('map-summary-pcs', String(mapStats.pcs));
   setText('map-summary-resources', String(mapStats.resources));
   setText('map-summary-custom', String(mapStats.custom));
-  setText('map-summary-traffic', String(mapStats.traffic));
 }
 
 function applyBasemap(style = 'osm') {
@@ -588,6 +587,13 @@ function setMapFeedback(message = '', isError = false) {
   target.className = isError ? 'error' : 'muted';
 }
 
+function setMapAddPointMode(enabled) {
+  mapAddPointMode = Boolean(enabled);
+  const button = document.getElementById('map-add-poi-btn');
+  if (!button) return;
+  button.setAttribute('aria-pressed', String(mapAddPointMode));
+  button.textContent = mapAddPointMode ? '✅ Cliquez sur la carte pour placer le POI' : '➕ Créer un POI';
+}
 
 async function resetMapFilters() {
   const defaults = {
@@ -1308,6 +1314,7 @@ function renderCustomPoints(showFeedback = true) {
 function onMapClickAddPoint(event) {
   if (!mapAddPointMode) return;
   pendingMapPointCoords = event.latlng;
+  setMapAddPointMode(false);
   const modal = document.getElementById('map-point-modal');
   if (!modal) return;
   const form = document.getElementById('map-point-form');
@@ -1317,7 +1324,7 @@ function onMapClickAddPoint(event) {
     form.elements.namedItem('icon').value = iconForCategory('autre');
     form.elements.namedItem('icon_url').value = '';
     mapIconTouched = false;
-    renderMapIconSuggestions('autre');
+    renderMapIconSuggestions('poi');
   }
   if (typeof modal.showModal === 'function') modal.showModal();
   else modal.setAttribute('open', 'open');
@@ -2396,11 +2403,17 @@ function bindAppInteractions() {
   });
   document.getElementById('logout-btn').addEventListener('click', logout);
   setMapControlsCollapsed(false);
+  setMapAddPointMode(false);
   document.getElementById('map-search-btn')?.addEventListener('click', handleMapSearch);
   document.getElementById('map-controls-toggle')?.addEventListener('click', () => {
     setMapControlsCollapsed(!mapControlsCollapsed);
   });
   document.getElementById('map-fit-btn')?.addEventListener('click', () => fitMapToData(true));
+  document.getElementById('map-add-poi-btn')?.addEventListener('click', () => {
+    const nextMode = !mapAddPointMode;
+    setMapAddPointMode(nextMode);
+    setMapFeedback(nextMode ? 'Mode création POI activé: cliquez sur la carte pour choisir l\'emplacement.' : 'Mode création POI désactivé.');
+  });
   document.getElementById('map-focus-crisis')?.addEventListener('click', focusOnCrisisAreas);
   document.getElementById('map-run-checks')?.addEventListener('click', runMapChecks);
   document.getElementById('map-toggle-contrast')?.addEventListener('click', toggleMapContrast);
