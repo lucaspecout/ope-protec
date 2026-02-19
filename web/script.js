@@ -517,6 +517,7 @@ function updateMapSummary() {
 
 function applyBasemap(style = 'osm') {
   if (!leafletMap || typeof window.L === 'undefined') return;
+  ensureTrafficPanes();
   if (mapTileLayer) leafletMap.removeLayer(mapTileLayer);
   const layers = {
     osm: {
@@ -541,6 +542,19 @@ function applyBasemap(style = 'osm') {
   applyGoogleTrafficFlowOverlay();
 }
 
+function ensureTrafficPanes() {
+  if (!leafletMap || typeof window.L === 'undefined') return;
+  if (!leafletMap.getPane('traffic-flow-pane')) {
+    const pane = leafletMap.createPane('traffic-flow-pane');
+    pane.style.zIndex = '660';
+    pane.style.pointerEvents = 'none';
+  }
+  if (!leafletMap.getPane('waze-closures-pane')) {
+    const pane = leafletMap.createPane('waze-closures-pane');
+    pane.style.zIndex = '665';
+  }
+}
+
 function applyGoogleTrafficFlowOverlay() {
   if (!leafletMap || typeof window.L === 'undefined') return;
   const enabled = document.getElementById('filter-google-traffic-flow')?.checked ?? true;
@@ -553,10 +567,12 @@ function applyGoogleTrafficFlowOverlay() {
   }
 
   if (!googleTrafficFlowLayer) {
-    googleTrafficFlowLayer = window.L.tileLayer('https://mt1.google.com/vt/lyrs=h,traffic&x={x}&y={y}&z={z}', {
+    googleTrafficFlowLayer = window.L.tileLayer('https://mt1.google.com/vt/lyrs=traffic&x={x}&y={y}&z={z}', {
       maxZoom: 20,
       opacity: 0.85,
-      attribution: 'Données trafic style Google Maps',
+      attribution: 'Flux trafic (lignes colorées) style Google Maps',
+      pane: 'traffic-flow-pane',
+      zIndex: 660,
     });
   }
 
@@ -566,6 +582,7 @@ function applyGoogleTrafficFlowOverlay() {
 function initMap() {
   if (leafletMap || typeof window.L === 'undefined') return;
   leafletMap = window.L.map('isere-map-leaflet', { zoomControl: true }).setView([45.2, 5.72], 9);
+  ensureTrafficPanes();
   applyBasemap(document.getElementById('map-basemap-select')?.value || 'osm');
   hydroLayer = window.L.layerGroup().addTo(leafletMap);
   hydroLineLayer = window.L.layerGroup().addTo(leafletMap);
@@ -605,11 +622,13 @@ async function resetMapFilters() {
   const pcs = document.getElementById('filter-pcs');
   const activeOnly = document.getElementById('filter-resources-active');
   const itinisere = document.getElementById('filter-itinisere');
+  const wazeClosedRoads = document.getElementById('filter-waze-closed-roads');
   const googleFlow = document.getElementById('filter-google-traffic-flow');
   if (hydro) hydro.checked = true;
   if (pcs) pcs.checked = true;
   if (activeOnly) activeOnly.checked = false;
   if (itinisere) itinisere.checked = true;
+  if (wazeClosedRoads) wazeClosedRoads.checked = true;
   if (googleFlow) googleFlow.checked = true;
   if (searchLayer) searchLayer.clearLayers();
   applyBasemap('osm');
@@ -1181,7 +1200,8 @@ async function renderTrafficOnMap() {
     });
   }
 
-  {
+  const showWazeClosedRoads = document.getElementById('filter-waze-closed-roads')?.checked ?? true;
+  if (showWazeClosedRoads) {
     const incidents = Array.isArray(cachedRealtimeTraffic?.incidents) ? cachedRealtimeTraffic.incidents : [];
     const filteredIncidents = incidents.filter((incident) => incident.subtype === 'road_closed');
     filteredIncidents.forEach((incident) => {
@@ -1191,22 +1211,17 @@ async function renderTrafficOnMap() {
           .filter(Boolean)
           .map((point) => [point.lat, point.lon]);
         if (lineLatLng.length > 1) {
-          window.L.polyline(lineLatLng, { color: trafficLevelColor('rouge'), weight: 5, opacity: 0.75 })
+          window.L.polyline(lineLatLng, { color: trafficLevelColor('rouge'), weight: 7, opacity: 0.9, pane: 'waze-closures-pane' })
             .bindPopup(`<strong>⛔ ${escapeHtml(incident.title || 'Route fermée')}</strong><br/>${escapeHtml(incident.description || '')}<br/><span class="badge neutral">fermeture · rouge</span>`)
             .addTo(realtimeTrafficLayer);
         }
       }
 
-      const markerCoords = normalizeMapCoordinates(incident.lat, incident.lon);
-      if (markerCoords) {
-        window.L.marker([markerCoords.lat, markerCoords.lon], { icon: emojiDivIcon('⛔') })
-          .bindPopup(`<strong>${escapeHtml(incident.title || 'Route fermée')}</strong><br/>${escapeHtml(incident.description || '')}<br/><span class="badge neutral">fermeture · rouge</span>`)
-          .addTo(realtimeTrafficLayer);
-      }
     });
     mapStats.traffic += filteredIncidents.length;
   }
 
+  realtimeTrafficLayer?.bringToFront();
   updateMapSummary();
 }
 
@@ -2771,7 +2786,7 @@ function bindAppInteractions() {
       document.getElementById('users-error').textContent = sanitizeErrorMessage(error.message);
     }
   });
-  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'resource-type-filter', 'filter-itinisere'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'resource-type-filter', 'filter-itinisere', 'filter-waze-closed-roads'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       renderStations(cachedStations);
       await renderMunicipalitiesOnMap(cachedMunicipalities);
