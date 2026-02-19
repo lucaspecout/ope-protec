@@ -543,7 +543,7 @@ function applyBasemap(style = 'osm') {
 
 function applyGoogleTrafficFlowOverlay() {
   if (!leafletMap || typeof window.L === 'undefined') return;
-  const enabled = document.getElementById('filter-google-traffic-flow')?.checked ?? true;
+  const enabled = document.getElementById('filter-google-traffic-flow')?.checked ?? false;
   if (!enabled) {
     if (googleTrafficFlowLayer) {
       leafletMap.removeLayer(googleTrafficFlowLayer);
@@ -612,7 +612,7 @@ async function resetMapFilters() {
   if (activeOnly) activeOnly.checked = false;
   if (itinisere) itinisere.checked = true;
   if (wazeClosedRoads) wazeClosedRoads.checked = true;
-  if (googleFlow) googleFlow.checked = true;
+  if (googleFlow) googleFlow.checked = false;
   if (searchLayer) searchLayer.clearLayers();
   applyBasemap('osm');
   renderStations(cachedStations);
@@ -972,6 +972,7 @@ const MAP_POINT_ICONS = {
   medical: '🏥',
   logistics: '📦',
   command: '🛰️',
+  poi: '📌',
   autre: '📍',
 };
 
@@ -983,6 +984,7 @@ const MAP_ICON_SUGGESTIONS = {
   medical: ['🏥', '🚑', '🩺'],
   logistics: ['📦', '🚛', '🛠️'],
   command: ['🛰️', '📡', '🧭'],
+  poi: ['📌', '📍', '⭐'],
   autre: ['📍', '📌', '⭐'],
 };
 
@@ -992,6 +994,22 @@ function iconForCategory(category) {
 
 function emojiDivIcon(emoji) {
   return window.L.divIcon({ className: 'map-emoji-icon', html: `<span>${escapeHtml(emoji)}</span>`, iconSize: [30, 30], iconAnchor: [15, 15], popupAnchor: [0, -15] });
+}
+
+function imageMarkerIcon(iconUrl) {
+  return window.L.icon({
+    iconUrl,
+    iconSize: [30, 30],
+    iconAnchor: [15, 30],
+    popupAnchor: [0, -28],
+    className: 'map-poi-icon',
+  });
+}
+
+function markerIconForPoint(point = {}) {
+  const iconUrl = String(point.icon_url || '').trim();
+  if (/^https?:\/\//i.test(iconUrl)) return imageMarkerIcon(iconUrl);
+  return emojiDivIcon(point.icon || iconForCategory(point.category));
 }
 
 function normalizeTrafficSeverity(level) {
@@ -1268,7 +1286,10 @@ function renderCustomPoints(showFeedback = true) {
   const selectedCategory = document.getElementById('map-point-category-filter')?.value || 'all';
   const filteredPoints = mapPoints.filter((point) => selectedCategory === 'all' || point.category === selectedCategory);
   const listMarkup = filteredPoints
-    .map((point) => `<li><strong>${escapeHtml(point.icon || iconForCategory(point.category))} ${escapeHtml(point.name)}</strong> · ${point.lat.toFixed(4)}, ${point.lon.toFixed(4)} <button type="button" data-remove-point="${point.id}">Supprimer</button></li>`)
+    .map((point) => {
+      const pointIcon = point.icon_url ? '🖼️' : (point.icon || iconForCategory(point.category));
+      return `<li><strong>${escapeHtml(pointIcon)} ${escapeHtml(point.name)}</strong> · ${point.lat.toFixed(4)}, ${point.lon.toFixed(4)} <button type="button" data-remove-point="${point.id}">Supprimer</button></li>`;
+    })
     .join('') || '<li>Aucun point personnalisé.</li>';
   setHtml('custom-points-list', listMarkup);
 
@@ -1276,11 +1297,12 @@ function renderCustomPoints(showFeedback = true) {
   updateMapSummary();
   if (!mapPointsLayer) return;
   filteredPoints.forEach((point) => {
-    const marker = window.L.marker([point.lat, point.lon], { icon: emojiDivIcon(point.icon || iconForCategory(point.category)) });
-    marker.bindPopup(`<strong>${escapeHtml(point.icon || iconForCategory(point.category))} ${escapeHtml(point.name)}</strong><br/>Catégorie: ${escapeHtml(point.category)}<br/>${escapeHtml(point.notes || 'Sans note')}`);
+    const marker = window.L.marker([point.lat, point.lon], { icon: markerIconForPoint(point) });
+    const popupIcon = point.icon_url ? '🖼️' : (point.icon || iconForCategory(point.category));
+    marker.bindPopup(`<strong>${escapeHtml(popupIcon)} ${escapeHtml(point.name)}</strong><br/>Catégorie: ${escapeHtml(point.category)}${point.icon_url ? '<br/>Type: POI avec icône personnalisée' : ''}<br/>${escapeHtml(point.notes || 'Sans note')}`);
     marker.addTo(mapPointsLayer);
   });
-  if (showFeedback) setMapFeedback(`${filteredPoints.length} point(s) opérationnel(s) affiché(s).`);
+  if (showFeedback) setMapFeedback(`${filteredPoints.length} marqueur(s) opérationnel(s)/POI affiché(s).`);
 }
 
 function onMapClickAddPoint(event) {
@@ -1293,6 +1315,7 @@ function onMapClickAddPoint(event) {
     form.reset();
     form.elements.namedItem('name').value = `Point ${new Date().toLocaleTimeString()}`;
     form.elements.namedItem('icon').value = iconForCategory('autre');
+    form.elements.namedItem('icon_url').value = '';
     mapIconTouched = false;
     renderMapIconSuggestions('autre');
   }
@@ -2460,11 +2483,13 @@ function bindAppInteractions() {
     const form = event.target;
     const category = form.elements.category.value || 'autre';
     const icon = form.elements.icon.value.trim() || iconForCategory(category);
+    const iconUrl = form.elements.icon_url.value.trim() || null;
     try {
       await saveMapPoint({
         name: form.elements.name.value.trim(),
         category,
         icon,
+        icon_url: iconUrl,
         notes: form.elements.notes.value.trim() || null,
         lat: pendingMapPointCoords.lat,
         lon: pendingMapPointCoords.lng,
