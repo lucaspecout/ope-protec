@@ -1,9 +1,9 @@
 const STORAGE_KEYS = { token: 'token', activePanel: 'activePanel', mapPointsCache: 'mapPointsCache', municipalitiesCache: 'municipalitiesCache', dashboardSnapshot: 'dashboardSnapshot', externalRisksSnapshot: 'externalRisksSnapshot', apiInterconnectionsSnapshot: 'apiInterconnectionsSnapshot' };
-const AUTO_REFRESH_MS = 30000;
-const EVENTS_LIVE_REFRESH_MS = 30000;
-const HOME_LIVE_REFRESH_MS = 30000;
-const API_CACHE_TTL_MS = 30000;
-const API_PANEL_REFRESH_MS = 30000;
+const AUTO_REFRESH_MS = 300000;
+const EVENTS_LIVE_REFRESH_MS = 300000;
+const HOME_LIVE_REFRESH_MS = 300000;
+const API_CACHE_TTL_MS = 300000;
+const API_PANEL_REFRESH_MS = 300000;
 const PANEL_TITLES = {
   'situation-panel': 'Situation opérationnelle',
   'services-panel': 'Services connectés',
