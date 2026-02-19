@@ -1149,6 +1149,24 @@ function extractItinisereLocationHints(event = {}, fullText = '', roads = []) {
     hints.push(label);
   };
 
+  const extractScopedLocationLabels = (text) => {
+    const labels = [];
+    const blob = String(text || '');
+    const scopedMatches = [...blob.matchAll(/\b(?:localisation|lieux?)\s*:\s*([^\n.;]+)/gi)];
+    scopedMatches.forEach((match) => {
+      const chunk = String(match?.[1] || '').replace(/\s+/g, ' ').trim();
+      if (!chunk) return;
+      chunk
+        .split(/[,/]|\s+-\s+/)
+        .map((part) => part.replace(/^\s*(?:adresse|commune)\s*[:\-]?\s*/i, '').trim())
+        .filter(Boolean)
+        .forEach((part) => labels.push(part));
+    });
+    return labels;
+  };
+
+  extractScopedLocationLabels(`${event.description || ''} ${event.title || ''}`).forEach(pushHint);
+
   [event.address, event.city, ...(Array.isArray(event.addresses) ? event.addresses : []), ...(Array.isArray(event.locations) ? event.locations : [])]
     .forEach(pushHint);
 
