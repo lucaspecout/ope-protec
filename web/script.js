@@ -1245,6 +1245,35 @@ async function geocodeTrafficLabel(label) {
   }
 }
 
+
+async function geocodeClosureCommune(label) {
+  const key = `closure-commune:${String(label || '').trim().toLowerCase()}`;
+  const normalizedLabel = String(label || '').replace(/^mairie\s+de\s+/i, '').replace(/^commune\s+(?:de\s+)?/i, '').trim();
+  if (!normalizedLabel) return null;
+  if (trafficGeocodeCache.has(key)) return trafficGeocodeCache.get(key);
+  try {
+    const communeUrl = `https://geo.api.gouv.fr/communes?nom=${encodeURIComponent(normalizedLabel)}&fields=nom,centre&boost=population&limit=1`;
+    const communeResponse = await fetch(communeUrl);
+    const communePayload = await parseJsonResponse(communeResponse, communeUrl);
+    const commune = Array.isArray(communePayload) ? communePayload[0] : null;
+    const center = commune?.centre?.coordinates;
+    if (Array.isArray(center) && center.length === 2) {
+      const point = {
+        lat: Number(center[1]),
+        lon: Number(center[0]),
+        precision: 'mairie',
+        communeName: commune.nom || normalizedLabel,
+      };
+      trafficGeocodeCache.set(key, point);
+      return point;
+    }
+  } catch {
+    // ignore commune geocoding issues for closure placement
+  }
+  trafficGeocodeCache.set(key, null);
+  return null;
+}
+
 function extractItinisereLocationHints(event = {}, fullText = '', roads = []) {
   const hints = [];
   const blockedHints = new Set([
