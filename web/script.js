@@ -1224,7 +1224,13 @@ async function renderTrafficOnMap() {
     filteredIncidents.forEach((incident) => {
       const coords = normalizeMapCoordinates(incident.lat, incident.lon);
       if (coords) {
-        window.L.marker([coords.lat, coords.lon], { icon: emojiDivIcon(trafficMarkerIcon('waze-road-closed', 'fermeture', incident.title || incident.description || '')) })
+        window.L.circleMarker([coords.lat, coords.lon], {
+          radius: 7,
+          color: '#fff',
+          weight: 1.5,
+          fillColor: trafficLevelColor('rouge'),
+          fillOpacity: 0.85,
+        })
           .bindPopup(`<strong>⛔ ${escapeHtml(incident.title || 'Route fermée')}</strong><br/>${escapeHtml(incident.description || '')}<br/><span class="badge neutral">fermeture · rouge</span>`)
           .addTo(realtimeTrafficLayer);
       }
@@ -2430,18 +2436,17 @@ function bindAppInteractions() {
   });
   document.getElementById('map-fit-btn')?.addEventListener('click', () => fitMapToData(true));
   document.getElementById('map-add-point-btn')?.addEventListener('click', () => {
-    if (!canCreateMapPoints()) {
+    if (!canEdit()) {
       setMapFeedback('Vous n\'avez pas le droit de créer un POI.', true);
       return;
     }
     mapAddPointMode = !mapAddPointMode;
-    if (!pendingMapPointCoords && leafletMap) pendingMapPointCoords = leafletMap.getCenter();
+    pendingMapPointCoords = null;
     const button = document.getElementById('map-add-point-btn');
     button?.classList.toggle('active', mapAddPointMode);
     button?.setAttribute('aria-pressed', String(mapAddPointMode));
-    if (mapAddPointMode) openMapPointModal('poi');
     setMapFeedback(mapAddPointMode
-      ? 'Mode création POI actif: placez/ajustez le point puis enregistrez.'
+      ? 'Mode création POI actif: cliquez sur la carte pour positionner le point.'
       : 'Mode création POI désactivé.');
   });
   document.getElementById('map-focus-crisis')?.addEventListener('click', focusOnCrisisAreas);
