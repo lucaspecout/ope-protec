@@ -1098,6 +1098,53 @@ function trafficMarkerIcon(kind = 'incident', category = '', text = '') {
   return detectItinisereIcon(text);
 }
 
+function itinisereRoadBadge(point = {}) {
+  const road = Array.isArray(point.roads) && point.roads.length ? point.roads[0] : '';
+  return String(road || '').toUpperCase().replace(/\s+/g, '');
+}
+
+function itinisereStyleType(point = {}) {
+  const blob = `${point.category || ''} ${point.title || ''} ${point.description || ''}`.toLowerCase();
+  if (/col\b/.test(blob)) return 'pass';
+  if (/ferm|barr|interdit|coup/.test(blob)) return 'closure';
+  if (/travaux|chantier/.test(blob)) return 'works';
+  return 'warning';
+}
+
+function itinisereDivIcon(point = {}) {
+  const styleType = itinisereStyleType(point);
+  const roadBadge = itinisereRoadBadge(point);
+  const road = roadBadge || '?';
+  const warning = styleType === 'works' ? '🚧' : '⚠️';
+  if (styleType === 'closure') {
+    return window.L.divIcon({
+      className: 'itinisere-icon-wrap',
+      html: `<span class="itinisere-icon itinisere-icon--closure">ROUTE<br/>BARRÉE</span><span class="itinisere-road-dot">${escapeHtml(road)}</span>`,
+      iconSize: [56, 34],
+      iconAnchor: [28, 24],
+      popupAnchor: [0, -20],
+    });
+  }
+
+  if (styleType === 'pass') {
+    return window.L.divIcon({
+      className: 'itinisere-icon-wrap',
+      html: `<span class="itinisere-icon itinisere-icon--pass">Col</span><span class="itinisere-pass-state">${escapeHtml(road)}</span>`,
+      iconSize: [56, 28],
+      iconAnchor: [28, 20],
+      popupAnchor: [0, -16],
+    });
+  }
+
+  return window.L.divIcon({
+    className: 'itinisere-icon-wrap',
+    html: `<span class="itinisere-icon itinisere-icon--warning">${warning}</span><span class="itinisere-road-dot">${escapeHtml(road)}</span>`,
+    iconSize: [36, 36],
+    iconAnchor: [18, 25],
+    popupAnchor: [0, -22],
+  });
+}
+
 const ISERE_BOUNDS = {
   latMin: 44.6,
   latMax: 46.0,
@@ -1134,11 +1181,59 @@ function detectItinisereIcon(text = '') {
   return '⚠️';
 }
 
+function normalizeRoadCode(rawRoad = '') {
+  const upper = String(rawRoad || '').toUpperCase().replace(/\s+/g, '');
+  const compact = upper.replace(/^(?:RD|RN|CD)/, (prefix) => (prefix === 'RN' ? 'N' : 'D'));
+  const match = compact.match(/^(A|N|D)(\d{1,4})$/);
+  if (!match) return '';
+  return `${match[1]}${match[2]}`;
+}
+
 function detectRoadCodes(text = '') {
   const roads = new Set();
-  const matches = String(text).toUpperCase().match(/\b(?:A|N|D)\s?\d{1,4}\b/g) || [];
-  matches.forEach((road) => roads.add(road.replace(/\s+/g, '')));
+  const matches = String(text).toUpperCase().match(/\b(?:A|N|D|RN|RD|CD)\s?\d{1,4}\b/g) || [];
+  matches
+    .map((road) => normalizeRoadCode(road))
+    .filter(Boolean)
+    .forEach((road) => roads.add(road));
   return Array.from(roads);
+}
+
+async function geocodeRoadWithContext(road = '', contextHints = []) {
+  const normalizedRoad = normalizeRoadCode(road);
+  if (!normalizedRoad) return null;
+  for (const hint of contextHints) {
+    const label = String(hint || '').trim();
+    if (!label) continue;
+    const point = await geocodeTrafficLabel(`${normalizedRoad} ${label}`);
+    if (point) return { ...point, anchor: `${normalizedRoad} · ${label}` };
+  }
+  const fallback = await geocodeTrafficLabel(`${normalizedRoad} Isère`);
+  if (fallback) return { ...fallback, anchor: `${normalizedRoad} · Isère` };
+  return null;
+}
+
+function extractAlertDynamicHints(fullText = '') {
+  const hints = [];
+  const pushHint = (value) => {
+    const clean = String(value || '').replace(/\s+/g, ' ').trim();
+    if (!clean || hints.includes(clean)) return;
+    hints.push(clean);
+  };
+
+  const betweenMatches = [...String(fullText).matchAll(/\bentre\s+([^,.;]{2,80})\s+et\s+([^,.;]{2,80})/gi)];
+  betweenMatches.forEach((match) => {
+    pushHint(match?.[1]);
+    pushHint(match?.[2]);
+  });
+
+  const junctionMatches = [...String(fullText).matchAll(/\b(?:échangeur|sortie|giratoire|carrefour)\s*(?:n[°o]\s*)?(\d{1,3}[A-Z]?)/gi)];
+  junctionMatches.forEach((match) => pushHint(`sortie ${match?.[1] || ''}`));
+
+  const sectorMatches = [...String(fullText).matchAll(/\b(?:secteur|quartier|zone|hameau)\s+([^,.;]{2,70})/gi)];
+  sectorMatches.forEach((match) => pushHint(match?.[1]));
+
+  return hints.slice(0, 8);
 }
 
 async function geocodeTrafficLabel(label) {
@@ -1253,31 +1348,54 @@ async function buildItinisereMapPoints(events = []) {
   const points = [];
   for (const event of events.slice(0, 80)) {
     const fullText = `${event.title || ''} ${event.description || ''}`;
-    const roads = Array.isArray(event.roads) && event.roads.length ? event.roads : detectRoadCodes(fullText);
+    const roads = (Array.isArray(event.roads) && event.roads.length ? event.roads : detectRoadCodes(fullText))
+      .map((road) => normalizeRoadCode(road))
+      .filter(Boolean);
+    const isClosureEvent = /ferm|barr|interdit|coup/.test(fullText.toLowerCase())
+      || String(event.category || '').toLowerCase() === 'fermeture';
     const locationHints = extractItinisereLocationHints(event, fullText, roads);
+    const dynamicAlertHints = extractAlertDynamicHints(fullText);
     const locations = Array.isArray(event.locations) ? event.locations.filter(Boolean) : locationHints;
     const communeHints = TRAFFIC_COMMUNES.filter((commune) => {
       const escaped = commune.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       return new RegExp(`\\b${escaped}\\b`, 'i').test(`${fullText} ${locationHints.join(' ')}`);
     });
+    const candidateLocationHints = [...new Set([...locations, ...locationHints, ...dynamicAlertHints, ...communeHints])];
     let position = null;
     let anchor = '';
     let precision = 'estimée';
     let communeAnchor = null;
 
     const providedCoords = normalizeMapCoordinates(event.lat, event.lon);
-    if (providedCoords) {
+    if (providedCoords && (!isClosureEvent || !roads.length)) {
+      position = providedCoords;
+      anchor = locations[0] || roads[0] || 'Itinisère';
+      precision = 'source';
+    }
+
+    if (!position && isClosureEvent && roads.length) {
+      for (const road of roads) {
+        const roadPoint = await geocodeRoadWithContext(road, candidateLocationHints);
+        if (!roadPoint) continue;
+        position = { lat: roadPoint.lat, lon: roadPoint.lon };
+        anchor = roadPoint.anchor || `${road} · Isère`;
+        precision = roadPoint.precision || 'route+commune';
+        break;
+      }
+    }
+
+    if (!position && providedCoords) {
       position = providedCoords;
       anchor = locations[0] || roads[0] || 'Itinisère';
       precision = 'source';
     }
 
     if (!position) {
-      for (const location of locationHints) {
+      for (const location of candidateLocationHints) {
         position = await geocodeTrafficLabel(location);
         anchor = location;
         if (position) {
-          precision = position.precision || 'localité';
+          precision = position.precision === 'commune' ? 'centre-ville' : (position.precision || 'localité');
           break;
         }
       }
@@ -1315,13 +1433,13 @@ async function buildItinisereMapPoints(events = []) {
     }
 
     if (!position) {
-      for (const commune of TRAFFIC_COMMUNES) {
+      for (const commune of [...communeHints, ...TRAFFIC_COMMUNES]) {
         const escaped = commune.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        if (!new RegExp(`\\b${escaped}\\b`, 'i').test(fullText)) continue;
+        if (!new RegExp(`\\b${escaped}\\b`, 'i').test(`${fullText} ${candidateLocationHints.join(' ')}`)) continue;
         position = await geocodeTrafficLabel(commune);
         anchor = commune;
         if (position) {
-          precision = position.precision || 'commune';
+          precision = 'centre-ville';
           break;
         }
       }
@@ -1362,7 +1480,7 @@ async function renderTrafficOnMap() {
       const roadsText = point.roads?.length ? `Axes détectés: ${point.roads.join(', ')}<br/>` : '';
       const locations = Array.isArray(point.locations) && point.locations.length ? point.locations.join(', ') : point.anchor;
       const icon = trafficMarkerIcon('itinisere', point.category, `${point.title || ''} ${point.description || ''}`);
-      const marker = window.L.marker([point.lat, point.lon], { icon: emojiDivIcon(icon) });
+      const marker = window.L.marker([point.lat, point.lon], { icon: itinisereDivIcon(point) });
       marker.bindPopup(`<strong>${escapeHtml(icon)} ${escapeHtml(point.title || 'Évènement Itinisère')}</strong><br/><span class="badge neutral">${escapeHtml(point.category || 'trafic')} · ${escapeHtml(point.severity || 'jaune')}</span><br/>${escapeHtml(point.description || '')}<br/>Localisation: ${escapeHtml(locations || 'Commune Isère')} (${escapeHtml(point.precision || 'estimée')})<br/>${roadsText}<a href="${escapeHtml(point.link || '#')}" target="_blank" rel="noreferrer">Détail Itinisère</a>`);
       marker.addTo(itinisereLayer);
     });
