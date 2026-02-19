@@ -1,4 +1,4 @@
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from copy import deepcopy
 from html import unescape
@@ -500,7 +500,8 @@ def _vigicrues_level_from_delta(delta_m: float) -> str:
 def _vigicrues_extract_observation(station_code: str) -> tuple[float, float, str]:
     try:
         payload = _http_get_json(
-            f"https://www.vigicrues.gouv.fr/services/observations.json/index.php?CdStationHydro={quote_plus(station_code)}&FormatDate=iso"
+            f"https://www.vigicrues.gouv.fr/services/observations.json/index.php?CdStationHydro={quote_plus(station_code)}&FormatDate=iso",
+            timeout=6,
         )
     except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
         return 0.0, 0.0, ""
@@ -584,27 +585,44 @@ def _vigicrues_station_control(details: dict[str, Any]) -> str:
     return "inconnu"
 
 
-
-
-def _vigicrues_fetch_station_detail(source: str, station_code: str) -> tuple[str, dict[str, Any] | None]:
+def _vigicrues_build_station_entry(source: str, station_code: str, priority_names: list[str]) -> dict[str, Any] | None:
     try:
-        details = _http_get_json(f"{source}/services/station.json?CdStationHydro={quote_plus(station_code)}")
-        return station_code, details if isinstance(details, dict) else None
+        details = _http_get_json(
+            f"{source}/services/station.json?CdStationHydro={quote_plus(station_code)}",
+            timeout=6,
+        )
     except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
-        return station_code, None
+        return None
 
+    commune_code = str(details.get("CdCommune") or "")
+    if not commune_code.startswith("38"):
+        return None
 
-def _vigicrues_fetch_station_details_bulk(source: str, station_codes: list[str], max_workers: int = 6) -> dict[str, dict[str, Any]]:
-    if not station_codes:
-        return {}
+    coords = details.get("CoordStationHydro") or {}
+    lat, lon = _normalize_vigicrues_coordinates(coords.get("CoordYStationHydro"), coords.get("CoordXStationHydro"), commune_code)
+    station_name = details.get("LbStationHydro") or "Station Vigicrues"
+    river_name = details.get("LbCoursEau") or ""
+    text_blob = f"{station_name} {river_name}".lower()
+    height_m, delta_window_m, observed_at = _vigicrues_extract_observation(station_code)
+    level = _vigicrues_level_from_delta(abs(delta_window_m))
 
-    details_by_code: dict[str, dict[str, Any]] = {}
-    worker_count = max(1, min(max_workers, len(station_codes)))
-    with ThreadPoolExecutor(max_workers=worker_count) as executor:
-        for station_code, details in executor.map(lambda code: _vigicrues_fetch_station_detail(source, code), station_codes):
-            if details is not None:
-                details_by_code[station_code] = details
-    return details_by_code
+    return {
+        "code": station_code,
+        "station": station_name,
+        "river": river_name,
+        "height_m": round(height_m, 2),
+        "delta_window_m": round(delta_window_m, 3),
+        "level": level,
+        "control_status": _vigicrues_station_control(details),
+        "is_priority": ("grenoble" in text_blob or any(name in text_blob for name in priority_names)),
+        "observed_at": observed_at,
+        "lat": lat,
+        "lon": lon,
+        "commune_code": commune_code,
+        "troncon": "",
+        "troncon_code": "",
+        "source_link": f"{source}/station/{station_code}",
+    }
 
 
 def _fetch_vigicrues_isere_live(
@@ -664,59 +682,30 @@ def _fetch_vigicrues_isere_live(
             raise ValueError("Aucune station candidate détectée pour l'Isère")
 
         isere_stations: list[dict[str, Any]] = []
-        added_codes: set[str] = set()
-        batch_size = min(90, max(30, target_isere_count * 5))
+        seen_codes: set[str] = set()
+        unique_candidate_codes: list[str] = []
+        for code in candidate_codes:
+            if code in seen_codes:
+                continue
+            seen_codes.add(code)
+            unique_candidate_codes.append(code)
 
-        for offset in range(0, len(candidate_codes), batch_size):
-            batch_codes: list[str] = []
-            for code in candidate_codes[offset:offset + batch_size]:
-                if code and code not in added_codes:
-                    batch_codes.append(code)
-
-            details_by_code = _vigicrues_fetch_station_details_bulk(source, batch_codes, max_workers=6)
-
-            for station_code in batch_codes:
-                details = details_by_code.get(station_code)
-                if not details:
+        worker_count = min(16, max(4, target_isere_count))
+        executor = ThreadPoolExecutor(max_workers=worker_count)
+        futures = [
+            executor.submit(_vigicrues_build_station_entry, source, code, priority_names)
+            for code in unique_candidate_codes
+        ]
+        try:
+            for future in as_completed(futures):
+                station = future.result()
+                if not station:
                     continue
-
-                commune_code = str(details.get("CdCommune") or "")
-                if not commune_code.startswith("38"):
-                    continue
-
-                coords = details.get("CoordStationHydro") or {}
-                lat, lon = _normalize_vigicrues_coordinates(coords.get("CoordYStationHydro"), coords.get("CoordXStationHydro"), commune_code)
-                station_name = details.get("LbStationHydro") or "Station Vigicrues"
-                river_name = details.get("LbCoursEau") or ""
-                text_blob = f"{station_name} {river_name}".lower()
-                height_m, delta_window_m, observed_at = _vigicrues_extract_observation(station_code)
-                level = _vigicrues_level_from_delta(abs(delta_window_m))
-
-                isere_stations.append(
-                    {
-                        "code": station_code,
-                        "station": station_name,
-                        "river": river_name,
-                        "height_m": round(height_m, 2),
-                        "delta_window_m": round(delta_window_m, 3),
-                        "level": level,
-                        "control_status": _vigicrues_station_control(details),
-                        "is_priority": ("grenoble" in text_blob or any(name in text_blob for name in priority_names)),
-                        "observed_at": observed_at,
-                        "lat": lat,
-                        "lon": lon,
-                        "commune_code": commune_code,
-                        "troncon": "",
-                        "troncon_code": "",
-                        "source_link": f"{source}/station/{station_code}",
-                    }
-                )
-                added_codes.add(station_code)
+                isere_stations.append(station)
                 if len(isere_stations) >= target_isere_count:
                     break
-
-            if len(isere_stations) >= target_isere_count:
-                break
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
         if not isere_stations:
             raise ValueError("Aucune station du département de l'Isère trouvée")
