@@ -1320,9 +1320,8 @@ function onMapClickAddPoint(event) {
   const form = document.getElementById('map-point-form');
   if (form) {
     form.reset();
-    form.elements.namedItem('name').value = `POI ${new Date().toLocaleTimeString()}`;
-    form.elements.namedItem('category').value = 'poi';
-    form.elements.namedItem('icon').value = iconForCategory('poi');
+    form.elements.namedItem('name').value = `Point ${new Date().toLocaleTimeString()}`;
+    form.elements.namedItem('icon').value = iconForCategory('autre');
     form.elements.namedItem('icon_url').value = '';
     mapIconTouched = false;
     renderMapIconSuggestions('poi');
