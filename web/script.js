@@ -69,6 +69,7 @@ let cachedCrisisPoints = [];
 let cachedLogs = [];
 let cachedDashboardSnapshot = {};
 let cachedExternalRisksSnapshot = {};
+let isereBoundaryGeometry = null;
 
 const ISERE_BOUNDARY_STYLE = { color: '#163a87', weight: 2, fillColor: '#63c27d', fillOpacity: 0.2 };
 const TRAFFIC_COMMUNES = ['Grenoble', 'Voiron', 'Vienne', 'Bourgoin-Jallieu', 'Pont-de-Claix', 'Meylan', 'Échirolles', 'L\'Isle-d\'Abeau', 'Saint-Martin-d\'Hères', 'La Tour-du-Pin', 'Rives', 'Sassenage', 'Crolles', 'Tullins'];
@@ -671,11 +672,56 @@ function fitMapToData(showFeedback = false) {
 async function loadIsereBoundary() {
   initMap();
   const data = await api('/public/isere-map');
+  isereBoundaryGeometry = data?.geometry || null;
   if (boundaryLayer) leafletMap.removeLayer(boundaryLayer);
   boundaryLayer = window.L.geoJSON({ type: 'Feature', geometry: data.geometry }, { style: ISERE_BOUNDARY_STYLE }).addTo(leafletMap);
   leafletMap.fitBounds(boundaryLayer.getBounds(), { padding: [16, 16] });
   document.getElementById('map-source').textContent = `Source carte: ${data.source}`;
   setMapFeedback('Fond de carte et contour Isère chargés.');
+}
+
+function isPointInRing(point, ring = []) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+    const [xi, yi] = ring[i] || [];
+    const [xj, yj] = ring[j] || [];
+    const intersects = ((yi > point.lat) !== (yj > point.lat))
+      && (point.lon < ((xj - xi) * (point.lat - yi)) / ((yj - yi) || Number.EPSILON) + xi);
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+
+function isPointInsideGeometry(point, geometry = null) {
+  if (!point || !geometry) return false;
+  const { type, coordinates } = geometry;
+  if (!Array.isArray(coordinates)) return false;
+
+  const isInsidePolygon = (polygon = []) => {
+    if (!Array.isArray(polygon) || !polygon.length) return false;
+    const [outerRing, ...holes] = polygon;
+    if (!isPointInRing(point, outerRing || [])) return false;
+    return !holes.some((hole) => isPointInRing(point, hole || []));
+  };
+
+  if (type === 'Polygon') return isInsidePolygon(coordinates);
+  if (type === 'MultiPolygon') return coordinates.some((polygon) => isInsidePolygon(polygon));
+  return false;
+}
+
+function isIncidentInIsere(incident = {}) {
+  if (!isereBoundaryGeometry) return true;
+  const points = [];
+  const incidentCoords = normalizeMapCoordinates(incident.lat, incident.lon);
+  if (incidentCoords) points.push(incidentCoords);
+  if (Array.isArray(incident.line)) {
+    incident.line.forEach((linePoint) => {
+      const normalized = normalizeMapCoordinates(linePoint?.lat, linePoint?.lon);
+      if (normalized) points.push(normalized);
+    });
+  }
+  if (!points.length) return false;
+  return points.some((point) => isPointInsideGeometry(point, isereBoundaryGeometry));
 }
 
 
@@ -1325,7 +1371,7 @@ async function renderTrafficOnMap() {
   const showWazeClosedRoads = document.getElementById('filter-waze-closed-roads')?.checked ?? true;
   if (showWazeClosedRoads) {
     const incidents = Array.isArray(cachedRealtimeTraffic?.incidents) ? cachedRealtimeTraffic.incidents : [];
-    const filteredIncidents = incidents.filter((incident) => incident.subtype === 'road_closed');
+    const filteredIncidents = incidents.filter((incident) => incident.subtype === 'road_closed' && isIncidentInIsere(incident));
     filteredIncidents.forEach((incident) => {
       const popupHtml = `<strong>⛔ ${escapeHtml(incident.title || 'Route fermée')}</strong><br/>${escapeHtml(incident.description || '')}<br/><span class="badge neutral">fermeture · rouge</span>`;
       const pointIcon = emojiDivIcon('⛔', { className: 'map-emoji-icon--traffic-closed', iconSize: [18, 18], iconAnchor: [9, 9], popupAnchor: [0, -10] });
