@@ -452,6 +452,13 @@
                   <label><input id="filter-itinisere" type="checkbox" checked /> Itinisère</label>
                   <label><input id="filter-bison" type="checkbox" checked /> Bison Futé</label>
                 </div>
+                <select id="traffic-severity-filter" aria-label="Filtrer le trafic par criticité">
+                  <option value="all">Trafic: toutes criticités</option>
+                  <option value="rouge">Trafic bloquant (rouge)</option>
+                  <option value="orange">Trafic perturbé fort (orange)</option>
+                  <option value="jaune">Trafic perturbé (jaune)</option>
+                  <option value="vert">Trafic léger / information (vert)</option>
+                </select>
                 <select id="resource-type-filter">
                   <option value="all">Toutes les ressources</option>
                   <option value="poste_commandement">Postes de commandement</option>
@@ -479,6 +486,8 @@
               <p>Bison Futé Isère (départs) <strong id="map-bison-isere">-</strong></p>
               <p>Itinisère · catégorie dominante <strong id="map-itinisere-category">-</strong></p>
               <p>Itinisère · axes les plus touchés <strong id="map-itinisere-roads">-</strong></p>
+              <p>Itinisère · criticité (R/O/J/V) <strong id="map-itinisere-severity">-</strong></p>
+              <p>Itinisère · localisation précise <strong id="map-itinisere-precision">-</strong></p>
               <p>Sismicité max <strong id="map-seismic-level">-</strong></p>
               <p>Docs inondation suivis <strong id="map-flood-docs">0</strong></p>
               <p class="muted" id="map-source">Source carte: chargement…</p>

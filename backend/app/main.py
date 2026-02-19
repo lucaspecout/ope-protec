@@ -699,8 +699,13 @@ def interactive_map_vigicrues_geojson(
 
 
 @app.get("/api/itinisere/events")
-def interactive_map_itinisere_events(refresh: bool = False, _: User = Depends(require_roles(*READ_ROLES))):
-    return fetch_itinisere_disruptions(force_refresh=refresh)
+def interactive_map_itinisere_events(
+    refresh: bool = False,
+    limit: int = 60,
+    _: User = Depends(require_roles(*READ_ROLES)),
+):
+    safe_limit = max(10, min(limit, 120))
+    return fetch_itinisere_disruptions(limit=safe_limit, force_refresh=refresh)
 
 
 @app.get("/supervision/overview")
