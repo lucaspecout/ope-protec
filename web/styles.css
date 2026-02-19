@@ -186,24 +186,16 @@ label { display: block; margin-bottom: .8rem; }
 
 
 .situation-panel { display: grid; gap: .95rem; }
-.situation-vigilance-legend {
-  margin: 0;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: #f7faff;
-  padding: .55rem .65rem;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: .45rem;
-}
 .situation-toolbar { display: flex; align-items: center; justify-content: space-between; gap: .65rem; padding: .65rem .75rem; border: 1px solid var(--line); border-radius: 12px; background: #f7faff; }
 .situation-toolbar p { margin: 0; }
 .situation-toolbar button { margin-top: 0; white-space: nowrap; }
 .situation-top-grid { display: grid; gap: .7rem; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
 .situation-middle-grid { display: grid; gap: .7rem; grid-template-columns: minmax(260px, 1.3fr) minmax(260px, 1fr); }
 .situation-tile .kpi-value { margin: .3rem 0 .15rem; font-size: clamp(1.6rem, 2.3vw, 2rem); font-weight: 800; line-height: 1.1; }
+.situation-tile .kpi-value.vert { color: #2f9e44; }
+.situation-tile .kpi-value.jaune { color: #907100; }
+.situation-tile .kpi-value.orange { color: #b46a00; }
+.situation-tile .kpi-value.rouge { color: #c22f43; }
 .situation-tile .muted { margin: 0; font-size: .95rem; font-weight: 500; color: var(--muted); }
 .situation-summary-grid { display: grid; gap: .55rem; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); margin-top: .45rem; }
 .situation-summary-grid p { margin: 0; border: 1px solid var(--line); border-radius: 10px; padding: .55rem .65rem; background: #f7faff; }
