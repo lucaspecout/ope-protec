@@ -1171,6 +1171,13 @@ function normalizeMapCoordinates(lat, lon) {
   };
 }
 
+function isPointInIsere(point = {}) {
+  const coords = normalizeMapCoordinates(point.lat, point.lon);
+  if (!coords) return false;
+  return coords.lat >= ISERE_BOUNDS.latMin && coords.lat <= ISERE_BOUNDS.latMax
+    && coords.lon >= ISERE_BOUNDS.lonMin && coords.lon <= ISERE_BOUNDS.lonMax;
+}
+
 function detectItinisereIcon(text = '') {
   const lowered = text.toLowerCase();
   if (/accident|collision|carambolage/.test(lowered)) return '💥';
@@ -1218,14 +1225,16 @@ async function geocodeTrafficLabel(label) {
   if (!key) return null;
   if (trafficGeocodeCache.has(key)) return trafficGeocodeCache.get(key);
   try {
-    const communeUrl = `https://geo.api.gouv.fr/communes?nom=${encodeURIComponent(label)}&fields=centre&limit=1`;
+    const communeUrl = `https://geo.api.gouv.fr/communes?nom=${encodeURIComponent(label)}&fields=centre,codeDepartement&codeDepartement=38&limit=1`;
     const communeResponse = await fetch(communeUrl);
     const communePayload = await parseJsonResponse(communeResponse, communeUrl);
     const center = communePayload?.[0]?.centre?.coordinates;
     if (Array.isArray(center) && center.length === 2) {
       const point = { lat: Number(center[1]), lon: Number(center[0]), precision: 'commune' };
-      trafficGeocodeCache.set(key, point);
-      return point;
+      if (isPointInIsere(point)) {
+        trafficGeocodeCache.set(key, point);
+        return point;
+      }
     }
   } catch {
     // fallback nominatim
@@ -1237,6 +1246,10 @@ async function geocodeTrafficLabel(label) {
     const payload = await parseJsonResponse(response, nominatimUrl);
     const first = payload?.[0];
     const point = first ? { lat: Number(first.lat), lon: Number(first.lon), precision: 'adresse' } : null;
+    if (!isPointInIsere(point || {})) {
+      trafficGeocodeCache.set(key, null);
+      return null;
+    }
     trafficGeocodeCache.set(key, point);
     return point;
   } catch {
@@ -1252,7 +1265,7 @@ async function geocodeClosureCommune(label) {
   if (!normalizedLabel) return null;
   if (trafficGeocodeCache.has(key)) return trafficGeocodeCache.get(key);
   try {
-    const communeUrl = `https://geo.api.gouv.fr/communes?nom=${encodeURIComponent(normalizedLabel)}&fields=nom,centre&boost=population&limit=1`;
+    const communeUrl = `https://geo.api.gouv.fr/communes?nom=${encodeURIComponent(normalizedLabel)}&fields=nom,centre,codeDepartement&codeDepartement=38&boost=population&limit=1`;
     const communeResponse = await fetch(communeUrl);
     const communePayload = await parseJsonResponse(communeResponse, communeUrl);
     const commune = Array.isArray(communePayload) ? communePayload[0] : null;
@@ -1264,8 +1277,10 @@ async function geocodeClosureCommune(label) {
         precision: 'mairie',
         communeName: commune.nom || normalizedLabel,
       };
-      trafficGeocodeCache.set(key, point);
-      return point;
+      if (isPointInIsere(point)) {
+        trafficGeocodeCache.set(key, point);
+        return point;
+      }
     }
   } catch {
     // ignore commune geocoding issues for closure placement
@@ -1432,14 +1447,13 @@ async function buildItinisereMapPoints(events = []) {
     if (isClosureEvent) {
       const closureCommuneHints = extractClosureCommuneHints(event, fullText);
       for (const commune of closureCommuneHints) {
-        const communePoint = await geocodeTrafficLabel(commune);
+        const communePoint = await geocodeClosureCommune(commune) || await geocodeTrafficLabel(commune);
         if (!communePoint) continue;
         position = { lat: communePoint.lat, lon: communePoint.lon };
-        anchor = `Mairie de ${commune}`;
+        anchor = `Mairie de ${communePoint.communeName || commune}`;
         precision = 'mairie';
         break;
       }
-      if (!position) continue;
     }
 
     const providedCoords = normalizeMapCoordinates(event.lat, event.lon);
