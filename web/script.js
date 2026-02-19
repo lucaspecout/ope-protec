@@ -1250,7 +1250,7 @@ function renderItinisereEvents(events = [], targetId = 'itinerary-list') {
 
 function renderPrefectureNews(prefecture = {}) {
   const items = Array.isArray(prefecture.items) ? prefecture.items : [];
-  const latestTitle = items[0]?.title ? `Actualité : ${items[0].title}` : "Actualité Préfecture de l'Isère";
+  const latestTitle = items[0]?.title || "Actualité Préfecture de l'Isère";
   setText('prefecture-news-title', latestTitle);
   setText('prefecture-status', `${prefecture.status || 'inconnu'} · ${items.length} actualité(s)`);
   setText('prefecture-info', `Dernière mise à jour: ${prefecture.updated_at ? new Date(prefecture.updated_at).toLocaleString() : 'inconnue'}`);
