@@ -1431,23 +1431,11 @@ async function buildItinisereMapPoints(events = []) {
 
     if (isClosureEvent) {
       const closureCommuneHints = extractClosureCommuneHints(event, fullText);
-      const closureCandidates = [...new Set([
-        ...closureCommuneHints,
-        ...communeHints,
-        ...locations,
-        ...locationHints,
-        ...dynamicAlertHints,
-      ])]
-        .map((hint) => String(hint || '').replace(/^\s*(?:adresse|lieu|localisation)\s*[:\-]?\s*/i, '').trim())
-        .filter((hint) => hint && !/^\d+$/.test(hint))
-        .slice(0, 16);
-
-      for (const communeHint of closureCandidates) {
-        const communePoint = await geocodeClosureCommune(communeHint);
+      for (const commune of closureCommuneHints) {
+        const communePoint = await geocodeTrafficLabel(commune);
         if (!communePoint) continue;
         position = { lat: communePoint.lat, lon: communePoint.lon };
-        const communeName = communePoint.communeName || communeHint;
-        anchor = `Mairie de ${communeName}`;
+        anchor = `Mairie de ${commune}`;
         precision = 'mairie';
         break;
       }
