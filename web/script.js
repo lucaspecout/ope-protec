@@ -1245,6 +1245,35 @@ async function geocodeTrafficLabel(label) {
   }
 }
 
+
+async function geocodeClosureCommune(label) {
+  const key = `closure-commune:${String(label || '').trim().toLowerCase()}`;
+  const normalizedLabel = String(label || '').replace(/^mairie\s+de\s+/i, '').replace(/^commune\s+(?:de\s+)?/i, '').trim();
+  if (!normalizedLabel) return null;
+  if (trafficGeocodeCache.has(key)) return trafficGeocodeCache.get(key);
+  try {
+    const communeUrl = `https://geo.api.gouv.fr/communes?nom=${encodeURIComponent(normalizedLabel)}&fields=nom,centre&boost=population&limit=1`;
+    const communeResponse = await fetch(communeUrl);
+    const communePayload = await parseJsonResponse(communeResponse, communeUrl);
+    const commune = Array.isArray(communePayload) ? communePayload[0] : null;
+    const center = commune?.centre?.coordinates;
+    if (Array.isArray(center) && center.length === 2) {
+      const point = {
+        lat: Number(center[1]),
+        lon: Number(center[0]),
+        precision: 'mairie',
+        communeName: commune.nom || normalizedLabel,
+      };
+      trafficGeocodeCache.set(key, point);
+      return point;
+    }
+  } catch {
+    // ignore commune geocoding issues for closure placement
+  }
+  trafficGeocodeCache.set(key, null);
+  return null;
+}
+
 function extractItinisereLocationHints(event = {}, fullText = '', roads = []) {
   const hints = [];
   const blockedHints = new Set([
@@ -1340,6 +1369,62 @@ function extractAlertDynamicHints(fullText = '') {
   return hints.slice(0, 8);
 }
 
+
+function sanitizeCommuneHint(value = '') {
+  let label = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!label) return '';
+  label = label
+    .replace(/\b(?:sens|direction|vers|entre|au niveau de|secteur)\b.*$/i, '')
+    .replace(/[()\[\]{}]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return label;
+}
+
+function detectKnownMunicipalitiesFromText(text = '') {
+  const blob = String(text || '');
+  const knownMunicipalities = [
+    ...TRAFFIC_COMMUNES,
+    ...(Array.isArray(cachedMunicipalities) ? cachedMunicipalities.map((m) => m?.name).filter(Boolean) : []),
+    ...(Array.isArray(cachedMunicipalityRecords) ? cachedMunicipalityRecords.map((m) => m?.name).filter(Boolean) : []),
+  ];
+  const unique = [...new Set(knownMunicipalities.map((name) => String(name || '').trim()).filter(Boolean))];
+  return unique.filter((commune) => {
+    const escaped = commune.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`\\b${escaped}\\b`, 'i').test(blob);
+  });
+}
+
+function extractClosureCommuneHints(event = {}, fullText = '') {
+  const hints = [];
+  const pushHint = (value) => {
+    const label = sanitizeCommuneHint(value);
+    if (!label || hints.includes(label)) return;
+    hints.push(label);
+  };
+
+  const blob = `${fullText || ''} ${event.city || ''} ${event.address || ''}`;
+  detectKnownMunicipalitiesFromText(blob).forEach(pushHint);
+
+  const scopedCityMatches = [...blob.matchAll(/\b(?:commune(?:\s+de)?|mairie\s+de|[àa]u?x?)\s+([A-ZÀ-ÖØ-Ý][\wÀ-ÖØ-öø-ÿ'\-]+(?:\s+[A-ZÀ-ÖØ-Ý][\wÀ-ÖØ-öø-ÿ'\-]+){0,3})/gi)];
+  scopedCityMatches.forEach((match) => pushHint(match?.[1]));
+
+  const chunkMatches = [...blob.matchAll(/\b(?:sur|vers|secteur|entre)\s+([^\n.;:]+)/gi)];
+  chunkMatches.forEach((match) => {
+    String(match?.[1] || '')
+      .split(/[,/]|\s+-\s+/)
+      .map((part) => sanitizeCommuneHint(part))
+      .filter(Boolean)
+      .forEach(pushHint);
+  });
+
+  [event.city, event.address, ...(Array.isArray(event.locations) ? event.locations : [])]
+    .forEach(pushHint);
+
+  return hints.slice(0, 20);
+}
+
+
 function spreadOverlappingTrafficPoints(points = []) {
   const overlapCounters = new Map();
   return points.map((point) => {
@@ -1380,52 +1465,43 @@ async function buildItinisereMapPoints(events = []) {
     let precision = 'estimée';
     let communeAnchor = null;
 
+    if (isClosureEvent) {
+      const closureCommuneHints = extractClosureCommuneHints(event, fullText);
+      const closureCandidates = [...new Set([
+        ...closureCommuneHints,
+        ...communeHints,
+        ...locations,
+        ...locationHints,
+        ...dynamicAlertHints,
+      ])]
+        .map((hint) => String(hint || '').replace(/^\s*(?:adresse|lieu|localisation|commune)\s*[:\-]?\s*/i, '').trim())
+        .map((hint) => sanitizeCommuneHint(hint))
+        .filter((hint) => hint && !/^\d+$/.test(hint) && hint.length > 2)
+        .slice(0, 24);
+
+      for (const communeHint of closureCandidates) {
+        const communePoint = await geocodeClosureCommune(communeHint);
+        if (!communePoint) continue;
+        position = { lat: communePoint.lat, lon: communePoint.lon };
+        const communeName = communePoint.communeName || communeHint;
+        anchor = `Mairie de ${communeName}`;
+        precision = 'mairie';
+        break;
+      }
+      if (!position) continue;
+    }
+
     const providedCoords = normalizeMapCoordinates(event.lat, event.lon);
-    if (providedCoords && (!isClosureEvent || !roads.length)) {
+    if (!isClosureEvent && providedCoords && !roads.length) {
       position = providedCoords;
       anchor = locations[0] || roads[0] || 'Itinisère';
       precision = 'source';
     }
-
-    if (!position && isClosureEvent && communeHints.length) {
-      for (const commune of communeHints) {
-        const communePoint = await geocodeTrafficLabel(commune);
-        if (!communePoint) continue;
-        position = { lat: communePoint.lat, lon: communePoint.lon };
-        anchor = `Mairie de ${commune}`;
-        precision = 'centre-ville';
-        break;
-      }
-    }
-
-    if (!position && isClosureEvent && roads.length) {
-      for (const road of roads) {
-        const roadPoint = await geocodeRoadWithContext(road, candidateLocationHints);
-        if (!roadPoint) continue;
-        position = { lat: roadPoint.lat, lon: roadPoint.lon };
-        anchor = roadPoint.anchor || `${road} · Isère`;
-        precision = roadPoint.precision || 'route+commune';
-        break;
-      }
-    }
-
     if (!position && providedCoords) {
       position = providedCoords;
       anchor = locations[0] || roads[0] || 'Itinisère';
       precision = 'source';
     }
-
-    if (!position && isClosureEvent && roads.length) {
-      for (const road of roads) {
-        const roadPoint = await geocodeRoadWithContext(road, candidateLocationHints);
-        if (!roadPoint) continue;
-        position = { lat: roadPoint.lat, lon: roadPoint.lon };
-        anchor = roadPoint.anchor || `${road} · Isère`;
-        precision = roadPoint.precision || 'route+commune';
-        break;
-      }
-    }
-
     if (!position) {
       for (const location of candidateLocationHints) {
         position = await geocodeTrafficLabel(location);
