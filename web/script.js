@@ -1331,6 +1331,7 @@ async function buildItinisereMapPoints(events = []) {
     const isClosureEvent = /ferm|barr|interdit|coup/.test(fullText.toLowerCase())
       || String(event.category || '').toLowerCase() === 'fermeture';
     const locationHints = extractItinisereLocationHints(event, fullText, roads);
+    const dynamicAlertHints = extractAlertDynamicHints(fullText);
     const locations = Array.isArray(event.locations) ? event.locations.filter(Boolean) : locationHints;
     const communeHints = TRAFFIC_COMMUNES.filter((commune) => {
       const escaped = commune.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -1343,7 +1344,24 @@ async function buildItinisereMapPoints(events = []) {
     let communeAnchor = null;
 
     const providedCoords = normalizeMapCoordinates(event.lat, event.lon);
-    if (providedCoords) {
+    if (providedCoords && (!isClosureEvent || !roads.length)) {
+      position = providedCoords;
+      anchor = locations[0] || roads[0] || 'Itinisère';
+      precision = 'source';
+    }
+
+    if (!position && isClosureEvent && roads.length) {
+      for (const road of roads) {
+        const roadPoint = await geocodeRoadWithContext(road, candidateLocationHints);
+        if (!roadPoint) continue;
+        position = { lat: roadPoint.lat, lon: roadPoint.lon };
+        anchor = roadPoint.anchor || `${road} · Isère`;
+        precision = roadPoint.precision || 'route+commune';
+        break;
+      }
+    }
+
+    if (!position && providedCoords) {
       position = providedCoords;
       anchor = locations[0] || roads[0] || 'Itinisère';
       precision = 'source';
