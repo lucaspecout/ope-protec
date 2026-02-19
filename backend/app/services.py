@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from copy import deepcopy
 from html import unescape
@@ -583,6 +584,29 @@ def _vigicrues_station_control(details: dict[str, Any]) -> str:
     return "inconnu"
 
 
+
+
+def _vigicrues_fetch_station_detail(source: str, station_code: str) -> tuple[str, dict[str, Any] | None]:
+    try:
+        details = _http_get_json(f"{source}/services/station.json?CdStationHydro={quote_plus(station_code)}")
+        return station_code, details if isinstance(details, dict) else None
+    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
+        return station_code, None
+
+
+def _vigicrues_fetch_station_details_bulk(source: str, station_codes: list[str], max_workers: int = 6) -> dict[str, dict[str, Any]]:
+    if not station_codes:
+        return {}
+
+    details_by_code: dict[str, dict[str, Any]] = {}
+    worker_count = max(1, min(max_workers, len(station_codes)))
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        for station_code, details in executor.map(lambda code: _vigicrues_fetch_station_detail(source, code), station_codes):
+            if details is not None:
+                details_by_code[station_code] = details
+    return details_by_code
+
+
 def _fetch_vigicrues_isere_live(
     sample_size: int = 1200,
     station_limit: int | None = None,
@@ -641,46 +665,56 @@ def _fetch_vigicrues_isere_live(
 
         isere_stations: list[dict[str, Any]] = []
         added_codes: set[str] = set()
-        for station_code in candidate_codes:
-            if station_code in added_codes:
-                continue
-            try:
-                details = _http_get_json(f"{source}/services/station.json?CdStationHydro={quote_plus(station_code)}")
-            except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
-                continue
+        batch_size = min(90, max(30, target_isere_count * 5))
 
-            commune_code = str(details.get("CdCommune") or "")
-            if not commune_code.startswith("38"):
-                continue
+        for offset in range(0, len(candidate_codes), batch_size):
+            batch_codes: list[str] = []
+            for code in candidate_codes[offset:offset + batch_size]:
+                if code and code not in added_codes:
+                    batch_codes.append(code)
 
-            coords = details.get("CoordStationHydro") or {}
-            lat, lon = _normalize_vigicrues_coordinates(coords.get("CoordYStationHydro"), coords.get("CoordXStationHydro"), commune_code)
-            station_name = details.get("LbStationHydro") or "Station Vigicrues"
-            river_name = details.get("LbCoursEau") or ""
-            text_blob = f"{station_name} {river_name}".lower()
-            height_m, delta_window_m, observed_at = _vigicrues_extract_observation(station_code)
-            level = _vigicrues_level_from_delta(abs(delta_window_m))
+            details_by_code = _vigicrues_fetch_station_details_bulk(source, batch_codes, max_workers=6)
 
-            isere_stations.append(
-                {
-                    "code": station_code,
-                    "station": station_name,
-                    "river": river_name,
-                    "height_m": round(height_m, 2),
-                    "delta_window_m": round(delta_window_m, 3),
-                    "level": level,
-                    "control_status": _vigicrues_station_control(details),
-                    "is_priority": ("grenoble" in text_blob or any(name in text_blob for name in priority_names)),
-                    "observed_at": observed_at,
-                    "lat": lat,
-                    "lon": lon,
-                    "commune_code": commune_code,
-                    "troncon": "",
-                    "troncon_code": "",
-                    "source_link": f"{source}/station/{station_code}",
-                }
-            )
-            added_codes.add(station_code)
+            for station_code in batch_codes:
+                details = details_by_code.get(station_code)
+                if not details:
+                    continue
+
+                commune_code = str(details.get("CdCommune") or "")
+                if not commune_code.startswith("38"):
+                    continue
+
+                coords = details.get("CoordStationHydro") or {}
+                lat, lon = _normalize_vigicrues_coordinates(coords.get("CoordYStationHydro"), coords.get("CoordXStationHydro"), commune_code)
+                station_name = details.get("LbStationHydro") or "Station Vigicrues"
+                river_name = details.get("LbCoursEau") or ""
+                text_blob = f"{station_name} {river_name}".lower()
+                height_m, delta_window_m, observed_at = _vigicrues_extract_observation(station_code)
+                level = _vigicrues_level_from_delta(abs(delta_window_m))
+
+                isere_stations.append(
+                    {
+                        "code": station_code,
+                        "station": station_name,
+                        "river": river_name,
+                        "height_m": round(height_m, 2),
+                        "delta_window_m": round(delta_window_m, 3),
+                        "level": level,
+                        "control_status": _vigicrues_station_control(details),
+                        "is_priority": ("grenoble" in text_blob or any(name in text_blob for name in priority_names)),
+                        "observed_at": observed_at,
+                        "lat": lat,
+                        "lon": lon,
+                        "commune_code": commune_code,
+                        "troncon": "",
+                        "troncon_code": "",
+                        "source_link": f"{source}/station/{station_code}",
+                    }
+                )
+                added_codes.add(station_code)
+                if len(isere_stations) >= target_isere_count:
+                    break
+
             if len(isere_stations) >= target_isere_count:
                 break
 
