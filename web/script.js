@@ -70,6 +70,7 @@ let cachedLogs = [];
 let cachedDashboardSnapshot = {};
 let cachedExternalRisksSnapshot = {};
 let isereBoundaryGeometry = null;
+let trafficRenderSequence = 0;
 
 const ISERE_BOUNDARY_STYLE = { color: '#163a87', weight: 2, fillColor: '#63c27d', fillOpacity: 0.2 };
 const TRAFFIC_COMMUNES = ['Grenoble', 'Voiron', 'Vienne', 'Bourgoin-Jallieu', 'Pont-de-Claix', 'Meylan', 'Échirolles', 'L\'Isle-d\'Abeau', 'Saint-Martin-d\'Hères', 'La Tour-du-Pin', 'Rives', 'Sassenage', 'Crolles', 'Tullins'];
@@ -1544,6 +1545,7 @@ async function buildItinisereMapPoints(events = []) {
 
 async function renderTrafficOnMap() {
   if (!itinisereLayer || !bisonLayer || !realtimeTrafficLayer || typeof window.L === 'undefined') return;
+  const renderSequence = ++trafficRenderSequence;
   itinisereLayer.clearLayers();
   bisonLayer.clearLayers();
   realtimeTrafficLayer.clearLayers();
@@ -1552,6 +1554,7 @@ async function renderTrafficOnMap() {
   const showItinisere = document.getElementById('filter-itinisere')?.checked ?? true;
   if (showItinisere) {
     const points = await buildItinisereMapPoints(cachedItinisereEvents || []);
+    if (renderSequence !== trafficRenderSequence) return;
     mapStats.traffic += points.length;
     points.forEach((point) => {
       const roadsText = point.precision === 'centre-ville' ? '' : (point.roads?.length ? `Axes détectés: ${point.roads.join(', ')}<br/>` : '');
@@ -1565,6 +1568,7 @@ async function renderTrafficOnMap() {
 
   const showWazeClosedRoads = document.getElementById('filter-waze-closed-roads')?.checked ?? true;
   if (showWazeClosedRoads) {
+    if (renderSequence !== trafficRenderSequence) return;
     const incidents = Array.isArray(cachedRealtimeTraffic?.incidents) ? cachedRealtimeTraffic.incidents : [];
     const filteredIncidents = incidents.filter((incident) => incident.subtype === 'road_closed' && isIncidentInIsere(incident));
     filteredIncidents.forEach((incident) => {
