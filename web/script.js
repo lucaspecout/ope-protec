@@ -30,6 +30,7 @@ let liveEventsTimer = null;
 let homeLiveTimer = null;
 let apiPanelTimer = null;
 let apiResyncTimer = null;
+let photoCameraRefreshTimer = null;
 let lastApiResyncAt = null;
 const apiGetCache = new Map();
 const apiInFlight = new Map();
@@ -47,6 +48,7 @@ let mapPointsLayer = null;
 let itinisereLayer = null;
 let bisonLayer = null;
 let bisonCameraLayer = null;
+let photoCameraLayer = null;
 let realtimeTrafficLayer = null;
 let mapTileLayer = null;
 let googleTrafficFlowLayer = null;
@@ -94,12 +96,73 @@ const BISON_CORRIDORS = [
   { name: 'N85 · Route Napoléon', points: [[45.1885, 5.7245], [44.9134, 5.7861]] },
 ];
 const BISON_FUTE_CAMERAS = [
-  { name: 'A48 · Voreppe', road: 'A48', lat: 45.2949, lon: 5.6388, manager: 'AREA', url: 'https://www.bison-fute.gouv.fr' },
-  { name: 'A41 · Crolles', road: 'A41', lat: 45.2878, lon: 5.8836, manager: 'AREA', url: 'https://www.bison-fute.gouv.fr' },
-  { name: 'A43 · Bourgoin-Jallieu', road: 'A43', lat: 45.5776, lon: 5.2806, manager: 'AREA', url: 'https://www.bison-fute.gouv.fr' },
-  { name: 'A49 · Rives / Beaucroissant', road: 'A49', lat: 45.3609, lon: 5.4754, manager: 'AREA', url: 'https://www.bison-fute.gouv.fr' },
-  { name: 'N85 · Vizille', road: 'N85', lat: 45.0766, lon: 5.7707, manager: 'DIR Centre-Est', url: 'https://www.bison-fute.gouv.fr' },
+  { name: 'Meylan N87 PR10+590', road: 'N87', lat: 45.201217282265034, lon: 5.7812657653824875, manager: 'DIR Centre-Est', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/nce_27.mp4' },
+  { name: 'Eybens N87 PR4+200', road: 'N87', lat: 45.15652758486637, lon: 5.7475476745737355, manager: 'DIR Centre-Est', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/nce_31.mp4' },
+  { name: 'A480 Grenoble vers Grenoble Sud', road: 'A480', lat: 45.15873823197743, lon: 5.7005336069172925, manager: 'AREA', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/at_area09.mp4' },
+  { name: 'A480/RN481 direction Ouest/Sud', road: 'A480 / RN481', lat: 45.21650958839951, lon: 5.6784500109717335, manager: 'AREA', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/at_area10.mp4' },
+  { name: 'A48 aire de l’Île rose', road: 'A48', lat: 45.272598746702336, lon: 5.625897585313137, manager: 'AREA', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/at_area08.mp4' },
 ];
+
+const ITINISERE_PHOTO_CAMERAS = [
+  { name: 'La Diat', road: 'D520B', lat: 45.33981893625896, lon: 5.807674386173609, manager: 'Itinisère', imageUrl: 'https://traffic.itiniserev2.cityway.fr/api/v1/Camera/D520BLaDiat' },
+  { name: 'Les Fontaines', road: 'D525', lat: 45.35574122911768, lon: 5.992340889751027, manager: 'Itinisère', imageUrl: 'https://traffic.itiniserev2.cityway.fr/api/v1/Camera/D525LesFontaines' },
+  { name: "Le Collet d'Allevard", road: 'D109', lat: 45.395387104597916, lon: 6.109804944464281, manager: 'Itinisère', imageUrl: 'https://traffic.itiniserev2.cityway.fr/api/v1/Camera/D109ColletAllevard' },
+  { name: 'Fond de France', road: 'D525A', lat: 45.28221936272868, lon: 6.074009634997554, manager: 'Itinisère', imageUrl: 'https://traffic.itiniserev2.cityway.fr/api/v1/Camera/D525AFonddeFrance' },
+  { name: 'Rochetaillée', road: 'D1091 / D526', lat: 45.1144099370023, lon: 6.005238134016191, manager: 'Itinisère', imageUrl: 'https://traffic.itiniserev2.cityway.fr/api/v1/Camera/D1091D526Rochetaillee' },
+  { name: 'Seiglières', road: 'D111', lat: 45.15474818390343, lon: 5.869930116196619, manager: 'Itinisère', imageUrl: 'https://traffic.itiniserev2.cityway.fr/api/v1/Camera/D111Seiglieres' },
+  { name: 'Clavaux Grenoble', road: 'D1091', lat: 45.07592699481376, lon: 5.883116163700038, manager: 'Itinisère', imageUrl: 'https://traffic.itiniserev2.cityway.fr/api/v1/Camera/D1091ClavauxGrenoble' },
+];
+
+function cameraPopupMarkup(camera = {}) {
+  const name = escapeHtml(camera.name || 'Caméra routière');
+  const road = escapeHtml(camera.road || 'Réseau principal');
+  const manager = escapeHtml(camera.manager || 'Bison Futé');
+  const sourceUrl = escapeHtml(camera.streamUrl || 'https://www.bison-fute.gouv.fr');
+  return `
+    <article class="camera-popup">
+      <strong>🎥 ${name}</strong><br/>
+      <span class="badge neutral">${road} · ${manager}</span>
+      <a class="camera-popup__media" href="${sourceUrl}" target="_blank" rel="noreferrer" title="Ouvrir le flux caméra dans un nouvel onglet">
+        <video muted autoplay loop playsinline preload="metadata" aria-label="Flux caméra ${name}">
+          <source src="${sourceUrl}" type="video/mp4" />
+        </video>
+      </a>
+      <a href="${sourceUrl}" target="_blank" rel="noreferrer">Voir le flux caméra</a>
+    </article>
+  `;
+}
+
+function photoCameraPopupMarkup(camera = {}) {
+  const name = escapeHtml(camera.name || 'Caméra photo');
+  const road = escapeHtml(camera.road || 'Réseau départemental');
+  const manager = escapeHtml(camera.manager || 'Itinisère');
+  const sourceUrl = escapeHtml(camera.imageUrl || 'https://www.itinisere.fr');
+  return `
+    <article class="camera-popup camera-photo-popup">
+      <strong>📷 ${name}</strong><br/>
+      <span class="badge neutral">${road} · ${manager}</span>
+      <a class="camera-popup__media" href="${sourceUrl}" target="_blank" rel="noreferrer" title="Ouvrir la photo caméra dans un nouvel onglet">
+        <img class="camera-photo-popup__image" src="${sourceUrl}" data-base-url="${sourceUrl}" alt="Vue caméra ${name}" loading="lazy" />
+      </a>
+      <p class="muted">Mise à jour automatique toutes les 60 secondes.</p>
+      <a href="${sourceUrl}" target="_blank" rel="noreferrer">Voir l'image source</a>
+    </article>
+  `;
+}
+
+function refreshPhotoCameraImages() {
+  const bucket = Math.floor(Date.now() / 60000);
+  document.querySelectorAll('.camera-photo-popup__image[data-base-url]').forEach((img) => {
+    const baseUrl = img.getAttribute('data-base-url');
+    if (!baseUrl) return;
+    img.src = `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}_=${bucket}`;
+  });
+}
+
+function startPhotoCameraAutoRefresh() {
+  if (photoCameraRefreshTimer) clearInterval(photoCameraRefreshTimer);
+  photoCameraRefreshTimer = setInterval(refreshPhotoCameraImages, 60000);
+}
 
 const homeView = document.getElementById('home-view');
 const loginView = document.getElementById('login-view');
@@ -589,8 +652,11 @@ function initMap() {
   itinisereLayer = window.L.layerGroup().addTo(leafletMap);
   bisonLayer = window.L.layerGroup().addTo(leafletMap);
   bisonCameraLayer = window.L.layerGroup().addTo(leafletMap);
+  photoCameraLayer = window.L.layerGroup().addTo(leafletMap);
   realtimeTrafficLayer = window.L.layerGroup().addTo(leafletMap);
   leafletMap.on('click', onMapClickAddPoint);
+  leafletMap.on('popupopen', refreshPhotoCameraImages);
+  startPhotoCameraAutoRefresh();
 }
 
 function setMapFeedback(message = '', isError = false) {
@@ -619,6 +685,7 @@ async function resetMapFilters() {
   const itinisere = document.getElementById('filter-itinisere');
   const bisonAccidents = document.getElementById('filter-bison-accidents');
   const bisonCameras = document.getElementById('filter-bison-cameras');
+  const photoCameras = document.getElementById('filter-photo-cameras');
   const wazeClosedRoads = document.getElementById('filter-waze-closed-roads');
   const googleFlow = document.getElementById('filter-google-traffic-flow');
   if (hydro) hydro.checked = true;
@@ -627,6 +694,7 @@ async function resetMapFilters() {
   if (itinisere) itinisere.checked = true;
   if (bisonAccidents) bisonAccidents.checked = true;
   if (bisonCameras) bisonCameras.checked = true;
+  if (photoCameras) photoCameras.checked = true;
   if (wazeClosedRoads) wazeClosedRoads.checked = true;
   if (googleFlow) googleFlow.checked = false;
   if (searchLayer) searchLayer.clearLayers();
@@ -667,7 +735,7 @@ function toggleMapContrast() {
 
 function fitMapToData(showFeedback = false) {
   if (!leafletMap) return;
-  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsBoundaryLayer, pcsLayer, resourceLayer, searchLayer, customPointsLayer, mapPointsLayer, itinisereLayer, bisonLayer, bisonCameraLayer, realtimeTrafficLayer].filter(Boolean);
+  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsBoundaryLayer, pcsLayer, resourceLayer, searchLayer, customPointsLayer, mapPointsLayer, itinisereLayer, bisonLayer, bisonCameraLayer, photoCameraLayer, realtimeTrafficLayer].filter(Boolean);
   const bounds = window.L.latLngBounds([]);
   layers.forEach((layer) => {
     if (layer?.getBounds) {
@@ -1564,11 +1632,12 @@ async function buildItinisereMapPoints(events = []) {
 }
 
 async function renderTrafficOnMap() {
-  if (!itinisereLayer || !bisonLayer || !bisonCameraLayer || !realtimeTrafficLayer || typeof window.L === 'undefined') return;
+  if (!itinisereLayer || !bisonLayer || !bisonCameraLayer || !photoCameraLayer || !realtimeTrafficLayer || typeof window.L === 'undefined') return;
   const renderSequence = ++trafficRenderSequence;
   itinisereLayer.clearLayers();
   bisonLayer.clearLayers();
   bisonCameraLayer.clearLayers();
+  photoCameraLayer.clearLayers();
   realtimeTrafficLayer.clearLayers();
   mapStats.traffic = 0;
 
@@ -1623,11 +1692,23 @@ async function renderTrafficOnMap() {
     BISON_FUTE_CAMERAS.forEach((camera) => {
       const coords = normalizeMapCoordinates(camera.lat, camera.lon);
       if (!coords) return;
-      const popupHtml = `<strong>🎥 ${escapeHtml(camera.name || 'Caméra routière')}</strong><br/><span class="badge neutral">${escapeHtml(camera.road || 'Réseau principal')} · ${escapeHtml(camera.manager || 'Bison Futé')}</span><br/><a href="${escapeHtml(camera.url || 'https://www.bison-fute.gouv.fr')}" target="_blank" rel="noreferrer">Ouvrir la carte Bison Futé</a>`;
+      const popupHtml = cameraPopupMarkup(camera);
       const pointIcon = emojiDivIcon('🎥', { iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -11] });
       window.L.marker([coords.lat, coords.lon], { icon: pointIcon }).bindPopup(popupHtml).addTo(bisonCameraLayer);
     });
     mapStats.traffic += BISON_FUTE_CAMERAS.length;
+  }
+
+  const showPhotoCameras = document.getElementById('filter-photo-cameras')?.checked ?? true;
+  if (showPhotoCameras) {
+    ITINISERE_PHOTO_CAMERAS.forEach((camera) => {
+      const coords = normalizeMapCoordinates(camera.lat, camera.lon);
+      if (!coords) return;
+      const popupHtml = photoCameraPopupMarkup(camera);
+      const pointIcon = emojiDivIcon('📷', { iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -11] });
+      window.L.marker([coords.lat, coords.lon], { icon: pointIcon }).bindPopup(popupHtml).addTo(photoCameraLayer);
+    });
+    mapStats.traffic += ITINISERE_PHOTO_CAMERAS.length;
   }
 
   const showWazeClosedRoads = document.getElementById('filter-waze-closed-roads')?.checked ?? true;
@@ -3268,7 +3349,7 @@ function bindAppInteractions() {
       document.getElementById('users-error').textContent = sanitizeErrorMessage(error.message);
     }
   });
-  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'resource-type-filter', 'filter-itinisere', 'filter-bison-accidents', 'filter-bison-cameras', 'filter-waze-closed-roads'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'resource-type-filter', 'filter-itinisere', 'filter-bison-accidents', 'filter-bison-cameras', 'filter-photo-cameras', 'filter-waze-closed-roads'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       renderStations(cachedStations);
       await renderMunicipalitiesOnMap(cachedMunicipalities);
@@ -3289,6 +3370,7 @@ function logout() {
   if (liveEventsTimer) clearInterval(liveEventsTimer);
   if (apiPanelTimer) clearInterval(apiPanelTimer);
   if (apiResyncTimer) clearInterval(apiResyncTimer);
+  if (photoCameraRefreshTimer) clearInterval(photoCameraRefreshTimer);
   showHome();
 }
 
