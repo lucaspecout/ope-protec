@@ -608,12 +608,14 @@ async function resetMapFilters() {
   const pcs = document.getElementById('filter-pcs');
   const activeOnly = document.getElementById('filter-resources-active');
   const itinisere = document.getElementById('filter-itinisere');
+  const bisonAccidents = document.getElementById('filter-bison-accidents');
   const wazeClosedRoads = document.getElementById('filter-waze-closed-roads');
   const googleFlow = document.getElementById('filter-google-traffic-flow');
   if (hydro) hydro.checked = true;
   if (pcs) pcs.checked = true;
   if (activeOnly) activeOnly.checked = false;
   if (itinisere) itinisere.checked = true;
+  if (bisonAccidents) bisonAccidents.checked = true;
   if (wazeClosedRoads) wazeClosedRoads.checked = true;
   if (googleFlow) googleFlow.checked = false;
   if (searchLayer) searchLayer.clearLayers();
@@ -725,6 +727,13 @@ function isIncidentInIsere(incident = {}) {
   return points.some((point) => isPointInsideGeometry(point, isereBoundaryGeometry));
 }
 
+function isAccidentIncident(incident = {}) {
+  const fields = [incident.type, incident.subtype, incident.title, incident.description]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return /accident|collision|carambolage|crash/.test(fields);
+}
 
 function renderStations(stations = []) {
   cachedStations = stations;
@@ -1566,6 +1575,37 @@ async function renderTrafficOnMap() {
     });
   }
 
+  const showBisonAccidents = document.getElementById('filter-bison-accidents')?.checked ?? true;
+  if (showBisonAccidents) {
+    if (renderSequence !== trafficRenderSequence) return;
+    const incidents = Array.isArray(cachedRealtimeTraffic?.incidents) ? cachedRealtimeTraffic.incidents : [];
+    const bisonAccidents = incidents.filter((incident) => isAccidentIncident(incident) && isIncidentInIsere(incident));
+    bisonAccidents.forEach((incident) => {
+      const coords = normalizeMapCoordinates(incident.lat, incident.lon);
+      const popupHtml = `<strong>💥 ${escapeHtml(incident.title || 'Accident en cours')}</strong><br/>${escapeHtml(incident.description || '')}<br/><span class="badge red">Bison Futé · accident</span>`;
+      const pointIcon = emojiDivIcon('💥', { iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -11] });
+      let markerPlaced = false;
+      if (coords) {
+        window.L.marker([coords.lat, coords.lon], { icon: pointIcon }).bindPopup(popupHtml).addTo(bisonLayer);
+        markerPlaced = true;
+      }
+      if (Array.isArray(incident.line) && incident.line.length > 1) {
+        const lineLatLng = incident.line
+          .map((point) => normalizeMapCoordinates(point.lat, point.lon))
+          .filter(Boolean)
+          .map((point) => [point.lat, point.lon]);
+        if (lineLatLng.length > 1) {
+          if (!markerPlaced) {
+            const midPoint = lineLatLng[Math.floor(lineLatLng.length / 2)];
+            if (midPoint) window.L.marker(midPoint, { icon: pointIcon }).bindPopup(popupHtml).addTo(bisonLayer);
+          }
+          window.L.polyline(lineLatLng, { color: '#d9480f', weight: 4, opacity: 0.7 }).bindPopup(popupHtml).addTo(bisonLayer);
+        }
+      }
+    });
+    mapStats.traffic += bisonAccidents.length;
+  }
+
   const showWazeClosedRoads = document.getElementById('filter-waze-closed-roads')?.checked ?? true;
   if (showWazeClosedRoads) {
     if (renderSequence !== trafficRenderSequence) return;
@@ -1774,8 +1814,10 @@ function renderBisonFuteSummary(bison = {}) {
   const isereTomorrow = tomorrow.isere || {};
   const nationalToday = today.national || {};
   const nationalTomorrow = tomorrow.national || {};
+  const accidents = (Array.isArray(cachedRealtimeTraffic?.incidents) ? cachedRealtimeTraffic.incidents : [])
+    .filter((incident) => isAccidentIncident(incident) && isIncidentInIsere(incident));
 
-  setText('bison-status', `${bison.status || 'inconnu'} · Isère départ ${isereToday.departure || 'inconnu'} / retour ${isereToday.return || 'inconnu'}`);
+  setText('bison-status', `${bison.status || 'inconnu'} · Isère départ ${isereToday.departure || 'inconnu'} / retour ${isereToday.return || 'inconnu'} · ${accidents.length} accident(s) en cours`);
   setText('bison-info', `National J0: ${nationalToday.departure || 'inconnu'} / ${nationalToday.return || 'inconnu'} · J1: ${nationalTomorrow.departure || 'inconnu'} / ${nationalTomorrow.return || 'inconnu'}`);
   setText('map-bison-isere', `${isereToday.departure || 'inconnu'} (retour ${isereToday.return || 'inconnu'})`);
   setText('home-feature-bison-isere', `${isereToday.departure || 'inconnu'} / ${isereToday.return || 'inconnu'}`);
@@ -1783,6 +1825,7 @@ function renderBisonFuteSummary(bison = {}) {
   const bisonMarkup = [
     `<li><strong>Aujourd'hui (${today.date || '-'})</strong><br>Isère départ: ${isereToday.departure || 'inconnu'} · Isère retour: ${isereToday.return || 'inconnu'}<br>National départ: ${nationalToday.departure || 'inconnu'} · National retour: ${nationalToday.return || 'inconnu'}<br><a href="https://www.bison-fute.gouv.fr" target="_blank" rel="noreferrer">Voir la carte Bison Futé</a></li>`,
     `<li><strong>Demain (${tomorrow.date || '-'})</strong><br>Isère départ: ${isereTomorrow.departure || 'inconnu'} · Isère retour: ${isereTomorrow.return || 'inconnu'}<br>National départ: ${nationalTomorrow.departure || 'inconnu'} · National retour: ${nationalTomorrow.return || 'inconnu'}</li>`,
+    `<li><strong>Accidents en cours (Isère)</strong><br>${accidents.length ? `${accidents.length} signalement(s) actifs` : 'Aucun accident signalé pour le moment'}</li>`,
   ].join('');
   setHtml('bison-list', bisonMarkup);
 }
@@ -2286,6 +2329,7 @@ function renderExternalRisks(data = {}) {
   const itinisere = data?.itinisere || {};
   const bisonFute = data?.bison_fute || {};
   const realtimeTraffic = data?.waze || {};
+  cachedRealtimeTraffic = realtimeTraffic || {};
   const prefecture = data?.prefecture_isere || {};
   const georisquesPayload = data?.georisques || {};
   const georisques = georisquesPayload?.data && typeof georisquesPayload.data === 'object'
@@ -2304,7 +2348,6 @@ function renderExternalRisks(data = {}) {
   const itinisereTotal = Number(itinisere.events_total ?? itinisereEvents.length);
   setText('itinisere-status', `${itinisere.status || 'inconnu'} · ${itinisereTotal} événements`);
   renderBisonFuteSummary(bisonFute);
-  cachedRealtimeTraffic = realtimeTraffic || {};
   renderPrefectureNews(prefecture);
   setRiskText('georisques-status', `${georisques.status || 'inconnu'} · sismicité ${georisques.highest_seismic_zone_label || 'inconnue'}`, georisques.status === 'online' ? 'vert' : 'jaune');
   setText('georisques-info', `${georisques.flood_documents_total ?? 0} AZI · ${georisques.ppr_total ?? 0} PPR · ${georisques.ground_movements_total ?? 0} mouvements`);
@@ -3201,7 +3244,7 @@ function bindAppInteractions() {
       document.getElementById('users-error').textContent = sanitizeErrorMessage(error.message);
     }
   });
-  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'resource-type-filter', 'filter-itinisere', 'filter-waze-closed-roads'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'resource-type-filter', 'filter-itinisere', 'filter-bison-accidents', 'filter-waze-closed-roads'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       renderStations(cachedStations);
       await renderMunicipalitiesOnMap(cachedMunicipalities);
