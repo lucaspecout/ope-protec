@@ -46,6 +46,7 @@ let customPointsLayer = null;
 let mapPointsLayer = null;
 let itinisereLayer = null;
 let bisonLayer = null;
+let bisonCameraLayer = null;
 let realtimeTrafficLayer = null;
 let mapTileLayer = null;
 let googleTrafficFlowLayer = null;
@@ -91,6 +92,13 @@ const BISON_CORRIDORS = [
   { name: 'A41 · Axe Grenoble ⇄ Savoie', points: [[45.1885, 5.7245], [45.3656, 5.9494]] },
   { name: 'A49 · Axe Grenoble ⇄ Valence', points: [[45.1885, 5.7245], [45.0541, 5.0536]] },
   { name: 'N85 · Route Napoléon', points: [[45.1885, 5.7245], [44.9134, 5.7861]] },
+];
+const BISON_FUTE_CAMERAS = [
+  { name: 'A48 · Voreppe', road: 'A48', lat: 45.2949, lon: 5.6388, manager: 'AREA', url: 'https://www.bison-fute.gouv.fr' },
+  { name: 'A41 · Crolles', road: 'A41', lat: 45.2878, lon: 5.8836, manager: 'AREA', url: 'https://www.bison-fute.gouv.fr' },
+  { name: 'A43 · Bourgoin-Jallieu', road: 'A43', lat: 45.5776, lon: 5.2806, manager: 'AREA', url: 'https://www.bison-fute.gouv.fr' },
+  { name: 'A49 · Rives / Beaucroissant', road: 'A49', lat: 45.3609, lon: 5.4754, manager: 'AREA', url: 'https://www.bison-fute.gouv.fr' },
+  { name: 'N85 · Vizille', road: 'N85', lat: 45.0766, lon: 5.7707, manager: 'DIR Centre-Est', url: 'https://www.bison-fute.gouv.fr' },
 ];
 
 const homeView = document.getElementById('home-view');
@@ -580,6 +588,7 @@ function initMap() {
   mapPointsLayer = window.L.layerGroup().addTo(leafletMap);
   itinisereLayer = window.L.layerGroup().addTo(leafletMap);
   bisonLayer = window.L.layerGroup().addTo(leafletMap);
+  bisonCameraLayer = window.L.layerGroup().addTo(leafletMap);
   realtimeTrafficLayer = window.L.layerGroup().addTo(leafletMap);
   leafletMap.on('click', onMapClickAddPoint);
 }
@@ -609,6 +618,7 @@ async function resetMapFilters() {
   const activeOnly = document.getElementById('filter-resources-active');
   const itinisere = document.getElementById('filter-itinisere');
   const bisonAccidents = document.getElementById('filter-bison-accidents');
+  const bisonCameras = document.getElementById('filter-bison-cameras');
   const wazeClosedRoads = document.getElementById('filter-waze-closed-roads');
   const googleFlow = document.getElementById('filter-google-traffic-flow');
   if (hydro) hydro.checked = true;
@@ -616,6 +626,7 @@ async function resetMapFilters() {
   if (activeOnly) activeOnly.checked = false;
   if (itinisere) itinisere.checked = true;
   if (bisonAccidents) bisonAccidents.checked = true;
+  if (bisonCameras) bisonCameras.checked = true;
   if (wazeClosedRoads) wazeClosedRoads.checked = true;
   if (googleFlow) googleFlow.checked = false;
   if (searchLayer) searchLayer.clearLayers();
@@ -656,7 +667,7 @@ function toggleMapContrast() {
 
 function fitMapToData(showFeedback = false) {
   if (!leafletMap) return;
-  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsBoundaryLayer, pcsLayer, resourceLayer, searchLayer, customPointsLayer, mapPointsLayer, itinisereLayer, bisonLayer, realtimeTrafficLayer].filter(Boolean);
+  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsBoundaryLayer, pcsLayer, resourceLayer, searchLayer, customPointsLayer, mapPointsLayer, itinisereLayer, bisonLayer, bisonCameraLayer, realtimeTrafficLayer].filter(Boolean);
   const bounds = window.L.latLngBounds([]);
   layers.forEach((layer) => {
     if (layer?.getBounds) {
@@ -1553,10 +1564,11 @@ async function buildItinisereMapPoints(events = []) {
 }
 
 async function renderTrafficOnMap() {
-  if (!itinisereLayer || !bisonLayer || !realtimeTrafficLayer || typeof window.L === 'undefined') return;
+  if (!itinisereLayer || !bisonLayer || !bisonCameraLayer || !realtimeTrafficLayer || typeof window.L === 'undefined') return;
   const renderSequence = ++trafficRenderSequence;
   itinisereLayer.clearLayers();
   bisonLayer.clearLayers();
+  bisonCameraLayer.clearLayers();
   realtimeTrafficLayer.clearLayers();
   mapStats.traffic = 0;
 
@@ -1604,6 +1616,18 @@ async function renderTrafficOnMap() {
       }
     });
     mapStats.traffic += bisonAccidents.length;
+  }
+
+  const showBisonCameras = document.getElementById('filter-bison-cameras')?.checked ?? true;
+  if (showBisonCameras) {
+    BISON_FUTE_CAMERAS.forEach((camera) => {
+      const coords = normalizeMapCoordinates(camera.lat, camera.lon);
+      if (!coords) return;
+      const popupHtml = `<strong>🎥 ${escapeHtml(camera.name || 'Caméra routière')}</strong><br/><span class="badge neutral">${escapeHtml(camera.road || 'Réseau principal')} · ${escapeHtml(camera.manager || 'Bison Futé')}</span><br/><a href="${escapeHtml(camera.url || 'https://www.bison-fute.gouv.fr')}" target="_blank" rel="noreferrer">Ouvrir la carte Bison Futé</a>`;
+      const pointIcon = emojiDivIcon('🎥', { iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -11] });
+      window.L.marker([coords.lat, coords.lon], { icon: pointIcon }).bindPopup(popupHtml).addTo(bisonCameraLayer);
+    });
+    mapStats.traffic += BISON_FUTE_CAMERAS.length;
   }
 
   const showWazeClosedRoads = document.getElementById('filter-waze-closed-roads')?.checked ?? true;
@@ -3244,7 +3268,7 @@ function bindAppInteractions() {
       document.getElementById('users-error').textContent = sanitizeErrorMessage(error.message);
     }
   });
-  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'resource-type-filter', 'filter-itinisere', 'filter-bison-accidents', 'filter-waze-closed-roads'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'resource-type-filter', 'filter-itinisere', 'filter-bison-accidents', 'filter-bison-cameras', 'filter-waze-closed-roads'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       renderStations(cachedStations);
       await renderMunicipalitiesOnMap(cachedMunicipalities);
