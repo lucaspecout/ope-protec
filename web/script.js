@@ -102,6 +102,7 @@ const BISON_FUTE_CAMERAS = [
   { name: 'A480/RN481 direction Ouest/Sud', road: 'A480 / RN481', lat: 45.21650958839951, lon: 5.6784500109717335, manager: 'AREA', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/at_area10.mp4' },
   { name: 'A48 aire de l’Île rose', road: 'A48', lat: 45.272598746702336, lon: 5.625897585313137, manager: 'AREA', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/at_area08.mp4' },
 ];
+const ITINISERE_PHOTO_CAMERAS = [];
 
 function cameraPopupMarkup(camera = {}) {
   const name = escapeHtml(camera.name || 'Caméra routière');
@@ -120,6 +121,13 @@ function cameraPopupMarkup(camera = {}) {
       <a href="${sourceUrl}" target="_blank" rel="noreferrer">Voir le flux caméra</a>
     </article>
   `;
+}
+
+function photoCameraPopupMarkup(camera = {}) {
+  return cameraPopupMarkup({
+    manager: 'Photo route',
+    ...camera,
+  });
 }
 
 const homeView = document.getElementById('home-view');
