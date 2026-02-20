@@ -30,6 +30,7 @@ let liveEventsTimer = null;
 let homeLiveTimer = null;
 let apiPanelTimer = null;
 let apiResyncTimer = null;
+let photoCameraRefreshTimer = null;
 let lastApiResyncAt = null;
 const apiGetCache = new Map();
 const apiInFlight = new Map();
@@ -47,6 +48,7 @@ let mapPointsLayer = null;
 let itinisereLayer = null;
 let bisonLayer = null;
 let bisonCameraLayer = null;
+let photoCameraLayer = null;
 let realtimeTrafficLayer = null;
 let mapTileLayer = null;
 let googleTrafficFlowLayer = null;
@@ -608,8 +610,11 @@ function initMap() {
   itinisereLayer = window.L.layerGroup().addTo(leafletMap);
   bisonLayer = window.L.layerGroup().addTo(leafletMap);
   bisonCameraLayer = window.L.layerGroup().addTo(leafletMap);
+  photoCameraLayer = window.L.layerGroup().addTo(leafletMap);
   realtimeTrafficLayer = window.L.layerGroup().addTo(leafletMap);
   leafletMap.on('click', onMapClickAddPoint);
+  leafletMap.on('popupopen', refreshPhotoCameraImages);
+  startPhotoCameraAutoRefresh();
 }
 
 function setMapFeedback(message = '', isError = false) {
@@ -638,6 +643,7 @@ async function resetMapFilters() {
   const itinisere = document.getElementById('filter-itinisere');
   const bisonAccidents = document.getElementById('filter-bison-accidents');
   const bisonCameras = document.getElementById('filter-bison-cameras');
+  const photoCameras = document.getElementById('filter-photo-cameras');
   const wazeClosedRoads = document.getElementById('filter-waze-closed-roads');
   const googleFlow = document.getElementById('filter-google-traffic-flow');
   if (hydro) hydro.checked = true;
@@ -646,6 +652,7 @@ async function resetMapFilters() {
   if (itinisere) itinisere.checked = true;
   if (bisonAccidents) bisonAccidents.checked = true;
   if (bisonCameras) bisonCameras.checked = true;
+  if (photoCameras) photoCameras.checked = true;
   if (wazeClosedRoads) wazeClosedRoads.checked = true;
   if (googleFlow) googleFlow.checked = false;
   if (searchLayer) searchLayer.clearLayers();
@@ -686,7 +693,7 @@ function toggleMapContrast() {
 
 function fitMapToData(showFeedback = false) {
   if (!leafletMap) return;
-  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsBoundaryLayer, pcsLayer, resourceLayer, searchLayer, customPointsLayer, mapPointsLayer, itinisereLayer, bisonLayer, bisonCameraLayer, realtimeTrafficLayer].filter(Boolean);
+  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsBoundaryLayer, pcsLayer, resourceLayer, searchLayer, customPointsLayer, mapPointsLayer, itinisereLayer, bisonLayer, bisonCameraLayer, photoCameraLayer, realtimeTrafficLayer].filter(Boolean);
   const bounds = window.L.latLngBounds([]);
   layers.forEach((layer) => {
     if (layer?.getBounds) {
@@ -1583,11 +1590,12 @@ async function buildItinisereMapPoints(events = []) {
 }
 
 async function renderTrafficOnMap() {
-  if (!itinisereLayer || !bisonLayer || !bisonCameraLayer || !realtimeTrafficLayer || typeof window.L === 'undefined') return;
+  if (!itinisereLayer || !bisonLayer || !bisonCameraLayer || !photoCameraLayer || !realtimeTrafficLayer || typeof window.L === 'undefined') return;
   const renderSequence = ++trafficRenderSequence;
   itinisereLayer.clearLayers();
   bisonLayer.clearLayers();
   bisonCameraLayer.clearLayers();
+  photoCameraLayer.clearLayers();
   realtimeTrafficLayer.clearLayers();
   mapStats.traffic = 0;
 
@@ -1647,6 +1655,18 @@ async function renderTrafficOnMap() {
       window.L.marker([coords.lat, coords.lon], { icon: pointIcon }).bindPopup(popupHtml).addTo(bisonCameraLayer);
     });
     mapStats.traffic += BISON_FUTE_CAMERAS.length;
+  }
+
+  const showPhotoCameras = document.getElementById('filter-photo-cameras')?.checked ?? true;
+  if (showPhotoCameras) {
+    ITINISERE_PHOTO_CAMERAS.forEach((camera) => {
+      const coords = normalizeMapCoordinates(camera.lat, camera.lon);
+      if (!coords) return;
+      const popupHtml = photoCameraPopupMarkup(camera);
+      const pointIcon = emojiDivIcon('📷', { iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -11] });
+      window.L.marker([coords.lat, coords.lon], { icon: pointIcon }).bindPopup(popupHtml).addTo(photoCameraLayer);
+    });
+    mapStats.traffic += ITINISERE_PHOTO_CAMERAS.length;
   }
 
   const showWazeClosedRoads = document.getElementById('filter-waze-closed-roads')?.checked ?? true;
@@ -3287,7 +3307,7 @@ function bindAppInteractions() {
       document.getElementById('users-error').textContent = sanitizeErrorMessage(error.message);
     }
   });
-  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'resource-type-filter', 'filter-itinisere', 'filter-bison-accidents', 'filter-bison-cameras', 'filter-waze-closed-roads'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'resource-type-filter', 'filter-itinisere', 'filter-bison-accidents', 'filter-bison-cameras', 'filter-photo-cameras', 'filter-waze-closed-roads'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       renderStations(cachedStations);
       await renderMunicipalitiesOnMap(cachedMunicipalities);
@@ -3308,6 +3328,7 @@ function logout() {
   if (liveEventsTimer) clearInterval(liveEventsTimer);
   if (apiPanelTimer) clearInterval(apiPanelTimer);
   if (apiResyncTimer) clearInterval(apiResyncTimer);
+  if (photoCameraRefreshTimer) clearInterval(photoCameraRefreshTimer);
   showHome();
 }
 
