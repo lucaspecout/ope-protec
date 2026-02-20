@@ -1905,8 +1905,17 @@ function renderItinisereEvents(events = [], targetId = 'itinerary-list') {
 }
 
 
+
+function sortPrefectureItemsByRecency(items = []) {
+  const toTimestamp = (value) => {
+    const parsed = Date.parse(String(value || '').trim());
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  return [...items].sort((a, b) => toTimestamp(b?.published_at) - toTimestamp(a?.published_at));
+}
+
 function renderPrefectureNews(prefecture = {}) {
-  const items = Array.isArray(prefecture.items) ? prefecture.items : [];
+  const items = sortPrefectureItemsByRecency(Array.isArray(prefecture.items) ? prefecture.items : []);
   const latestTitle = items[0]?.title || "Actualité Préfecture de l'Isère";
   setText('prefecture-news-title', latestTitle);
   setText('prefecture-status', `${prefecture.status || 'inconnu'} · ${items.length} actualité(s)`);
@@ -2374,7 +2383,7 @@ function renderSituationOverview() {
   const openLogs = logs.filter((log) => String(log.status || '').toLowerCase() !== 'clos');
   const closedLogs = logs.filter((log) => String(log.status || '').toLowerCase() === 'clos');
   const prefectureItems = Array.isArray(externalRisks?.prefecture_isere?.items)
-    ? externalRisks.prefecture_isere.items.slice(0, 4)
+    ? sortPrefectureItemsByRecency(externalRisks.prefecture_isere.items).slice(0, 4)
     : [];
   const kpiCards = [
     { label: 'Vigilance météo', value: vigilance, info: 'Source Météo-France', css: normalizeLevel(vigilance) },
