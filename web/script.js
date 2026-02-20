@@ -102,7 +102,57 @@ const BISON_FUTE_CAMERAS = [
   { name: 'A480/RN481 direction Ouest/Sud', road: 'A480 / RN481', lat: 45.21650958839951, lon: 5.6784500109717335, manager: 'AREA', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/at_area10.mp4' },
   { name: 'A48 aire de l’Île rose', road: 'A48', lat: 45.272598746702336, lon: 5.625897585313137, manager: 'AREA', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/at_area08.mp4' },
 ];
-const ITINISERE_PHOTO_CAMERAS = [];
+const ITINISERE_PHOTO_CAMERAS = [
+  {
+    name: 'La Diat',
+    road: 'D520B',
+    lat: 45.33981893625896,
+    lon: 5.807674386173609,
+    streamUrl: 'https://traffic.itiniserev2.cityway.fr/api/v1/Camera/D520BLaDiat',
+  },
+  {
+    name: 'Les Fontaines',
+    road: 'D525',
+    lat: 45.35574122911768,
+    lon: 5.992340889751027,
+    streamUrl: 'https://traffic.itiniserev2.cityway.fr/api/v1/Camera/D525LesFontaines',
+  },
+  {
+    name: "Le Collet d'Allevard",
+    road: 'D109',
+    lat: 45.395387104597916,
+    lon: 6.109804944464281,
+    streamUrl: 'https://traffic.itiniserev2.cityway.fr/api/v1/Camera/D109ColletAllevard',
+  },
+  {
+    name: 'Fond de France',
+    road: 'D525A',
+    lat: 45.28221936272868,
+    lon: 6.074009634997554,
+    streamUrl: 'https://traffic.itiniserev2.cityway.fr/api/v1/Camera/D525AFonddeFrance',
+  },
+  {
+    name: 'Rochetaillée',
+    road: 'D1091 / D526',
+    lat: 45.1144099370023,
+    lon: 6.005238134016191,
+    streamUrl: 'https://traffic.itiniserev2.cityway.fr/api/v1/Camera/D1091D526Rochetaillee',
+  },
+  {
+    name: 'Seiglières',
+    road: 'D111',
+    lat: 45.15474818390343,
+    lon: 5.869930116196619,
+    streamUrl: 'https://traffic.itiniserev2.cityway.fr/api/v1/Camera/D111Seiglieres',
+  },
+  {
+    name: 'Clavaux Grenoble',
+    road: 'D1091',
+    lat: 45.07592699481376,
+    lon: 5.883116163700038,
+    streamUrl: 'https://traffic.itiniserev2.cityway.fr/api/v1/Camera/D1091ClavauxGrenoble',
+  },
+];
 
 function cameraPopupMarkup(camera = {}) {
   const name = escapeHtml(camera.name || 'Caméra routière');
