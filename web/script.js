@@ -159,14 +159,18 @@ function cameraPopupMarkup(camera = {}) {
   const road = escapeHtml(camera.road || 'Réseau principal');
   const manager = escapeHtml(camera.manager || 'Bison Futé');
   const sourceUrl = escapeHtml(camera.streamUrl || 'https://www.bison-fute.gouv.fr');
+  const mediaType = camera.mediaType === 'image' ? 'image' : 'video';
+  const mediaMarkup = mediaType === 'image'
+    ? `<img src="${sourceUrl}" alt="Flux image caméra ${name}" loading="lazy" referrerpolicy="no-referrer" />`
+    : `<video muted autoplay loop playsinline preload="metadata" aria-label="Flux caméra ${name}">
+          <source src="${sourceUrl}" type="video/mp4" />
+        </video>`;
   return `
     <article class="camera-popup">
       <strong>🎥 ${name}</strong><br/>
       <span class="badge neutral">${road} · ${manager}</span>
       <a class="camera-popup__media" href="${sourceUrl}" target="_blank" rel="noreferrer" title="Ouvrir le flux caméra dans un nouvel onglet">
-        <video muted autoplay loop playsinline preload="metadata" aria-label="Flux caméra ${name}">
-          <source src="${sourceUrl}" type="video/mp4" />
-        </video>
+        ${mediaMarkup}
       </a>
       <a href="${sourceUrl}" target="_blank" rel="noreferrer">Voir le flux caméra</a>
     </article>
@@ -176,6 +180,7 @@ function cameraPopupMarkup(camera = {}) {
 function photoCameraPopupMarkup(camera = {}) {
   return cameraPopupMarkup({
     manager: 'Photo route',
+    mediaType: 'image',
     ...camera,
   });
 }
