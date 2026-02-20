@@ -620,6 +620,7 @@ def _vigicrues_build_station_entry(
     station_code: str,
     priority_names: list[str],
     force_include_codes: set[str] | None = None,
+    isere_catalog_codes: set[str] | None = None,
 ) -> dict[str, Any] | None:
     try:
         details = _http_get_json(
@@ -631,7 +632,8 @@ def _vigicrues_build_station_entry(
 
     commune_code = str(details.get("CdCommune") or "")
     force_include_codes = force_include_codes or set()
-    if not commune_code.startswith("38") and station_code not in force_include_codes:
+    isere_catalog_codes = isere_catalog_codes or set()
+    if not commune_code.startswith("38") and station_code not in force_include_codes and station_code not in isere_catalog_codes:
         return None
 
     coords = details.get("CoordStationHydro") or {}
@@ -765,9 +767,6 @@ def _fetch_vigicrues_isere_live(
         max_lookups = max(220, target_isere_count * 40)
         if sample_size > 0:
             max_lookups = min(max_lookups, sample_size)
-        if focused_codes:
-            max_lookups = min(max_lookups, max(target_isere_count * 3, len(focused_codes) + 8))
-
         candidate_codes = (focused_codes + prioritized_codes + remaining_codes + list(fallback_isere_codes))[:max_lookups]
         candidate_codes = [code for code in candidate_codes if code]
         if not candidate_codes:
@@ -787,7 +786,7 @@ def _fetch_vigicrues_isere_live(
         executor = ThreadPoolExecutor(max_workers=worker_count)
         force_include_codes = set(focused_codes)
         futures = [
-            executor.submit(_vigicrues_build_station_entry, source, code, priority_names, force_include_codes)
+            executor.submit(_vigicrues_build_station_entry, source, code, priority_names, force_include_codes, isere_catalog_codes)
             for code in unique_candidate_codes
         ]
         try:
@@ -1205,24 +1204,35 @@ def _fetch_waze_isere_traffic_live() -> dict[str, Any]:
         jams = payload.get("jams") or payload.get("traffic") or []
 
         incidents: list[dict[str, Any]] = []
+        incident_keys: set[tuple[Any, ...]] = set()
         for alert in alerts[:250]:
             subtype = str(alert.get("subtype") or alert.get("type") or "incident").lower()
             if subtype in {"jam", "road_closed"}:
                 severity = "rouge" if subtype == "road_closed" else "orange"
             else:
                 severity = "jaune"
-            incidents.append(
-                {
-                    "kind": "alert",
-                    "title": alert.get("title") or alert.get("street") or "Signalement trafic",
-                    "description": alert.get("reportDescription") or alert.get("description") or "",
-                    "subtype": subtype,
-                    "severity": severity,
-                    "lat": alert.get("location", {}).get("y"),
-                    "lon": alert.get("location", {}).get("x"),
-                    "reliability": alert.get("reliability"),
-                }
+            incident = {
+                "kind": "alert",
+                "title": alert.get("title") or alert.get("street") or "Signalement trafic",
+                "description": alert.get("reportDescription") or alert.get("description") or "",
+                "subtype": subtype,
+                "severity": severity,
+                "lat": alert.get("location", {}).get("y"),
+                "lon": alert.get("location", {}).get("x"),
+                "reliability": alert.get("reliability"),
+            }
+            key = (
+                incident["kind"],
+                incident.get("subtype"),
+                incident.get("title"),
+                incident.get("lat"),
+                incident.get("lon"),
+                incident.get("description"),
             )
+            if key in incident_keys:
+                continue
+            incident_keys.add(key)
+            incidents.append(incident)
 
         for jam in jams[:250]:
             line = jam.get("line") or []
@@ -1237,18 +1247,27 @@ def _fetch_waze_isere_traffic_live() -> dict[str, Any]:
                 severity = "orange"
             else:
                 severity = "jaune"
-            incidents.append(
-                {
-                    "kind": "jam",
-                    "title": jam.get("street") or "Ralentissement",
-                    "description": f"Vitesse {int(speed)} km/h · retard {int(delay // 60)} min",
-                    "severity": severity,
-                    "lat": first.get("y"),
-                    "lon": first.get("x"),
-                    "line": [{"lat": point.get("y"), "lon": point.get("x")} for point in line[:80]],
-                    "length": jam.get("length"),
-                }
+            incident = {
+                "kind": "jam",
+                "title": jam.get("street") or "Ralentissement",
+                "description": f"Vitesse {int(speed)} km/h · retard {int(delay // 60)} min",
+                "severity": severity,
+                "lat": first.get("y"),
+                "lon": first.get("x"),
+                "line": [{"lat": point.get("y"), "lon": point.get("x")} for point in line[:80]],
+                "length": jam.get("length"),
+            }
+            key = (
+                incident["kind"],
+                incident.get("title"),
+                incident.get("lat"),
+                incident.get("lon"),
+                incident.get("description"),
             )
+            if key in incident_keys:
+                continue
+            incident_keys.add(key)
+            incidents.append(incident)
 
         return {
             "service": "Waze",
