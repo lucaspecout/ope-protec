@@ -94,12 +94,31 @@ const BISON_CORRIDORS = [
   { name: 'N85 · Route Napoléon', points: [[45.1885, 5.7245], [44.9134, 5.7861]] },
 ];
 const BISON_FUTE_CAMERAS = [
-  { name: 'A48 · Voreppe', road: 'A48', lat: 45.2949, lon: 5.6388, manager: 'AREA', url: 'https://www.bison-fute.gouv.fr' },
-  { name: 'A41 · Crolles', road: 'A41', lat: 45.2878, lon: 5.8836, manager: 'AREA', url: 'https://www.bison-fute.gouv.fr' },
-  { name: 'A43 · Bourgoin-Jallieu', road: 'A43', lat: 45.5776, lon: 5.2806, manager: 'AREA', url: 'https://www.bison-fute.gouv.fr' },
-  { name: 'A49 · Rives / Beaucroissant', road: 'A49', lat: 45.3609, lon: 5.4754, manager: 'AREA', url: 'https://www.bison-fute.gouv.fr' },
-  { name: 'N85 · Vizille', road: 'N85', lat: 45.0766, lon: 5.7707, manager: 'DIR Centre-Est', url: 'https://www.bison-fute.gouv.fr' },
+  { name: 'Meylan N87 PR10+590', road: 'N87', lat: 45.201217282265034, lon: 5.7812657653824875, manager: 'DIR Centre-Est', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/nce_27.mp4' },
+  { name: 'Eybens N87 PR4+200', road: 'N87', lat: 45.15652758486637, lon: 5.7475476745737355, manager: 'DIR Centre-Est', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/nce_31.mp4' },
+  { name: 'A480 Grenoble vers Grenoble Sud', road: 'A480', lat: 45.15873823197743, lon: 5.7005336069172925, manager: 'AREA', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/at_area09.mp4' },
+  { name: 'A480/RN481 direction Ouest/Sud', road: 'A480 / RN481', lat: 45.21650958839951, lon: 5.6784500109717335, manager: 'AREA', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/at_area10.mp4' },
+  { name: 'A48 aire de l’Île rose', road: 'A48', lat: 45.272598746702336, lon: 5.625897585313137, manager: 'AREA', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/at_area08.mp4' },
 ];
+
+function cameraPopupMarkup(camera = {}) {
+  const name = escapeHtml(camera.name || 'Caméra routière');
+  const road = escapeHtml(camera.road || 'Réseau principal');
+  const manager = escapeHtml(camera.manager || 'Bison Futé');
+  const sourceUrl = escapeHtml(camera.streamUrl || 'https://www.bison-fute.gouv.fr');
+  return `
+    <article class="camera-popup">
+      <strong>🎥 ${name}</strong><br/>
+      <span class="badge neutral">${road} · ${manager}</span>
+      <a class="camera-popup__media" href="${sourceUrl}" target="_blank" rel="noreferrer" title="Ouvrir le flux caméra dans un nouvel onglet">
+        <video muted autoplay loop playsinline preload="metadata" aria-label="Flux caméra ${name}">
+          <source src="${sourceUrl}" type="video/mp4" />
+        </video>
+      </a>
+      <a href="${sourceUrl}" target="_blank" rel="noreferrer">Voir le flux caméra</a>
+    </article>
+  `;
+}
 
 const homeView = document.getElementById('home-view');
 const loginView = document.getElementById('login-view');
@@ -1623,7 +1642,7 @@ async function renderTrafficOnMap() {
     BISON_FUTE_CAMERAS.forEach((camera) => {
       const coords = normalizeMapCoordinates(camera.lat, camera.lon);
       if (!coords) return;
-      const popupHtml = `<strong>🎥 ${escapeHtml(camera.name || 'Caméra routière')}</strong><br/><span class="badge neutral">${escapeHtml(camera.road || 'Réseau principal')} · ${escapeHtml(camera.manager || 'Bison Futé')}</span><br/><a href="${escapeHtml(camera.url || 'https://www.bison-fute.gouv.fr')}" target="_blank" rel="noreferrer">Ouvrir la carte Bison Futé</a>`;
+      const popupHtml = cameraPopupMarkup(camera);
       const pointIcon = emojiDivIcon('🎥', { iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -11] });
       window.L.marker([coords.lat, coords.lon], { icon: pointIcon }).bindPopup(popupHtml).addTo(bisonCameraLayer);
     });
