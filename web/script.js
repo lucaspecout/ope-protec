@@ -103,16 +103,6 @@ const BISON_FUTE_CAMERAS = [
   { name: 'A48 aire de l’Île rose', road: 'A48', lat: 45.272598746702336, lon: 5.625897585313137, manager: 'AREA', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/at_area08.mp4' },
 ];
 
-const ITINISERE_PHOTO_CAMERAS = [
-  { name: 'La Diat', road: 'D520B', lat: 45.33981893625896, lon: 5.807674386173609, manager: 'Itinisère', imageUrl: 'https://traffic.itiniserev2.cityway.fr/api/v1/Camera/D520BLaDiat' },
-  { name: 'Les Fontaines', road: 'D525', lat: 45.35574122911768, lon: 5.992340889751027, manager: 'Itinisère', imageUrl: 'https://traffic.itiniserev2.cityway.fr/api/v1/Camera/D525LesFontaines' },
-  { name: "Le Collet d'Allevard", road: 'D109', lat: 45.395387104597916, lon: 6.109804944464281, manager: 'Itinisère', imageUrl: 'https://traffic.itiniserev2.cityway.fr/api/v1/Camera/D109ColletAllevard' },
-  { name: 'Fond de France', road: 'D525A', lat: 45.28221936272868, lon: 6.074009634997554, manager: 'Itinisère', imageUrl: 'https://traffic.itiniserev2.cityway.fr/api/v1/Camera/D525AFonddeFrance' },
-  { name: 'Rochetaillée', road: 'D1091 / D526', lat: 45.1144099370023, lon: 6.005238134016191, manager: 'Itinisère', imageUrl: 'https://traffic.itiniserev2.cityway.fr/api/v1/Camera/D1091D526Rochetaillee' },
-  { name: 'Seiglières', road: 'D111', lat: 45.15474818390343, lon: 5.869930116196619, manager: 'Itinisère', imageUrl: 'https://traffic.itiniserev2.cityway.fr/api/v1/Camera/D111Seiglieres' },
-  { name: 'Clavaux Grenoble', road: 'D1091', lat: 45.07592699481376, lon: 5.883116163700038, manager: 'Itinisère', imageUrl: 'https://traffic.itiniserev2.cityway.fr/api/v1/Camera/D1091ClavauxGrenoble' },
-];
-
 function cameraPopupMarkup(camera = {}) {
   const name = escapeHtml(camera.name || 'Caméra routière');
   const road = escapeHtml(camera.road || 'Réseau principal');
@@ -130,38 +120,6 @@ function cameraPopupMarkup(camera = {}) {
       <a href="${sourceUrl}" target="_blank" rel="noreferrer">Voir le flux caméra</a>
     </article>
   `;
-}
-
-function photoCameraPopupMarkup(camera = {}) {
-  const name = escapeHtml(camera.name || 'Caméra photo');
-  const road = escapeHtml(camera.road || 'Réseau départemental');
-  const manager = escapeHtml(camera.manager || 'Itinisère');
-  const sourceUrl = escapeHtml(camera.imageUrl || 'https://www.itinisere.fr');
-  return `
-    <article class="camera-popup camera-photo-popup">
-      <strong>📷 ${name}</strong><br/>
-      <span class="badge neutral">${road} · ${manager}</span>
-      <a class="camera-popup__media" href="${sourceUrl}" target="_blank" rel="noreferrer" title="Ouvrir la photo caméra dans un nouvel onglet">
-        <img class="camera-photo-popup__image" src="${sourceUrl}" data-base-url="${sourceUrl}" alt="Vue caméra ${name}" loading="lazy" />
-      </a>
-      <p class="muted">Mise à jour automatique toutes les 60 secondes.</p>
-      <a href="${sourceUrl}" target="_blank" rel="noreferrer">Voir l'image source</a>
-    </article>
-  `;
-}
-
-function refreshPhotoCameraImages() {
-  const bucket = Math.floor(Date.now() / 60000);
-  document.querySelectorAll('.camera-photo-popup__image[data-base-url]').forEach((img) => {
-    const baseUrl = img.getAttribute('data-base-url');
-    if (!baseUrl) return;
-    img.src = `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}_=${bucket}`;
-  });
-}
-
-function startPhotoCameraAutoRefresh() {
-  if (photoCameraRefreshTimer) clearInterval(photoCameraRefreshTimer);
-  photoCameraRefreshTimer = setInterval(refreshPhotoCameraImages, 60000);
 }
 
 const homeView = document.getElementById('home-view');
