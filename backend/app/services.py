@@ -1353,6 +1353,33 @@ def _resolve_prefecture_news_title(title: str, link: str) -> str:
     return "Actualité Préfecture"
 
 
+def _parse_prefecture_published_date(value: str) -> datetime:
+    raw = (value or "").strip()
+    if not raw:
+        return datetime.min
+
+    normalized = re.sub(r"\s*\([^)]*\)$", "", raw)
+    parsed_formats = (
+        "%a, %d %b %Y %H:%M:%S %z",
+        "%Y-%m-%dT%H:%M:%S%z",
+        "%Y-%m-%dT%H:%M:%SZ",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d",
+    )
+    for fmt in parsed_formats:
+        try:
+            parsed = datetime.strptime(normalized, fmt)
+            return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
+        except ValueError:
+            continue
+
+    try:
+        parsed_iso = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+        return parsed_iso.replace(tzinfo=None) if parsed_iso.tzinfo else parsed_iso
+    except ValueError:
+        return datetime.min
+
+
 def _fetch_prefecture_isere_news_live(limit: int = 6) -> dict[str, Any]:
     source = "https://www.isere.gouv.fr/syndication/flux/actualites"
     try:
@@ -1361,7 +1388,7 @@ def _fetch_prefecture_isere_news_live(limit: int = 6) -> dict[str, Any]:
         namespace = {"atom": "http://www.w3.org/2005/Atom"}
         items: list[dict[str, Any]] = []
 
-        for item in root.findall(".//item")[:limit]:
+        for item in root.findall(".//item"):
             link = (item.findtext("link") or "https://www.isere.gouv.fr").strip()
             title = _resolve_prefecture_news_title(item.findtext("title") or "", link)
             description_html = (item.findtext("description") or "").strip()
@@ -1377,7 +1404,7 @@ def _fetch_prefecture_isere_news_live(limit: int = 6) -> dict[str, Any]:
             )
 
         if not items:
-            for entry in root.findall(".//atom:entry", namespace)[:limit]:
+            for entry in root.findall(".//atom:entry", namespace):
                 link_tag = entry.find("atom:link", namespace)
                 link = (link_tag.get("href") if link_tag is not None else "") or "https://www.isere.gouv.fr"
                 title = _resolve_prefecture_news_title(entry.findtext("atom:title", namespaces=namespace) or "", link)
@@ -1393,11 +1420,13 @@ def _fetch_prefecture_isere_news_live(limit: int = 6) -> dict[str, Any]:
                     }
                 )
 
+        items.sort(key=lambda article: _parse_prefecture_published_date(article.get("published_at") or ""), reverse=True)
+
         return {
             "service": "Préfecture de l'Isère",
             "status": "online",
             "source": source,
-            "items": items,
+            "items": items[:limit],
             "updated_at": datetime.utcnow().isoformat() + "Z",
         }
     except (ET.ParseError, HTTPError, URLError, TimeoutError, ValueError) as exc:
