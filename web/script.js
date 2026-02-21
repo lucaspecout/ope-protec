@@ -2254,19 +2254,21 @@ async function openMunicipalityFile(municipalityId, fileId) {
 
 function closeMunicipalityDetailsModal() {
   const modal = document.getElementById('municipality-details-modal');
+  cleanupMunicipalityPreview();
+  if (!modal) return;
+  if (typeof modal.close === 'function' && modal.open) {
+    modal.close();
+    return;
+  }
+  modal.open = false;
+  modal.removeAttribute('open');
+}
+
+function cleanupMunicipalityPreview() {
   if (currentMunicipalityPreviewUrl) {
     URL.revokeObjectURL(currentMunicipalityPreviewUrl);
     currentMunicipalityPreviewUrl = null;
   }
-  if (!modal) return;
-  try {
-    if (typeof modal.close === 'function' && modal.open) modal.close();
-  } catch (_) {
-    // ignore close errors and fallback to attribute cleanup
-  }
-
-  modal.open = false;
-  modal.removeAttribute('open');
 }
 
 function openMunicipalityDetailsInlineFallback(municipality) {
@@ -3281,8 +3283,10 @@ function bindAppInteractions() {
     closeMunicipalityDetailsModal();
   });
   document.getElementById('municipality-details-modal')?.addEventListener('cancel', (event) => {
-    event.preventDefault();
-    closeMunicipalityDetailsModal();
+    cleanupMunicipalityPreview();
+  });
+  document.getElementById('municipality-details-modal')?.addEventListener('close', () => {
+    cleanupMunicipalityPreview();
   });
   document.getElementById('municipality-details-modal')?.addEventListener('click', (event) => {
     if (event.target?.id === 'municipality-details-modal') closeMunicipalityDetailsModal();
