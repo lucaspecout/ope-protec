@@ -1301,43 +1301,99 @@ def _sncf_isere_alert_type(text: str) -> str:
     return "autre"
 
 
+def _sncf_siri_pick_text(element: ET.Element, tag: str) -> str:
+    namespace = {"s": "http://www.siri.org.uk/siri", "xml": "http://www.w3.org/XML/1998/namespace"}
+    candidates = element.findall(f"s:{tag}", namespace)
+    if not candidates:
+        return ""
+    for candidate in candidates:
+        lang = (candidate.attrib.get("{http://www.w3.org/XML/1998/namespace}lang") or "").lower()
+        if lang in {"fr", "fr-fr"}:
+            return (candidate.text or "").strip()
+    return (candidates[0].text or "").strip()
+
+
+def _sncf_isere_related_text(text: str) -> bool:
+    normalized = unicodedata.normalize("NFKD", (text or "").lower())
+    flattened = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    keywords = (
+        "isere",
+        "grenoble",
+        "bourgoin",
+        "voiron",
+        "vienne",
+        "la tour-du-pin",
+        "pont-de-cheruy",
+        "isle d'abeau",
+        "saint-egreve",
+        "saint-marcellin",
+        "romesche",
+        "roussillon",
+        "chasse-sur-rhone",
+    )
+    return any(keyword in flattened for keyword in keywords)
+
+
+def _sncf_severity_to_level(value: str) -> str:
+    lowered = (value or "").strip().lower()
+    if lowered in {"verysevere", "severe"}:
+        return "rouge"
+    if lowered in {"normal", "unknown"}:
+        return "jaune"
+    return "orange" if lowered else "jaune"
+
+
 def _fetch_sncf_isere_alerts_live(limit: int = 25) -> dict[str, Any]:
-    source = "https://www.itinisere.fr/fr/rss/Disruptions"
-    base_payload = _fetch_itinisere_disruptions_live(limit=80)
-    if base_payload.get("status") not in {"online", "partial"}:
+    source = "https://proxy.transport.data.gouv.fr/resource/sncf-siri-lite-situation-exchange"
+    namespace = {"s": "http://www.siri.org.uk/siri"}
+    try:
+        payload = _http_get_text(source, timeout=18)
+        root = ET.fromstring(payload)
+    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ET.ParseError, ValueError) as exc:
         return {
             "service": "SNCF Isère",
             "status": "degraded",
             "source": source,
             "alerts": [],
             "alerts_total": 0,
-            "error": base_payload.get("error") or "Flux indisponible",
+            "error": str(exc),
             "updated_at": datetime.utcnow().isoformat() + "Z",
         }
 
     alerts: list[dict[str, Any]] = []
-    for event in base_payload.get("events") or []:
-        title = str(event.get("title") or "")
-        description = str(event.get("description") or "")
-        text = f"{title} {description}".lower()
-        if not any(token in text for token in ("sncf", "ter", "train", "ferroviaire", "gare")):
+    for situation in root.findall(".//s:PtSituationElement", namespace):
+        participant = (situation.findtext("s:ParticipantRef", namespaces=namespace) or "").strip()
+        summary = _sncf_siri_pick_text(situation, "Summary")
+        description = _sncf_siri_pick_text(situation, "Description")
+        detail = _sncf_siri_pick_text(situation, "Detail")
+        content = " ".join(part for part in (summary, description, unescape(_strip_html_tags(detail))) if part).strip()
+        if not content:
             continue
-        alert_type = _sncf_isere_alert_type(text)
+
+        searchable_text = f"{participant} {content}".lower()
+        if not _sncf_isere_related_text(searchable_text):
+            continue
+
+        alert_type = _sncf_isere_alert_type(searchable_text)
         if alert_type not in {"accident", "travaux"}:
             continue
+
+        start_time = (situation.findtext("s:ValidityPeriod/s:StartTime", namespaces=namespace) or "").strip()
+        severity = _sncf_severity_to_level(situation.findtext("s:Severity", namespaces=namespace) or "")
         alerts.append(
             {
-                "title": title or "Alerte SNCF",
-                "description": description[:400],
+                "title": summary or "Alerte SNCF",
+                "description": content[:400],
                 "type": alert_type,
-                "severity": event.get("severity") or "jaune",
-                "locations": event.get("locations") or [],
-                "roads": event.get("roads") or [],
-                "link": event.get("link") or source,
-                "published_at": event.get("published_at") or "",
+                "severity": severity,
+                "locations": [participant] if participant else [],
+                "roads": [],
+                "link": source,
+                "published_at": start_time,
             }
         )
 
+    alerts.sort(key=lambda alert: alert.get("published_at", ""), reverse=True)
     return {
         "service": "SNCF Isère",
         "status": "online",

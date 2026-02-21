@@ -82,7 +82,7 @@ Retourne un bloc consolidé :
 - `vigicrues` : état de connexion, stations du département de l'Isère, vigilances des tronçons associés et niveau d'alerte eau courant (`vert`, `jaune`, `orange`, `rouge`).
 - `georisques` : synthèse multi-communes Isère (sismicité max, AZI, PPRN/PPRM/PPRT, DICRIM, TIM, information préventive risques, radon, mouvements de terrain et cavités).
 - `prefecture_isere` : flux RSS des actualités de la Préfecture de l'Isère (titres, dates, liens).
-- `sncf_isere` : alertes SNCF filtrées sur l'Isère (accidents et travaux de voie) consolidées depuis le flux perturbations départemental.
+- `sncf_isere` : alertes SNCF filtrées sur l'Isère (accidents et travaux de voie) issues du flux temps réel SNCF (SIRI SX Lite / GTFS-RT Service Alerts).
 - `atmo_aura` : indice ATMO (J/J+1), commentaire et statut d'épisode pollution via Atmo Auvergne-Rhône-Alpes (commune de Grenoble).
 
 
