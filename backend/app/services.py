@@ -1540,24 +1540,73 @@ def _fetch_georisques_v2_collection(
         raise ValueError("Clé API Géorisques absente")
 
     headers = {"Authorization": f"Bearer {token}"}
-    query = {"departement": departement, "pageSize": page_size, "pageNumber": 0}
-    if extra_query:
-        query.update(extra_query)
+    base_query = deepcopy(extra_query) if extra_query else {}
 
-    first_page = _http_get_json(
-        f"https://www.georisques.gouv.fr/api/v2/{endpoint}?{urlencode(query, doseq=True)}",
-        headers=headers,
-    )
+    if not any(key in base_query for key in ("departement", "department", "codeDepartement")):
+        base_query["departement"] = departement
+
+    query_candidates: list[tuple[dict[str, Any], tuple[str, str] | None]] = []
+    pagination_variants = [
+        ("pageSize", "pageNumber"),
+        ("size", "page"),
+        ("page_size", "page"),
+    ]
+
+    for dept_key in ("departement", "department", "codeDepartement"):
+        candidate_base = deepcopy(base_query)
+        if "departement" in candidate_base and dept_key != "departement":
+            candidate_base[dept_key] = candidate_base.pop("departement")
+        elif dept_key != "departement" and "departement" not in candidate_base and dept_key not in candidate_base and "department" in candidate_base:
+            candidate_base[dept_key] = candidate_base.pop("department")
+        for size_key, page_key in pagination_variants:
+            candidate = deepcopy(candidate_base)
+            candidate[size_key] = page_size
+            candidate[page_key] = 0
+            query_candidates.append((candidate, (size_key, page_key)))
+        query_candidates.append((candidate_base, None))
+
+    deduped_candidates: list[tuple[dict[str, Any], tuple[str, str] | None]] = []
+    seen: set[str] = set()
+    for candidate, pagination in query_candidates:
+        candidate_key = json.dumps(candidate, sort_keys=True, default=str)
+        if candidate_key in seen:
+            continue
+        seen.add(candidate_key)
+        deduped_candidates.append((candidate, pagination))
+
+    last_error: Exception | None = None
+    first_page: dict[str, Any] | None = None
+    page_config: tuple[str, str] | None = None
+    selected_query: dict[str, Any] | None = None
+
+    for candidate_query, pagination in deduped_candidates:
+        try:
+            payload = _http_get_json(
+                f"https://www.georisques.gouv.fr/api/v2/{endpoint}?{urlencode(candidate_query, doseq=True)}",
+                headers=headers,
+            )
+            first_page = payload if isinstance(payload, dict) else {}
+            selected_query = deepcopy(candidate_query)
+            page_config = pagination
+            break
+        except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+            last_error = exc
+
+    if first_page is None or selected_query is None:
+        raise last_error or ValueError(f"Réponse Géorisques vide pour {endpoint}")
+
     content = list(first_page.get("content") or [])
-    total_pages = int(first_page.get("totalPages") or 1)
+    total_pages = int(first_page.get("totalPages") or first_page.get("total_pages") or 1)
 
-    for page_number in range(1, total_pages):
-        query["pageNumber"] = page_number
-        page_payload = _http_get_json(
-            f"https://www.georisques.gouv.fr/api/v2/{endpoint}?{urlencode(query, doseq=True)}",
-            headers=headers,
-        )
-        content.extend(page_payload.get("content") or [])
+    if page_config:
+        _, page_key = page_config
+        for page_number in range(1, total_pages):
+            selected_query[page_key] = page_number
+            page_payload = _http_get_json(
+                f"https://www.georisques.gouv.fr/api/v2/{endpoint}?{urlencode(selected_query, doseq=True)}",
+                headers=headers,
+            )
+            content.extend(page_payload.get("content") or [])
 
     return {
         "total_elements": int(first_page.get("totalElements") or len(content)),
