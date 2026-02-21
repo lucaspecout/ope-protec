@@ -1968,6 +1968,29 @@ function sanitizeMeteoInformation(info = '') {
   return text;
 }
 
+function bisonSquareCell(label, level) {
+  const normalized = normalizeLevel(level || 'inconnu');
+  const safeLabel = escapeHtml(label);
+  const safeLevel = escapeHtml(level || 'inconnu');
+  return `<div class="bison-isere-square__cell ${normalized}"><span>${safeLabel}</span><strong>${safeLevel}</strong></div>`;
+}
+
+function renderVigieauAlerts(vigieau = {}) {
+  const alerts = Array.isArray(vigieau.alerts) ? vigieau.alerts : [];
+  const maxLevel = vigieau.max_level || 'vert';
+  setRiskText('vigieau-status', `${vigieau.status || 'inconnu'} · niveau ${normalizeLevel(maxLevel)}`, maxLevel);
+  setText('vigieau-info', `${alerts.length} alerte(s) restriction d'eau · source Vigieau`);
+  setHtml('vigieau-list', alerts.slice(0, 8).map((alert) => {
+    const zone = escapeHtml(alert.zone || 'Zone Isère');
+    const level = escapeHtml(alert.level || 'non définie');
+    const measure = escapeHtml(alert.measure || 'Restriction en vigueur');
+    const period = alert.start_date || alert.end_date
+      ? `<br><span class="muted">Période: ${escapeHtml(alert.start_date || '?')} → ${escapeHtml(alert.end_date || '?')}</span>`
+      : '';
+    return `<li><strong>${zone}</strong> · <span style="color:${levelColor(alert.level_color || 'vert')}">${level}</span><br>${measure}${period}</li>`;
+  }).join('') || "<li>Aucune restriction d'eau active signalée pour l'Isère.</li>");
+}
+
 function renderBisonFuteSummary(bison = {}) {
   cachedBisonFute = bison || {};
   const today = bison.today || {};
@@ -1983,6 +2006,10 @@ function renderBisonFuteSummary(bison = {}) {
   setText('bison-info', `National J0: ${nationalToday.departure || 'inconnu'} / ${nationalToday.return || 'inconnu'} · J1: ${nationalTomorrow.departure || 'inconnu'} / ${nationalTomorrow.return || 'inconnu'}`);
   setText('map-bison-isere', `${isereToday.departure || 'inconnu'} (retour ${isereToday.return || 'inconnu'})`);
   setText('home-feature-bison-isere', `${isereToday.departure || 'inconnu'} / ${isereToday.return || 'inconnu'}`);
+  setHtml('bison-isere-square', [
+    bisonSquareCell('Départs', isereToday.departure || 'inconnu'),
+    bisonSquareCell('Retours', isereToday.return || 'inconnu'),
+  ].join(''));
 
   const bisonMarkup = [
     `<li><strong>Aujourd'hui (${today.date || '-'})</strong><br>Isère départ: ${isereToday.departure || 'inconnu'} · Isère retour: ${isereToday.return || 'inconnu'}<br>National départ: ${nationalToday.departure || 'inconnu'} · National retour: ${nationalToday.return || 'inconnu'}<br><a href="https://www.bison-fute.gouv.fr" target="_blank" rel="noreferrer">Voir la carte Bison Futé</a></li>`,
@@ -2472,6 +2499,7 @@ function buildCriticalRisksMarkup(dashboard = {}, externalRisks = {}) {
 
   risks.push(`<li><strong>Itinisère</strong> · ${(itinisereEvents || []).length} événement(s) actif(s) · Statut ${escapeHtml(externalRisks?.itinisere?.status || 'inconnu')}</li>`);
   risks.push(`<li><strong>Bison Futé</strong> · Départs ${escapeHtml(bisonIsere.departure || 'inconnu')} · Retours ${escapeHtml(bisonIsere.return || 'inconnu')}</li>`);
+  risks.push(`<li><strong>Vigieau</strong> · ${escapeHtml(String((externalRisks?.vigieau?.alerts || []).length))} restriction(s) d'eau active(s) en Isère</li>`);
   risks.push(`<li><strong>Géorisques</strong> · Sismicité ${escapeHtml(georisques.highest_seismic_zone_label || 'inconnue')} · ${Number(georisques.flood_documents_total ?? 0)} document(s) inondation</li>`);
 
   const fromDashboard = Array.isArray(dashboard?.latest_logs) ? dashboard.latest_logs : [];
@@ -2581,6 +2609,7 @@ function renderExternalRisks(data = {}) {
   const realtimeTraffic = data?.waze || {};
   cachedRealtimeTraffic = realtimeTraffic || {};
   const prefecture = data?.prefecture_isere || {};
+  const vigieau = data?.vigieau || {};
   const georisquesPayload = data?.georisques || {};
   const georisques = georisquesPayload?.data && typeof georisquesPayload.data === 'object'
     ? { ...georisquesPayload.data, ...georisquesPayload }
@@ -2599,6 +2628,7 @@ function renderExternalRisks(data = {}) {
   setText('itinisere-status', `${itinisere.status || 'inconnu'} · ${itinisereTotal} événements`);
   renderBisonFuteSummary(bisonFute);
   renderPrefectureNews(prefecture);
+  renderVigieauAlerts(vigieau);
   setRiskText('georisques-status', `${georisques.status || 'inconnu'} · sismicité ${georisques.highest_seismic_zone_label || 'inconnue'}`, georisques.status === 'online' ? 'vert' : 'jaune');
   setText('georisques-info', `${georisques.flood_documents_total ?? 0} AZI · ${georisques.ppr_total ?? 0} PPR · ${georisques.ground_movements_total ?? 0} mouvements`);
   renderGeorisquesDetails(georisques);
@@ -2643,6 +2673,7 @@ function renderApiInterconnections(data = {}) {
     { key: 'waze', label: 'Trafic temps réel (Waze)', level: `${data.waze?.incidents_total || 0} incident(s)`, details: data.waze?.source || '-' },
     { key: 'georisques', label: 'Géorisques', level: data.georisques?.highest_seismic_zone_label || 'inconnue', details: `${data.georisques?.flood_documents_total ?? 0} document(s) inondation` },
     { key: 'prefecture_isere', label: "Préfecture Isère · Actualités", level: `${(data.prefecture_isere?.items || []).length} actualité(s)`, details: data.prefecture_isere?.source || '-' },
+    { key: 'vigieau', label: 'Vigieau · Restrictions eau', level: `${(data.vigieau?.alerts || []).length} alerte(s)`, details: data.vigieau?.source || '-' },
   ];
 
   const cards = services.map((service) => {

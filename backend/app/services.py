@@ -287,6 +287,7 @@ _BISON_CACHE_TTL_SECONDS = 600
 _WAZE_CACHE_TTL_SECONDS = 120
 _GEORISQUES_CACHE_TTL_SECONDS = 900
 _PREFECTURE_CACHE_TTL_SECONDS = 600
+_VIGIEAU_CACHE_TTL_SECONDS = 900
 
 _vigicrues_cache_lock = Lock()
 _vigicrues_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
@@ -300,6 +301,8 @@ _georisques_cache_lock = Lock()
 _georisques_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _prefecture_cache_lock = Lock()
 _prefecture_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_vigieau_cache_lock = Lock()
+_vigieau_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 
 
 def _cached_external_payload(
@@ -385,7 +388,7 @@ def _fetch_meteo_france_isere_live() -> dict[str, Any]:
             {"domain": "38", "report_type": "vigilanceV6", "report_subtype": "Bulletin de suivi", "echeance": "J1"},
             version="v2",
         )
-    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
         return {
             "service": "Météo-France Vigilance",
             "department": "Isère (38)",
@@ -483,7 +486,7 @@ def fetch_isere_boundary_geojson() -> dict[str, Any]:
             "geometry": geometry,
             "updated_at": datetime.utcnow().isoformat() + "Z",
         }
-    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
         return {
             "status": "degraded",
             "source": source_url,
@@ -1262,7 +1265,7 @@ def _fetch_waze_isere_traffic_live() -> dict[str, Any]:
             "incidents_total": len(incidents),
             "updated_at": datetime.utcnow().isoformat() + "Z",
         }
-    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
         return {
             "service": "Waze",
             "status": "degraded",
@@ -1490,7 +1493,7 @@ def _fetch_bison_fute_traffic_live() -> dict[str, Any]:
             "tomorrow": pick_entry(tomorrow_index),
             "updated_at": datetime.utcnow().isoformat() + "Z",
         }
-    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
         return {
             "service": "Bison Futé",
             "status": "degraded",
@@ -1516,6 +1519,144 @@ def fetch_bison_fute_traffic(force_refresh: bool = False) -> dict[str, Any]:
         ttl_seconds=_BISON_CACHE_TTL_SECONDS,
         force_refresh=force_refresh,
         loader=_fetch_bison_fute_traffic_live,
+    )
+
+
+def _vigieau_level_rank(level: str) -> int:
+    return {
+        "vigilance": 1,
+        "alerte": 2,
+        "alerte renforcee": 3,
+        "crise": 4,
+    }.get(str(level or "").strip().lower(), 0)
+
+
+def _normalize_vigieau_level(value: str) -> str:
+    raw = str(value or "").strip().lower()
+    if "crise" in raw:
+        return "crise"
+    if "renforc" in raw:
+        return "alerte renforcée"
+    if "alerte" in raw:
+        return "alerte"
+    if "vigilance" in raw:
+        return "vigilance"
+    return "non définie"
+
+
+def _vigieau_level_to_color(level: str) -> str:
+    normalized = str(level or "").lower()
+    if "crise" in normalized:
+        return "rouge"
+    if "renforc" in normalized:
+        return "orange"
+    if "alerte" in normalized:
+        return "jaune"
+    if "vigilance" in normalized:
+        return "vert"
+    return "vert"
+
+
+def _vigieau_list(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if not isinstance(payload, dict):
+        return []
+    for key in ("restrictions", "data", "results", "items", "records"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, dict)]
+    return []
+
+
+def _fetch_vigieau_restrictions_live() -> dict[str, Any]:
+    source_page = "https://www.vigieau.gouv.fr"
+    candidates = [
+        "https://www.vigieau.gouv.fr/api/v1/restrictions?code_departement=38",
+        "https://www.vigieau.gouv.fr/api/v1/restrictions?departement=38",
+        "https://www.vigieau.gouv.fr/api/restrictions?code_departement=38",
+    ]
+    last_error: Exception | None = None
+
+    for candidate in candidates:
+        try:
+            payload = _http_get_json(candidate, timeout=18)
+            restrictions = _vigieau_list(payload)
+            alerts: list[dict[str, Any]] = []
+            for item in restrictions:
+                dept = str(
+                    item.get("code_departement")
+                    or item.get("departement")
+                    or item.get("codeDepartement")
+                    or ""
+                ).strip()
+                if dept and dept != "38":
+                    continue
+                level = _normalize_vigieau_level(
+                    item.get("niveau_gravite")
+                    or item.get("niveau")
+                    or item.get("niveauAlerte")
+                    or item.get("libelle_niveau_gravite")
+                    or item.get("severity")
+                    or ""
+                )
+                alerts.append(
+                    {
+                        "zone": item.get("nom_zone")
+                        or item.get("zone")
+                        or item.get("nomZoneAlerte")
+                        or item.get("nom_alerte")
+                        or "Zone Isère",
+                        "level": level,
+                        "level_color": _vigieau_level_to_color(level),
+                        "measure": item.get("mesure")
+                        or item.get("restriction")
+                        or item.get("libelle_mesure")
+                        or item.get("mesurePrincipale")
+                        or "Mesure de restriction d'eau active",
+                        "start_date": item.get("date_debut")
+                        or item.get("debut_validite")
+                        or item.get("dateDebut")
+                        or "",
+                        "end_date": item.get("date_fin")
+                        or item.get("fin_validite")
+                        or item.get("dateFin")
+                        or "",
+                    }
+                )
+
+            alerts.sort(key=lambda alert: _vigieau_level_rank(alert.get("level", "")), reverse=True)
+            max_level = alerts[0]["level_color"] if alerts else "vert"
+            return {
+                "service": "Vigieau",
+                "status": "online",
+                "source": candidate,
+                "department": "Isère",
+                "alerts": alerts[:20],
+                "max_level": max_level,
+                "updated_at": datetime.utcnow().isoformat() + "Z",
+            }
+        except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
+            last_error = exc
+
+    return {
+        "service": "Vigieau",
+        "status": "degraded",
+        "source": source_page,
+        "department": "Isère",
+        "alerts": [],
+        "max_level": "vert",
+        "error": str(last_error or "Service Vigieau indisponible"),
+    }
+
+
+def fetch_vigieau_restrictions(force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_vigieau_cache,
+        lock=_vigieau_cache_lock,
+        ttl_seconds=_VIGIEAU_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=_fetch_vigieau_restrictions_live,
     )
 
 
@@ -1589,7 +1730,7 @@ def _fetch_georisques_v2_collection(
             selected_query = deepcopy(candidate_query)
             page_config = pagination
             break
-        except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+        except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
             last_error = exc
 
     if first_page is None or selected_query is None:
@@ -1675,7 +1816,7 @@ def fetch_georisques_commune_risks(codes_insee: list[str]) -> dict[str, Any]:
     query = urlencode({"code_insee": ",".join(normalized_codes), "page_size": 100}, doseq=True)
     try:
         payload = _http_get_json(f"https://www.georisques.gouv.fr/api/v1/gaspar/risques?{query}")
-    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
         return {
             "service": "Géorisques",
             "source": "https://georisques.gouv.fr/api/v1/gaspar/risques",
@@ -1797,7 +1938,7 @@ def _fetch_georisques_isere_summary_live(commune_names: list[str] | None = None)
         tim_payload = _fetch_georisques_v2_collection("gaspar/tim", extra_query=filters)
         risques_payload = _fetch_georisques_v2_collection("gaspar/risques", extra_query=filters)
         zonage_payload = _fetch_georisques_v2_collection("zonage_sismique", extra_query=filters)
-    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
         return {
             "service": "Géorisques",
             "status": "degraded",

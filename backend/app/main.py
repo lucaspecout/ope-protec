@@ -54,6 +54,7 @@ from .services import (
     fetch_itinisere_disruptions,
     fetch_prefecture_isere_news,
     fetch_vigicrues_isere,
+    fetch_vigieau_restrictions,
     generate_pdf_report,
     resolve_commune_insee_code,
     vigicrues_geojson_from_stations,
@@ -615,6 +616,7 @@ def build_external_risks_payload(refresh: bool = False, db: Session | None = Non
         "waze": (lambda: fetch_waze_isere_traffic(force_refresh=refresh), {"status": "degraded", "incidents": [], "incidents_total": 0}),
         "georisques": (lambda: fetch_georisques_isere_summary(force_refresh=refresh, commune_names=pcs_commune_names), {"status": "degraded", "details": []}),
         "prefecture_isere": (lambda: fetch_prefecture_isere_news(force_refresh=refresh), {"status": "degraded", "articles": []}),
+        "vigieau": (lambda: fetch_vigieau_restrictions(force_refresh=refresh), {"status": "degraded", "alerts": [], "max_level": "vert"}),
     }
 
     results: dict[str, dict] = {}
@@ -635,6 +637,7 @@ def build_external_risks_payload(refresh: bool = False, db: Session | None = Non
         "waze": results["waze"],
         "georisques": results["georisques"],
         "prefecture_isere": results["prefecture_isere"],
+        "vigieau": results["vigieau"],
     }
     if errors:
         payload["errors"] = errors
@@ -648,7 +651,7 @@ def get_external_risks_payload(refresh: bool = False, db: Session | None = None)
         return payload
 
     snapshot = _get_external_risks_snapshot()
-    if snapshot and any(snapshot.get(key) for key in ("meteo_france", "vigicrues", "itinisere", "bison_fute", "waze", "georisques", "prefecture_isere")):
+    if snapshot and any(snapshot.get(key) for key in ("meteo_france", "vigicrues", "itinisere", "bison_fute", "waze", "georisques", "prefecture_isere", "vigieau")):
         return snapshot
 
     payload = build_external_risks_payload(refresh=True, db=db)
