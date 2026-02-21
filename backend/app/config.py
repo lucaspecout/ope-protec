@@ -1,3 +1,4 @@
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 
 
@@ -10,7 +11,10 @@ class Settings(BaseSettings):
     upload_dir: str = "/data/uploads"
     report_dir: str = "/data/reports"
     weather_retention_days: int = 90
-    georisques_api_token: str = ""
+    georisques_api_token: str = Field(
+        default="",
+        validation_alias=AliasChoices("GEORISQUES_API_TOKEN", "GEORISQUE_API_TOKEN"),
+    )
 
     class Config:
         env_file = ".env"
