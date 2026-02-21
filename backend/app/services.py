@@ -1614,8 +1614,27 @@ def _fetch_georisques_v2_collection(
     }
 
 
-def _fetch_georisques_isere_summary_live() -> dict[str, Any]:
-    source = "https://www.georisques.gouv.fr/api/v2"
+def _resolve_commune_insee_codes(names: list[str], departement: str = "38") -> dict[str, str]:
+    resolved: dict[str, str] = {}
+    for name in names:
+        label = (name or "").strip()
+        if not label:
+            continue
+        try:
+            payload = _http_get_json(
+                f"https://geo.api.gouv.fr/communes?nom={quote_plus(label)}&departement={quote_plus(departement)}&fields=nom,code&boost=population&limit=1"
+            )
+            if isinstance(payload, list) and payload:
+                code = str(payload[0].get("code") or "").strip()
+                if code:
+                    resolved[code] = label
+        except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
+            continue
+    return resolved
+
+
+def _fetch_georisques_isere_summary_live(commune_names: list[str] | None = None) -> dict[str, Any]:
+    source = "https://georisques.gouv.fr/api/v2"
     if not settings.georisques_api_token.strip():
         return {
             "service": "Géorisques",
@@ -1646,27 +1665,53 @@ def _fetch_georisques_isere_summary_live() -> dict[str, Any]:
             "error": "Clé API Géorisques v2 absente",
         }
 
+    monitored_names = commune_names or ["Grenoble", "Bourgoin-Jallieu", "Vienne", "Voiron"]
+    monitored_codes = _resolve_commune_insee_codes(monitored_names)
+    if not monitored_codes:
+        return {
+            "service": "Géorisques",
+            "status": "degraded",
+            "source": source,
+            "api_mode": "v2-token",
+            "department": "Isère (38)",
+            "highest_seismic_zone_code": 0,
+            "highest_seismic_zone_label": "inconnue",
+            "flood_documents_total": 0,
+            "ppr_total": 0,
+            "ground_movements_total": 0,
+            "cavities_total": 0,
+            "communes_with_radon_moderate_or_high": 0,
+            "movement_types": {},
+            "movement_reliability": {},
+            "cavity_types": {},
+            "ppr_categories": {"pprn": 0, "pprm": 0, "pprt": 0},
+            "dicrim_total": 0,
+            "tim_total": 0,
+            "risques_information_total": 0,
+            "seismic_zone_distribution": {},
+            "radon_distribution": {"faible": 0, "moyen": 0, "eleve": 0},
+            "recent_ground_movements": [],
+            "monitored_communes": [],
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+            "errors": ["Aucun code INSEE trouvé pour les communes PCS"],
+            "error": "Aucun code INSEE trouvé pour les communes PCS",
+        }
 
-    monitored_codes = {
-        "38185": "Grenoble",
-        "38053": "Bourgoin-Jallieu",
-        "38544": "Vienne",
-        "38563": "Voiron",
-    }
+    filters = {"codesInsee": sorted(monitored_codes.keys())}
     radon_labels = {"1": "Faible", "2": "Moyen", "3": "Élevé"}
 
     try:
-        mvt_payload = _fetch_georisques_v2_collection("mvt")
-        cavites_payload = _fetch_georisques_v2_collection("cavites")
-        radon_payload = _fetch_georisques_v2_collection("radon")
-        azi_payload = _fetch_georisques_v2_collection("gaspar/azi")
-        pprn_payload = _fetch_georisques_v2_collection("gaspar/pprn")
-        pprm_payload = _fetch_georisques_v2_collection("gaspar/pprm")
-        pprt_payload = _fetch_georisques_v2_collection("gaspar/pprt")
-        dicrim_payload = _fetch_georisques_v2_collection("gaspar/dicrim")
-        tim_payload = _fetch_georisques_v2_collection("gaspar/tim")
-        risques_payload = _fetch_georisques_v2_collection("gaspar/risques")
-        zonage_payload = _fetch_georisques_v2_collection("zonage_sismique")
+        mvt_payload = _fetch_georisques_v2_collection("mvt", extra_query=filters)
+        cavites_payload = _fetch_georisques_v2_collection("cavites", extra_query=filters)
+        radon_payload = _fetch_georisques_v2_collection("radon", extra_query=filters)
+        azi_payload = _fetch_georisques_v2_collection("gaspar/azi", extra_query=filters)
+        pprn_payload = _fetch_georisques_v2_collection("gaspar/pprn", extra_query=filters)
+        pprm_payload = _fetch_georisques_v2_collection("gaspar/pprm", extra_query=filters)
+        pprt_payload = _fetch_georisques_v2_collection("gaspar/pprt", extra_query=filters)
+        dicrim_payload = _fetch_georisques_v2_collection("gaspar/dicrim", extra_query=filters)
+        tim_payload = _fetch_georisques_v2_collection("gaspar/tim", extra_query=filters)
+        risques_payload = _fetch_georisques_v2_collection("gaspar/risques", extra_query=filters)
+        zonage_payload = _fetch_georisques_v2_collection("zonage_sismique", extra_query=filters)
     except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
         return {
             "service": "Géorisques",
@@ -1793,16 +1838,17 @@ def _fetch_georisques_isere_summary_live() -> dict[str, Any]:
                 }
             )
 
+    zone_by_commune = {
+        str(item.get("codeInsee") or ""): str(item.get("zoneSismicite") or "inconnue")
+        for item in zonage_entries
+        if item.get("codeInsee")
+    }
+
     monitored = []
     for code, name in monitored_codes.items():
         radon_class = radon_by_commune.get(code, "")
         docs = monitored_flood_documents.get(code) or []
-        try:
-            zone_payload = _fetch_georisques_v2_collection("zonage_sismique", extra_query={"codesInsee": [code]})
-            zone_entries = zone_payload.get("content") or []
-            zone_label = str((zone_entries[0] if zone_entries else {}).get("zoneSismicite") or "inconnue")
-        except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
-            zone_label = "inconnue"
+        zone_label = zone_by_commune.get(code, "inconnue")
         monitored.append(
             {
                 "name": name,
@@ -1878,13 +1924,15 @@ def _fetch_georisques_isere_summary_live() -> dict[str, Any]:
     }
 
 
-def fetch_georisques_isere_summary(force_refresh: bool = False) -> dict[str, Any]:
+def fetch_georisques_isere_summary(force_refresh: bool = False, commune_names: list[str] | None = None) -> dict[str, Any]:
+    if commune_names:
+        return _fetch_georisques_isere_summary_live(commune_names=commune_names)
     return _cached_external_payload(
         cache=_georisques_cache,
         lock=_georisques_cache_lock,
         ttl_seconds=_GEORISQUES_CACHE_TTL_SECONDS,
         force_refresh=force_refresh,
-        loader=_fetch_georisques_isere_summary_live,
+        loader=lambda: _fetch_georisques_isere_summary_live(commune_names=commune_names),
     )
 
 

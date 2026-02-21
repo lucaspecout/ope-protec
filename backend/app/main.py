@@ -581,9 +581,16 @@ def build_dashboard_payload(db: Session, user: User, external_risks: dict | None
     }
 
 
-def build_external_risks_payload(refresh: bool = False) -> dict:
+def build_external_risks_payload(refresh: bool = False, db: Session | None = None) -> dict:
     errors: dict[str, str] = {}
     errors_lock = Lock()
+    pcs_commune_names: list[str] = []
+    if db is not None:
+        pcs_commune_names = [
+            str(name)
+            for (name,) in db.query(Municipality.name).filter(Municipality.pcs_active.is_(True)).all()
+            if name
+        ]
 
     def safe_fetch(key: str, fetcher: Callable[[], dict], fallback: dict) -> dict:
         try:
@@ -603,7 +610,7 @@ def build_external_risks_payload(refresh: bool = False) -> dict:
         "itinisere": (lambda: fetch_itinisere_disruptions(force_refresh=refresh), {"status": "degraded", "events": [], "events_total": 0}),
         "bison_fute": (lambda: fetch_bison_fute_traffic(force_refresh=refresh), {"status": "degraded", "alerts": []}),
         "waze": (lambda: fetch_waze_isere_traffic(force_refresh=refresh), {"status": "degraded", "incidents": [], "incidents_total": 0}),
-        "georisques": (lambda: fetch_georisques_isere_summary(force_refresh=refresh), {"status": "degraded", "details": []}),
+        "georisques": (lambda: fetch_georisques_isere_summary(force_refresh=refresh, commune_names=pcs_commune_names), {"status": "degraded", "details": []}),
         "prefecture_isere": (lambda: fetch_prefecture_isere_news(force_refresh=refresh), {"status": "degraded", "articles": []}),
     }
 
@@ -631,9 +638,9 @@ def build_external_risks_payload(refresh: bool = False) -> dict:
     return payload
 
 
-def get_external_risks_payload(refresh: bool = False) -> dict:
+def get_external_risks_payload(refresh: bool = False, db: Session | None = None) -> dict:
     if refresh:
-        payload = build_external_risks_payload(refresh=True)
+        payload = build_external_risks_payload(refresh=True, db=db)
         _set_external_risks_snapshot(payload)
         return payload
 
@@ -641,7 +648,7 @@ def get_external_risks_payload(refresh: bool = False) -> dict:
     if snapshot and any(snapshot.get(key) for key in ("meteo_france", "vigicrues", "itinisere", "bison_fute", "waze", "georisques", "prefecture_isere")):
         return snapshot
 
-    payload = build_external_risks_payload(refresh=True)
+    payload = build_external_risks_payload(refresh=True, db=db)
     _set_external_risks_snapshot(payload)
     return payload
 
@@ -649,9 +656,10 @@ def get_external_risks_payload(refresh: bool = False) -> dict:
 @app.get("/external/isere/risks")
 def isere_external_risks(
     refresh: bool = False,
+    db: Session = Depends(get_db),
     _: User = Depends(require_roles(*READ_ROLES)),
 ):
-    return get_external_risks_payload(refresh=refresh)
+    return get_external_risks_payload(refresh=refresh, db=db)
 
 
 @app.get("/operations/bootstrap")
@@ -661,7 +669,7 @@ def operations_bootstrap(
     user: User = Depends(require_roles(*READ_ROLES)),
 ):
     started_at = datetime.utcnow()
-    risks_payload = get_external_risks_payload(refresh=refresh)
+    risks_payload = get_external_risks_payload(refresh=refresh, db=db)
     dashboard_payload = build_dashboard_payload(db, user, external_risks=risks_payload)
     municipalities_payload = list_municipalities(db=db, user=user)
     logs_payload = list_logs(db=db, user=user)
@@ -719,7 +727,7 @@ def supervision_overview(
     db: Session = Depends(get_db),
     _: User = Depends(require_roles(*READ_ROLES)),
 ):
-    risks_payload = get_external_risks_payload(refresh=refresh)
+    risks_payload = get_external_risks_payload(refresh=refresh, db=db)
     meteo = risks_payload.get("meteo_france") or {}
     vigicrues = risks_payload.get("vigicrues") or {}
     itinisere = risks_payload.get("itinisere") or {}
