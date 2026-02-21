@@ -446,6 +446,13 @@ function isCacheableRequest(path, fetchOptions = {}) {
   return !path.includes('/auth/login');
 }
 
+
+function createApiError(message, status = null) {
+  const error = new Error(message);
+  if (status !== null && status !== undefined) error.status = Number(status);
+  return error;
+}
+
 function clearApiCache() {
   apiGetCache.clear();
   apiInFlight.clear();
@@ -490,7 +497,7 @@ async function api(path, options = {}) {
         if (!response.ok) {
           const message = normalizeApiErrorMessage(payload, response.status);
           if (response.status === 401 && logoutOn401) logout();
-          throw new Error(message);
+          throw createApiError(message, response.status);
         }
         return payload;
       } catch (error) {
@@ -499,7 +506,7 @@ async function api(path, options = {}) {
       }
     }
 
-    throw new Error(sanitizeErrorMessage(lastError?.message || 'API indisponible'));
+    throw createApiError(sanitizeErrorMessage(lastError?.message || 'API indisponible'), lastError?.status);
   })();
 
   if (!cacheable) {
@@ -550,14 +557,14 @@ async function apiFile(path) {
         } catch (_) {
           detail = detailText || `Erreur API (${response.status})`;
         }
-        throw new Error(detail);
+        throw createApiError(detail, response.status);
       }
       return { blob: await response.blob(), contentType: response.headers.get('content-type') || 'application/octet-stream' };
     } catch (error) {
       lastError = error;
     }
   }
-  throw new Error(sanitizeErrorMessage(lastError?.message || 'API indisponible'));
+  throw createApiError(sanitizeErrorMessage(lastError?.message || 'API indisponible'), lastError?.status);
 }
 
 function setActivePanel(panelId) {
@@ -3667,7 +3674,12 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
     await refreshAll();
     startAutoRefresh();
     startLiveEventsRefresh();
-  } catch {
-    logout();
+  } catch (error) {
+    if (Number(error?.status) === 401) {
+      logout();
+      return;
+    }
+    document.getElementById('login-error').textContent = `Session conservée mais API indisponible: ${sanitizeErrorMessage(error?.message || 'erreur inconnue')}`;
+    showLogin();
   }
 })();

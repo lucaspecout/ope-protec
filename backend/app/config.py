@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql://postgres:postgres@db:5432/veille"
     redis_url: str = "redis://redis:6379/0"
     secret_key: str = "change-me-in-production"
-    access_token_expire_minutes: int = 10080
+    access_token_expire_minutes: int = 1440
     upload_dir: str = "/data/uploads"
     report_dir: str = "/data/reports"
     weather_retention_days: int = 90
