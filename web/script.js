@@ -185,6 +185,31 @@ function photoCameraPopupMarkup(camera = {}) {
   });
 }
 
+function refreshPhotoCameraImages(event) {
+  const popupElement = event?.popup?.getElement?.();
+  if (!popupElement) return;
+  popupElement.querySelectorAll('img').forEach((image) => {
+    const originalUrl = image.getAttribute('data-original-src') || image.getAttribute('src');
+    if (!originalUrl) return;
+    if (!image.getAttribute('data-original-src')) image.setAttribute('data-original-src', originalUrl);
+    const separator = originalUrl.includes('?') ? '&' : '?';
+    image.setAttribute('src', `${originalUrl}${separator}t=${Date.now()}`);
+  });
+}
+
+function startPhotoCameraAutoRefresh() {
+  if (photoCameraRefreshTimer) clearInterval(photoCameraRefreshTimer);
+  photoCameraRefreshTimer = setInterval(() => {
+    if (document.hidden || !leafletMap) return;
+    leafletMap.eachLayer((layer) => {
+      if (!(layer instanceof window.L.Marker)) return;
+      const popup = layer.getPopup?.();
+      if (!popup?.isOpen?.()) return;
+      refreshPhotoCameraImages({ popup });
+    });
+  }, 30000);
+}
+
 const homeView = document.getElementById('home-view');
 const loginView = document.getElementById('login-view');
 const appView = document.getElementById('app-view');
