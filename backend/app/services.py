@@ -219,6 +219,24 @@ def _meteo_france_wsft_get(path: str, token: str, params: dict[str, Any], versio
     return json.loads(payload.decode("utf-8"))
 
 
+def _meteo_france_wsft_get_optional(
+    path: str,
+    token: str,
+    params: dict[str, Any],
+    *,
+    version: str = "v3",
+    fallback: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    try:
+        return _meteo_france_wsft_get(path, token, params, version=version)
+    except HTTPError as exc:
+        if exc.code == 404:
+            return fallback or {}
+        raise
+    except json.JSONDecodeError:
+        return fallback or {}
+
+
 def _parse_mf_bulletin_items(bulletin_payload: dict[str, Any]) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for block in bulletin_payload.get("text_bloc_item") or []:
@@ -377,10 +395,11 @@ def _fetch_meteo_france_isere_live() -> dict[str, Any]:
             token,
             {"domain": "38", "warning_type": "vigilance", "formatDate": "timestamp", "echeance": "J0", "depth": 1},
         )
-        warning_tomorrow = _meteo_france_wsft_get(
+        warning_tomorrow = _meteo_france_wsft_get_optional(
             "warning/currentphenomenons",
             token,
             {"domain": "38", "warning_type": "vigilance", "formatDate": "timestamp", "echeance": "J1", "depth": 1},
+            fallback={"phenomenons_max_colors": []},
         )
         bulletin_today = _meteo_france_wsft_get(
             "report",
@@ -388,11 +407,12 @@ def _fetch_meteo_france_isere_live() -> dict[str, Any]:
             {"domain": "38", "report_type": "vigilanceV6", "report_subtype": "Bulletin de suivi", "echeance": "J0"},
             version="v2",
         )
-        bulletin_tomorrow = _meteo_france_wsft_get(
+        bulletin_tomorrow = _meteo_france_wsft_get_optional(
             "report",
             token,
             {"domain": "38", "report_type": "vigilanceV6", "report_subtype": "Bulletin de suivi", "echeance": "J1"},
             version="v2",
+            fallback={"text_bloc_item": []},
         )
     except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
         return {
