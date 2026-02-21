@@ -273,13 +273,10 @@ def serialize_document(document: MunicipalityDocument, db: Session) -> Municipal
 
 
 def _warmup_external_sources() -> None:
+    """Charge un premier snapshot partagé dès le démarrage du serveur."""
     try:
-        fetch_meteo_france_isere(force_refresh=True)
-        fetch_vigicrues_isere(force_refresh=True)
-        fetch_itinisere_disruptions(force_refresh=True)
-        fetch_bison_fute_traffic(force_refresh=True)
-        fetch_waze_isere_traffic(force_refresh=True)
-        fetch_georisques_isere_summary(force_refresh=True)
+        payload = build_external_risks_payload(refresh=True)
+        _set_external_risks_snapshot(payload)
     except Exception:
         # Le warmup ne doit jamais empêcher le démarrage de l'API.
         return
