@@ -289,6 +289,7 @@ _GEORISQUES_CACHE_TTL_SECONDS = 900
 _PREFECTURE_CACHE_TTL_SECONDS = 600
 _VIGIEAU_CACHE_TTL_SECONDS = 900
 _ATMO_AURA_CACHE_TTL_SECONDS = 900
+_SNCF_ISERE_CACHE_TTL_SECONDS = 180
 
 _vigicrues_cache_lock = Lock()
 _vigicrues_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
@@ -306,6 +307,8 @@ _vigieau_cache_lock = Lock()
 _vigieau_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _atmo_aura_cache_lock = Lock()
 _atmo_aura_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_sncf_isere_cache_lock = Lock()
+_sncf_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 
 
 def _cached_external_payload(
@@ -1286,6 +1289,72 @@ def fetch_itinisere_disruptions(limit: int = 60, force_refresh: bool = False) ->
         ttl_seconds=_ITINISERE_CACHE_TTL_SECONDS,
         force_refresh=force_refresh,
         loader=lambda: _fetch_itinisere_disruptions_live(limit=limit),
+    )
+
+
+def _sncf_isere_alert_type(text: str) -> str:
+    lowered = (text or "").lower()
+    if any(token in lowered for token in ("accident", "collision", "heurt", "obstacle")):
+        return "accident"
+    if any(token in lowered for token in ("travaux", "chantier", "maintenance", "voie")):
+        return "travaux"
+    return "autre"
+
+
+def _fetch_sncf_isere_alerts_live(limit: int = 25) -> dict[str, Any]:
+    source = "https://www.itinisere.fr/fr/rss/Disruptions"
+    base_payload = _fetch_itinisere_disruptions_live(limit=80)
+    if base_payload.get("status") not in {"online", "partial"}:
+        return {
+            "service": "SNCF Isère",
+            "status": "degraded",
+            "source": source,
+            "alerts": [],
+            "alerts_total": 0,
+            "error": base_payload.get("error") or "Flux indisponible",
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+
+    alerts: list[dict[str, Any]] = []
+    for event in base_payload.get("events") or []:
+        title = str(event.get("title") or "")
+        description = str(event.get("description") or "")
+        text = f"{title} {description}".lower()
+        if not any(token in text for token in ("sncf", "ter", "train", "ferroviaire", "gare")):
+            continue
+        alert_type = _sncf_isere_alert_type(text)
+        if alert_type not in {"accident", "travaux"}:
+            continue
+        alerts.append(
+            {
+                "title": title or "Alerte SNCF",
+                "description": description[:400],
+                "type": alert_type,
+                "severity": event.get("severity") or "jaune",
+                "locations": event.get("locations") or [],
+                "roads": event.get("roads") or [],
+                "link": event.get("link") or source,
+                "published_at": event.get("published_at") or "",
+            }
+        )
+
+    return {
+        "service": "SNCF Isère",
+        "status": "online",
+        "source": source,
+        "alerts": alerts[:limit],
+        "alerts_total": len(alerts),
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+def fetch_sncf_isere_alerts(limit: int = 25, force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_sncf_isere_cache,
+        lock=_sncf_isere_cache_lock,
+        ttl_seconds=_SNCF_ISERE_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=lambda: _fetch_sncf_isere_alerts_live(limit=limit),
     )
 
 

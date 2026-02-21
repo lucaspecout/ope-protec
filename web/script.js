@@ -2658,6 +2658,22 @@ function renderDashboard(dashboard = {}) {
   renderSituationOverview();
 }
 
+function renderSncfAlerts(sncf = {}) {
+  const alerts = Array.isArray(sncf?.alerts) ? sncf.alerts : [];
+  const total = Number(sncf?.alerts_total ?? alerts.length);
+  setRiskText('sncf-status', `${sncf.status || 'inconnu'} · ${total} alerte(s)`, sncf.status === 'online' ? 'vert' : 'jaune');
+  setText('sncf-info', `Filtre Isère · accidents/travaux de voie · source ${sncf.source || '-'}`);
+  setHtml('sncf-alerts-list', alerts.slice(0, 10).map((alert) => {
+    const level = normalizeLevel(alert.severity || 'jaune');
+    const type = escapeHtml(alert.type || 'alerte');
+    const title = escapeHtml(alert.title || 'Alerte SNCF');
+    const desc = escapeHtml(alert.description || '');
+    const location = Array.isArray(alert.locations) && alert.locations.length ? ` · ${escapeHtml(alert.locations.join(', '))}` : '';
+    const link = String(alert.link || '').startsWith('http') ? alert.link : 'https://www.sncf.com/fr/itineraire-reservation/info-trafic';
+    return `<li><strong>${title}</strong> · <span style="color:${levelColor(level)}">${type}</span>${location}<br>${desc}${link ? `<br><a href="${link}" target="_blank" rel="noreferrer">Consulter SNCF</a>` : ''}</li>`;
+  }).join('') || '<li>Aucune alerte SNCF accidents/travaux en Isère pour le moment.</li>');
+}
+
 async function loadDashboard() {
   const cached = readSnapshot(STORAGE_KEYS.dashboardSnapshot);
   if (cached) renderDashboard(cached);
@@ -2685,6 +2701,7 @@ function renderExternalRisks(data = {}) {
   const realtimeTraffic = data?.waze || {};
   cachedRealtimeTraffic = realtimeTraffic || {};
   const prefecture = data?.prefecture_isere || {};
+  const sncf = data?.sncf_isere || {};
   const vigieau = data?.vigieau || {};
   const atmo = data?.atmo_aura || {};
   const georisquesPayload = data?.georisques || {};
@@ -2705,6 +2722,7 @@ function renderExternalRisks(data = {}) {
   setText('itinisere-status', `${itinisere.status || 'inconnu'} · ${itinisereTotal} événements`);
   renderBisonFuteSummary(bisonFute);
   renderPrefectureNews(prefecture);
+  renderSncfAlerts(sncf);
   renderVigieauAlerts(vigieau);
   const atmoToday = atmo?.today || {};
   const atmoLevel = normalizeLevel(atmoToday.level || 'inconnu');
@@ -2754,6 +2772,7 @@ function renderApiInterconnections(data = {}) {
     { key: 'waze', label: 'Trafic temps réel (Waze)', level: `${data.waze?.incidents_total || 0} incident(s)`, details: data.waze?.source || '-' },
     { key: 'georisques', label: 'Géorisques', level: data.georisques?.highest_seismic_zone_label || 'inconnue', details: `${data.georisques?.flood_documents_total ?? 0} document(s) inondation` },
     { key: 'prefecture_isere', label: "Préfecture Isère · Actualités", level: `${(data.prefecture_isere?.items || []).length} actualité(s)`, details: data.prefecture_isere?.source || '-' },
+    { key: 'sncf_isere', label: 'SNCF Isère · Accidents/Travaux voies', level: `${(data.sncf_isere?.alerts || []).length} alerte(s)`, details: data.sncf_isere?.source || '-' },
     { key: 'vigieau', label: 'Vigieau · Restrictions eau', level: `${(data.vigieau?.alerts || []).length} alerte(s)`, details: data.vigieau?.source || '-' },
     { key: 'atmo_aura', label: "Atmo AURA · Qualité de l'air", level: `indice ${data.atmo_aura?.today?.index ?? '-'}`, details: data.atmo_aura?.source || '-' },
   ];

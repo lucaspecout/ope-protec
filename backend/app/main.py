@@ -53,6 +53,7 @@ from .services import (
     fetch_meteo_france_isere,
     fetch_itinisere_disruptions,
     fetch_prefecture_isere_news,
+    fetch_sncf_isere_alerts,
     fetch_atmo_aura_isere_air_quality,
     fetch_vigicrues_isere,
     fetch_vigieau_restrictions,
@@ -618,6 +619,7 @@ def build_external_risks_payload(refresh: bool = False, db: Session | None = Non
         "waze": (lambda: fetch_waze_isere_traffic(force_refresh=refresh), {"status": "degraded", "incidents": [], "incidents_total": 0}),
         "georisques": (lambda: fetch_georisques_isere_summary(force_refresh=refresh, commune_names=pcs_commune_names), {"status": "degraded", "details": []}),
         "prefecture_isere": (lambda: fetch_prefecture_isere_news(force_refresh=refresh), {"status": "degraded", "articles": []}),
+        "sncf_isere": (lambda: fetch_sncf_isere_alerts(force_refresh=refresh), {"status": "degraded", "alerts": [], "alerts_total": 0}),
         "vigieau": (lambda: fetch_vigieau_restrictions(force_refresh=refresh), {"status": "degraded", "alerts": [], "max_level": "vert"}),
         "atmo_aura": (lambda: fetch_atmo_aura_isere_air_quality(force_refresh=refresh), {"status": "degraded", "today": {}, "tomorrow": {}}),
     }
@@ -640,6 +642,7 @@ def build_external_risks_payload(refresh: bool = False, db: Session | None = Non
         "waze": results["waze"],
         "georisques": results["georisques"],
         "prefecture_isere": results["prefecture_isere"],
+        "sncf_isere": results["sncf_isere"],
         "vigieau": results["vigieau"],
         "atmo_aura": results["atmo_aura"],
     }
@@ -655,7 +658,7 @@ def get_external_risks_payload(refresh: bool = False, db: Session | None = None)
         return payload
 
     snapshot = _get_external_risks_snapshot()
-    if snapshot and any(snapshot.get(key) for key in ("meteo_france", "vigicrues", "itinisere", "bison_fute", "waze", "georisques", "prefecture_isere", "vigieau", "atmo_aura")):
+    if snapshot and any(snapshot.get(key) for key in ("meteo_france", "vigicrues", "itinisere", "bison_fute", "waze", "georisques", "prefecture_isere", "sncf_isere", "vigieau", "atmo_aura")):
         return snapshot
 
     payload = build_external_risks_payload(refresh=True, db=db)
