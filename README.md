@@ -57,6 +57,18 @@ GEORISQUES_API_TOKEN=votre_cle_api
 
 Sans clé, l'application bascule automatiquement sur l'API publique v1 (mode dégradé mais fonctionnel).
 
+## Géorisques v2 Isère – données enrichies
+
+En mode API v2 (token), la consolidation Isère (`/external/isere/risks`) agrège désormais les endpoints suivants pour le département `38` :
+
+- `zonage_sismique` : zone sismique maximale et distribution des zones.
+- `gaspar/azi` : documents d'inondation.
+- `gaspar/pprn`, `gaspar/pprm`, `gaspar/pprt` : volume de PPR par catégorie.
+- `gaspar/dicrim` : nombre de DICRIM et année de publication pour les communes suivies.
+- `gaspar/tim` : volume des transmissions d'information au maire (TIM).
+- `gaspar/risques` : volume des informations préventives risques.
+- `mvt`, `cavites`, `radon` : mouvements de terrain, cavités, potentiel radon.
+
 ## Endpoint de surveillance externe (Isère)
 
 Après authentification, l'API expose :
@@ -68,7 +80,7 @@ GET /external/isere/risks
 Retourne un bloc consolidé :
 - `meteo_france` : état de connexion au service vigilance Météo-France et bulletin Isère.
 - `vigicrues` : état de connexion, stations du département de l'Isère, vigilances des tronçons associés et niveau d'alerte eau courant (`vert`, `jaune`, `orange`, `rouge`).
-- `georisques` : synthèse multi-communes Isère (sismicité max et nombre de documents inondation).
+- `georisques` : synthèse multi-communes Isère (sismicité max, AZI, PPRN/PPRM/PPRT, DICRIM, TIM, information préventive risques, radon, mouvements de terrain et cavités).
 - `prefecture_isere` : flux RSS des actualités de la Préfecture de l'Isère (titres, dates, liens).
 
 
