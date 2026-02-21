@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     upload_dir: str = "/data/uploads"
     report_dir: str = "/data/reports"
     weather_retention_days: int = 90
+    georisques_api_token: str = ""
 
     class Config:
         env_file = ".env"

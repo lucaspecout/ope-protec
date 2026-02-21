@@ -142,8 +142,11 @@ def _http_get_with_retries(request: Request, timeout: int = 10, retries: int = 2
     raise last_error or RuntimeError("Échec HTTP inattendu")
 
 
-def _http_get_json(url: str, timeout: int = 12) -> Any:
-    request = Request(url, headers={"User-Agent": "ope-protec/1.0"})
+def _http_get_json(url: str, timeout: int = 12, headers: dict[str, str] | None = None) -> Any:
+    request_headers = {"User-Agent": "ope-protec/1.0"}
+    if headers:
+        request_headers.update(headers)
+    request = Request(url, headers=request_headers)
     payload = _http_get_with_retries(request=request, timeout=timeout)
     return json.loads(payload.decode("utf-8"))
 
@@ -1526,7 +1529,33 @@ def fetch_waze_isere_traffic(force_refresh: bool = False) -> dict[str, Any]:
     )
 
 
-def _fetch_georisques_isere_summary_live() -> dict[str, Any]:
+def _fetch_georisques_v2_collection(endpoint: str, departement: str = "38", page_size: int = 1000) -> dict[str, Any]:
+    token = settings.georisques_api_token.strip()
+    if not token:
+        raise ValueError("Clé API Géorisques absente")
+
+    headers = {"Authorization": f"Bearer {token}"}
+    first_page = _http_get_json(
+        f"https://www.georisques.gouv.fr/api/v2/{endpoint}?departement={quote_plus(departement)}&pageSize={page_size}&pageNumber=0",
+        headers=headers,
+    )
+    content = list(first_page.get("content") or [])
+    total_pages = int(first_page.get("totalPages") or 1)
+
+    for page_number in range(1, total_pages):
+        page_payload = _http_get_json(
+            f"https://www.georisques.gouv.fr/api/v2/{endpoint}?departement={quote_plus(departement)}&pageSize={page_size}&pageNumber={page_number}",
+            headers=headers,
+        )
+        content.extend(page_payload.get("content") or [])
+
+    return {
+        "total_elements": int(first_page.get("totalElements") or len(content)),
+        "content": content,
+    }
+
+
+def _fetch_georisques_isere_summary_v1() -> dict[str, Any]:
     source = "https://www.georisques.gouv.fr/api/v1"
     communes = [
         {"name": "Grenoble", "code_insee": "38185"},
@@ -1664,6 +1693,7 @@ def _fetch_georisques_isere_summary_live() -> dict[str, Any]:
         "service": "Géorisques",
         "status": status,
         "source": source,
+        "api_mode": "v1-public",
         "department": "Isère (38)",
         "highest_seismic_zone_code": highest_seismic,
         "highest_seismic_zone_label": f"Zone {highest_seismic}" if highest_seismic else "inconnue",
@@ -1673,15 +1703,139 @@ def _fetch_georisques_isere_summary_live() -> dict[str, Any]:
         "cavities_total": cavity_total,
         "communes_with_radon_moderate_or_high": communes_with_radon_moderate_or_high,
         "movement_types": movement_types,
-        "recent_ground_movements": sorted(
-            recent_movements,
-            key=lambda item: item.get("date") or "",
-            reverse=True,
-        )[:12],
+        "recent_ground_movements": sorted(recent_movements, key=lambda item: item.get("date") or "", reverse=True)[:12],
         "monitored_communes": monitored,
         "updated_at": datetime.utcnow().isoformat() + "Z",
         "errors": errors,
         "error": " ; ".join(errors) if errors else None,
+    }
+
+
+def _fetch_georisques_isere_summary_live() -> dict[str, Any]:
+    if not settings.georisques_api_token.strip():
+        return _fetch_georisques_isere_summary_v1()
+
+    source = "https://www.georisques.gouv.fr/api/v2"
+    monitored_codes = {
+        "38185": "Grenoble",
+        "38053": "Bourgoin-Jallieu",
+        "38544": "Vienne",
+        "38563": "Voiron",
+    }
+    radon_labels = {"1": "Faible", "2": "Moyen", "3": "Élevé"}
+
+    try:
+        mvt_payload = _fetch_georisques_v2_collection("mvt")
+        cavites_payload = _fetch_georisques_v2_collection("cavites")
+        radon_payload = _fetch_georisques_v2_collection("radon")
+        azi_payload = _fetch_georisques_v2_collection("gaspar/azi")
+    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+        fallback = _fetch_georisques_isere_summary_v1()
+        fallback["status"] = "partial" if fallback.get("status") == "online" else fallback.get("status", "degraded")
+        fallback.setdefault("errors", []).append(f"API v2 indisponible: {exc}")
+        fallback["error"] = " ; ".join(fallback.get("errors") or [])
+        return fallback
+
+    movements = mvt_payload["content"]
+    movement_types: dict[str, int] = {}
+    movement_reliability: dict[str, int] = {}
+    recent_movements: list[dict[str, Any]] = []
+    for item in movements:
+        movement_type = str(item.get("type") or "Type non renseigné").strip()
+        movement_types[movement_type] = movement_types.get(movement_type, 0) + 1
+        reliability = str(item.get("fiabilite") or "Non précisée").strip()
+        movement_reliability[reliability] = movement_reliability.get(reliability, 0) + 1
+        recent_movements.append(
+            {
+                "commune": monitored_codes.get(str(item.get("codeInsee") or ""), item.get("codeInsee") or "Commune inconnue"),
+                "type": movement_type,
+                "date": item.get("dateDebut") or item.get("dateMaj"),
+                "location": item.get("lieu") or item.get("commentaireLieu"),
+                "identifier": item.get("identifiant"),
+                "reliability": item.get("fiabilite"),
+            }
+        )
+
+    cavities = cavites_payload["content"]
+    cavity_types: dict[str, int] = {}
+    for item in cavities:
+        cavity_type = str(item.get("type") or "Non renseigné").strip()
+        cavity_types[cavity_type] = cavity_types.get(cavity_type, 0) + 1
+
+    radon_entries = radon_payload["content"]
+    radon_distribution = {"1": 0, "2": 0, "3": 0}
+    radon_by_commune: dict[str, str] = {}
+    for item in radon_entries:
+        code = str(item.get("codeInsee") or "")
+        classe = str(item.get("classePotentiel") or "")
+        if classe in radon_distribution:
+            radon_distribution[classe] += 1
+        if code:
+            radon_by_commune[code] = classe
+
+    flood_documents_total = azi_payload["total_elements"]
+    monitored_flood_documents = {code: [] for code in monitored_codes}
+    for doc in azi_payload["content"]:
+        for commune in doc.get("communes") or []:
+            code = str(commune.get("codeInsee") or "")
+            if code not in monitored_flood_documents:
+                continue
+            monitored_flood_documents[code].append(
+                {
+                    "code": doc.get("idGaspar"),
+                    "title": doc.get("libelle"),
+                    "river_basin": doc.get("libBassinRisques"),
+                    "published_at": (commune.get("aleas") or [{}])[0].get("dateDiffusion"),
+                }
+            )
+
+    monitored = []
+    for code, name in monitored_codes.items():
+        radon_class = radon_by_commune.get(code, "")
+        docs = monitored_flood_documents.get(code) or []
+        monitored.append(
+            {
+                "name": name,
+                "code_insee": code,
+                "seismic_zone": "Voir zonage communal détaillé",
+                "flood_documents": len(docs),
+                "flood_documents_details": docs,
+                "ppr_total": 0,
+                "ppr_by_risk": {},
+                "ground_movements_total": sum(1 for item in movements if str(item.get("codeInsee") or "") == code),
+                "cavities_total": sum(1 for item in cavities if str(item.get("codeInsee") or "") == code),
+                "radon_class": radon_class,
+                "radon_label": radon_labels.get(radon_class, "inconnu"),
+                "errors": [],
+            }
+        )
+
+    return {
+        "service": "Géorisques",
+        "status": "online",
+        "source": source,
+        "api_mode": "v2-token",
+        "department": "Isère (38)",
+        "highest_seismic_zone_code": 0,
+        "highest_seismic_zone_label": "À compléter (API v2 zonage)",
+        "flood_documents_total": flood_documents_total,
+        "ppr_total": 0,
+        "ground_movements_total": mvt_payload["total_elements"],
+        "cavities_total": cavites_payload["total_elements"],
+        "communes_with_radon_moderate_or_high": radon_distribution["2"] + radon_distribution["3"],
+        "movement_types": movement_types,
+        "movement_reliability": movement_reliability,
+        "cavity_types": cavity_types,
+        "radon_distribution": {
+            "faible": radon_distribution["1"],
+            "moyen": radon_distribution["2"],
+            "eleve": radon_distribution["3"],
+        },
+        "recent_ground_movements": sorted(recent_movements, key=lambda item: item.get("date") or "", reverse=True)[:12],
+        "monitored_communes": monitored,
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+        "errors": [],
+        "error": None,
     }
 
 

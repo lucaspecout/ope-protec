@@ -2062,17 +2062,21 @@ function renderGeorisquesDetails(georisques = {}) {
   const errorDetails = Array.isArray(georisques.errors) ? georisques.errors.filter(Boolean) : [];
   const movementTypes = georisques.movement_types && typeof georisques.movement_types === 'object' ? georisques.movement_types : {};
   const recentMovements = Array.isArray(georisques.recent_ground_movements) ? georisques.recent_ground_movements : [];
+  const radonDistribution = georisques.radon_distribution && typeof georisques.radon_distribution === 'object' ? georisques.radon_distribution : null;
 
   setText('georisques-page-status', georisques.status || 'inconnu');
   setText('georisques-page-seismic', georisques.highest_seismic_zone_label || 'inconnue');
   setText('georisques-page-flood-docs', String(georisques.flood_documents_total ?? 0));
   setText('georisques-page-ppr-total', String(georisques.ppr_total ?? 0));
   setText('georisques-page-ground-movements', String(georisques.ground_movements_total ?? 0));
+  setText('georisques-page-cavities', String(georisques.cavities_total ?? 0));
   setText('georisques-page-radon-alert', String(georisques.communes_with_radon_moderate_or_high ?? 0));
+  setText('georisques-page-api-mode', georisques.api_mode || 'auto');
 
   const sourceText = `Source: ${georisques.source || 'inconnue'} · Dernière mise à jour: ${georisques.updated_at ? new Date(georisques.updated_at).toLocaleString() : 'inconnue'}`;
   const errorsText = errorDetails.length ? ` · Anomalies: ${errorDetails.join(' | ')}` : '';
-  setText('georisques-page-source', `${sourceText}${errorsText}`);
+  const radonText = radonDistribution ? ` · Radon (faible/moyen/élevé): ${Number(radonDistribution.faible || 0)}/${Number(radonDistribution.moyen || 0)}/${Number(radonDistribution.eleve || 0)}` : '';
+  setText('georisques-page-source', `${sourceText}${radonText}${errorsText}`);
   setText('georisques-page-debug', monitored.length ? '' : `Aucune commune détaillée reçue (clés: ${Object.keys(georisques || {}).join(', ') || 'aucune'}).`);
 
   const movementTypesMarkup = Object.entries(movementTypes)
