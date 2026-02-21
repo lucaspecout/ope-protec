@@ -53,6 +53,7 @@ from .services import (
     fetch_meteo_france_isere,
     fetch_itinisere_disruptions,
     fetch_prefecture_isere_news,
+    fetch_atmo_aura_isere_air_quality,
     fetch_vigicrues_isere,
     fetch_vigieau_restrictions,
     generate_pdf_report,
@@ -140,6 +141,7 @@ _external_risks_snapshot: dict = {
         "waze": {},
         "georisques": {},
         "prefecture_isere": {},
+        "atmo_aura": {},
     },
 }
 ALLOWED_DOC_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
@@ -617,6 +619,7 @@ def build_external_risks_payload(refresh: bool = False, db: Session | None = Non
         "georisques": (lambda: fetch_georisques_isere_summary(force_refresh=refresh, commune_names=pcs_commune_names), {"status": "degraded", "details": []}),
         "prefecture_isere": (lambda: fetch_prefecture_isere_news(force_refresh=refresh), {"status": "degraded", "articles": []}),
         "vigieau": (lambda: fetch_vigieau_restrictions(force_refresh=refresh), {"status": "degraded", "alerts": [], "max_level": "vert"}),
+        "atmo_aura": (lambda: fetch_atmo_aura_isere_air_quality(force_refresh=refresh), {"status": "degraded", "today": {}, "tomorrow": {}}),
     }
 
     results: dict[str, dict] = {}
@@ -638,6 +641,7 @@ def build_external_risks_payload(refresh: bool = False, db: Session | None = Non
         "georisques": results["georisques"],
         "prefecture_isere": results["prefecture_isere"],
         "vigieau": results["vigieau"],
+        "atmo_aura": results["atmo_aura"],
     }
     if errors:
         payload["errors"] = errors
@@ -651,7 +655,7 @@ def get_external_risks_payload(refresh: bool = False, db: Session | None = None)
         return payload
 
     snapshot = _get_external_risks_snapshot()
-    if snapshot and any(snapshot.get(key) for key in ("meteo_france", "vigicrues", "itinisere", "bison_fute", "waze", "georisques", "prefecture_isere", "vigieau")):
+    if snapshot and any(snapshot.get(key) for key in ("meteo_france", "vigicrues", "itinisere", "bison_fute", "waze", "georisques", "prefecture_isere", "vigieau", "atmo_aura")):
         return snapshot
 
     payload = build_external_risks_payload(refresh=True, db=db)

@@ -43,7 +43,7 @@ Ou via script:
 - Gestion des communes (ajout, enrichissement contacts/informations, bascule mode crise, import ORSEC et conventions).
 - Main courante locale (ajout d’évènements horodatés).
 - Carte opérationnelle embarquée (OpenStreetMap).
-- Connexion aux flux externes Isère : Météo-France (état de disponibilité et infos vigilance) et Vigicrues (stations du département + vigilances de tronçons + niveau d'alerte eau calculé).
+- Connexion aux flux externes Isère : Météo-France (état de disponibilité et infos vigilance), Vigicrues (stations du département + vigilances de tronçons + niveau d'alerte eau calculé) et Atmo AURA (indice qualité de l'air Grenoble/Isère).
 
 
 ## Géorisques API v2 (clé annuelle)
@@ -82,6 +82,7 @@ Retourne un bloc consolidé :
 - `vigicrues` : état de connexion, stations du département de l'Isère, vigilances des tronçons associés et niveau d'alerte eau courant (`vert`, `jaune`, `orange`, `rouge`).
 - `georisques` : synthèse multi-communes Isère (sismicité max, AZI, PPRN/PPRM/PPRT, DICRIM, TIM, information préventive risques, radon, mouvements de terrain et cavités).
 - `prefecture_isere` : flux RSS des actualités de la Préfecture de l'Isère (titres, dates, liens).
+- `atmo_aura` : indice ATMO (J/J+1), commentaire et statut d'épisode pollution via Atmo Auvergne-Rhône-Alpes (commune de Grenoble).
 
 
 ## Alignement besoins métier
