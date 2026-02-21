@@ -125,7 +125,10 @@
 
       <section class="content">
         <header class="panel app-header">
-          <button id="app-menu-btn" class="menu-toggle" type="button" aria-expanded="false" aria-controls="app-sidebar">☰ Menu</button>
+          <div class="app-header-nav-actions">
+            <button id="app-menu-btn" class="menu-toggle" type="button" aria-expanded="false" aria-controls="app-sidebar">☰ Menu</button>
+            <button id="app-sidebar-toggle" class="ghost" type="button" aria-expanded="true" aria-controls="app-sidebar">↔ Réduire menu</button>
+          </div>
           <div>
             <p class="tag">Pilotage en temps réel</p>
             <h1 id="panel-title">Situation opérationnelle</h1>
@@ -464,6 +467,7 @@
                 </div>
                 <div class="map-inline-actions">
                   <button id="map-fit-btn" type="button" class="ghost map-btn-lite">Tout voir</button>
+                  <button id="map-locate-btn" type="button" class="ghost map-btn-lite">📍 Me localiser</button>
                   <button id="map-add-point-btn" type="button" class="ghost map-btn-lite" aria-pressed="false" data-requires-edit>➕ Créer un POI</button>
                 </div>
                 <select id="map-basemap-select" aria-label="Choisir le fond de carte">

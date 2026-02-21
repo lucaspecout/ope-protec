@@ -1,4 +1,13 @@
-const STORAGE_KEYS = { token: 'token', activePanel: 'activePanel', mapPointsCache: 'mapPointsCache', municipalitiesCache: 'municipalitiesCache', dashboardSnapshot: 'dashboardSnapshot', externalRisksSnapshot: 'externalRisksSnapshot', apiInterconnectionsSnapshot: 'apiInterconnectionsSnapshot' };
+const STORAGE_KEYS = {
+  token: 'token',
+  activePanel: 'activePanel',
+  appSidebarCollapsed: 'appSidebarCollapsed',
+  mapPointsCache: 'mapPointsCache',
+  municipalitiesCache: 'municipalitiesCache',
+  dashboardSnapshot: 'dashboardSnapshot',
+  externalRisksSnapshot: 'externalRisksSnapshot',
+  apiInterconnectionsSnapshot: 'apiInterconnectionsSnapshot',
+};
 const AUTO_REFRESH_MS = 300000;
 const EVENTS_LIVE_REFRESH_MS = 300000;
 const HOME_LIVE_REFRESH_MS = 300000;
@@ -52,6 +61,7 @@ let photoCameraLayer = null;
 let realtimeTrafficLayer = null;
 let mapTileLayer = null;
 let googleTrafficFlowLayer = null;
+let userLocationMarker = null;
 let mapAddPointMode = false;
 let mapPoints = [];
 let pendingMapPointCoords = null;
@@ -592,13 +602,30 @@ function setActivePanel(panelId) {
   document.querySelectorAll('.menu-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.target === panelId));
   document.querySelectorAll('.view').forEach((panel) => setVisibility(panel, panel.id === panelId));
   document.getElementById('panel-title').textContent = PANEL_TITLES[panelId] || 'Centre opérationnel';
-  if (panelId === 'map-panel' && leafletMap) setTimeout(() => leafletMap.invalidateSize(), 100);
+  if (panelId === 'map-panel' && leafletMap) {
+    setTimeout(() => {
+      leafletMap.invalidateSize();
+      centerMapOnIsere();
+    }, 100);
+  }
   if (panelId === 'logs-panel') ensureLogMunicipalitiesLoaded();
   if (panelId === 'api-panel' && token) {
     loadApiInterconnections(false).catch((error) => {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
     });
   }
+}
+
+function centerMapOnIsere() {
+  if (!leafletMap) return;
+  if (boundaryLayer?.getBounds) {
+    const bounds = boundaryLayer.getBounds();
+    if (bounds?.isValid && bounds.isValid()) {
+      leafletMap.fitBounds(bounds, { padding: [16, 16] });
+      return;
+    }
+  }
+  leafletMap.setView([45.2, 5.72], 9);
 }
 
 function withPreservedScroll(runUpdate) {
@@ -797,6 +824,55 @@ function fitMapToData(showFeedback = false) {
     return;
   }
   if (showFeedback) setMapFeedback('Aucune donnée cartographique à afficher.', true);
+}
+
+function locateUserOnMap() {
+  if (!leafletMap) return;
+  if (!navigator.geolocation) {
+    setMapFeedback('La géolocalisation n\'est pas disponible sur cet appareil.', true);
+    return;
+  }
+  navigator.geolocation.getCurrentPosition((position) => {
+    const { latitude, longitude, accuracy } = position.coords;
+    const coords = [latitude, longitude];
+    leafletMap.setView(coords, 14);
+    if (!userLocationMarker) {
+      userLocationMarker = window.L.circleMarker(coords, {
+        radius: 9,
+        color: '#0b4daa',
+        weight: 2,
+        fillColor: '#2b6bff',
+        fillOpacity: 0.35,
+      }).addTo(leafletMap);
+    } else {
+      userLocationMarker.setLatLng(coords);
+    }
+    userLocationMarker.bindPopup(`Vous êtes ici (précision ±${Math.round(accuracy)} m)`).openPopup();
+    setMapFeedback('Position trouvée et centrée sur votre localisation.');
+  }, (error) => {
+    const messages = {
+      1: 'Autorisation refusée pour la géolocalisation.',
+      2: 'Position indisponible actuellement.',
+      3: 'Délai dépassé pour récupérer la position.',
+    };
+    setMapFeedback(messages[error.code] || 'Impossible de vous localiser.', true);
+  }, {
+    enableHighAccuracy: true,
+    timeout: 12000,
+    maximumAge: 60000,
+  });
+}
+
+function setSidebarCollapsed(collapsed) {
+  const appView = document.getElementById('app-view');
+  const toggle = document.getElementById('app-sidebar-toggle');
+  if (!appView || !toggle) return;
+  const isCollapsed = Boolean(collapsed);
+  appView.classList.toggle('app--sidebar-collapsed', isCollapsed);
+  toggle.setAttribute('aria-expanded', String(!isCollapsed));
+  toggle.textContent = isCollapsed ? '↔ Agrandir menu' : '↔ Réduire menu';
+  localStorage.setItem(STORAGE_KEYS.appSidebarCollapsed, String(isCollapsed));
+  if (leafletMap) setTimeout(() => leafletMap.invalidateSize(), 160);
 }
 
 async function loadIsereBoundary() {
@@ -3115,6 +3191,13 @@ function bindAppInteractions() {
     const isOpen = appSidebar?.classList.toggle('open');
     appMenuButton.setAttribute('aria-expanded', String(Boolean(isOpen)));
   });
+  const appSidebarToggle = document.getElementById('app-sidebar-toggle');
+  appSidebarToggle?.addEventListener('click', () => {
+    const appView = document.getElementById('app-view');
+    const isCollapsed = appView?.classList.contains('app--sidebar-collapsed');
+    setSidebarCollapsed(!isCollapsed);
+  });
+  setSidebarCollapsed(localStorage.getItem(STORAGE_KEYS.appSidebarCollapsed) === 'true');
   document.getElementById('logout-btn').addEventListener('click', logout);
   setMapControlsCollapsed(false);
   document.getElementById('map-search-btn')?.addEventListener('click', handleMapSearch);
@@ -3122,6 +3205,7 @@ function bindAppInteractions() {
     setMapControlsCollapsed(!mapControlsCollapsed);
   });
   document.getElementById('map-fit-btn')?.addEventListener('click', () => fitMapToData(true));
+  document.getElementById('map-locate-btn')?.addEventListener('click', locateUserOnMap);
   document.getElementById('map-add-point-btn')?.addEventListener('click', () => {
     if (!canEdit()) {
       setMapFeedback('Vous n\'avez pas le droit de créer un POI.', true);
