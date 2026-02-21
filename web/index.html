@@ -227,6 +227,11 @@
             <p id="georisques-page-source" class="muted">Source: -</p>
             <p id="georisques-page-debug" class="muted"></p>
           </article>
+          <div class="georisques-tabs" role="tablist" aria-label="Vues Géorisques">
+            <button id="georisques-tab-overview" class="georisques-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="georisques-overview-section">Synthèse multi-risques</button>
+            <button id="georisques-tab-pcs" class="georisques-tab" type="button" role="tab" aria-selected="false" aria-controls="georisques-pcs-section">Risques existants des communes PCS</button>
+          </div>
+          <div id="georisques-overview-section" role="tabpanel" aria-labelledby="georisques-tab-overview">
           <div class="georisques-lists">
             <article class="tile">
               <h4>Répartition des mouvements de terrain (type)</h4>
@@ -245,6 +250,13 @@
             <h4>Documents inondation détaillés (AZI)</h4>
             <ul id="georisques-documents-list" class="list"></ul>
           </article>
+          </div>
+          <div id="georisques-pcs-section" class="hidden" hidden role="tabpanel" aria-labelledby="georisques-tab-pcs">
+            <article class="tile">
+              <h4>Communes PCS · risques existants et niveau de danger</h4>
+              <ul id="georisques-pcs-risks-list" class="list"></ul>
+            </article>
+          </div>
         </section>
 
         <section id="api-panel" class="panel view hidden" hidden>
