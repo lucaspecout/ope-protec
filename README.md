@@ -55,7 +55,7 @@ Pour enrichir les données départementales Isère (mouvements de terrain, cavit
 GEORISQUES_API_TOKEN=votre_cle_api
 ```
 
-Sans clé, l'application bascule automatiquement sur l'API publique v1 (mode dégradé mais fonctionnel).
+Sans clé, le module Géorisques reste en mode dégradé et n'expose pas de consolidation (fonctionnement 100% API v2).
 
 ## Géorisques v2 Isère – données enrichies
 
