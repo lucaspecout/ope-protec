@@ -99,3 +99,4 @@ Retourne un bloc consolidé :
 - `GET /supervision/overview` : consolidation prête à l'emploi (Météo-France + Vigicrues + Itinisère + Géorisques + communes en crise + timeline).
 - `GET /api/vigicrues/geojson` : stations Vigicrues Isère en GeoJSON pour cartographie interactive.
 - `GET /api/itinisere/events` : perturbations Itinisère en direct via le flux RSS officiel.
+- `GET /api/vigieau/alerts` : restrictions d'eau Vigieau pour l'Isère (actualisation optionnelle avec `?refresh=true`).

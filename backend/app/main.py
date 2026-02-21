@@ -727,6 +727,14 @@ def interactive_map_itinisere_events(
     return fetch_itinisere_disruptions(limit=safe_limit, force_refresh=refresh)
 
 
+@app.get("/api/vigieau/alerts")
+def interactive_map_vigieau_alerts(
+    refresh: bool = False,
+    _: User = Depends(require_roles(*READ_ROLES)),
+):
+    return fetch_vigieau_restrictions(force_refresh=refresh)
+
+
 @app.get("/supervision/overview")
 def supervision_overview(
     refresh: bool = False,
@@ -748,6 +756,7 @@ def supervision_overview(
         "alerts": {
             "meteo": meteo,
             "vigicrues": vigicrues,
+            "vigieau": risks_payload.get("vigieau") or {},
             "itinisere": itinisere,
             "bison_fute": bison_fute,
             "waze": waze,

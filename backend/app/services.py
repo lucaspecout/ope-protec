@@ -1569,6 +1569,40 @@ def _vigieau_list(payload: Any) -> list[dict[str, Any]]:
     return []
 
 
+def _vigieau_collect_zone_alerts() -> list[dict[str, Any]]:
+    probe_points = [
+        (45.1885, 5.7245),  # Grenoble
+        (45.3640, 5.5920),  # Voiron
+        (45.3930, 5.5050),  # Rives
+        (45.2100, 5.6800),  # Échirolles
+        (45.6110, 5.1500),  # Bourgoin-Jallieu
+        (45.5270, 4.8740),  # Vienne
+        (45.2980, 5.6360),  # Saint-Égrève
+    ]
+
+    entries: list[dict[str, Any]] = []
+    for lat, lon in probe_points:
+        query = urlencode({"lat": lat, "lon": lon})
+        payload = _http_get_json(f"https://api.vigieau.beta.gouv.fr/api/zones?{query}", timeout=18)
+        entries.extend(_vigieau_list(payload))
+
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in entries:
+        key = "|".join(
+            [
+                str(item.get("id") or ""),
+                str(item.get("nom_zone") or item.get("nom") or item.get("name") or ""),
+                str(item.get("niveau_gravite") or item.get("niveau") or item.get("niveauAlerte") or ""),
+            ]
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
 def _fetch_vigieau_restrictions_live() -> dict[str, Any]:
     source_page = "https://www.vigieau.gouv.fr"
     candidates = [
@@ -1639,6 +1673,56 @@ def _fetch_vigieau_restrictions_live() -> dict[str, Any]:
         except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
             last_error = exc
 
+    try:
+        restrictions = _vigieau_collect_zone_alerts()
+        alerts: list[dict[str, Any]] = []
+        for item in restrictions:
+            level = _normalize_vigieau_level(
+                item.get("niveau_gravite")
+                or item.get("niveau")
+                or item.get("niveauAlerte")
+                or item.get("libelle_niveau_gravite")
+                or item.get("severity")
+                or ""
+            )
+            alerts.append(
+                {
+                    "zone": item.get("nom_zone")
+                    or item.get("zone")
+                    or item.get("nom")
+                    or item.get("name")
+                    or "Zone Isère",
+                    "level": level,
+                    "level_color": _vigieau_level_to_color(level),
+                    "measure": item.get("mesure")
+                    or item.get("restriction")
+                    or item.get("libelle_mesure")
+                    or item.get("description")
+                    or "Mesure de restriction d'eau active",
+                    "start_date": item.get("date_debut")
+                    or item.get("debut_validite")
+                    or item.get("dateDebut")
+                    or "",
+                    "end_date": item.get("date_fin")
+                    or item.get("fin_validite")
+                    or item.get("dateFin")
+                    or "",
+                }
+            )
+        alerts.sort(key=lambda alert: _vigieau_level_rank(alert.get("level", "")), reverse=True)
+        max_level = alerts[0]["level_color"] if alerts else "vert"
+        return {
+            "service": "Vigieau",
+            "status": "online",
+            "source": "https://api.vigieau.beta.gouv.fr/api/zones",
+            "department": "Isère",
+            "alerts": alerts[:20],
+            "max_level": max_level,
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
+        last_error = exc
+
     return {
         "service": "Vigieau",
         "status": "degraded",
@@ -1648,6 +1732,7 @@ def _fetch_vigieau_restrictions_live() -> dict[str, Any]:
         "max_level": "vert",
         "error": str(last_error or "Service Vigieau indisponible"),
     }
+
 
 
 def fetch_vigieau_restrictions(force_refresh: bool = False) -> dict[str, Any]:
