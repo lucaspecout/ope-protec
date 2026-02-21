@@ -2276,6 +2276,7 @@ function openMunicipalityDetailsInlineFallback(municipality) {
 if (typeof window !== 'undefined') {
   window.openMunicipalityDetailsInlineFallback = openMunicipalityDetailsInlineFallback;
   window.closeMunicipalityDetailsModal = closeMunicipalityDetailsModal;
+  window.closeMunicipalityEditorFallback = closeMunicipalityEditor;
 }
 
 async function openMunicipalityDetailsModal(municipality) {
@@ -2283,10 +2284,9 @@ async function openMunicipalityDetailsModal(municipality) {
   const content = document.getElementById('municipality-details-content');
   if (!modal || !content || !municipality) return;
 
-  const [files, logs, georisquesRisks] = await Promise.all([
+  const [files, logs] = await Promise.all([
     loadMunicipalityFiles(municipality.id).catch(() => []),
     api('/logs').catch(() => []),
-    api(`/municipalities/${municipality.id}/georisques-risks`).catch(() => ({ risks: [], danger_level: 'Faible', code_insee: municipality.insee_code || null })),
   ]);
   const municipalityLogs = (Array.isArray(logs) ? logs : [])
     .filter((log) => String(log.municipality_id || '') === String(municipality.id))
@@ -2341,15 +2341,12 @@ async function openMunicipalityDetailsModal(municipality) {
     <h4>${escapeHtml(municipality.name)}</h4>
     <p><strong>Responsable:</strong> ${escapeHtml(municipality.manager || '-')}</p>
     <p><strong>Téléphone:</strong> ${escapeHtml(municipality.phone || '-')} · <strong>Email:</strong> ${escapeHtml(municipality.email || '-')}</p>
-    <p><strong>Code postal:</strong> ${escapeHtml(municipality.postal_code || '-')} · <strong>Code INSEE:</strong> ${escapeHtml(georisquesRisks.code_insee || municipality.insee_code || '-')} · <strong>PCS:</strong> ${municipality.pcs_active ? 'actif' : 'inactif'}</p>
+    <p><strong>Code postal:</strong> ${escapeHtml(municipality.postal_code || '-')} · <strong>Code INSEE:</strong> ${escapeHtml(municipality.insee_code || '-')} · <strong>PCS:</strong> ${municipality.pcs_active ? 'actif' : 'inactif'}</p>
     <p><strong>Statut:</strong> ${municipality.crisis_mode ? 'CRISE' : 'veille'} · <strong>Vigilance:</strong> ${escapeHtml(normalizeLevel(municipality.vigilance_color || 'vert'))}</p>
     <p><strong>Population:</strong> ${municipality.population ?? '-'} · <strong>Capacité d'accueil:</strong> ${municipality.shelter_capacity ?? '-'}</p>
     <p><strong>Canal radio:</strong> ${escapeHtml(municipality.radio_channel || '-')}</p>
     <p><strong>Contacts d'astreinte:</strong><br>${escapeHtml(municipality.contacts || 'Aucun')}</p>
     <p><strong>Informations complémentaires:</strong><br>${escapeHtml(municipality.additional_info || 'Aucune')}</p>
-    <h5>Risques Géorisques (code INSEE)</h5>
-    <p><strong>Niveau estimé:</strong> ${escapeHtml(georisquesRisks.danger_level || 'Faible')} · <strong>Risques recensés:</strong> ${Number(georisquesRisks.risk_total || (Array.isArray(georisquesRisks.risks) ? georisquesRisks.risks.length : 0))}</p>
-    <ul class="list compact">${(Array.isArray(georisquesRisks.risks) ? georisquesRisks.risks : []).map((risk) => `<li>${escapeHtml(String(risk))}</li>`).join('') || '<li>Aucun risque détaillé retourné par Géorisques.</li>'}</ul>
     <h5>Documents partagés</h5>
     <p class="muted">Total: <strong>${files.length}</strong>${Object.entries(byType).map(([type, count]) => ` · ${escapeHtml(type)}: ${count}`).join('')}</p>
     ${municipalityDocumentFiltersMarkup(state, municipality.id)}

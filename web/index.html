@@ -315,7 +315,7 @@
           <dialog id="municipality-details-modal" class="municipality-details-modal">
             <div class="municipality-details-modal__head">
               <h4>Détail commune</h4>
-              <button type="button" id="municipality-details-close" class="ghost">Fermer</button>
+              <button type="button" id="municipality-details-close" class="ghost" onclick="window.closeMunicipalityDetailsModal && window.closeMunicipalityDetailsModal()">Fermer</button>
             </div>
             <div id="municipality-details-content"></div>
           </dialog>
@@ -323,7 +323,7 @@
           <aside id="municipality-editor" class="municipality-editor hidden" hidden>
             <div class="municipality-editor__head">
               <h4 id="municipality-editor-title">Fiche commune</h4>
-              <button type="button" id="municipality-editor-close" class="ghost">Fermer</button>
+              <button type="button" id="municipality-editor-close" class="ghost" onclick="window.closeMunicipalityEditorFallback && window.closeMunicipalityEditorFallback()">Fermer</button>
             </div>
             <form id="municipality-edit-form" class="municipality-edit-form">
               <input type="hidden" name="id" />
