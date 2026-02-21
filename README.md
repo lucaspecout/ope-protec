@@ -45,6 +45,18 @@ Ou via script:
 - Carte opérationnelle embarquée (OpenStreetMap).
 - Connexion aux flux externes Isère : Météo-France (état de disponibilité et infos vigilance) et Vigicrues (stations du département + vigilances de tronçons + niveau d'alerte eau calculé).
 
+
+## Géorisques API v2 (clé annuelle)
+
+Pour enrichir les données départementales Isère (mouvements de terrain, cavités, radon, AZI) avec l'API v2 authentifiée, ajoutez votre clé dans le backend :
+
+```bash
+# .env (backend)
+GEORISQUES_API_TOKEN=votre_cle_api
+```
+
+Sans clé, l'application bascule automatiquement sur l'API publique v1 (mode dégradé mais fonctionnel).
+
 ## Endpoint de surveillance externe (Isère)
 
 Après authentification, l'API expose :
