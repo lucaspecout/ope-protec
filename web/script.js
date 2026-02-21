@@ -2610,6 +2610,7 @@ function renderExternalRisks(data = {}) {
   cachedRealtimeTraffic = realtimeTraffic || {};
   const prefecture = data?.prefecture_isere || {};
   const vigieau = data?.vigieau || {};
+  const atmo = data?.atmo_aura || {};
   const georisquesPayload = data?.georisques || {};
   const georisques = georisquesPayload?.data && typeof georisquesPayload.data === 'object'
     ? { ...georisquesPayload.data, ...georisquesPayload }
@@ -2629,6 +2630,10 @@ function renderExternalRisks(data = {}) {
   renderBisonFuteSummary(bisonFute);
   renderPrefectureNews(prefecture);
   renderVigieauAlerts(vigieau);
+  const atmoToday = atmo?.today || {};
+  const atmoLevel = normalizeLevel(atmoToday.level || 'inconnu');
+  setRiskText('atmo-status', `${atmo.status || 'inconnu'} · indice ${atmoToday.index ?? '-'}`, atmoToday.level || 'vert');
+  setText('atmo-info', `${atmoToday.date || 'date inconnue'} · niveau ${atmoLevel}${atmo.has_pollution_episode ? ' · épisode en cours' : ''}`);
   setRiskText('georisques-status', `${georisques.status || 'inconnu'} · sismicité ${georisques.highest_seismic_zone_label || 'inconnue'}`, georisques.status === 'online' ? 'vert' : 'jaune');
   setText('georisques-info', `${georisques.flood_documents_total ?? 0} AZI · ${georisques.ppr_total ?? 0} PPR · ${georisques.ground_movements_total ?? 0} mouvements`);
   renderGeorisquesDetails(georisques);
@@ -2674,6 +2679,7 @@ function renderApiInterconnections(data = {}) {
     { key: 'georisques', label: 'Géorisques', level: data.georisques?.highest_seismic_zone_label || 'inconnue', details: `${data.georisques?.flood_documents_total ?? 0} document(s) inondation` },
     { key: 'prefecture_isere', label: "Préfecture Isère · Actualités", level: `${(data.prefecture_isere?.items || []).length} actualité(s)`, details: data.prefecture_isere?.source || '-' },
     { key: 'vigieau', label: 'Vigieau · Restrictions eau', level: `${(data.vigieau?.alerts || []).length} alerte(s)`, details: data.vigieau?.source || '-' },
+    { key: 'atmo_aura', label: "Atmo AURA · Qualité de l'air", level: `indice ${data.atmo_aura?.today?.index ?? '-'}`, details: data.atmo_aura?.source || '-' },
   ];
 
   const cards = services.map((service) => {

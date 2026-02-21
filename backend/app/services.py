@@ -288,6 +288,7 @@ _WAZE_CACHE_TTL_SECONDS = 120
 _GEORISQUES_CACHE_TTL_SECONDS = 900
 _PREFECTURE_CACHE_TTL_SECONDS = 600
 _VIGIEAU_CACHE_TTL_SECONDS = 900
+_ATMO_AURA_CACHE_TTL_SECONDS = 900
 
 _vigicrues_cache_lock = Lock()
 _vigicrues_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
@@ -303,6 +304,8 @@ _prefecture_cache_lock = Lock()
 _prefecture_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _vigieau_cache_lock = Lock()
 _vigieau_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_atmo_aura_cache_lock = Lock()
+_atmo_aura_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 
 
 def _cached_external_payload(
@@ -1426,6 +1429,87 @@ def _fetch_prefecture_isere_news_live(limit: int = 6) -> dict[str, Any]:
             "error": str(exc),
         }
 
+def _extract_drupal_settings_json(page_html: str) -> dict[str, Any]:
+    match = re.search(
+        r'<script type="application/json" data-drupal-selector="drupal-settings-json">(.*?)</script>',
+        page_html,
+        flags=re.DOTALL,
+    )
+    if not match:
+        raise ValueError("Configuration Drupal introuvable")
+    return json.loads(match.group(1))
+
+
+def _atmo_level_from_index(index_value: float | int | None) -> str:
+    if index_value is None:
+        return "inconnu"
+    if index_value <= 2:
+        return "vert"
+    if index_value <= 4:
+        return "jaune"
+    if index_value <= 6:
+        return "orange"
+    return "rouge"
+
+
+def _fetch_atmo_aura_isere_air_quality_live() -> dict[str, Any]:
+    source = "https://www.atmo-auvergnerhonealpes.fr/air-commune/grenoble/38185/indice-atmo"
+    try:
+        page_html = _http_get_text(source, timeout=16)
+        settings_payload = _extract_drupal_settings_json(page_html)
+        dataviz = settings_payload.get("dataviz") or {}
+        indices = dataviz.get("indices") or {}
+        comments = dataviz.get("comments") or {}
+
+        available_dates = sorted(indices.keys())
+        if not available_dates:
+            raise ValueError("Indices ATMO indisponibles")
+
+        today_date = available_dates[0]
+        tomorrow_date = available_dates[1] if len(available_dates) > 1 else None
+        today_payload = indices.get(today_date) or {}
+        tomorrow_payload = indices.get(tomorrow_date) or {}
+
+        today_index = today_payload.get("indice_atmo")
+        tomorrow_index = tomorrow_payload.get("indice_atmo")
+
+        return {
+            "service": "Atmo Auvergne-Rhône-Alpes",
+            "status": "online",
+            "department": "Isère",
+            "city": "Grenoble",
+            "source": source,
+            "today": {
+                "date": today_date,
+                "index": today_index,
+                "level": _atmo_level_from_index(today_index),
+                "comment": comments.get(today_date, ""),
+                "sub_indices": today_payload.get("sous_indices") or [],
+            },
+            "tomorrow": {
+                "date": tomorrow_date,
+                "index": tomorrow_index,
+                "level": _atmo_level_from_index(tomorrow_index),
+                "comment": comments.get(tomorrow_date, ""),
+                "sub_indices": tomorrow_payload.get("sous_indices") or [],
+            },
+            "has_pollution_episode": bool(dataviz.get("hasEpisodeInProgress")),
+            "updated_at": comments.get("date_maj") or (datetime.utcnow().isoformat() + "Z"),
+        }
+    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
+        return {
+            "service": "Atmo Auvergne-Rhône-Alpes",
+            "status": "degraded",
+            "department": "Isère",
+            "city": "Grenoble",
+            "source": source,
+            "today": {},
+            "tomorrow": {},
+            "has_pollution_episode": False,
+            "error": str(exc),
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+
 
 def fetch_prefecture_isere_news(limit: int = 6, force_refresh: bool = False) -> dict[str, Any]:
     return _cached_external_payload(
@@ -1434,6 +1518,16 @@ def fetch_prefecture_isere_news(limit: int = 6, force_refresh: bool = False) -> 
         ttl_seconds=_PREFECTURE_CACHE_TTL_SECONDS,
         force_refresh=force_refresh,
         loader=lambda: _fetch_prefecture_isere_news_live(limit=limit),
+    )
+
+
+def fetch_atmo_aura_isere_air_quality(force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_atmo_aura_cache,
+        lock=_atmo_aura_cache_lock,
+        ttl_seconds=_ATMO_AURA_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=_fetch_atmo_aura_isere_air_quality_live,
     )
 
 
