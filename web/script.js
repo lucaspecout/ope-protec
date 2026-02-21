@@ -101,6 +101,8 @@ const BISON_FUTE_CAMERAS = [
   { name: 'A480 Grenoble vers Grenoble Sud', road: 'A480', lat: 45.15873823197743, lon: 5.7005336069172925, manager: 'AREA', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/at_area09.mp4' },
   { name: 'A480/RN481 direction Ouest/Sud', road: 'A480 / RN481', lat: 45.21650958839951, lon: 5.6784500109717335, manager: 'AREA', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/at_area10.mp4' },
   { name: 'A48 aire de l’Île rose', road: 'A48', lat: 45.272598746702336, lon: 5.625897585313137, manager: 'AREA', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/at_area08.mp4' },
+  { name: 'Bifurcation A43/A48 près de Bourgoin vers Chambéry', road: 'A43 / A48', lat: 45.56699881012449, lon: 5.344117226835471, manager: 'AREA', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/at_area06.mp4' },
+  { name: 'A48 Châbons voie Sud', road: 'A48', lat: 45.44780572102549, lon: 5.399438919782866, manager: 'AREA', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/at_area11.mp4' },
 ];
 const ITINISERE_PHOTO_CAMERAS = [
   {
@@ -116,13 +118,6 @@ const ITINISERE_PHOTO_CAMERAS = [
     lat: 45.35574122911768,
     lon: 5.992340889751027,
     streamUrl: 'https://traffic.itiniserev2.cityway.fr/api/v1/Camera/D525LesFontaines',
-  },
-  {
-    name: "Le Collet d'Allevard",
-    road: 'D109',
-    lat: 45.395387104597916,
-    lon: 6.109804944464281,
-    streamUrl: 'https://traffic.itiniserev2.cityway.fr/api/v1/Camera/D109ColletAllevard',
   },
   {
     name: 'Fond de France',
