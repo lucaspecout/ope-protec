@@ -2076,7 +2076,10 @@ function renderGeorisquesDetails(georisques = {}) {
   const sourceText = `Source: ${georisques.source || 'inconnue'} · Dernière mise à jour: ${georisques.updated_at ? new Date(georisques.updated_at).toLocaleString() : 'inconnue'}`;
   const errorsText = errorDetails.length ? ` · Anomalies: ${errorDetails.join(' | ')}` : '';
   const radonText = radonDistribution ? ` · Radon (faible/moyen/élevé): ${Number(radonDistribution.faible || 0)}/${Number(radonDistribution.moyen || 0)}/${Number(radonDistribution.eleve || 0)}` : '';
-  setText('georisques-page-source', `${sourceText}${radonText}${errorsText}`);
+  const pprCategories = georisques.ppr_categories && typeof georisques.ppr_categories === 'object' ? georisques.ppr_categories : null;
+  const pprText = pprCategories ? ` · PPR (N/M/T): ${Number(pprCategories.pprn || 0)}/${Number(pprCategories.pprm || 0)}/${Number(pprCategories.pprt || 0)}` : '';
+  const preventionText = ` · DICRIM: ${Number(georisques.dicrim_total || 0)} · TIM: ${Number(georisques.tim_total || 0)} · Info-risques: ${Number(georisques.risques_information_total || 0)}`;
+  setText('georisques-page-source', `${sourceText}${radonText}${pprText}${preventionText}${errorsText}`);
   setText('georisques-page-debug', monitored.length ? '' : `Aucune commune détaillée reçue (clés: ${Object.keys(georisques || {}).join(', ') || 'aucune'}).`);
 
   const movementTypesMarkup = Object.entries(movementTypes)
@@ -2104,7 +2107,7 @@ function renderGeorisquesDetails(georisques = {}) {
       ? `<ul class="list compact">${docs.slice(0, 6).map((doc) => `<li><strong>${escapeHtml(doc.title || doc.libelle_azi || 'Document inondation')}</strong>${doc.code ? ` (${escapeHtml(doc.code)})` : ''}${doc.river_basin ? ` · Bassin: ${escapeHtml(doc.river_basin)}` : ''}${doc.published_at ? ` · Diffusion: ${escapeHtml(doc.published_at)}` : ''}</li>`).join('')}</ul>`
       : '<span class="muted">Aucun détail de document remonté.</span>';
 
-    return `<li><strong>${escapeHtml(commune.name || commune.commune || 'Commune inconnue')}</strong> (${escapeHtml(commune.code_insee || commune.insee || '-')})<br>Sismicité: <strong>${escapeHtml(commune.seismic_zone || commune.zone_sismicite || 'inconnue')}</strong> · Radon: <strong>${escapeHtml(commune.radon_label || 'inconnu')}</strong><br>Inondation (AZI): <strong>${Number(commune.flood_documents || commune.nb_documents || 0)}</strong> · PPR: <strong>${Number(commune.ppr_total || 0)}</strong> · Mouvements: <strong>${Number(commune.ground_movements_total || 0)}</strong> · Cavités: <strong>${Number(commune.cavities_total || 0)}</strong><br>PPR par risque: ${pprText}${communeErrors.length ? `<br><span class="muted">Anomalies commune: ${escapeHtml(communeErrors.join(' | '))}</span>` : ''}<br>${docsMarkup}</li>`;
+    return `<li><strong>${escapeHtml(commune.name || commune.commune || 'Commune inconnue')}</strong> (${escapeHtml(commune.code_insee || commune.insee || '-')})<br>Sismicité: <strong>${escapeHtml(commune.seismic_zone || commune.zone_sismicite || 'inconnue')}</strong> · Radon: <strong>${escapeHtml(commune.radon_label || 'inconnu')}</strong><br>Inondation (AZI): <strong>${Number(commune.flood_documents || commune.nb_documents || 0)}</strong> · PPR: <strong>${Number(commune.ppr_total || 0)}</strong> · Mouvements: <strong>${Number(commune.ground_movements_total || 0)}</strong> · Cavités: <strong>${Number(commune.cavities_total || 0)}</strong><br>DICRIM: <strong>${escapeHtml(commune.dicrim_publication_year || 'non renseigné')}</strong> · TIM: <strong>${Number(commune.tim_total || 0)}</strong> · Info-risques: <strong>${Number(commune.risques_information_total || 0)}</strong><br>PPR par risque: ${pprText}${communeErrors.length ? `<br><span class="muted">Anomalies commune: ${escapeHtml(communeErrors.join(' | '))}</span>` : ''}<br>${docsMarkup}</li>`;
   }).join('') || '<li>Aucune commune remontée par Géorisques.</li>';
   setHtml('georisques-communes-list', markup);
   renderGeorisquesPcsRisks(monitored);

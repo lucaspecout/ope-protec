@@ -1529,22 +1529,32 @@ def fetch_waze_isere_traffic(force_refresh: bool = False) -> dict[str, Any]:
     )
 
 
-def _fetch_georisques_v2_collection(endpoint: str, departement: str = "38", page_size: int = 1000) -> dict[str, Any]:
+def _fetch_georisques_v2_collection(
+    endpoint: str,
+    departement: str = "38",
+    page_size: int = 1000,
+    extra_query: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     token = settings.georisques_api_token.strip()
     if not token:
         raise ValueError("Clé API Géorisques absente")
 
     headers = {"Authorization": f"Bearer {token}"}
+    query = {"departement": departement, "pageSize": page_size, "pageNumber": 0}
+    if extra_query:
+        query.update(extra_query)
+
     first_page = _http_get_json(
-        f"https://www.georisques.gouv.fr/api/v2/{endpoint}?departement={quote_plus(departement)}&pageSize={page_size}&pageNumber=0",
+        f"https://www.georisques.gouv.fr/api/v2/{endpoint}?{urlencode(query, doseq=True)}",
         headers=headers,
     )
     content = list(first_page.get("content") or [])
     total_pages = int(first_page.get("totalPages") or 1)
 
     for page_number in range(1, total_pages):
+        query["pageNumber"] = page_number
         page_payload = _http_get_json(
-            f"https://www.georisques.gouv.fr/api/v2/{endpoint}?departement={quote_plus(departement)}&pageSize={page_size}&pageNumber={page_number}",
+            f"https://www.georisques.gouv.fr/api/v2/{endpoint}?{urlencode(query, doseq=True)}",
             headers=headers,
         )
         content.extend(page_payload.get("content") or [])
@@ -1729,6 +1739,13 @@ def _fetch_georisques_isere_summary_live() -> dict[str, Any]:
         cavites_payload = _fetch_georisques_v2_collection("cavites")
         radon_payload = _fetch_georisques_v2_collection("radon")
         azi_payload = _fetch_georisques_v2_collection("gaspar/azi")
+        pprn_payload = _fetch_georisques_v2_collection("gaspar/pprn")
+        pprm_payload = _fetch_georisques_v2_collection("gaspar/pprm")
+        pprt_payload = _fetch_georisques_v2_collection("gaspar/pprt")
+        dicrim_payload = _fetch_georisques_v2_collection("gaspar/dicrim")
+        tim_payload = _fetch_georisques_v2_collection("gaspar/tim")
+        risques_payload = _fetch_georisques_v2_collection("gaspar/risques")
+        zonage_payload = _fetch_georisques_v2_collection("zonage_sismique")
     except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
         fallback = _fetch_georisques_isere_summary_v1()
         fallback["status"] = "partial" if fallback.get("status") == "online" else fallback.get("status", "degraded")
@@ -1774,6 +1791,49 @@ def _fetch_georisques_isere_summary_live() -> dict[str, Any]:
             radon_by_commune[code] = classe
 
     flood_documents_total = azi_payload["total_elements"]
+
+    zonage_entries = zonage_payload["content"]
+    seismic_zone_distribution: dict[str, int] = {}
+    highest_seismic_zone_code = 0
+    for item in zonage_entries:
+        zone_label = str(item.get("zoneSismicite") or item.get("typeZone") or "inconnue").strip()
+        seismic_zone_distribution[zone_label] = seismic_zone_distribution.get(zone_label, 0) + 1
+        zone_match = re.search(r"(\d+)", zone_label)
+        if zone_match:
+            highest_seismic_zone_code = max(highest_seismic_zone_code, int(zone_match.group(1)))
+
+    ppr_total = pprn_payload["total_elements"] + pprm_payload["total_elements"] + pprt_payload["total_elements"]
+    ppr_categories = {
+        "pprn": pprn_payload["total_elements"],
+        "pprm": pprm_payload["total_elements"],
+        "pprt": pprt_payload["total_elements"],
+    }
+
+    tim_by_commune: dict[str, int] = {}
+    for item in tim_payload["content"]:
+        for commune in item.get("communes") or []:
+            code = str(commune.get("codeInsee") or "")
+            if code:
+                tim_by_commune[code] = tim_by_commune.get(code, 0) + 1
+
+    risques_by_commune: dict[str, int] = {}
+    for item in risques_payload["content"]:
+        for commune in item.get("communes") or []:
+            code = str(commune.get("codeInsee") or "")
+            if code:
+                risques_by_commune[code] = risques_by_commune.get(code, 0) + 1
+
+    dicrim_by_commune: dict[str, str] = {}
+    for item in dicrim_payload["content"]:
+        code = str(item.get("codeInsee") or "")
+        if not code:
+            continue
+        year = str(item.get("anneePublication") or "").strip()
+        if year:
+            best = dicrim_by_commune.get(code)
+            if not best or year > best:
+                dicrim_by_commune[code] = year
+
     monitored_flood_documents = {code: [] for code in monitored_codes}
     for doc in azi_payload["content"]:
         for commune in doc.get("communes") or []:
@@ -1793,19 +1853,49 @@ def _fetch_georisques_isere_summary_live() -> dict[str, Any]:
     for code, name in monitored_codes.items():
         radon_class = radon_by_commune.get(code, "")
         docs = monitored_flood_documents.get(code) or []
+        try:
+            zone_payload = _fetch_georisques_v2_collection("zonage_sismique", extra_query={"codesInsee": [code]})
+            zone_entries = zone_payload.get("content") or []
+            zone_label = str((zone_entries[0] if zone_entries else {}).get("zoneSismicite") or "inconnue")
+        except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
+            zone_label = "inconnue"
         monitored.append(
             {
                 "name": name,
                 "code_insee": code,
-                "seismic_zone": "Voir zonage communal détaillé",
+                "seismic_zone": zone_label,
                 "flood_documents": len(docs),
                 "flood_documents_details": docs,
-                "ppr_total": 0,
-                "ppr_by_risk": {},
+                "ppr_total": sum(
+                    1
+                    for dataset in (pprn_payload["content"], pprm_payload["content"], pprt_payload["content"])
+                    for item in dataset
+                    if any(str(commune.get("codeInsee") or "") == code for commune in item.get("communes") or [])
+                ),
+                "ppr_by_risk": {
+                    "pprn": sum(
+                        1
+                        for item in pprn_payload["content"]
+                        if any(str(commune.get("codeInsee") or "") == code for commune in item.get("communes") or [])
+                    ),
+                    "pprm": sum(
+                        1
+                        for item in pprm_payload["content"]
+                        if any(str(commune.get("codeInsee") or "") == code for commune in item.get("communes") or [])
+                    ),
+                    "pprt": sum(
+                        1
+                        for item in pprt_payload["content"]
+                        if any(str(commune.get("codeInsee") or "") == code for commune in item.get("communes") or [])
+                    ),
+                },
                 "ground_movements_total": sum(1 for item in movements if str(item.get("codeInsee") or "") == code),
                 "cavities_total": sum(1 for item in cavities if str(item.get("codeInsee") or "") == code),
                 "radon_class": radon_class,
                 "radon_label": radon_labels.get(radon_class, "inconnu"),
+                "dicrim_publication_year": dicrim_by_commune.get(code),
+                "tim_total": tim_by_commune.get(code, 0),
+                "risques_information_total": risques_by_commune.get(code, 0),
                 "errors": [],
             }
         )
@@ -1816,16 +1906,21 @@ def _fetch_georisques_isere_summary_live() -> dict[str, Any]:
         "source": source,
         "api_mode": "v2-token",
         "department": "Isère (38)",
-        "highest_seismic_zone_code": 0,
-        "highest_seismic_zone_label": "À compléter (API v2 zonage)",
+        "highest_seismic_zone_code": highest_seismic_zone_code,
+        "highest_seismic_zone_label": f"Zone {highest_seismic_zone_code}" if highest_seismic_zone_code else "inconnue",
         "flood_documents_total": flood_documents_total,
-        "ppr_total": 0,
+        "ppr_total": ppr_total,
         "ground_movements_total": mvt_payload["total_elements"],
         "cavities_total": cavites_payload["total_elements"],
         "communes_with_radon_moderate_or_high": radon_distribution["2"] + radon_distribution["3"],
         "movement_types": movement_types,
         "movement_reliability": movement_reliability,
         "cavity_types": cavity_types,
+        "ppr_categories": ppr_categories,
+        "dicrim_total": dicrim_payload["total_elements"],
+        "tim_total": tim_payload["total_elements"],
+        "risques_information_total": risques_payload["total_elements"],
+        "seismic_zone_distribution": seismic_zone_distribution,
         "radon_distribution": {
             "faible": radon_distribution["1"],
             "moyen": radon_distribution["2"],
