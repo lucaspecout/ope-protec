@@ -2264,6 +2264,18 @@ function closeMunicipalityDetailsModal() {
   modal.removeAttribute('open');
 }
 
+function requestMunicipalityDetailsCloseLikeEscape() {
+  const modal = document.getElementById('municipality-details-modal');
+  if (!modal) return;
+  if (typeof modal.requestClose === 'function') {
+    modal.requestClose();
+    return;
+  }
+  const cancelEvent = new Event('cancel', { cancelable: true });
+  modal.dispatchEvent(cancelEvent);
+  if (!cancelEvent.defaultPrevented) closeMunicipalityDetailsModal();
+}
+
 function cleanupMunicipalityPreview() {
   if (currentMunicipalityPreviewUrl) {
     URL.revokeObjectURL(currentMunicipalityPreviewUrl);
@@ -2278,6 +2290,7 @@ function openMunicipalityDetailsInlineFallback(municipality) {
 if (typeof window !== 'undefined') {
   window.openMunicipalityDetailsInlineFallback = openMunicipalityDetailsInlineFallback;
   window.closeMunicipalityDetailsModal = closeMunicipalityDetailsModal;
+  window.requestMunicipalityDetailsCloseLikeEscape = requestMunicipalityDetailsCloseLikeEscape;
   window.closeMunicipalityEditorFallback = closeMunicipalityEditor;
 }
 
@@ -3280,7 +3293,7 @@ function bindAppInteractions() {
     closeMunicipalityEditor();
   });
   document.getElementById('municipality-details-close')?.addEventListener('click', () => {
-    closeMunicipalityDetailsModal();
+    requestMunicipalityDetailsCloseLikeEscape();
   });
   document.getElementById('municipality-details-modal')?.addEventListener('cancel', (event) => {
     cleanupMunicipalityPreview();
