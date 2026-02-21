@@ -36,6 +36,7 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/veille
       REDIS_URL: redis://redis:6379/0
       SECRET_KEY: change-me-in-production
+      GEORISQUES_API_TOKEN: eyJhbGciOiJIUzI1NiJ9.eyJub20iOiJQRUNPVVQiLCJwcmVub20iOiJMdWNhcyBGZXJuYW5kIiwiZW1haWwiOiJsdWNhc3BlY291dEBnbWFpbC5jb20iLCJleHAiOjE4MDMxNjgwMDAsImlhdCI6MTc3MTcwMTg1OH0.0vvegNEtb8ZVbdepBJ2yxunLR_JycuPAtnV_ODsZWS0
     depends_on:
       db:
         condition: service_healthy
