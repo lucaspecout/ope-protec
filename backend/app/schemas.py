@@ -143,6 +143,7 @@ class MunicipalityCreate(BaseModel):
     phone: str
     email: EmailStr
     manager: str
+    insee_code: str | None = None
     postal_code: str | None = None
     contacts: str | None = None
     additional_info: str | None = None
@@ -173,11 +174,24 @@ class MunicipalityCreate(BaseModel):
             raise ValueError("La valeur ne peut pas être négative")
         return value
 
+    @field_validator("insee_code")
+    @classmethod
+    def validate_insee_code(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            return None
+        if not normalized.isdigit() or len(normalized) != 5:
+            raise ValueError("Le code INSEE doit contenir 5 chiffres")
+        return normalized
+
 
 class MunicipalityUpdate(BaseModel):
     manager: str | None = None
     phone: str | None = None
     email: EmailStr | None = None
+    insee_code: str | None = None
     postal_code: str | None = None
     contacts: str | None = None
     additional_info: str | None = None
@@ -212,6 +226,18 @@ class MunicipalityUpdate(BaseModel):
             raise ValueError("Couleur de vigilance invalide")
         return normalized
 
+    @field_validator("insee_code")
+    @classmethod
+    def validate_insee_code(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            return None
+        if not normalized.isdigit() or len(normalized) != 5:
+            raise ValueError("Le code INSEE doit contenir 5 chiffres")
+        return normalized
+
 
 class MunicipalityOut(BaseModel):
     id: int
@@ -219,6 +245,7 @@ class MunicipalityOut(BaseModel):
     phone: str
     email: str
     manager: str
+    insee_code: str | None = None
     postal_code: str | None = None
     contacts: str | None = None
     additional_info: str | None = None

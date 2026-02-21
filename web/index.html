@@ -300,6 +300,7 @@
             <input name="phone" placeholder="Téléphone" required />
             <input name="email" placeholder="Email" type="email" required />
             <input name="postal_code" placeholder="Code postal" pattern="[0-9]{5}" maxlength="5" required />
+            <input name="insee_code" placeholder="Code INSEE (5 chiffres)" pattern="[0-9]{5}" maxlength="5" />
             <input name="contacts" placeholder="Contacts d'astreinte (tel, mails)" />
             <input name="additional_info" placeholder="Infos complémentaires (zones sensibles, écoles...)" />
             <input name="population" type="number" placeholder="Population" min="0" />
@@ -330,6 +331,7 @@
               <label>Téléphone<input name="phone" required /></label>
               <label>Email<input name="email" type="email" required /></label>
               <label>Code postal<input name="postal_code" maxlength="5" pattern="[0-9]{5}" /></label>
+              <label>Code INSEE<input name="insee_code" maxlength="5" pattern="[0-9]{5}" /></label>
               <label>Contacts d'astreinte<textarea name="contacts" rows="2"></textarea></label>
               <label>Informations complémentaires<textarea name="additional_info" rows="3"></textarea></label>
               <label>Population<input name="population" type="number" min="0" /></label>

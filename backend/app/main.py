@@ -45,6 +45,7 @@ from .schemas import (
 from .security import create_access_token, hash_password, verify_password
 from .services import (
     fetch_bison_fute_traffic,
+    fetch_georisques_commune_risks,
     fetch_waze_isere_traffic,
     cleanup_old_weather_alerts,
     fetch_georisques_isere_summary,
@@ -54,6 +55,7 @@ from .services import (
     fetch_prefecture_isere_news,
     fetch_vigicrues_isere,
     generate_pdf_report,
+    resolve_commune_insee_code,
     vigicrues_geojson_from_stations,
 )
 
@@ -67,6 +69,7 @@ with engine.begin() as conn:
     conn.execute(text("ALTER TABLE weather_alerts ADD COLUMN IF NOT EXISTS internal_mail_group VARCHAR(255)"))
     conn.execute(text("ALTER TABLE weather_alerts ADD COLUMN IF NOT EXISTS sent_to_internal_group BOOLEAN DEFAULT FALSE"))
     conn.execute(text("ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS contacts TEXT"))
+    conn.execute(text("ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS insee_code VARCHAR(5)"))
     conn.execute(text("ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS postal_code VARCHAR(10)"))
     conn.execute(text("ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS additional_info TEXT"))
     conn.execute(text("ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS population INTEGER"))
@@ -785,7 +788,10 @@ def validate_weather(alert_id: int, db: Session = Depends(get_db), _: User = Dep
 
 @app.post("/municipalities", response_model=MunicipalityOut)
 def create_municipality(data: MunicipalityCreate, db: Session = Depends(get_db), _: User = Depends(require_roles(*EDIT_ROLES))):
-    municipality = Municipality(**data.model_dump())
+    payload = data.model_dump()
+    if not payload.get("insee_code"):
+        payload["insee_code"] = resolve_commune_insee_code(payload.get("name", ""), payload.get("postal_code"))
+    municipality = Municipality(**payload)
     db.add(municipality)
     db.commit()
     db.refresh(municipality)
@@ -813,12 +819,46 @@ def update_municipality(
     if not municipality:
         raise HTTPException(404, "Commune introuvable")
 
-    for key, value in data.model_dump(exclude_unset=True).items():
+    changes = data.model_dump(exclude_unset=True)
+    for key, value in changes.items():
         setattr(municipality, key, value)
+
+    if ("insee_code" in changes and not municipality.insee_code) or ("name" in changes or "postal_code" in changes):
+        municipality.insee_code = resolve_commune_insee_code(municipality.name, municipality.postal_code)
 
     db.commit()
     db.refresh(municipality)
     return municipality
+
+
+@app.get("/municipalities/{municipality_id}/georisques-risks")
+def municipality_georisques_risks(
+    municipality_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*READ_ROLES)),
+):
+    municipality = ensure_municipality_scope(user, db, municipality_id)
+    insee_code = (municipality.insee_code or "").strip()
+    if not insee_code:
+        insee_code = resolve_commune_insee_code(municipality.name, municipality.postal_code)
+        if insee_code:
+            municipality.insee_code = insee_code
+            db.commit()
+
+    if not insee_code:
+        return {"municipality_id": municipality_id, "name": municipality.name, "code_insee": None, "risks": [], "danger_level": "Faible"}
+
+    payload = fetch_georisques_commune_risks([insee_code])
+    entry = (payload.get("communes") or [{}])[0]
+    return {
+        "municipality_id": municipality_id,
+        "name": municipality.name,
+        "code_insee": insee_code,
+        "risks": entry.get("risks", []),
+        "risk_total": entry.get("risk_total", 0),
+        "danger_level": entry.get("danger_level", "Faible"),
+        "updated_at": payload.get("updated_at"),
+    }
 
 
 @app.post("/municipalities/{municipality_id}/documents")

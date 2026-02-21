@@ -2039,7 +2039,9 @@ function renderGeorisquesPcsRisks(monitored = []) {
 
   const markup = pcsMonitored.map((commune) => {
     const danger = georisquesDangerLevel(commune);
-    return `<li><strong>${escapeHtml(commune.name || commune.commune || 'Commune inconnue')}</strong> <span class="danger-chip ${danger.css}">${danger.label}</span><br>Sismicité: <strong>${escapeHtml(commune.seismic_zone || commune.zone_sismicite || 'inconnue')}</strong> · Inondation: <strong>${Number(commune.flood_documents || commune.nb_documents || 0)}</strong> · PPR: <strong>${Number(commune.ppr_total || 0)}</strong> · Mouvements: <strong>${Number(commune.ground_movements_total || 0)}</strong></li>`;
+    const gasparRisks = Array.isArray(commune.gaspar_risks) ? commune.gaspar_risks : [];
+    const gasparDanger = commune.gaspar_danger_level || danger.label;
+    return `<li><strong>${escapeHtml(commune.name || commune.commune || 'Commune inconnue')}</strong> <span class="danger-chip ${danger.css}">${escapeHtml(gasparDanger)}</span><br>INSEE: <strong>${escapeHtml(commune.code_insee || '-')}</strong> · Sismicité: <strong>${escapeHtml(commune.seismic_zone || commune.zone_sismicite || 'inconnue')}</strong> · Inondation: <strong>${Number(commune.flood_documents || commune.nb_documents || 0)}</strong> · PPR: <strong>${Number(commune.ppr_total || 0)}</strong> · Mouvements: <strong>${Number(commune.ground_movements_total || 0)}</strong><br>Risques GASPAR: ${gasparRisks.length ? gasparRisks.slice(0, 6).map((risk) => escapeHtml(risk)).join(', ') : 'non détaillés'}</li>`;
   }).join('') || '<li>Aucune commune PCS active avec détails Géorisques.</li>';
 
   setHtml('georisques-pcs-risks-list', markup);
@@ -2107,7 +2109,8 @@ function renderGeorisquesDetails(georisques = {}) {
       ? `<ul class="list compact">${docs.slice(0, 6).map((doc) => `<li><strong>${escapeHtml(doc.title || doc.libelle_azi || 'Document inondation')}</strong>${doc.code ? ` (${escapeHtml(doc.code)})` : ''}${doc.river_basin ? ` · Bassin: ${escapeHtml(doc.river_basin)}` : ''}${doc.published_at ? ` · Diffusion: ${escapeHtml(doc.published_at)}` : ''}</li>`).join('')}</ul>`
       : '<span class="muted">Aucun détail de document remonté.</span>';
 
-    return `<li><strong>${escapeHtml(commune.name || commune.commune || 'Commune inconnue')}</strong> (${escapeHtml(commune.code_insee || commune.insee || '-')})<br>Sismicité: <strong>${escapeHtml(commune.seismic_zone || commune.zone_sismicite || 'inconnue')}</strong> · Radon: <strong>${escapeHtml(commune.radon_label || 'inconnu')}</strong><br>Inondation (AZI): <strong>${Number(commune.flood_documents || commune.nb_documents || 0)}</strong> · PPR: <strong>${Number(commune.ppr_total || 0)}</strong> · Mouvements: <strong>${Number(commune.ground_movements_total || 0)}</strong> · Cavités: <strong>${Number(commune.cavities_total || 0)}</strong><br>DICRIM: <strong>${escapeHtml(commune.dicrim_publication_year || 'non renseigné')}</strong> · TIM: <strong>${Number(commune.tim_total || 0)}</strong> · Info-risques: <strong>${Number(commune.risques_information_total || 0)}</strong><br>PPR par risque: ${pprText}${communeErrors.length ? `<br><span class="muted">Anomalies commune: ${escapeHtml(communeErrors.join(' | '))}</span>` : ''}<br>${docsMarkup}</li>`;
+    const gasparRisks = Array.isArray(commune.gaspar_risks) ? commune.gaspar_risks : [];
+    return `<li><strong>${escapeHtml(commune.name || commune.commune || 'Commune inconnue')}</strong> (${escapeHtml(commune.code_insee || commune.insee || '-')})<br>Sismicité: <strong>${escapeHtml(commune.seismic_zone || commune.zone_sismicite || 'inconnue')}</strong> · Radon: <strong>${escapeHtml(commune.radon_label || 'inconnu')}</strong><br>Inondation (AZI): <strong>${Number(commune.flood_documents || commune.nb_documents || 0)}</strong> · PPR: <strong>${Number(commune.ppr_total || 0)}</strong> · Mouvements: <strong>${Number(commune.ground_movements_total || 0)}</strong> · Cavités: <strong>${Number(commune.cavities_total || 0)}</strong><br>DICRIM: <strong>${escapeHtml(commune.dicrim_publication_year || 'non renseigné')}</strong> · TIM: <strong>${Number(commune.tim_total || 0)}</strong> · Info-risques: <strong>${Number(commune.risques_information_total || 0)}</strong><br>Risques GASPAR: <strong>${Number(commune.gaspar_risk_total || gasparRisks.length || 0)}</strong>${gasparRisks.length ? ` · ${gasparRisks.slice(0, 6).map((risk) => escapeHtml(risk)).join(', ')}` : ''}<br>PPR par risque: ${pprText}${communeErrors.length ? `<br><span class="muted">Anomalies commune: ${escapeHtml(communeErrors.join(' | '))}</span>` : ''}<br>${docsMarkup}</li>`;
   }).join('') || '<li>Aucune commune remontée par Géorisques.</li>';
   setHtml('georisques-communes-list', markup);
   renderGeorisquesPcsRisks(monitored);
@@ -2134,6 +2137,7 @@ function openMunicipalityEditor(municipality) {
   form.elements.phone.value = municipality.phone || '';
   form.elements.email.value = municipality.email || '';
   form.elements.postal_code.value = municipality.postal_code || '';
+  form.elements.insee_code.value = municipality.insee_code || '';
   form.elements.contacts.value = municipality.contacts || '';
   form.elements.additional_info.value = municipality.additional_info || '';
   form.elements.population.value = municipality.population ?? '';
@@ -2279,9 +2283,10 @@ async function openMunicipalityDetailsModal(municipality) {
   const content = document.getElementById('municipality-details-content');
   if (!modal || !content || !municipality) return;
 
-  const [files, logs] = await Promise.all([
+  const [files, logs, georisquesRisks] = await Promise.all([
     loadMunicipalityFiles(municipality.id).catch(() => []),
     api('/logs').catch(() => []),
+    api(`/municipalities/${municipality.id}/georisques-risks`).catch(() => ({ risks: [], danger_level: 'Faible', code_insee: municipality.insee_code || null })),
   ]);
   const municipalityLogs = (Array.isArray(logs) ? logs : [])
     .filter((log) => String(log.municipality_id || '') === String(municipality.id))
@@ -2336,12 +2341,15 @@ async function openMunicipalityDetailsModal(municipality) {
     <h4>${escapeHtml(municipality.name)}</h4>
     <p><strong>Responsable:</strong> ${escapeHtml(municipality.manager || '-')}</p>
     <p><strong>Téléphone:</strong> ${escapeHtml(municipality.phone || '-')} · <strong>Email:</strong> ${escapeHtml(municipality.email || '-')}</p>
-    <p><strong>Code postal:</strong> ${escapeHtml(municipality.postal_code || '-')} · <strong>PCS:</strong> ${municipality.pcs_active ? 'actif' : 'inactif'}</p>
+    <p><strong>Code postal:</strong> ${escapeHtml(municipality.postal_code || '-')} · <strong>Code INSEE:</strong> ${escapeHtml(georisquesRisks.code_insee || municipality.insee_code || '-')} · <strong>PCS:</strong> ${municipality.pcs_active ? 'actif' : 'inactif'}</p>
     <p><strong>Statut:</strong> ${municipality.crisis_mode ? 'CRISE' : 'veille'} · <strong>Vigilance:</strong> ${escapeHtml(normalizeLevel(municipality.vigilance_color || 'vert'))}</p>
     <p><strong>Population:</strong> ${municipality.population ?? '-'} · <strong>Capacité d'accueil:</strong> ${municipality.shelter_capacity ?? '-'}</p>
     <p><strong>Canal radio:</strong> ${escapeHtml(municipality.radio_channel || '-')}</p>
     <p><strong>Contacts d'astreinte:</strong><br>${escapeHtml(municipality.contacts || 'Aucun')}</p>
     <p><strong>Informations complémentaires:</strong><br>${escapeHtml(municipality.additional_info || 'Aucune')}</p>
+    <h5>Risques Géorisques (code INSEE)</h5>
+    <p><strong>Niveau estimé:</strong> ${escapeHtml(georisquesRisks.danger_level || 'Faible')} · <strong>Risques recensés:</strong> ${Number(georisquesRisks.risk_total || (Array.isArray(georisquesRisks.risks) ? georisquesRisks.risks.length : 0))}</p>
+    <ul class="list compact">${(Array.isArray(georisquesRisks.risks) ? georisquesRisks.risks : []).map((risk) => `<li>${escapeHtml(String(risk))}</li>`).join('') || '<li>Aucun risque détaillé retourné par Géorisques.</li>'}</ul>
     <h5>Documents partagés</h5>
     <p class="muted">Total: <strong>${files.length}</strong>${Object.entries(byType).map(([type, count]) => ` · ${escapeHtml(type)}: ${count}`).join('')}</p>
     ${municipalityDocumentFiltersMarkup(state, municipality.id)}
@@ -3427,6 +3435,7 @@ function bindAppInteractions() {
       phone: form.elements.phone.value.trim(),
       email: form.elements.email.value.trim(),
       postal_code: form.elements.postal_code.value.trim() || null,
+      insee_code: form.elements.insee_code.value.trim() || null,
       contacts: form.elements.contacts.value.trim() || null,
       additional_info: form.elements.additional_info.value.trim() || null,
       population: Number(form.elements.population.value || 0) || null,
@@ -3676,6 +3685,7 @@ document.getElementById('municipality-form').addEventListener('submit', async (e
         phone: form.get('phone'),
         email: form.get('email'),
         postal_code: form.get('postal_code'),
+        insee_code: form.get('insee_code') || null,
         contacts: form.get('contacts'),
         additional_info: form.get('additional_info'),
         population: Number(form.get('population') || 0) || null,

@@ -1633,6 +1633,91 @@ def _resolve_commune_insee_codes(names: list[str], departement: str = "38") -> d
     return resolved
 
 
+def resolve_commune_insee_code(name: str, postal_code: str | None = None, departement: str = "38") -> str | None:
+    label = (name or "").strip()
+    if not label:
+        return None
+    query = f"https://geo.api.gouv.fr/communes?nom={quote_plus(label)}&fields=nom,code&boost=population&limit=1"
+    if postal_code:
+        query = f"https://geo.api.gouv.fr/communes?nom={quote_plus(label)}&codePostal={quote_plus(str(postal_code))}&fields=nom,code&boost=population&limit=1"
+    elif departement:
+        query = f"https://geo.api.gouv.fr/communes?nom={quote_plus(label)}&departement={quote_plus(departement)}&fields=nom,code&boost=population&limit=1"
+    try:
+        payload = _http_get_json(query)
+        if isinstance(payload, list) and payload:
+            code = str(payload[0].get("code") or "").strip()
+            return code or None
+    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
+        return None
+    return None
+
+
+def _georisques_danger_label(risk_total: int) -> str:
+    if risk_total >= 8:
+        return "Très élevé"
+    if risk_total >= 5:
+        return "Élevé"
+    if risk_total >= 2:
+        return "Modéré"
+    return "Faible"
+
+
+def fetch_georisques_commune_risks(codes_insee: list[str]) -> dict[str, Any]:
+    normalized_codes = []
+    for code in codes_insee:
+        candidate = str(code or "").strip()
+        if candidate and candidate.isdigit() and len(candidate) == 5 and candidate not in normalized_codes:
+            normalized_codes.append(candidate)
+
+    if not normalized_codes:
+        return {"service": "Géorisques", "source": "https://georisques.gouv.fr/api/v1/gaspar/risques", "communes": [], "updated_at": datetime.utcnow().isoformat() + "Z"}
+
+    query = urlencode({"code_insee": ",".join(normalized_codes), "page_size": 100}, doseq=True)
+    try:
+        payload = _http_get_json(f"https://www.georisques.gouv.fr/api/v1/gaspar/risques?{query}")
+    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+        return {
+            "service": "Géorisques",
+            "source": "https://georisques.gouv.fr/api/v1/gaspar/risques",
+            "communes": [{"code_insee": code, "risks": [], "risk_total": 0, "danger_level": "Faible", "errors": [str(exc)]} for code in normalized_codes],
+            "error": str(exc),
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+
+    content = payload.get("data") or payload.get("content") or payload.get("items") or []
+    by_commune = {code: [] for code in normalized_codes}
+
+    for item in content:
+        communes = item.get("communes") if isinstance(item, dict) else None
+        risk_name = str(item.get("libelle_risque") or item.get("libelle") or item.get("risque") or "Risque non précisé").strip()
+        if communes:
+            for commune in communes:
+                code = str(commune.get("code_insee") or commune.get("codeInsee") or "").strip()
+                if code in by_commune and risk_name:
+                    by_commune[code].append(risk_name)
+            continue
+        code = str(item.get("code_insee") or item.get("codeInsee") or "").strip()
+        if code in by_commune and risk_name:
+            by_commune[code].append(risk_name)
+
+    communes_payload = []
+    for code in normalized_codes:
+        risks = sorted({risk for risk in by_commune.get(code, []) if risk})
+        communes_payload.append({
+            "code_insee": code,
+            "risks": risks,
+            "risk_total": len(risks),
+            "danger_level": _georisques_danger_label(len(risks)),
+        })
+
+    return {
+        "service": "Géorisques",
+        "source": "https://www.georisques.gouv.fr/api/v1/gaspar/risques",
+        "communes": communes_payload,
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
 def _fetch_georisques_isere_summary_live(commune_names: list[str] | None = None) -> dict[str, Any]:
     source = "https://georisques.gouv.fr/api/v2"
     if not settings.georisques_api_token.strip():
@@ -1886,9 +1971,20 @@ def _fetch_georisques_isere_summary_live(commune_names: list[str] | None = None)
                 "dicrim_publication_year": dicrim_by_commune.get(code),
                 "tim_total": tim_by_commune.get(code, 0),
                 "risques_information_total": risques_by_commune.get(code, 0),
+                "gaspar_risks": [],
+                "gaspar_risk_total": 0,
+                "gaspar_danger_level": "Faible",
                 "errors": [],
             }
         )
+
+    gaspar_payload = fetch_georisques_commune_risks(list(monitored_codes.keys()))
+    gaspar_by_code = {item.get("code_insee"): item for item in gaspar_payload.get("communes") or []}
+    for commune in monitored:
+        details = gaspar_by_code.get(commune.get("code_insee")) or {}
+        commune["gaspar_risks"] = details.get("risks", [])
+        commune["gaspar_risk_total"] = details.get("risk_total", 0)
+        commune["gaspar_danger_level"] = details.get("danger_level", "Faible")
 
     return {
         "service": "Géorisques",
