@@ -1074,23 +1074,6 @@ function renderStations(vigicruesPayload = []) {
       .addTo(hydroLayer);
   });
 
-  const byRiver = new Map();
-  stationsWithPoints.forEach((s) => {
-    const key = s.river || s.station || 'Isère';
-    if (!byRiver.has(key)) byRiver.set(key, []);
-    byRiver.get(key).push(s);
-  });
-  byRiver.forEach((group) => {
-    if (group.length < 2) return;
-    const sorted = group.slice().sort((a, b) => String(a.station || '').localeCompare(String(b.station || '')));
-    const maxLevel = sorted.some((s) => normalizeLevel(s.level) === 'rouge') ? 'rouge'
-      : sorted.some((s) => normalizeLevel(s.level) === 'orange') ? 'orange'
-      : sorted.some((s) => normalizeLevel(s.level) === 'jaune') ? 'jaune' : 'vert';
-    window.L.polyline(sorted.map((s) => [s.lat, s.lon]), { color: levelColor(maxLevel), weight: 4, opacity: 0.75 })
-      .bindPopup(`Cours d'eau: ${escapeHtml(sorted[0].river || sorted[0].station || 'Isère')} · Niveau max: ${maxLevel}`)
-      .addTo(hydroLineLayer);
-  });
-
   troncons.forEach((troncon) => {
     const polyline = Array.isArray(troncon?.polyline) ? troncon.polyline : [];
     if (!polyline.length) return;
@@ -3231,11 +3214,16 @@ function renderExternalRisks(data = {}) {
   setRiskText('meteo-status', `${meteo.status || 'inconnu'} · niveau ${normalizeLevel(meteo.level || 'inconnu')}`, meteo.level || 'vert');
   setText('meteo-info', sanitizeMeteoInformation(meteo.info_state) || meteo.bulletin_title || '');
   setRiskText('vigicrues-status', `${vigicrues.status || 'inconnu'} · niveau ${normalizeLevel(vigicrues.water_alert_level || 'inconnu')}`, vigicrues.water_alert_level || 'vert');
-  setText('vigicrues-info', `${(vigicrues.stations || []).length} station(s) suivie(s)`);
+  setText('vigicrues-info', `${(vigicrues.stations || []).length} station(s) suivie(s) · ${(vigicrues.troncons || []).length} tronçon(s)`);
   setHtml('stations-list', (vigicrues.stations || []).slice(0, 10).map((s) => {
     const statusLevel = stationStatusLevel(s);
     return `<li>${s.station || s.code} · ${s.river || ''} · <span style="color:${levelColor(statusLevel)}">${statusLevel}</span> · Contrôle: ${escapeHtml(s.control_status || 'inconnu')} · ${s.height_m} m</li>`;
   }).join('') || '<li>Aucune station disponible.</li>');
+  setHtml('troncons-list', (vigicrues.troncons || []).map((troncon) => {
+    const level = normalizeLevel(troncon.level || 'inconnu');
+    const stationsCount = Array.isArray(troncon.stations) ? troncon.stations.length : 0;
+    return `<li><strong>${escapeHtml(troncon.name || troncon.code || 'Tronçon')}</strong> · <span style="color:${levelColor(level)}">${escapeHtml(level)}</span> · ${stationsCount} station(s)</li>`;
+  }).join('') || '<li>Aucun tronçon disponible.</li>');
   const itinisereEvents = itinisere.events || [];
   const itinisereTotal = Number(itinisere.events_total ?? itinisereEvents.length);
   setText('itinisere-status', `${itinisere.status || 'inconnu'} · ${itinisereTotal} événements`);
