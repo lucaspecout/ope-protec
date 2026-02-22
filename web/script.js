@@ -836,7 +836,6 @@ async function resetMapFilters() {
   const bisonCameras = document.getElementById('filter-bison-cameras');
   const photoCameras = document.getElementById('filter-photo-cameras');
   const googleFlow = document.getElementById('filter-google-traffic-flow');
-  const poiVisible = document.getElementById('filter-map-poi');
   if (hydro) hydro.checked = true;
   if (pcs) pcs.checked = true;
   if (activeOnly) activeOnly.checked = true;
@@ -845,7 +844,6 @@ async function resetMapFilters() {
   if (bisonCameras) bisonCameras.checked = true;
   if (photoCameras) photoCameras.checked = true;
   if (googleFlow) googleFlow.checked = false;
-  if (poiVisible) poiVisible.checked = true;
   if (searchLayer) searchLayer.clearLayers();
   applyBasemap('osm');
   renderStations(cachedStations);
@@ -2049,11 +2047,9 @@ function renderCustomPoints(showFeedback = true) {
 
   const selectedCategory = document.getElementById('map-point-category-filter')?.value || 'all';
   const targetedCategory = document.getElementById('poi-target-category-filter')?.value || 'all';
-  const poiVisible = document.getElementById('filter-map-poi')?.checked ?? true;
   const filteredPoints = mapPoints.filter((point) => {
     const isVisible = mapPointVisibilityOverrides.get(point.id) !== false;
     if (!isVisible) return false;
-    if (!poiVisible && point.category === 'poi') return false;
     return (selectedCategory === 'all' || point.category === selectedCategory)
       && (targetedCategory === 'all' || point.category === targetedCategory);
   });
@@ -2875,7 +2871,7 @@ function projectToIsereMap(lat, lon, width = 480, height = 280, padding = 16) {
 function buildSitrepMapSvg(title, points = [], lines = []) {
   const width = 480;
   const height = 280;
-  const frame = '<path d="M90 26 L376 26 L450 82 L432 246 L120 258 L40 194 L36 88 Z" fill="#f4f8ff" stroke="#163a87" stroke-width="2" />';
+  const frame = '<path d="M90 26 L376 26 L450 82 L432 246 L120 258 L40 194 L36 88 Z" fill="rgba(255,255,255,0.25)" stroke="#163a87" stroke-width="2.4" />';
   const lineSvg = lines.map((line) => {
     const coords = (line.points || [])
       .map((coord) => projectToIsereMap(coord.lat, coord.lon, width, height, 18))
@@ -2889,9 +2885,12 @@ function buildSitrepMapSvg(title, points = [], lines = []) {
     return `<circle cx="${position.x.toFixed(1)}" cy="${position.y.toFixed(1)}" r="4.2" fill="${escapeHtml(point.color || '#0d4b8e')}" stroke="#ffffff" stroke-width="1.2" />`;
   }).join('');
 
+  const background = 'https://staticmap.openstreetmap.de/staticmap.php?center=45.2,5.72&zoom=8&size=960x560&maptype=mapnik';
   return `<figure style="margin:10px 0 16px;">
     <figcaption style="font-weight:700; margin-bottom:6px;">${escapeHtml(title)} (centrée Isère)</figcaption>
     <svg viewBox="0 0 ${width} ${height}" width="100%" height="220" role="img" aria-label="${escapeHtml(title)}">
+      <image href="${background}" x="0" y="0" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice" opacity="0.95"/>
+      <rect x="0" y="0" width="${width}" height="${height}" fill="rgba(255,255,255,0.10)" />
       ${frame}
       ${lineSvg}
       ${pointsSvg}
@@ -2926,7 +2925,7 @@ function buildSitrepHtml() {
   const vigicruesItems = Array.isArray(vigicrues.stations) && vigicrues.stations.length
     ? vigicrues.stations.slice(0, 6).map((station) => {
       const level = normalizeLevel(station.level || station.vigilance || vigicrues.water_alert_level || 'inconnu');
-      return `<strong>${escapeHtml(station.name || 'Station')}</strong> · niveau ${escapeHtml(level)}`;
+      return `<strong>${escapeHtml(station.station || station.name || 'Station')}</strong> · niveau ${escapeHtml(level)}`;
     })
     : ['Aucune station prioritaire transmise.'];
 
@@ -3394,6 +3393,20 @@ function computeLogCriticality(level) {
   return riskRank(level);
 }
 
+function buildLogTableRow(log = {}) {
+  const statusKey = String(log.status || 'nouveau');
+  const status = LOG_STATUS_LABEL[statusKey] || 'Nouveau';
+  const municipality = log.municipality_id ? ` · ${escapeHtml(getMunicipalityName(log.municipality_id))}` : '';
+  const place = log.location ? `📍 ${escapeHtml(log.location)}` : 'Lieu non précisé';
+  const source = log.source ? `Source: ${escapeHtml(log.source)}` : 'Source non précisée';
+  const owner = log.assigned_to ? `👤 ${escapeHtml(log.assigned_to)}` : '👤 Non assigné';
+  const next = log.next_update_due ? `⏱️ MAJ ${new Date(log.next_update_due).toLocaleString()}` : '';
+  const actions = canEdit()
+    ? `<div class="map-inline-actions"><button type="button" class="ghost inline-action" data-log-status="${log.id}" data-log-next="en_cours">En cours</button><button type="button" class="ghost inline-action" data-log-next="suivi" data-log-status="${log.id}">Suivi</button><button type="button" class="ghost inline-action" data-log-next="clos" data-log-status="${log.id}">Clôturer</button><button type="button" class="ghost inline-action danger" data-log-delete="${log.id}">Supprimer</button></div>`
+    : '—';
+  return `<tr><td>${new Date(log.event_time || log.created_at).toLocaleString()}</td><td><span class="badge neutral">${formatLogScope(log)}${municipality}</span></td><td>${log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢'}</td><td><strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'MCO')}</strong></td><td><span class="badge neutral">${status}</span></td><td>${place}<br/><span class="muted">${owner} · ${source}${next ? ` · ${next}` : ''}</span><br/>${escapeHtml(log.description || '')}${log.actions_taken ? `<br/><span class="muted">Actions: ${escapeHtml(log.actions_taken)}</span>` : ''}</td><td>${actions}</td></tr>`;
+}
+
 function renderLogsList() {
   const search = String(document.getElementById('logs-search')?.value || '').trim().toLowerCase();
   const municipalityFilter = String(document.getElementById('logs-municipality-filter')?.value || 'all');
@@ -3405,16 +3418,8 @@ function renderLogsList() {
   if (municipalityFilter !== 'all') filtered = filtered.filter((log) => String(log.municipality_id || '') === municipalityFilter);
   if (search) {
     filtered = filtered.filter((log) => {
-      const haystack = [
-        log.event_type,
-        log.description,
-        log.target_scope,
-        log.status,
-        log.location,
-        log.source,
-        log.tags,
-        getMunicipalityName(log.municipality_id),
-      ].map((value) => String(value || '').toLowerCase()).join(' ');
+      const haystack = [log.event_type, log.description, log.target_scope, log.status, log.location, log.source, log.tags, getMunicipalityName(log.municipality_id)]
+        .map((value) => String(value || '').toLowerCase()).join(' ');
       return haystack.includes(search);
     });
   }
@@ -3426,8 +3431,12 @@ function renderLogsList() {
     return new Date(b.event_time || b.created_at).getTime() - new Date(a.event_time || a.created_at).getTime();
   });
 
+  const openLogs = filtered.filter((log) => String(log.status || '').toLowerCase() !== 'clos');
+  const closedLogs = filtered.filter((log) => String(log.status || '').toLowerCase() === 'clos');
+
   setText('logs-count', String(filtered.length));
-  setHtml('logs-list', filtered.map((l) => formatLogLine(l)).join('') || '<li>Aucun log.</li>');
+  setHtml('logs-table-open', openLogs.map((log) => buildLogTableRow(log)).join('') || '<tr><td colspan="7">Aucun évènement en cours.</td></tr>');
+  setHtml('logs-table-closed', closedLogs.map((log) => buildLogTableRow(log)).join('') || '<tr><td colspan="7">Aucun évènement clos.</td></tr>');
 }
 
 async function loadLogs(preloaded = null) {
@@ -4030,7 +4039,7 @@ function bindAppInteractions() {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
     }
   });
-  document.getElementById('logs-list')?.addEventListener('click', async (event) => {
+  document.getElementById('logs-panel')?.addEventListener('click', async (event) => {
     const statusButton = event.target.closest('[data-log-status]');
     const deleteButton = event.target.closest('[data-log-delete]');
     if (!statusButton && !deleteButton) return;
@@ -4123,10 +4132,6 @@ function bindAppInteractions() {
     }
   });
 
-  document.getElementById('filter-map-poi')?.addEventListener('change', () => {
-    renderCustomPoints();
-    fitMapToData();
-  });
   ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'resource-type-filter', 'resource-priority-filter', 'filter-itinisere', 'filter-bison-accidents', 'filter-bison-cameras', 'filter-photo-cameras'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       renderStations(cachedStations);
