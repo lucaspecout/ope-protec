@@ -17,6 +17,7 @@ const PANEL_TITLES = {
   'situation-panel': 'Situation opérationnelle',
   'services-panel': 'Services connectés',
   'georisques-panel': 'Page Géorisques',
+  'news-panel': 'Actualités Isère',
   'api-panel': 'Interconnexions API',
   'municipalities-panel': 'Communes partenaires',
   'logs-panel': 'Main courante opérationnelle',
@@ -107,8 +108,8 @@ let itinisereLayer = null;
 let bisonLayer = null;
 let bisonCameraLayer = null;
 let photoCameraLayer = null;
-let realtimeTrafficLayer = null;
 let mapTileLayer = null;
+let mapFloodOverlayLayer = null;
 let googleTrafficFlowLayer = null;
 let userLocationMarker = null;
 let mapAddPointMode = false;
@@ -121,7 +122,6 @@ let cachedMunicipalities = [];
 let cachedMunicipalityRecords = [];
 let cachedItinisereEvents = [];
 let cachedBisonFute = {};
-let cachedRealtimeTraffic = {};
 let geocodeCache = new Map();
 let municipalityContourCache = new Map();
 const municipalityDocumentsUiState = new Map();
@@ -718,7 +718,11 @@ function updateMapSummary() {
 function applyBasemap(style = 'osm') {
   if (!leafletMap || typeof window.L === 'undefined') return;
   if (mapTileLayer) leafletMap.removeLayer(mapTileLayer);
-  const isereBounds = [[44.6, 4.7], [45.9, 6.4]];
+  if (mapFloodOverlayLayer) {
+    leafletMap.removeLayer(mapFloodOverlayLayer);
+    mapFloodOverlayLayer = null;
+  }
+
   const layers = {
     osm: {
       url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -741,23 +745,27 @@ function applyBasemap(style = 'osm') {
       options: { maxZoom: 19, attribution: '&copy; IGN/Geoportail France' },
     },
     'isere-flood': {
-      type: 'wms',
-      url: 'https://georisques.gouv.fr/services',
-      options: {
-        layers: 'MASQ_EAIP',
-        format: 'image/png',
-        transparent: false,
-        version: '1.3.0',
-        maxZoom: 16,
-        bounds: isereBounds,
-        attribution: '&copy; GéoRisques / BRGM',
+      url: 'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png',
+      options: { maxZoom: 19, attribution: '&copy; Etat (Géorisques) · fond IGN/Geoportail' },
+      floodOverlay: {
+        url: 'https://georisques.gouv.fr/services',
+        options: {
+          layers: 'PPRN_COMMUNE_RISQINOND_APPROUV,PPRN_COMMUNE_RISQINOND_PRESCRIT',
+          format: 'image/png',
+          transparent: true,
+          version: '1.3.0',
+          opacity: 0.62,
+          attribution: '&copy; Etat / Géorisques',
+        },
       },
     },
   };
+
   const selected = layers[style] || layers.osm;
-  mapTileLayer = selected.type === 'wms'
-    ? window.L.tileLayer.wms(selected.url, selected.options).addTo(leafletMap)
-    : window.L.tileLayer(selected.url, selected.options).addTo(leafletMap);
+  mapTileLayer = window.L.tileLayer(selected.url, selected.options).addTo(leafletMap);
+  if (selected.floodOverlay) {
+    mapFloodOverlayLayer = window.L.tileLayer.wms(selected.floodOverlay.url, selected.floodOverlay.options).addTo(leafletMap);
+  }
   applyGoogleTrafficFlowOverlay();
 }
 
@@ -799,7 +807,6 @@ function initMap() {
   bisonLayer = window.L.layerGroup().addTo(leafletMap);
   bisonCameraLayer = window.L.layerGroup().addTo(leafletMap);
   photoCameraLayer = window.L.layerGroup().addTo(leafletMap);
-  realtimeTrafficLayer = window.L.layerGroup().addTo(leafletMap);
   leafletMap.on('click', onMapClickAddPoint);
   leafletMap.on('popupopen', refreshPhotoCameraImages);
   startPhotoCameraAutoRefresh();
@@ -817,8 +824,6 @@ async function resetMapFilters() {
   const defaults = {
     'map-search': '',
     'map-point-category-filter': 'all',
-    'resource-type-filter': 'all',
-    'resource-priority-filter': 'all',
     'resource-target-category-filter': 'all',
     'poi-target-category-filter': 'all',
     'map-basemap-select': 'osm',
@@ -882,7 +887,7 @@ function toggleMapContrast() {
 
 function fitMapToData(showFeedback = false) {
   if (!leafletMap) return;
-  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsBoundaryLayer, pcsLayer, resourceLayer, searchLayer, customPointsLayer, mapPointsLayer, itinisereLayer, bisonLayer, bisonCameraLayer, photoCameraLayer, realtimeTrafficLayer].filter(Boolean);
+  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsBoundaryLayer, pcsLayer, resourceLayer, searchLayer, customPointsLayer, mapPointsLayer, itinisereLayer, bisonLayer, bisonCameraLayer, photoCameraLayer].filter(Boolean);
   const bounds = window.L.latLngBounds([]);
   layers.forEach((layer) => {
     if (layer?.getBounds) {
@@ -1220,15 +1225,11 @@ function toggleSelectedPoiVisibility() {
 
 function renderResources() {
   const showResources = document.getElementById('filter-resources-active')?.checked ?? true;
-  const type = document.getElementById('resource-type-filter')?.value || 'all';
   const targetCategory = document.getElementById('resource-target-category-filter')?.value || 'all';
-  const priority = document.getElementById('resource-priority-filter')?.value || 'all';
   const query = (document.getElementById('map-search')?.value || '').trim().toLowerCase();
   const resources = showResources
-    ? RESOURCE_POINTS.filter((r) => (type === 'all' || r.type === type)
-      && (targetCategory === 'all' || r.type === targetCategory)
+    ? RESOURCE_POINTS.filter((r) => (targetCategory === 'all' || r.type === targetCategory)
       && r.active
-      && (priority === 'all' || r.priority === priority)
       && (!query || `${r.name} ${r.address}`.toLowerCase().includes(query)))
     : [];
   const priorityLabel = { critical: 'critique', vital: 'vital', risk: 'à risque' };
@@ -1902,13 +1903,12 @@ async function buildItinisereMapPoints(events = []) {
 }
 
 async function renderTrafficOnMap() {
-  if (!itinisereLayer || !bisonLayer || !bisonCameraLayer || !photoCameraLayer || !realtimeTrafficLayer || typeof window.L === 'undefined') return;
+  if (!itinisereLayer || !bisonLayer || !bisonCameraLayer || !photoCameraLayer || typeof window.L === 'undefined') return;
   const renderSequence = ++trafficRenderSequence;
   itinisereLayer.clearLayers();
   bisonLayer.clearLayers();
   bisonCameraLayer.clearLayers();
   photoCameraLayer.clearLayers();
-  realtimeTrafficLayer.clearLayers();
   mapStats.traffic = 0;
 
   const showItinisere = document.getElementById('filter-itinisere')?.checked ?? true;
@@ -1924,37 +1924,6 @@ async function renderTrafficOnMap() {
       marker.bindPopup(`<strong>${escapeHtml(icon)} ${escapeHtml(point.title || 'Évènement Itinisère')}</strong><br/><span class="badge neutral">${escapeHtml(point.category || 'trafic')} · ${escapeHtml(point.severity || 'jaune')}</span><br/>${escapeHtml(point.description || '')}<br/>Localisation: ${escapeHtml(locations || 'Commune Isère')} (${escapeHtml(point.precision || 'estimée')})<br/>${roadsText}<a href="${escapeHtml(point.link || '#')}" target="_blank" rel="noreferrer">Détail Itinisère</a>`);
       marker.addTo(itinisereLayer);
     });
-  }
-
-  const showBisonAccidents = document.getElementById('filter-bison-accidents')?.checked ?? true;
-  if (showBisonAccidents) {
-    if (renderSequence !== trafficRenderSequence) return;
-    const incidents = Array.isArray(cachedRealtimeTraffic?.incidents) ? cachedRealtimeTraffic.incidents : [];
-    const bisonAccidents = incidents.filter((incident) => isAccidentIncident(incident) && isIncidentInIsere(incident));
-    bisonAccidents.forEach((incident) => {
-      const coords = normalizeMapCoordinates(incident.lat, incident.lon);
-      const popupHtml = `<strong>💥 ${escapeHtml(incident.title || 'Accident en cours')}</strong><br/>${escapeHtml(incident.description || '')}<br/><span class="badge red">Bison Futé · accident</span>`;
-      const pointIcon = emojiDivIcon('💥', { iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -11] });
-      let markerPlaced = false;
-      if (coords) {
-        window.L.marker([coords.lat, coords.lon], { icon: pointIcon }).bindPopup(popupHtml).addTo(bisonLayer);
-        markerPlaced = true;
-      }
-      if (Array.isArray(incident.line) && incident.line.length > 1) {
-        const lineLatLng = incident.line
-          .map((point) => normalizeMapCoordinates(point.lat, point.lon))
-          .filter(Boolean)
-          .map((point) => [point.lat, point.lon]);
-        if (lineLatLng.length > 1) {
-          if (!markerPlaced) {
-            const midPoint = lineLatLng[Math.floor(lineLatLng.length / 2)];
-            if (midPoint) window.L.marker(midPoint, { icon: pointIcon }).bindPopup(popupHtml).addTo(bisonLayer);
-          }
-          window.L.polyline(lineLatLng, { color: '#d9480f', weight: 4, opacity: 0.7 }).bindPopup(popupHtml).addTo(bisonLayer);
-        }
-      }
-    });
-    mapStats.traffic += bisonAccidents.length;
   }
 
   const showBisonCameras = document.getElementById('filter-bison-cameras')?.checked ?? true;
@@ -2146,13 +2115,29 @@ function renderPrefectureNews(prefecture = {}) {
   setText('prefecture-news-title', latestTitle);
   setText('prefecture-status', `${prefecture.status || 'inconnu'} · ${items.length} actualité(s)`);
   setText('prefecture-info', `Dernière mise à jour: ${prefecture.updated_at ? new Date(prefecture.updated_at).toLocaleString() : 'inconnue'}`);
-  setHtml('prefecture-news-list', items.slice(0, 6).map((item) => {
+  setHtml('prefecture-news-list', items.slice(0, 7).map((item) => {
     const title = escapeHtml(item.title || 'Actualité Préfecture');
     const description = escapeHtml(item.description || '');
     const published = item.published_at ? escapeHtml(item.published_at) : 'Date non précisée';
     const safeLink = String(item.link || '').startsWith('http') ? item.link : 'https://www.isere.gouv.fr';
     return `<li><strong>${title}</strong><br><span class="muted">${published}</span>${description ? `<br>${description}` : ''}<br><a href="${safeLink}" target="_blank" rel="noreferrer">Lire l'actualité</a></li>`;
   }).join('') || '<li>Aucune actualité disponible pour le moment.</li>');
+}
+
+
+function renderDauphineNews(dauphine = {}) {
+  const items = sortPrefectureItemsByRecency(Array.isArray(dauphine.items) ? dauphine.items : []);
+  setRiskText('dauphine-status', `${dauphine.status || 'inconnu'} · ${items.length} article(s)`, dauphine.status === 'online' ? 'vert' : 'jaune');
+  setText('dauphine-info', `Dernière mise à jour: ${dauphine.updated_at ? new Date(dauphine.updated_at).toLocaleString() : 'inconnue'}`);
+  const markup = items.slice(0, 7).map((item) => {
+    const title = escapeHtml(item.title || 'Article Le Dauphiné Libéré');
+    const description = escapeHtml(item.description || '');
+    const published = item.published_at ? escapeHtml(item.published_at) : 'Date non précisée';
+    const safeLink = String(item.link || '').startsWith('http') ? item.link : 'https://www.ledauphine.com/isere';
+    return `<li><strong>${title}</strong><br><span class="muted">${published}</span>${description ? `<br>${description}` : ''}<br><a href="${safeLink}" target="_blank" rel="noreferrer">Lire l'article</a></li>`;
+  }).join('') || '<li>Aucun article Isère disponible pour le moment.</li>';
+  setHtml('dauphine-news-list', markup);
+  setHtml('dauphine-news-panel-list', markup);
 }
 
 function sanitizeMeteoInformation(info = '') {
@@ -2193,10 +2178,7 @@ function renderBisonFuteSummary(bison = {}) {
   const isereTomorrow = tomorrow.isere || {};
   const nationalToday = today.national || {};
   const nationalTomorrow = tomorrow.national || {};
-  const accidents = (Array.isArray(cachedRealtimeTraffic?.incidents) ? cachedRealtimeTraffic.incidents : [])
-    .filter((incident) => isAccidentIncident(incident) && isIncidentInIsere(incident));
-
-  setText('bison-status', `${bison.status || 'inconnu'} · Isère départ ${isereToday.departure || 'inconnu'} / retour ${isereToday.return || 'inconnu'} · ${accidents.length} accident(s) en cours`);
+  setText('bison-status', `${bison.status || 'inconnu'} · Isère départ ${isereToday.departure || 'inconnu'} / retour ${isereToday.return || 'inconnu'}`);
   setText('bison-info', `National J0: ${nationalToday.departure || 'inconnu'} / ${nationalToday.return || 'inconnu'} · J1: ${nationalTomorrow.departure || 'inconnu'} / ${nationalTomorrow.return || 'inconnu'}`);
   setText('map-bison-isere', `${isereToday.departure || 'inconnu'} (retour ${isereToday.return || 'inconnu'})`);
   setText('home-feature-bison-isere', `${isereToday.departure || 'inconnu'} / ${isereToday.return || 'inconnu'}`);
@@ -2208,7 +2190,6 @@ function renderBisonFuteSummary(bison = {}) {
   const bisonMarkup = [
     `<li><strong>Aujourd'hui (${today.date || '-'})</strong><br>Isère départ: ${isereToday.departure || 'inconnu'} · Isère retour: ${isereToday.return || 'inconnu'}<br>National départ: ${nationalToday.departure || 'inconnu'} · National retour: ${nationalToday.return || 'inconnu'}<br><a href="https://www.bison-fute.gouv.fr" target="_blank" rel="noreferrer">Voir la carte Bison Futé</a></li>`,
     `<li><strong>Demain (${tomorrow.date || '-'})</strong><br>Isère départ: ${isereTomorrow.departure || 'inconnu'} · Isère retour: ${isereTomorrow.return || 'inconnu'}<br>National départ: ${nationalTomorrow.departure || 'inconnu'} · National retour: ${nationalTomorrow.return || 'inconnu'}</li>`,
-    `<li><strong>Accidents en cours (Isère)</strong><br>${accidents.length ? `${accidents.length} signalement(s) actifs` : 'Aucun accident signalé pour le moment'}</li>`,
   ].join('');
   setHtml('bison-list', bisonMarkup);
 }
@@ -3174,9 +3155,8 @@ function renderExternalRisks(data = {}) {
   const vigicrues = data?.vigicrues || {};
   const itinisere = data?.itinisere || {};
   const bisonFute = data?.bison_fute || {};
-  const realtimeTraffic = data?.waze || {};
-  cachedRealtimeTraffic = realtimeTraffic || {};
   const prefecture = data?.prefecture_isere || {};
+  const dauphine = data?.dauphine_isere || {};
   const sncf = data?.sncf_isere || {};
   const vigieau = data?.vigieau || {};
   const atmo = data?.atmo_aura || {};
@@ -3198,6 +3178,7 @@ function renderExternalRisks(data = {}) {
   setText('itinisere-status', `${itinisere.status || 'inconnu'} · ${itinisereTotal} événements`);
   renderBisonFuteSummary(bisonFute);
   renderPrefectureNews(prefecture);
+  renderDauphineNews(dauphine);
   renderSncfAlerts(sncf);
   renderVigieauAlerts(vigieau);
   const atmoToday = atmo?.today || {};
@@ -3245,9 +3226,9 @@ function renderApiInterconnections(data = {}) {
     { key: 'vigicrues', label: 'Vigicrues', level: normalizeLevel(data.vigicrues?.water_alert_level || 'inconnu'), details: `${(data.vigicrues?.stations || []).length} station(s)` },
     { key: 'itinisere', label: 'Itinisère', level: `${data.itinisere?.events_total ?? (data.itinisere?.events || []).length} événement(s)`, details: data.itinisere?.source || '-' },
     { key: 'bison_fute', label: 'Bison Futé', level: data.bison_fute?.today?.isere?.departure || 'inconnu', details: data.bison_fute?.source || '-' },
-    { key: 'waze', label: 'Trafic temps réel (Waze)', level: `${data.waze?.incidents_total || 0} incident(s)`, details: data.waze?.source || '-' },
     { key: 'georisques', label: 'Géorisques', level: data.georisques?.highest_seismic_zone_label || 'inconnue', details: `${data.georisques?.flood_documents_total ?? 0} document(s) inondation` },
     { key: 'prefecture_isere', label: "Préfecture Isère · Actualités", level: `${(data.prefecture_isere?.items || []).length} actualité(s)`, details: data.prefecture_isere?.source || '-' },
+    { key: 'dauphine_isere', label: 'Le Dauphiné Libéré · Isère', level: `${(data.dauphine_isere?.items || []).length} article(s)`, details: data.dauphine_isere?.source || '-' },
     { key: 'sncf_isere', label: 'SNCF Isère · Accidents/Travaux voies', level: `${(data.sncf_isere?.alerts || []).length} alerte(s)`, details: data.sncf_isere?.source || '-' },
     { key: 'vigieau', label: 'Vigieau · Restrictions eau', level: `${(data.vigieau?.alerts || []).length} alerte(s)`, details: data.vigieau?.source || '-' },
     { key: 'atmo_aura', label: "Atmo AURA · Qualité de l'air", level: `indice ${data.atmo_aura?.today?.index ?? '-'}`, details: data.atmo_aura?.source || '-' },
@@ -3431,11 +3412,13 @@ function renderLogsList() {
     return new Date(b.event_time || b.created_at).getTime() - new Date(a.event_time || a.created_at).getTime();
   });
 
-  const openLogs = filtered.filter((log) => String(log.status || '').toLowerCase() !== 'clos');
+  const activeLogs = filtered.filter((log) => ['nouveau', 'en_cours'].includes(String(log.status || '').toLowerCase()));
+  const followupLogs = filtered.filter((log) => String(log.status || '').toLowerCase() === 'suivi');
   const closedLogs = filtered.filter((log) => String(log.status || '').toLowerCase() === 'clos');
 
   setText('logs-count', String(filtered.length));
-  setHtml('logs-table-open', openLogs.map((log) => buildLogTableRow(log)).join('') || '<tr><td colspan="7">Aucun évènement en cours.</td></tr>');
+  setHtml('logs-table-open-active', activeLogs.map((log) => buildLogTableRow(log)).join('') || '<tr><td colspan="7">Aucun évènement nouveau / en cours.</td></tr>');
+  setHtml('logs-table-open-followup', followupLogs.map((log) => buildLogTableRow(log)).join('') || '<tr><td colspan="7">Aucun évènement en suivi.</td></tr>');
   setHtml('logs-table-closed', closedLogs.map((log) => buildLogTableRow(log)).join('') || '<tr><td colspan="7">Aucun évènement clos.</td></tr>');
 }
 
@@ -4132,7 +4115,7 @@ function bindAppInteractions() {
     }
   });
 
-  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'resource-type-filter', 'resource-priority-filter', 'filter-itinisere', 'filter-bison-accidents', 'filter-bison-cameras', 'filter-photo-cameras'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-itinisere', 'filter-bison-accidents', 'filter-bison-cameras', 'filter-photo-cameras'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       renderStations(cachedStations);
       await renderMunicipalitiesOnMap(cachedMunicipalities);

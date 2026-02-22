@@ -146,7 +146,9 @@ label { display: block; margin-bottom: .8rem; }
 .app--sidebar-collapsed .sidebar-header,
 .app--sidebar-collapsed .danger { display: none; }
 .app--sidebar-collapsed .sidebar { padding: .8rem .55rem; }
-.app--sidebar-collapsed .side-nav .menu-btn { text-align: center; padding: .78rem .45rem; font-size: .82rem; }
+.app--sidebar-collapsed .side-nav .menu-btn { display: grid; place-items: center; text-align: center; padding: .72rem .35rem; font-size: 1.1rem; }
+.app--sidebar-collapsed .side-nav .menu-btn .menu-label { display: none; }
+.app--sidebar-collapsed .side-nav .menu-btn::before { content: attr(data-icon); line-height: 1; }
 .app-header {
   padding: 1rem;
   display: flex;
@@ -444,6 +446,8 @@ svg text { font-size: 14px; fill: #17335f; }
 .logs-tables-grid { display: grid; gap: .9rem; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
 .logs-tables-grid h4 { margin: .4rem 0; }
 .logs-tables-grid .users-table td { vertical-align: top; }
+.logs-closed-table-wrap { margin-top: .9rem; }
+.logs-closed-table-wrap h4 { margin: .4rem 0; }
 
 .users-actions { display: flex; flex-wrap: wrap; gap: .35rem; }
 .users-actions button { padding: .3rem .5rem; font-size: .75rem; border-radius: 8px; }
