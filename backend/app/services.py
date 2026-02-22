@@ -920,6 +920,49 @@ def _fetch_vigicrues_isere_live(
             group["stations"].append({"code": station["code"], "station": station["station"], "river": station["river"]})
             group["level"] = _highest_vigilance_level([{"level": group["level"]}, {"level": station["level"]}])
 
+        # Tracé du tronçon Vigicrues AN12 (Isère grenobloise), approximé pour
+        # couvrir le segment urbain grenoblois visible sur la carte métier.
+        isere_grenobloise_points = [
+            [45.170942, 5.612945],
+            [45.174588, 5.632403],
+            [45.178239, 5.653298],
+            [45.181986, 5.676021],
+            [45.185221, 5.694287],
+            [45.188443, 5.711848],
+            [45.191580, 5.728094],
+            [45.194664, 5.745318],
+            [45.197128, 5.761889],
+            [45.199436, 5.777393],
+            [45.202612, 5.796450],
+            [45.206438, 5.815992],
+            [45.210722, 5.835086],
+            [45.215133, 5.852783],
+            [45.219409, 5.869712],
+        ]
+        isere_grenobloise_level, isere_grenobloise_rss = (None, None)
+        try:
+            isere_grenobloise_level, isere_grenobloise_rss = _fetch_vigicrues_troncon_rss_level("AN12")
+        except (ET.ParseError, HTTPError, URLError, TimeoutError, ValueError):
+            isere_grenobloise_level, isere_grenobloise_rss = (None, "https://www.vigicrues.gouv.fr/territoire/rss?CdEntVigiCru=AN12")
+
+        troncons_index["AN12 Isère grenobloise"] = {
+            "code": "AN12",
+            "name": "Isère grenobloise",
+            "level": isere_grenobloise_level or "vert",
+            "territory": "19",
+            "rss": isere_grenobloise_rss,
+            "stations": [
+                {"code": s["code"], "station": s["station"], "river": s["river"]}
+                for s in isere_stations
+                if "isère" in str(s.get("river") or "").lower()
+            ],
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [[point[1], point[0]] for point in isere_grenobloise_points],
+            },
+            "polyline": isere_grenobloise_points,
+        }
+
         # Tracé du tronçon Vigicrues AN20 (Isère aval), extrait d'un GeoJSON
         # en ligne (OSM/Nominatim - relation "L'Isère", osm_id 1067839), puis
         # simplifié pour un rendu web léger. Segment conservé: Grenoble -> Rhône.
@@ -1009,7 +1052,13 @@ def _fetch_vigicrues_isere_live(
             isere_stations = isere_stations[:station_limit]
 
         levels = [s["level"] for s in isere_stations]
-        levels.extend([normalize_level for normalize_level in [isere_aval_level] if normalize_level])
+        levels.extend(
+            [
+                normalize_level
+                for normalize_level in [isere_grenobloise_level, isere_aval_level]
+                if normalize_level
+            ]
+        )
         global_level = "rouge" if "rouge" in levels else "orange" if "orange" in levels else "jaune" if "jaune" in levels else "vert"
         return {
             "service": "Vigicrues",
