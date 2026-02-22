@@ -384,6 +384,79 @@ _atmo_aura_cache_lock = Lock()
 _atmo_aura_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _sncf_isere_cache_lock = Lock()
 _sncf_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_isere_aval_polyline_cache_lock = Lock()
+_isere_aval_polyline_cache: dict[str, Any] = {"points": None, "expires_at": datetime.min}
+
+
+def _point_distance_meters(start: list[float], end: list[float]) -> float:
+    lat_delta = (end[0] - start[0]) * 111_000
+    lon_delta = (end[1] - start[1]) * 80_000
+    return (lat_delta**2 + lon_delta**2) ** 0.5
+
+
+def _load_isere_aval_polyline_online() -> list[list[float]]:
+    now = datetime.utcnow()
+    with _isere_aval_polyline_cache_lock:
+        cached = _isere_aval_polyline_cache.get("points")
+        expires_at = _isere_aval_polyline_cache.get("expires_at") or datetime.min
+        if cached and now < expires_at:
+            return deepcopy(cached)
+
+    geojson = _http_get_json(
+        "https://nominatim.openstreetmap.org/lookup?osm_ids=R1067839&format=geojson&polygon_geojson=1",
+        timeout=18,
+    )
+    features = geojson.get("features") if isinstance(geojson, dict) else None
+    if not isinstance(features, list) or not features:
+        raise ValueError("Géométrie OSM Isère indisponible")
+
+    geometry = features[0].get("geometry") if isinstance(features[0], dict) else None
+    if not isinstance(geometry, dict):
+        raise ValueError("Géométrie OSM Isère absente")
+
+    geom_type = geometry.get("type")
+    if geom_type == "LineString":
+        lines = [geometry.get("coordinates")]
+    elif geom_type == "MultiLineString":
+        lines = geometry.get("coordinates")
+    else:
+        raise ValueError("Type de géométrie OSM non supporté")
+
+    valid_lines = [line for line in lines if isinstance(line, list) and len(line) >= 2]
+    if not valid_lines:
+        raise ValueError("Aucune ligne OSM exploitable pour l'Isère")
+
+    main_line = max(valid_lines, key=len)
+    segment = [
+        [float(lat), float(lon)]
+        for lon, lat in main_line
+        if isinstance(lat, (int, float))
+        and isinstance(lon, (int, float))
+        and 44.95 <= float(lat) <= 45.23
+        and 4.84 <= float(lon) <= 5.83
+    ]
+    if len(segment) < 30:
+        raise ValueError("Segment OSM insuffisant pour AN20")
+
+    simplified = [segment[0]]
+    for point in segment[1:]:
+        if _point_distance_meters(simplified[-1], point) >= 250:
+            simplified.append(point)
+    if simplified[-1] != segment[-1]:
+        simplified.append(segment[-1])
+
+    if len(simplified) > 340:
+        step = max(1, len(simplified) // 340)
+        reduced = simplified[::step]
+        if reduced[-1] != simplified[-1]:
+            reduced.append(simplified[-1])
+        simplified = reduced
+
+    with _isere_aval_polyline_cache_lock:
+        _isere_aval_polyline_cache["points"] = deepcopy(simplified)
+        _isere_aval_polyline_cache["expires_at"] = now + timedelta(hours=12)
+
+    return simplified
 
 
 def _cached_external_payload(
@@ -963,10 +1036,9 @@ def _fetch_vigicrues_isere_live(
             "polyline": isere_grenobloise_points,
         }
 
-        # Tracé du tronçon Vigicrues AN20 (Isère aval), extrait d'un GeoJSON
-        # en ligne (OSM/Nominatim - relation "L'Isère", osm_id 1067839), puis
-        # simplifié pour un rendu web léger. Segment conservé: Grenoble -> Rhône.
-        isere_aval_points = [
+        # Tracé du tronçon Vigicrues AN20 (Isère aval).
+        # Priorité au tracé en ligne (OSM/Nominatim), avec fallback local.
+        isere_aval_points_fallback = [
             [45.192742, 5.720049],
             [45.206842, 5.703633],
             [45.217251, 5.672787],
@@ -1019,6 +1091,11 @@ def _fetch_vigicrues_isere_live(
             [44.998560, 4.880949],
             [44.981814, 4.852909],
         ]
+        try:
+            isere_aval_points = _load_isere_aval_polyline_online()
+        except (HTTPError, URLError, TimeoutError, ValueError, KeyError, TypeError):
+            isere_aval_points = isere_aval_points_fallback
+
         isere_aval_level, isere_aval_rss = (None, None)
         try:
             isere_aval_level, isere_aval_rss = _fetch_vigicrues_troncon_rss_level("AN20")
