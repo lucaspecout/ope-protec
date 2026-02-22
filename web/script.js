@@ -24,16 +24,31 @@ const PANEL_TITLES = {
   'users-panel': 'Gestion des utilisateurs',
 };
 
+const RESOURCE_TYPE_META = {
+  poste_commandement: { label: 'Poste de commandement', icon: '🛰️' },
+  centre_hebergement: { label: 'Centre d\'hébergement', icon: '🏘️' },
+  hopital: { label: 'Hôpital', icon: '🏥' },
+  caserne: { label: 'Caserne', icon: '🚒' },
+  centrale_nucleaire: { label: 'Site nucléaire', icon: '☢️' },
+  lieu_risque: { label: 'Site Seveso / risque technologique', icon: '⚠️' },
+  lieu_vital: { label: 'Lieu vital logistique', icon: '📦' },
+  transport: { label: 'Nœud transport', icon: '🚉' },
+  energie: { label: 'Énergie / barrage', icon: '⚡' },
+};
+
 const RESOURCE_POINTS = [
-  { name: 'PC Départemental Grenoble', type: 'poste_commandement', active: true, lat: 45.1885, lon: 5.7245, address: 'Grenoble', priority: 'critical' },
-  { name: 'Centre hébergement Voiron', type: 'centre_hebergement', active: false, lat: 45.3667, lon: 5.5906, address: 'Voiron', priority: 'vital' },
-  { name: 'CHU Grenoble Alpes', type: 'hopital', active: true, lat: 45.1899, lon: 5.7428, address: 'La Tronche', priority: 'critical' },
-  { name: 'Centre hospitalier de Vienne', type: 'hopital', active: true, lat: 45.5257, lon: 4.8745, address: 'Mont Salomon, Vienne', priority: 'vital' },
-  { name: 'Caserne Bourgoin-Jallieu', type: 'caserne', active: true, lat: 45.5866, lon: 5.2732, address: 'Bourgoin-Jallieu', priority: 'vital' },
-  { name: 'CEA Grenoble (site nucléaire de recherche)', type: 'centrale_nucleaire', active: true, lat: 45.202, lon: 5.7084, address: 'Presqu\'île, Grenoble', priority: 'critical' },
-  { name: 'CNPE Saint-Alban (rayon de vigilance Isère)', type: 'centrale_nucleaire', active: true, lat: 45.3949, lon: 4.7533, address: 'Saint-Maurice-l\'Exil', priority: 'risk' },
-  { name: 'Usine chimique Pont-de-Claix', type: 'lieu_risque', active: true, lat: 45.1232, lon: 5.7016, address: 'Pont-de-Claix', priority: 'risk' },
-  { name: 'Plateforme logistique de secours Isère', type: 'lieu_vital', active: true, lat: 45.2338, lon: 5.6805, address: 'Sassenage', priority: 'vital' },
+  { id: 'pc-grenoble', name: 'PC Départemental Isère (Préfecture)', type: 'poste_commandement', active: true, lat: 45.1935, lon: 5.7243, address: '12 place de Verdun, 38000 Grenoble', priority: 'critical', info: 'Coordination ORSEC et cellule de crise départementale.', source: 'https://www.isere.gouv.fr' },
+  { id: 'hebergement-voiron', name: 'Centre d\'hébergement d\'urgence de Voiron', type: 'centre_hebergement', active: false, lat: 45.3649, lon: 5.5924, address: 'Avenue Jules Ravat, 38500 Voiron', priority: 'vital', info: 'Capacité de mise à l\'abri court terme en cas d\'évacuation.', source: 'https://www.ville-voiron.fr' },
+  { id: 'chu-grenoble', name: 'CHU Grenoble Alpes – Hôpital Michallon', type: 'hopital', active: true, lat: 45.1916, lon: 5.7671, address: 'Boulevard de la Chantourne, 38700 La Tronche', priority: 'critical', info: 'Pôle sanitaire majeur (urgences, réanimation, trauma center alpin).', source: 'https://www.chu-grenoble.fr' },
+  { id: 'ch-vienne', name: 'Centre hospitalier Lucien Hussel', type: 'hopital', active: true, lat: 45.5336, lon: 4.8807, address: 'Mont Salomon, 38200 Vienne', priority: 'vital', info: 'Établissement pivot pour le sud-ouest isérois.', source: 'https://www.ch-vienne.fr' },
+  { id: 'sdis-bj', name: 'SDIS 38 – Centre de secours de Bourgoin-Jallieu', type: 'caserne', active: true, lat: 45.5872, lon: 5.2787, address: 'Bourgoin-Jallieu (secteur gare)', priority: 'vital', info: 'Projection rapide des moyens incendie/secours sur l\'axe A43.', source: 'https://www.sdis38.fr' },
+  { id: 'cea-grenoble', name: 'CEA Grenoble (site nucléaire de recherche)', type: 'centrale_nucleaire', active: true, lat: 45.2017, lon: 5.7059, address: '17 avenue des Martyrs, 38000 Grenoble', priority: 'critical', info: 'Site de recherche sensible de la Presqu\'île scientifique.', source: 'https://www.cea.fr' },
+  { id: 'cnpe-saint-alban', name: 'CNPE de Saint-Alban (zone de vigilance)', type: 'centrale_nucleaire', active: true, lat: 45.4045, lon: 4.7541, address: '38550 Saint-Maurice-l\'Exil', priority: 'risk', info: 'Centrale en bord Rhône, surveillance des impacts potentiels en Isère.', source: 'https://www.edf.fr/centrale-nucleaire-saint-alban' },
+  { id: 'pont-de-claix-chem', name: 'Plateforme chimique de Pont-de-Claix', type: 'lieu_risque', active: true, lat: 45.1328, lon: 5.7045, address: 'Rue Lavoisier, 38800 Le Pont-de-Claix', priority: 'risk', info: 'Zone industrielle à risques technologiques (chimie).', source: 'https://www.pontdeclaix.fr' },
+  { id: 'log-sassenage', name: 'Plateforme logistique de secours Isère', type: 'lieu_vital', active: true, lat: 45.2081, lon: 5.6629, address: 'Secteur Sassenage / Fontaine', priority: 'vital', info: 'Stockage et acheminement de matériels de crise.', source: 'https://www.protectioncivile.org' },
+  { id: 'gare-grenoble', name: 'Gare de Grenoble (hub mobilité évacuation)', type: 'transport', active: true, lat: 45.1919, lon: 5.7146, address: '1 place de la Gare, 38000 Grenoble', priority: 'vital', info: 'Nœud ferroviaire clé pour évacuation et logistique voyageurs.', source: 'https://www.garesetconnexions.sncf/fr/gares-services/grenoble' },
+  { id: 'barrage-verney', name: 'Barrage du Verney', type: 'energie', active: true, lat: 45.1537, lon: 6.0262, address: 'Allemond, Vallée de l\'Eau d\'Olle', priority: 'risk', info: 'Ouvrage hydraulique sensible (gestion des débits en vallée).', source: 'https://www.edf.fr/hydraulique-isere' },
+  { id: 'st-crolles', name: 'STMicroelectronics Crolles', type: 'lieu_vital', active: true, lat: 45.2671, lon: 5.8848, address: '850 rue Jean Monnet, 38920 Crolles', priority: 'vital', info: 'Site industriel stratégique pour la chaîne d\'approvisionnement électronique.', source: 'https://www.st.com' },
 ];
 
 let token = localStorage.getItem(STORAGE_KEYS.token);
@@ -1128,7 +1143,17 @@ function renderResources() {
     && (!query || `${r.name} ${r.address}`.toLowerCase().includes(query)));
   const priorityLabel = { critical: 'critique', vital: 'vital', risk: 'à risque' };
   const markerColor = { critical: '#e03131', vital: '#1971c2', risk: '#f08c00' };
-  setHtml('resources-list', resources.map((r) => `<li><strong>${r.name}</strong> · ${r.address} · ${r.active ? 'activée' : 'en attente'} · ${priorityLabel[r.priority] || 'standard'}</li>`).join('') || '<li>Aucune ressource avec ces filtres.</li>');
+  setHtml('resources-list', resources.map((r) => {
+    const meta = RESOURCE_TYPE_META[r.type] || { label: r.type.replace(/_/g, ' '), icon: '📍' };
+    const statusLabel = r.active ? 'activée' : 'désactivée';
+    return `<li>
+      <strong>${meta.icon} ${r.name}</strong> · ${r.address}<br/>
+      <span class="muted">${meta.label} · ${statusLabel} · ${priorityLabel[r.priority] || 'standard'}</span><br/>
+      <span class="muted">${escapeHtml(r.info || 'Aucune information complémentaire.')}</span><br/>
+      <a href="${escapeHtml(r.source || '#')}" target="_blank" rel="noreferrer">Source</a>
+      <button type="button" class="ghost" data-resource-toggle="${escapeHtml(r.id)}">${r.active ? 'Désactiver' : 'Activer'}</button>
+    </li>`;
+  }).join('') || '<li>Aucune ressource avec ces filtres.</li>');
   mapStats.resources = resources.length;
   updateMapSummary();
   if (!resourceLayer) return;
@@ -1136,11 +1161,22 @@ function renderResources() {
   resources.forEach((r) => {
     const coords = normalizeMapCoordinates(r.lat, r.lon);
     if (!coords) return;
-    window.L.circleMarker([coords.lat, coords.lon], { radius: 7, color: '#fff', weight: 1.5, fillColor: markerColor[r.priority] || (r.active ? '#2f9e44' : '#f59f00'), fillOpacity: 0.95 })
-      .bindPopup(`<strong>${r.name}</strong><br>Type: ${r.type.replace('_', ' ')}<br>Niveau: ${priorityLabel[r.priority] || 'standard'}<br>Adresse: ${r.address}<br>Activation: ${r.active ? 'oui' : 'non'}`)
+    const meta = RESOURCE_TYPE_META[r.type] || { label: r.type.replace(/_/g, ' '), icon: '📍' };
+    const markerHtml = `<span class="map-resource-icon" style="background:${markerColor[r.priority] || (r.active ? '#2f9e44' : '#f59f00')}">${meta.icon}</span>`;
+    window.L.marker([coords.lat, coords.lon], {
+      icon: window.L.divIcon({ className: 'map-resource-icon-wrap', html: markerHtml, iconSize: [24, 24], iconAnchor: [12, 12] }),
+    })
+      .bindPopup(`<strong>${meta.icon} ${r.name}</strong><br>Type: ${meta.label}<br>Niveau: ${priorityLabel[r.priority] || 'standard'}<br>Adresse: ${r.address}<br>Activation: ${r.active ? 'oui' : 'non'}<br>${escapeHtml(r.info || '')}<br><a href="${escapeHtml(r.source || '#')}" target="_blank" rel="noreferrer">Source publique</a>`)
       .addTo(resourceLayer);
   });
   setMapFeedback(`${resources.length} ressource(s) affichée(s).`);
+}
+
+function toggleResourceActive(resourceId = '') {
+  const resource = RESOURCE_POINTS.find((item) => item.id === resourceId);
+  if (!resource) return;
+  resource.active = !resource.active;
+  renderResources();
 }
 
 function tryLocalMapSearch(query = '') {
@@ -3364,6 +3400,11 @@ function bindAppInteractions() {
     if (searchLayer) searchLayer.clearLayers();
     renderResources();
     setMapFeedback('Recherche effacée, ressources remises à jour.');
+  });
+  document.getElementById('resources-list')?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-resource-toggle]');
+    if (!button) return;
+    toggleResourceActive(button.dataset.resourceToggle || '');
   });
   document.getElementById('map-point-category-filter')?.addEventListener('change', renderCustomPoints);
   document.getElementById('map-point-form-cancel')?.addEventListener('click', () => {
