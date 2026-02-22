@@ -386,12 +386,28 @@ _sncf_isere_cache_lock = Lock()
 _sncf_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _isere_aval_polyline_cache_lock = Lock()
 _isere_aval_polyline_cache: dict[str, Any] = {"points": None, "expires_at": datetime.min}
+_ISERE_AVAL_GRENOBLE_CUTOFF_LON = 5.46
 
 
 def _point_distance_meters(start: list[float], end: list[float]) -> float:
     lat_delta = (end[0] - start[0]) * 111_000
     lon_delta = (end[1] - start[1]) * 80_000
     return (lat_delta**2 + lon_delta**2) ** 0.5
+
+
+def _truncate_isere_aval_before_grenoble(points: list[list[float]]) -> list[list[float]]:
+    """Trim AN20 to stop before Grenoble; AN12 covers the Grenoble section."""
+    if not isinstance(points, list) or len(points) < 2:
+        return points
+
+    trimmed = [
+        [float(lat), float(lon)]
+        for lat, lon in points
+        if isinstance(lat, (int, float))
+        and isinstance(lon, (int, float))
+        and float(lon) <= _ISERE_AVAL_GRENOBLE_CUTOFF_LON
+    ]
+    return trimmed if len(trimmed) >= 2 else points
 
 
 def _load_isere_aval_polyline_online() -> list[list[float]]:
@@ -451,6 +467,8 @@ def _load_isere_aval_polyline_online() -> list[list[float]]:
         if reduced[-1] != simplified[-1]:
             reduced.append(simplified[-1])
         simplified = reduced
+
+    simplified = _truncate_isere_aval_before_grenoble(simplified)
 
     with _isere_aval_polyline_cache_lock:
         _isere_aval_polyline_cache["points"] = deepcopy(simplified)
@@ -1038,7 +1056,7 @@ def _fetch_vigicrues_isere_live(
 
         # Tracé du tronçon Vigicrues AN20 (Isère aval).
         # Priorité au tracé en ligne (OSM/Nominatim), avec fallback local.
-        isere_aval_points_fallback = [
+        isere_aval_points_fallback = _truncate_isere_aval_before_grenoble([
             [45.192742, 5.720049],
             [45.206842, 5.703633],
             [45.217251, 5.672787],
@@ -1090,7 +1108,7 @@ def _fetch_vigicrues_isere_live(
             [45.015669, 4.910498],
             [44.998560, 4.880949],
             [44.981814, 4.852909],
-        ]
+        ])
         try:
             isere_aval_points = _load_isere_aval_polyline_online()
         except (HTTPError, URLError, TimeoutError, ValueError, KeyError, TypeError):
