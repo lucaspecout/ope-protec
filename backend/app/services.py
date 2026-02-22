@@ -420,6 +420,15 @@ def _truncate_isere_aval_before_grenoble(points: list[list[float]]) -> list[list
     return trimmed
 
 
+def _has_polyline_large_gap(points: list[list[float]], max_gap_meters: float = 5_000) -> bool:
+    if not isinstance(points, list) or len(points) < 2:
+        return False
+    for idx in range(1, len(points)):
+        if _point_distance_meters(points[idx - 1], points[idx]) > max_gap_meters:
+            return True
+    return False
+
+
 def _load_isere_aval_polyline_online() -> list[list[float]]:
     now = datetime.utcnow()
     with _isere_aval_polyline_cache_lock:
@@ -479,6 +488,8 @@ def _load_isere_aval_polyline_online() -> list[list[float]]:
         simplified = reduced
 
     simplified = _truncate_isere_aval_before_grenoble(simplified)
+    if _has_polyline_large_gap(simplified):
+        raise ValueError("Tracé OSM AN20 discontinu")
 
     with _isere_aval_polyline_cache_lock:
         _isere_aval_polyline_cache["points"] = deepcopy(simplified)
@@ -1114,9 +1125,14 @@ def _fetch_vigicrues_isere_live(
             [45.028236, 5.041771],
             [45.032738, 5.000246],
             [45.039306, 4.950251],
+            [45.027484, 4.943982],
             [45.021887, 4.945380],
+            [45.017191, 4.928028],
             [45.015669, 4.910498],
+            [45.006422, 4.891335],
             [44.998560, 4.880949],
+            [44.991277, 4.868133],
+            [44.983718, 4.857392],
             [44.981814, 4.852909],
         ])
         try:
