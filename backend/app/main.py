@@ -46,13 +46,13 @@ from .security import create_access_token, hash_password, verify_password
 from .services import (
     fetch_bison_fute_traffic,
     fetch_georisques_commune_risks,
-    fetch_waze_isere_traffic,
     cleanup_old_weather_alerts,
     fetch_georisques_isere_summary,
     fetch_isere_boundary_geojson,
     fetch_meteo_france_isere,
     fetch_itinisere_disruptions,
     fetch_prefecture_isere_news,
+    fetch_dauphine_isere_news,
     fetch_sncf_isere_alerts,
     fetch_atmo_aura_isere_air_quality,
     fetch_vigicrues_isere,
@@ -139,9 +139,9 @@ _external_risks_snapshot: dict = {
         "vigicrues": {},
         "itinisere": {},
         "bison_fute": {},
-        "waze": {},
         "georisques": {},
         "prefecture_isere": {},
+        "dauphine_isere": {},
         "atmo_aura": {},
     },
 }
@@ -616,9 +616,9 @@ def build_external_risks_payload(refresh: bool = False, db: Session | None = Non
         "vigicrues": (lambda: fetch_vigicrues_isere(force_refresh=refresh), {"level": "vert", "stations": [], "alerts": []}),
         "itinisere": (lambda: fetch_itinisere_disruptions(force_refresh=refresh), {"status": "degraded", "events": [], "events_total": 0}),
         "bison_fute": (lambda: fetch_bison_fute_traffic(force_refresh=refresh), {"status": "degraded", "alerts": []}),
-        "waze": (lambda: fetch_waze_isere_traffic(force_refresh=refresh), {"status": "degraded", "incidents": [], "incidents_total": 0}),
         "georisques": (lambda: fetch_georisques_isere_summary(force_refresh=refresh, commune_names=pcs_commune_names), {"status": "degraded", "details": []}),
         "prefecture_isere": (lambda: fetch_prefecture_isere_news(force_refresh=refresh), {"status": "degraded", "articles": []}),
+        "dauphine_isere": (lambda: fetch_dauphine_isere_news(force_refresh=refresh), {"status": "degraded", "articles": []}),
         "sncf_isere": (lambda: fetch_sncf_isere_alerts(force_refresh=refresh), {"status": "degraded", "alerts": [], "alerts_total": 0}),
         "vigieau": (lambda: fetch_vigieau_restrictions(force_refresh=refresh), {"status": "degraded", "alerts": [], "max_level": "vert"}),
         "atmo_aura": (lambda: fetch_atmo_aura_isere_air_quality(force_refresh=refresh), {"status": "degraded", "today": {}, "tomorrow": {}}),
@@ -639,9 +639,9 @@ def build_external_risks_payload(refresh: bool = False, db: Session | None = Non
         "vigicrues": results["vigicrues"],
         "itinisere": results["itinisere"],
         "bison_fute": results["bison_fute"],
-        "waze": results["waze"],
         "georisques": results["georisques"],
         "prefecture_isere": results["prefecture_isere"],
+        "dauphine_isere": results["dauphine_isere"],
         "sncf_isere": results["sncf_isere"],
         "vigieau": results["vigieau"],
         "atmo_aura": results["atmo_aura"],
@@ -658,7 +658,7 @@ def get_external_risks_payload(refresh: bool = False, db: Session | None = None)
         return payload
 
     snapshot = _get_external_risks_snapshot()
-    if snapshot and any(snapshot.get(key) for key in ("meteo_france", "vigicrues", "itinisere", "bison_fute", "waze", "georisques", "prefecture_isere", "sncf_isere", "vigieau", "atmo_aura")):
+    if snapshot and any(snapshot.get(key) for key in ("meteo_france", "vigicrues", "itinisere", "bison_fute", "georisques", "prefecture_isere", "dauphine_isere", "sncf_isere", "vigieau", "atmo_aura")):
         return snapshot
 
     payload = build_external_risks_payload(refresh=True, db=db)
@@ -753,9 +753,9 @@ def supervision_overview(
     vigicrues = risks_payload.get("vigicrues") or {}
     itinisere = risks_payload.get("itinisere") or {}
     bison_fute = risks_payload.get("bison_fute") or {}
-    waze = risks_payload.get("waze") or {}
     georisques = risks_payload.get("georisques") or {}
     prefecture = risks_payload.get("prefecture_isere") or {}
+    dauphine = risks_payload.get("dauphine_isere") or {}
     crisis = db.query(Municipality).filter(Municipality.crisis_mode.is_(True)).all()
     latest_logs = db.query(OperationalLog).order_by(OperationalLog.created_at.desc()).limit(10).all()
     return {
@@ -766,9 +766,9 @@ def supervision_overview(
             "vigieau": risks_payload.get("vigieau") or {},
             "itinisere": itinisere,
             "bison_fute": bison_fute,
-            "waze": waze,
             "georisques": georisques,
             "prefecture_isere": prefecture,
+            "dauphine_isere": dauphine,
         },
         "crisis_municipalities": [MunicipalityOut.model_validate(c).model_dump() for c in crisis],
         "timeline": [OperationalLogOut.model_validate(log).model_dump() for log in latest_logs],

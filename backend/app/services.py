@@ -302,9 +302,9 @@ _meteo_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _VIGICRUES_CACHE_TTL_SECONDS = 300
 _ITINISERE_CACHE_TTL_SECONDS = 180
 _BISON_CACHE_TTL_SECONDS = 600
-_WAZE_CACHE_TTL_SECONDS = 120
 _GEORISQUES_CACHE_TTL_SECONDS = 900
-_PREFECTURE_CACHE_TTL_SECONDS = 600
+_PREFECTURE_CACHE_TTL_SECONDS = 120
+_DAUPHINE_CACHE_TTL_SECONDS = 300
 _VIGIEAU_CACHE_TTL_SECONDS = 900
 _ATMO_AURA_CACHE_TTL_SECONDS = 900
 _SNCF_ISERE_CACHE_TTL_SECONDS = 180
@@ -315,12 +315,12 @@ _itinisere_cache_lock = Lock()
 _itinisere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _bison_cache_lock = Lock()
 _bison_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
-_waze_cache_lock = Lock()
-_waze_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _georisques_cache_lock = Lock()
 _georisques_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _prefecture_cache_lock = Lock()
 _prefecture_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_dauphine_cache_lock = Lock()
+_dauphine_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _vigieau_cache_lock = Lock()
 _vigieau_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _atmo_aura_cache_lock = Lock()
@@ -1202,322 +1202,7 @@ def _fetch_itinisere_disruptions_live(limit: int = 60) -> dict[str, Any]:
         }
 
 
-def _fetch_waze_isere_traffic_live() -> dict[str, Any]:
-    source = "https://www.waze.com/live-map/api/georss"
-    params = {
-        "top": 46.05,
-        "bottom": 44.55,
-        "left": 4.1,
-        "right": 6.9,
-        "env": "row",
-        "types": "alerts,traffic",
-    }
-    try:
-        url = f"{source}?{urlencode(params)}"
-        payload = _http_get_json(url, timeout=12)
-        alerts = payload.get("alerts") or []
-        jams = payload.get("jams") or payload.get("traffic") or []
-
-        incidents: list[dict[str, Any]] = []
-        incident_keys: set[tuple[Any, ...]] = set()
-        for alert in alerts[:250]:
-            subtype = str(alert.get("subtype") or alert.get("type") or "incident").lower()
-            if subtype in {"jam", "road_closed"}:
-                severity = "rouge" if subtype == "road_closed" else "orange"
-            else:
-                severity = "jaune"
-            incident = {
-                "kind": "alert",
-                "title": alert.get("title") or alert.get("street") or "Signalement trafic",
-                "description": alert.get("reportDescription") or alert.get("description") or "",
-                "subtype": subtype,
-                "severity": severity,
-                "lat": alert.get("location", {}).get("y"),
-                "lon": alert.get("location", {}).get("x"),
-                "reliability": alert.get("reliability"),
-            }
-            key = (
-                incident["kind"],
-                incident.get("subtype"),
-                incident.get("title"),
-                incident.get("lat"),
-                incident.get("lon"),
-                incident.get("description"),
-            )
-            if key in incident_keys:
-                continue
-            incident_keys.add(key)
-            incidents.append(incident)
-
-        for jam in jams[:250]:
-            line = jam.get("line") or []
-            if not line:
-                continue
-            first = line[0]
-            speed = float(jam.get("speed") or 0)
-            delay = float(jam.get("delay") or 0)
-            if delay >= 900 or speed < 12:
-                severity = "rouge"
-            elif delay >= 420 or speed < 25:
-                severity = "orange"
-            else:
-                severity = "jaune"
-            incident = {
-                "kind": "jam",
-                "title": jam.get("street") or "Ralentissement",
-                "description": f"Vitesse {int(speed)} km/h · retard {int(delay // 60)} min",
-                "severity": severity,
-                "lat": first.get("y"),
-                "lon": first.get("x"),
-                "line": [{"lat": point.get("y"), "lon": point.get("x")} for point in line[:80]],
-                "length": jam.get("length"),
-            }
-            key = (
-                incident["kind"],
-                incident.get("title"),
-                incident.get("lat"),
-                incident.get("lon"),
-                incident.get("description"),
-            )
-            if key in incident_keys:
-                continue
-            incident_keys.add(key)
-            incidents.append(incident)
-
-        return {
-            "service": "Waze",
-            "status": "online",
-            "source": source,
-            "incidents": incidents,
-            "incidents_total": len(incidents),
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
-    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
-        return {
-            "service": "Waze",
-            "status": "degraded",
-            "source": source,
-            "incidents": [],
-            "incidents_total": 0,
-            "error": str(exc),
-        }
-
-
-def fetch_itinisere_disruptions(limit: int = 60, force_refresh: bool = False) -> dict[str, Any]:
-    return _cached_external_payload(
-        cache=_itinisere_cache,
-        lock=_itinisere_cache_lock,
-        ttl_seconds=_ITINISERE_CACHE_TTL_SECONDS,
-        force_refresh=force_refresh,
-        loader=lambda: _fetch_itinisere_disruptions_live(limit=limit),
-    )
-
-
-def _sncf_isere_alert_type(text: str) -> str:
-    lowered = (text or "").lower()
-    if any(token in lowered for token in ("accident", "collision", "heurt", "obstacle")):
-        return "accident"
-    if any(token in lowered for token in ("travaux", "chantier", "maintenance", "voie")):
-        return "travaux"
-    return "autre"
-
-
-def _sncf_siri_pick_text(element: ET.Element, tag: str) -> str:
-    namespace = {"s": "http://www.siri.org.uk/siri", "xml": "http://www.w3.org/XML/1998/namespace"}
-    candidates = element.findall(f"s:{tag}", namespace)
-    if not candidates:
-        return ""
-    for candidate in candidates:
-        lang = (candidate.attrib.get("{http://www.w3.org/XML/1998/namespace}lang") or "").lower()
-        if lang in {"fr", "fr-fr"}:
-            return (candidate.text or "").strip()
-    return (candidates[0].text or "").strip()
-
-
-def _sncf_isere_related_text(text: str) -> bool:
-    normalized = unicodedata.normalize("NFKD", (text or "").lower())
-    flattened = "".join(ch for ch in normalized if not unicodedata.combining(ch))
-    keywords = (
-        "isere",
-        "grenoble",
-        "bourgoin",
-        "voiron",
-        "vienne",
-        "la tour-du-pin",
-        "pont-de-cheruy",
-        "isle d'abeau",
-        "saint-egreve",
-        "saint-marcellin",
-        "romesche",
-        "roussillon",
-        "chasse-sur-rhone",
-    )
-    return any(keyword in flattened for keyword in keywords)
-
-
-def _sncf_severity_to_level(value: str) -> str:
-    lowered = (value or "").strip().lower()
-    if lowered in {"verysevere", "severe"}:
-        return "rouge"
-    if lowered in {"normal", "unknown"}:
-        return "jaune"
-    return "orange" if lowered else "jaune"
-
-
-def _fetch_sncf_isere_alerts_live(limit: int = 25) -> dict[str, Any]:
-    source = "https://proxy.transport.data.gouv.fr/resource/sncf-siri-lite-situation-exchange"
-    namespace = {"s": "http://www.siri.org.uk/siri"}
-    try:
-        payload = _http_get_text(source, timeout=18)
-        root = ET.fromstring(payload)
-    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ET.ParseError, ValueError) as exc:
-        return {
-            "service": "SNCF Isère",
-            "status": "degraded",
-            "source": source,
-            "alerts": [],
-            "alerts_total": 0,
-            "error": str(exc),
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
-
-    alerts: list[dict[str, Any]] = []
-    for situation in root.findall(".//s:PtSituationElement", namespace):
-        participant = (situation.findtext("s:ParticipantRef", namespaces=namespace) or "").strip()
-        summary = _sncf_siri_pick_text(situation, "Summary")
-        description = _sncf_siri_pick_text(situation, "Description")
-        detail = _sncf_siri_pick_text(situation, "Detail")
-        content = " ".join(part for part in (summary, description, unescape(_strip_html_tags(detail))) if part).strip()
-        if not content:
-            continue
-
-        searchable_text = f"{participant} {content}".lower()
-        if not _sncf_isere_related_text(searchable_text):
-            continue
-
-        alert_type = _sncf_isere_alert_type(searchable_text)
-        if alert_type not in {"accident", "travaux"}:
-            continue
-
-        start_time = (situation.findtext("s:ValidityPeriod/s:StartTime", namespaces=namespace) or "").strip()
-        severity = _sncf_severity_to_level(situation.findtext("s:Severity", namespaces=namespace) or "")
-        alerts.append(
-            {
-                "title": summary or "Alerte SNCF",
-                "description": content[:400],
-                "type": alert_type,
-                "severity": severity,
-                "locations": [participant] if participant else [],
-                "roads": [],
-                "link": source,
-                "published_at": start_time,
-            }
-        )
-
-    alerts.sort(key=lambda alert: alert.get("published_at", ""), reverse=True)
-    return {
-        "service": "SNCF Isère",
-        "status": "online",
-        "source": source,
-        "alerts": alerts[:limit],
-        "alerts_total": len(alerts),
-        "updated_at": datetime.utcnow().isoformat() + "Z",
-    }
-
-
-def fetch_sncf_isere_alerts(limit: int = 25, force_refresh: bool = False) -> dict[str, Any]:
-    return _cached_external_payload(
-        cache=_sncf_isere_cache,
-        lock=_sncf_isere_cache_lock,
-        ttl_seconds=_SNCF_ISERE_CACHE_TTL_SECONDS,
-        force_refresh=force_refresh,
-        loader=lambda: _fetch_sncf_isere_alerts_live(limit=limit),
-    )
-
-
-def _strip_html_tags(value: str) -> str:
-    return re.sub(r"<[^>]+>", " ", value or "")
-
-
-def _extract_html_title(value: str) -> str:
-    if not value:
-        return ""
-
-    patterns = (
-        r"<title[^>]*>(?P<content>.*?)</title>",
-        r"<h1[^>]*>(?P<content>.*?)</h1>",
-        r'<meta[^>]+property=(["\'])og:title\1[^>]+content=(["\'])(?P<content>.*?)\2',
-        r'<meta[^>]+content=(["\'])(?P<content>.*?)\1[^>]+property=(["\'])og:title\3',
-    )
-    for pattern in patterns:
-        match = re.search(pattern, value, flags=re.IGNORECASE | re.DOTALL)
-        if not match:
-            continue
-        candidate = unescape(re.sub(r"\s+", " ", _strip_html_tags(match.group("content")))).strip()
-        if candidate:
-            cleaned = re.sub(r"\s*[\|\-–]\s*isere\.gouv\.fr$", "", candidate, flags=re.IGNORECASE).strip()
-            if "Les services de l'État en Isère" in cleaned and " - " in cleaned:
-                cleaned = cleaned.split(" - ", 1)[0].strip()
-            return cleaned
-
-    return ""
-
-
-def _title_from_link_slug(link: str) -> str:
-    path = urlparse(link or "").path.rstrip("/")
-    slug = path.split("/")[-1] if path else ""
-    if not slug:
-        return ""
-    return unescape(unquote(slug)).replace("-", " ").strip()
-
-
-def _resolve_prefecture_news_title(title: str, link: str) -> str:
-    cleaned_title = (title or "").strip()
-    if cleaned_title:
-        return unescape(cleaned_title)
-
-    try:
-        article_html = _http_get_text(link, timeout=10)
-        extracted_title = _extract_html_title(article_html)
-        if extracted_title:
-            return extracted_title
-    except (HTTPError, URLError, TimeoutError, ValueError):
-        pass
-
-    slug_title = _title_from_link_slug(link)
-    if slug_title:
-        return slug_title
-    return "Actualité Préfecture"
-
-
-def _parse_prefecture_published_date(value: str) -> datetime:
-    raw = (value or "").strip()
-    if not raw:
-        return datetime.min
-
-    normalized = re.sub(r"\s*\([^)]*\)$", "", raw)
-    parsed_formats = (
-        "%a, %d %b %Y %H:%M:%S %z",
-        "%Y-%m-%dT%H:%M:%S%z",
-        "%Y-%m-%dT%H:%M:%SZ",
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%d",
-    )
-    for fmt in parsed_formats:
-        try:
-            parsed = datetime.strptime(normalized, fmt)
-            return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
-        except ValueError:
-            continue
-
-    try:
-        parsed_iso = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
-        return parsed_iso.replace(tzinfo=None) if parsed_iso.tzinfo else parsed_iso
-    except ValueError:
-        return datetime.min
-
-
-def _fetch_prefecture_isere_news_live(limit: int = 6) -> dict[str, Any]:
+def _fetch_prefecture_isere_news_live(limit: int = 7) -> dict[str, Any]:
     source = "https://www.isere.gouv.fr/syndication/flux/actualites"
     try:
         xml_payload = _http_get_text(source)
@@ -1657,13 +1342,61 @@ def _fetch_atmo_aura_isere_air_quality_live() -> dict[str, Any]:
         }
 
 
-def fetch_prefecture_isere_news(limit: int = 6, force_refresh: bool = False) -> dict[str, Any]:
+def fetch_prefecture_isere_news(limit: int = 7, force_refresh: bool = False) -> dict[str, Any]:
     return _cached_external_payload(
         cache=_prefecture_cache,
         lock=_prefecture_cache_lock,
         ttl_seconds=_PREFECTURE_CACHE_TTL_SECONDS,
         force_refresh=force_refresh,
         loader=lambda: _fetch_prefecture_isere_news_live(limit=limit),
+    )
+
+
+
+def _fetch_dauphine_isere_news_live(limit: int = 7) -> dict[str, Any]:
+    source = "https://www.ledauphine.com/isere/rss"
+    try:
+        xml_payload = _http_get_text(source)
+        root = ET.fromstring(xml_payload)
+        items: list[dict[str, Any]] = []
+        for item in root.findall(".//item"):
+            title = unescape((item.findtext("title") or "").strip()) or "Article Le Dauphiné Libéré"
+            link = (item.findtext("link") or "https://www.ledauphine.com/isere").strip()
+            description_html = (item.findtext("description") or "").strip()
+            description = unescape(re.sub(r"\s+", " ", _strip_html_tags(description_html))).strip()
+            published = (item.findtext("pubDate") or "").strip()
+            items.append({
+                "title": title,
+                "description": description[:400],
+                "published_at": published,
+                "link": link,
+            })
+
+        items.sort(key=lambda article: _parse_prefecture_published_date(article.get("published_at") or ""), reverse=True)
+        return {
+            "service": "Le Dauphiné Libéré · Isère",
+            "status": "online",
+            "source": source,
+            "items": items[:limit],
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+    except (ET.ParseError, HTTPError, URLError, TimeoutError, ValueError) as exc:
+        return {
+            "service": "Le Dauphiné Libéré · Isère",
+            "status": "degraded",
+            "source": source,
+            "items": [],
+            "error": str(exc),
+        }
+
+
+def fetch_dauphine_isere_news(limit: int = 7, force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_dauphine_cache,
+        lock=_dauphine_cache_lock,
+        ttl_seconds=_DAUPHINE_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=lambda: _fetch_dauphine_isere_news_live(limit=limit),
     )
 
 
@@ -1984,15 +1717,6 @@ def fetch_vigieau_restrictions(force_refresh: bool = False) -> dict[str, Any]:
         loader=_fetch_vigieau_restrictions_live,
     )
 
-
-def fetch_waze_isere_traffic(force_refresh: bool = False) -> dict[str, Any]:
-    return _cached_external_payload(
-        cache=_waze_cache,
-        lock=_waze_cache_lock,
-        ttl_seconds=_WAZE_CACHE_TTL_SECONDS,
-        force_refresh=force_refresh,
-        loader=_fetch_waze_isere_traffic_live,
-    )
 
 
 def _fetch_georisques_v2_collection(

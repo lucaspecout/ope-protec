@@ -111,14 +111,15 @@
           <p class="muted">Commune <strong id="current-commune">Toutes</strong></p>
         </div>
         <nav class="side-nav" aria-label="Menu principal">
-          <button class="menu-btn" data-target="situation-panel">Situation</button>
-          <button class="menu-btn" data-target="services-panel">Services connectés</button>
-          <button class="menu-btn" data-target="georisques-panel">Page Géorisques</button>
-          <button class="menu-btn" data-target="municipalities-panel">Communes</button>
-          <button class="menu-btn" data-target="logs-panel">Main courante</button>
-          <button class="menu-btn" data-target="map-panel">Carte Isère</button>
-          <button class="menu-btn" data-target="users-panel">Utilisateurs</button>
-          <button class="menu-btn" data-target="api-panel">Interconnexions API</button>
+          <button class="menu-btn" data-target="situation-panel" data-icon="📊"><span class="menu-label">Situation</span></button>
+          <button class="menu-btn" data-target="services-panel" data-icon="🔌"><span class="menu-label">Services connectés</span></button>
+          <button class="menu-btn" data-target="georisques-panel" data-icon="🌍"><span class="menu-label">Page Géorisques</span></button>
+          <button class="menu-btn" data-target="news-panel" data-icon="📰"><span class="menu-label">Actualités</span></button>
+          <button class="menu-btn" data-target="municipalities-panel" data-icon="🏛️"><span class="menu-label">Communes</span></button>
+          <button class="menu-btn" data-target="logs-panel" data-icon="📝"><span class="menu-label">Main courante</span></button>
+          <button class="menu-btn" data-target="map-panel" data-icon="🗺️"><span class="menu-label">Carte Isère</span></button>
+          <button class="menu-btn" data-target="users-panel" data-icon="👤"><span class="menu-label">Utilisateurs</span></button>
+          <button class="menu-btn" data-target="api-panel" data-icon="🧩"><span class="menu-label">Interconnexions API</span></button>
         </nav>
         <button id="logout-btn" class="danger">Déconnexion</button>
       </aside>
@@ -235,6 +236,10 @@
             <article class="tile">
               <h4 id="prefecture-news-title">Actualité Préfecture de l'Isère</h4>
               <ul id="prefecture-news-list" class="list"></ul>
+            </article>
+            <article class="tile">
+              <h4>Le Dauphiné Libéré · Isère</h4>
+              <ul id="dauphine-news-list" class="list"></ul>
             </article>
             <article class="tile">
               <h4>Alertes SNCF Isère (accidents / travaux)</h4>
@@ -442,24 +447,43 @@
           <p class="muted">Entrées affichées: <strong id="logs-count">0</strong> · <button id="logs-export" type="button" class="ghost">Exporter CSV</button></p>
           <div class="logs-tables-grid">
             <article>
-              <h4>En cours</h4>
+              <h4>Nouveaux / En cours</h4>
               <table class="users-table">
                 <thead>
                   <tr><th>Horodatage</th><th>Périmètre</th><th>Criticité</th><th>Évènement</th><th>Statut</th><th>Détails</th><th>Actions</th></tr>
                 </thead>
-                <tbody id="logs-table-open"></tbody>
+                <tbody id="logs-table-open-active"></tbody>
               </table>
             </article>
             <article>
-              <h4>Clos</h4>
+              <h4>Suivi</h4>
               <table class="users-table">
                 <thead>
                   <tr><th>Horodatage</th><th>Périmètre</th><th>Criticité</th><th>Évènement</th><th>Statut</th><th>Détails</th><th>Actions</th></tr>
                 </thead>
-                <tbody id="logs-table-closed"></tbody>
+                <tbody id="logs-table-open-followup"></tbody>
               </table>
             </article>
           </div>
+          <div class="logs-closed-table-wrap">
+            <h4>Clos</h4>
+            <table class="users-table">
+              <thead>
+                <tr><th>Horodatage</th><th>Périmètre</th><th>Criticité</th><th>Évènement</th><th>Statut</th><th>Détails</th><th>Actions</th></tr>
+              </thead>
+              <tbody id="logs-table-closed"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="news-panel" class="panel view hidden" hidden>
+          <div class="panel-heading">
+            <h3>Actualités opérationnelles · Isère</h3>
+            <p class="muted">Flux presse local du Dauphiné Libéré (section Isère), trié du plus récent au plus ancien.</p>
+          </div>
+          <p id="dauphine-status" class="service-status">-</p>
+          <p id="dauphine-info" class="muted">-</p>
+          <ul id="dauphine-news-panel-list" class="list"></ul>
         </section>
 
         <section id="map-panel" class="panel view hidden" hidden>
@@ -565,24 +589,7 @@
                   <label><input id="filter-photo-cameras" type="checkbox" checked /> Caméras photo Itinisère (maj 1 min)</label>
                   <label><input id="filter-google-traffic-flow" type="checkbox" /> Trafic continu (style Google Maps)</label>
                 </div>
-                <select id="resource-type-filter">
-                  <option value="all">Toutes les ressources</option>
-                  <option value="poste_commandement">Postes de commandement</option>
-                  <option value="centre_hebergement">Centres d'hébergement</option>
-                  <option value="hopital">Hôpitaux</option>
-                  <option value="centrale_nucleaire">Centrales / sites nucléaires</option>
-                  <option value="lieu_risque">Site Seveso / risque technologique</option>
-                  <option value="lieu_vital">Lieux vitaux</option>
-                  <option value="caserne">Casernes</option>
-                  <option value="transport">Nœuds transport</option>
-                  <option value="energie">Énergie / barrages</option>
-                </select>
-                <select id="resource-priority-filter">
-                  <option value="all">Tous niveaux de criticité</option>
-                  <option value="critical">Ressources critiques</option>
-                  <option value="vital">Lieux vitaux</option>
-                  <option value="risk">Lieux à risque</option>
-                </select>
+                
               </div>
               <p id="map-feedback" class="muted"></p>
               <ul id="map-checks-list" class="list compact map-checks-list"><li>Lancez « Vérifier la carte » pour un diagnostic rapide.</li></ul>
