@@ -2799,8 +2799,7 @@ function renderSituationOverview() {
         <p class="muted">Synthèse météo, risques et signaux d'intérêt · mise à jour ${escapeHtml(generatedAt)}</p>
       </div>
       <div class="situation-toolbar__actions">
-        <button id="situation-refresh-btn" type="button" class="ghost">Actualiser la situation</button>
-        <button id="situation-export-pdf-btn" type="button">📄 Générer SITREP PDF</button>
+        <button id="situation-export-pdf-btn" type="button">📄 Générer et télécharger le SITREP PDF</button>
       </div>
     </div>
 
@@ -2979,31 +2978,25 @@ function exportSitrepPdf() {
 }
 
 function bindSituationActions() {
-  document.getElementById('situation-refresh-btn')?.addEventListener('click', async () => {
-    const button = document.getElementById('situation-refresh-btn');
+  document.getElementById('situation-export-pdf-btn')?.addEventListener('click', async () => {
+    const button = document.getElementById('situation-export-pdf-btn');
+    const originalText = button?.textContent || '📄 Générer et télécharger le SITREP PDF';
     if (button) {
       button.disabled = true;
-      button.textContent = 'Actualisation...';
+      button.textContent = 'Collecte des informations...';
     }
     try {
       await refreshAll(true);
+      if (button) button.textContent = 'Préparation du PDF...';
+      exportSitrepPdf();
       document.getElementById('dashboard-error').textContent = '';
     } catch (error) {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
     } finally {
       if (button) {
         button.disabled = false;
-        button.textContent = 'Actualiser la situation';
+        button.textContent = originalText;
       }
-    }
-  });
-
-  document.getElementById('situation-export-pdf-btn')?.addEventListener('click', () => {
-    try {
-      exportSitrepPdf();
-      document.getElementById('dashboard-error').textContent = '';
-    } catch (error) {
-      document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
     }
   });
 }
@@ -3612,24 +3605,6 @@ function bindAppInteractions() {
       document.getElementById('dashboard-error').textContent = '';
     } catch (error) {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
-    }
-  });
-  document.getElementById('situation-refresh-btn')?.addEventListener('click', async () => {
-    const button = document.getElementById('situation-refresh-btn');
-    if (button) {
-      button.disabled = true;
-      button.textContent = 'Actualisation...';
-    }
-    try {
-      await refreshAll(true);
-      document.getElementById('dashboard-error').textContent = '';
-    } catch (error) {
-      document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
-    } finally {
-      if (button) {
-        button.disabled = false;
-        button.textContent = 'Actualiser la situation';
-      }
     }
   });
   document.getElementById('map-search')?.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); handleMapSearch(); } });
