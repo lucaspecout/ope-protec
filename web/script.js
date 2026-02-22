@@ -803,7 +803,6 @@ async function resetMapFilters() {
     'map-point-category-filter': 'all',
     'resource-type-filter': 'all',
     'resource-priority-filter': 'all',
-    'resource-bulk-action-select': 'none',
     'resource-target-category-filter': 'all',
     'poi-target-category-filter': 'all',
     'map-basemap-select': 'osm',
@@ -1169,21 +1168,6 @@ function refreshResourceTargetOptions() {
   const hasVisible = RESOURCE_POINTS.some((resource) => resource.active);
   button.disabled = RESOURCE_POINTS.length === 0;
   button.textContent = hasVisible ? 'Masquer toutes les ressources' : 'Afficher toutes les ressources';
-}
-
-function applyResourceBulkAction() {
-  const action = document.getElementById('resource-bulk-action-select')?.value || 'none';
-  if (action === 'none') {
-    setMapFeedback('Aucune action globale appliquée aux ressources.');
-    return;
-  }
-  const shouldActivate = action === 'show';
-  RESOURCE_POINTS.forEach((resource) => {
-    resource.active = shouldActivate;
-  });
-  renderResources();
-  fitMapToData();
-  setMapFeedback(shouldActivate ? 'Toutes les ressources sont affichées.' : 'Toutes les ressources sont masquées.');
 }
 
 function toggleSelectedResource() {
@@ -3469,7 +3453,6 @@ function bindAppInteractions() {
     if (!button) return;
     toggleResourceActive(button.dataset.resourceToggle || '');
   });
-  document.getElementById('resource-bulk-action-btn')?.addEventListener('click', applyResourceBulkAction);
   document.getElementById('resource-target-category-filter')?.addEventListener('change', () => {
     renderResources();
   });
