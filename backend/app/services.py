@@ -733,6 +733,18 @@ def _vigicrues_level_from_delta(delta_m: float) -> str:
     return "vert"
 
 
+def normalize_level(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    aliases = {
+        "green": "vert",
+        "yellow": "jaune",
+        "orange": "orange",
+        "red": "rouge",
+    }
+    normalized = aliases.get(normalized, normalized)
+    return normalized if normalized in {"vert", "jaune", "orange", "rouge"} else "vert"
+
+
 def _vigicrues_extract_observation(station_code: str) -> tuple[float, float, str]:
     try:
         payload = _http_get_json(
