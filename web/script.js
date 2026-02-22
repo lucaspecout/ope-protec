@@ -3463,13 +3463,11 @@ function renderLogsList() {
     return new Date(b.event_time || b.created_at).getTime() - new Date(a.event_time || a.created_at).getTime();
   });
 
-  const activeLogs = filtered.filter((log) => ['nouveau', 'en_cours'].includes(String(log.status || '').toLowerCase()));
-  const followupLogs = filtered.filter((log) => String(log.status || '').toLowerCase() === 'suivi');
+  const openLogs = filtered.filter((log) => ['nouveau', 'en_cours', 'suivi'].includes(String(log.status || '').toLowerCase()));
   const closedLogs = filtered.filter((log) => String(log.status || '').toLowerCase() === 'clos');
 
   setText('logs-count', String(filtered.length));
-  setHtml('logs-table-open-active', activeLogs.map((log) => buildLogTableRow(log)).join('') || '<tr><td colspan="7">Aucun évènement nouveau / en cours.</td></tr>');
-  setHtml('logs-table-open-followup', followupLogs.map((log) => buildLogTableRow(log)).join('') || '<tr><td colspan="7">Aucun évènement en suivi.</td></tr>');
+  setHtml('logs-table-open', openLogs.map((log) => buildLogTableRow(log)).join('') || '<tr><td colspan="7">Aucun évènement nouveau / en cours / suivi.</td></tr>');
   setHtml('logs-table-closed', closedLogs.map((log) => buildLogTableRow(log)).join('') || '<tr><td colspan="7">Aucun évènement clos.</td></tr>');
 }
 
