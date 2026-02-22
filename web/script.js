@@ -2790,8 +2790,20 @@ function renderSituationOverview() {
     { label: "Qualité de l'air", value: atmoLevel, info: 'Source Atmo AURA', css: atmoLevel },
     { label: 'Incidents SNCF', value: `${sncfIncidentsCount}`, info: 'Accidents / travaux Isère', css: sncfIncidentsCount > 0 ? 'orange' : 'vert' },
   ];
+  const generatedAt = safeDateToLocale(Date.now());
 
   setHtml('situation-content', `
+    <div class="situation-toolbar">
+      <div>
+        <h3>SITREP journalier · Isère</h3>
+        <p class="muted">Synthèse météo, risques et signaux d'intérêt · mise à jour ${escapeHtml(generatedAt)}</p>
+      </div>
+      <div class="situation-toolbar__actions">
+        <button id="situation-refresh-btn" type="button" class="ghost">Actualiser la situation</button>
+        <button id="situation-export-pdf-btn" type="button">📄 Générer SITREP PDF</button>
+      </div>
+    </div>
+
     <div class="situation-top-grid">
       ${kpiCards.map((card) => `<article class="tile situation-tile"><h3>${card.label}</h3><p class="kpi-value ${card.css}">${escapeHtml(card.value)}</p><p class="muted">${card.info}</p></article>`).join('')}
     </div>
@@ -2830,6 +2842,170 @@ function renderSituationOverview() {
       </div>
     </div>
   `);
+
+  bindSituationActions();
+}
+
+function toSitrepBulletItems(items = [], emptyLabel = 'Aucune donnée disponible.') {
+  if (!Array.isArray(items) || !items.length) return `<li>${escapeHtml(emptyLabel)}</li>`;
+  return items.map((item) => `<li>${item}</li>`).join('');
+}
+
+function buildSitrepHtml() {
+  const dashboard = cachedDashboardSnapshot && Object.keys(cachedDashboardSnapshot).length
+    ? cachedDashboardSnapshot
+    : (readSnapshot(STORAGE_KEYS.dashboardSnapshot) || {});
+  const externalRisks = cachedExternalRisksSnapshot && Object.keys(cachedExternalRisksSnapshot).length
+    ? cachedExternalRisksSnapshot
+    : (readSnapshot(STORAGE_KEYS.externalRisksSnapshot) || {});
+
+  const meteo = externalRisks?.meteo_france || {};
+  const vigicrues = externalRisks?.vigicrues || {};
+  const prefecture = Array.isArray(externalRisks?.prefecture_isere?.items) ? sortPrefectureItemsByRecency(externalRisks.prefecture_isere.items).slice(0, 5) : [];
+  const atmo = externalRisks?.atmo_aura || {};
+  const bison = externalRisks?.bison_fute?.today?.isere || {};
+  const vigieau = Array.isArray(externalRisks?.vigieau?.alerts) ? externalRisks.vigieau.alerts.slice(0, 5) : [];
+  const sncf = Array.isArray(externalRisks?.sncf_isere?.alerts) ? externalRisks.sncf_isere.alerts.slice(0, 5) : [];
+  const logs = Array.isArray(cachedLogs) && cachedLogs.length ? cachedLogs.slice(0, 8) : (Array.isArray(dashboard.latest_logs) ? dashboard.latest_logs.slice(0, 8) : []);
+
+  const meteoItems = Array.isArray(meteo.current_alerts) && meteo.current_alerts.length
+    ? meteo.current_alerts.map((alert) => {
+      const details = Array.isArray(alert.details) && alert.details.length ? ` (${escapeHtml(alert.details.slice(0, 2).join(' · '))})` : '';
+      return `<strong>${escapeHtml(alert.phenomenon || 'Phénomène')}</strong> : ${escapeHtml(normalizeLevel(alert.level || 'inconnu'))}${details}`;
+    })
+    : [escapeHtml(sanitizeMeteoInformation(meteo.info_state) || 'Aucune vigilance significative signalée.')];
+
+  const vigicruesItems = Array.isArray(vigicrues.stations) && vigicrues.stations.length
+    ? vigicrues.stations.slice(0, 6).map((station) => {
+      const level = normalizeLevel(station.level || station.vigilance || vigicrues.water_alert_level || 'inconnu');
+      return `<strong>${escapeHtml(station.name || 'Station')}</strong> · niveau ${escapeHtml(level)}`;
+    })
+    : ['Aucune station prioritaire transmise.'];
+
+  const prefectureItems = prefecture.map((item) => `<strong>${escapeHtml(item.title || 'Actualité')}</strong>${item.published_at ? ` · ${escapeHtml(item.published_at)}` : ''}`);
+  const vigieauItems = vigieau.map((item) => `<strong>${escapeHtml(item.level || 'Restriction')}</strong> · ${escapeHtml(item.zone || item.title || 'Isère')}`);
+  const sncfItems = sncf.map((item) => `<strong>${escapeHtml(item.type || 'Alerte')}</strong> · ${escapeHtml(item.title || 'Incident réseau')}`);
+  const logItems = logs.map((log) => {
+    const at = safeDateToLocale(log.event_time || log.created_at || Date.now());
+    return `<strong>${escapeHtml(at)}</strong> · ${escapeHtml(log.event_type || 'Évènement')} (${escapeHtml(normalizeLevel(log.danger_level || 'vert'))})`;
+  });
+
+  const generatedAt = safeDateToLocale(Date.now(), { dateStyle: 'full', timeStyle: 'short' });
+  const crisisCount = Number(dashboard.communes_crise ?? 0);
+  const globalRisk = escapeHtml(normalizeLevel(dashboard.global_risk || meteo.level || 'vert'));
+  const weatherLevel = escapeHtml(normalizeLevel(meteo.level || dashboard.vigilance || 'vert'));
+
+  return `<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<title>SITREP Isère</title>
+<style>
+  @page { size: A4; margin: 16mm; }
+  body { font-family: Inter, Arial, sans-serif; color: #0f1c2f; margin: 0; }
+  .header { border: 3px solid #f39200; border-radius: 14px; padding: 14px 16px; background: linear-gradient(135deg, #fff7ec, #ffffff); }
+  .badge { display: inline-block; background: #0d4b8e; color: #fff; border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 700; }
+  h1 { margin: 8px 0 4px; color: #0d4b8e; font-size: 24px; }
+  h2 { margin: 16px 0 8px; color: #0d4b8e; font-size: 18px; border-bottom: 2px solid #f39200; padding-bottom: 4px; }
+  p { margin: 4px 0; line-height: 1.4; }
+  .kpi { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+  .card { border: 1px solid #d8e4f5; border-radius: 10px; padding: 10px; background: #f8fbff; }
+  .card strong { display: block; font-size: 20px; margin-top: 4px; }
+  ul { margin: 6px 0 0; padding-left: 18px; }
+  li { margin-bottom: 5px; }
+  .muted { color: #53627a; font-size: 12px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+</style>
+</head>
+<body>
+  <header class="header">
+    <span class="badge">Protection Civile · Isère (38)</span>
+    <h1>SITREP quotidien · Conditions météo & points d'intérêt</h1>
+    <p><strong>Émis le :</strong> ${escapeHtml(generatedAt)}</p>
+    <p class="muted">Document opérationnel d'aide à la décision (couleurs Protection Civile).</p>
+    <div class="kpi">
+      <article class="card"><p>Niveau météo</p><strong>${weatherLevel}</strong></article>
+      <article class="card"><p>Risque global</p><strong>${globalRisk}</strong></article>
+      <article class="card"><p>Communes en crise</p><strong>${escapeHtml(String(crisisCount))}</strong></article>
+    </div>
+  </header>
+  <section>
+    <h2>Situation météo du jour</h2>
+    <ul>${toSitrepBulletItems(meteoItems)}</ul>
+  </section>
+  <section class="grid">
+    <div>
+      <h2>Hydrologie & mobilité</h2>
+      <p><strong>Vigicrues :</strong> ${escapeHtml(normalizeLevel(vigicrues.water_alert_level || 'inconnu'))}</p>
+      <ul>${toSitrepBulletItems(vigicruesItems)}</ul>
+      <p><strong>Bison Futé (38)</strong> · Départs: ${escapeHtml(normalizeLevel(bison.departure || 'inconnu'))} · Retours: ${escapeHtml(normalizeLevel(bison.return || 'inconnu'))}</p>
+      <p><strong>Qualité de l'air:</strong> ${escapeHtml(normalizeLevel(atmo?.today?.level || 'inconnu'))}</p>
+    </div>
+    <div>
+      <h2>Infos institutionnelles</h2>
+      <ul>${toSitrepBulletItems(prefectureItems, 'Aucune actualité Préfecture.')}</ul>
+    </div>
+  </section>
+  <section class="grid">
+    <div>
+      <h2>Restrictions eau</h2>
+      <ul>${toSitrepBulletItems(vigieauItems, 'Aucune restriction Vigieau remontée.')}</ul>
+    </div>
+    <div>
+      <h2>Alertes SNCF</h2>
+      <ul>${toSitrepBulletItems(sncfItems, 'Aucune alerte SNCF accidents/travaux en Isère.')}</ul>
+    </div>
+  </section>
+  <section>
+    <h2>Main courante (extrait)</h2>
+    <ul>${toSitrepBulletItems(logItems, 'Aucun évènement récent.')}</ul>
+  </section>
+</body>
+</html>`;
+}
+
+function exportSitrepPdf() {
+  const popup = window.open('', '_blank', 'noopener,noreferrer,width=1024,height=900');
+  if (!popup) {
+    throw new Error('Impossible d’ouvrir la fenêtre d’impression. Autorisez les popups pour générer le SITREP PDF.');
+  }
+  popup.document.open();
+  popup.document.write(buildSitrepHtml());
+  popup.document.close();
+  popup.focus();
+  setTimeout(() => {
+    popup.print();
+  }, 250);
+}
+
+function bindSituationActions() {
+  document.getElementById('situation-refresh-btn')?.addEventListener('click', async () => {
+    const button = document.getElementById('situation-refresh-btn');
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Actualisation...';
+    }
+    try {
+      await refreshAll(true);
+      document.getElementById('dashboard-error').textContent = '';
+    } catch (error) {
+      document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = 'Actualiser la situation';
+      }
+    }
+  });
+
+  document.getElementById('situation-export-pdf-btn')?.addEventListener('click', () => {
+    try {
+      exportSitrepPdf();
+      document.getElementById('dashboard-error').textContent = '';
+    } catch (error) {
+      document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
+    }
+  });
 }
 
 function renderDashboard(dashboard = {}) {
