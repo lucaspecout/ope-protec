@@ -432,6 +432,34 @@ def _highest_vigilance_level(alerts: list[dict[str, Any]]) -> str:
     return highest
 
 
+def _vigicrues_extract_level_from_text(text: str) -> str | None:
+    normalized = unescape(text or "").lower()
+    match = re.search(r"\b(vert|verte|jaune|orange|rouge)\b", normalized)
+    if not match:
+        return None
+    value = match.group(1)
+    return "vert" if value == "verte" else value
+
+
+def _fetch_vigicrues_troncon_rss_level(troncon_code: str) -> tuple[str | None, str | None]:
+    rss_url = f"https://www.vigicrues.gouv.fr/territoire/rss?CdEntVigiCru={quote_plus(troncon_code)}"
+    content = _http_get_text(rss_url)
+    root = ET.fromstring(content)
+    item = root.find("./channel/item")
+    if item is None:
+        return None, rss_url
+
+    candidates = [
+        item.findtext("title") or "",
+        item.findtext("description") or "",
+    ]
+    for candidate in candidates:
+        level = _vigicrues_extract_level_from_text(candidate)
+        if level:
+            return level, rss_url
+    return None, rss_url
+
+
 def _fetch_meteo_france_isere_live() -> dict[str, Any]:
     source_url = "https://vigilance.meteofrance.fr/fr/isere"
     html = _http_get_text(source_url)
@@ -892,6 +920,37 @@ def _fetch_vigicrues_isere_live(
             group["stations"].append({"code": station["code"], "station": station["station"], "river": station["river"]})
             group["level"] = _highest_vigilance_level([{"level": group["level"]}, {"level": station["level"]}])
 
+        isere_aval_points = [
+            [45.1885, 5.7245],
+            [45.1456, 5.5852],
+            [45.1052, 5.3554],
+            [45.0539, 5.0536],
+            [44.9336, 4.8924],
+        ]
+        isere_aval_level, isere_aval_rss = (None, None)
+        try:
+            isere_aval_level, isere_aval_rss = _fetch_vigicrues_troncon_rss_level("AN20")
+        except (ET.ParseError, HTTPError, URLError, TimeoutError, ValueError):
+            isere_aval_level, isere_aval_rss = (None, "https://www.vigicrues.gouv.fr/territoire/rss?CdEntVigiCru=AN20")
+
+        troncons_index["AN20 Isère aval"] = {
+            "code": "AN20",
+            "name": "Isère aval",
+            "level": isere_aval_level or "vert",
+            "territory": "19",
+            "rss": isere_aval_rss,
+            "stations": [
+                {"code": s["code"], "station": s["station"], "river": s["river"]}
+                for s in isere_stations
+                if "isère" in str(s.get("river") or "").lower()
+            ],
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [[point[1], point[0]] for point in isere_aval_points],
+            },
+            "polyline": isere_aval_points,
+        }
+
         troncons = list(troncons_index.values())
 
         isere_stations.sort(key=lambda station: (not station["is_priority"], station["station"] or "", station["code"] or ""))
@@ -901,6 +960,7 @@ def _fetch_vigicrues_isere_live(
             isere_stations = isere_stations[:station_limit]
 
         levels = [s["level"] for s in isere_stations]
+        levels.extend([normalize_level for normalize_level in [isere_aval_level] if normalize_level])
         global_level = "rouge" if "rouge" in levels else "orange" if "orange" in levels else "jaune" if "jaune" in levels else "vert"
         return {
             "service": "Vigicrues",

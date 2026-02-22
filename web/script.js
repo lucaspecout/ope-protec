@@ -1039,7 +1039,11 @@ function isAccidentIncident(incident = {}) {
   return /accident|collision|carambolage|crash/.test(fields);
 }
 
-function renderStations(stations = []) {
+function renderStations(vigicruesPayload = []) {
+  const stations = Array.isArray(vigicruesPayload)
+    ? vigicruesPayload
+    : (Array.isArray(vigicruesPayload?.stations) ? vigicruesPayload.stations : []);
+  const troncons = Array.isArray(vigicruesPayload?.troncons) ? vigicruesPayload.troncons : [];
   cachedStations = stations;
   const visible = document.getElementById('filter-hydro')?.checked ?? true;
   setHtml('hydro-stations-list', stations.slice(0, 40).map((s) => {
@@ -1084,6 +1088,19 @@ function renderStations(stations = []) {
       : sorted.some((s) => normalizeLevel(s.level) === 'jaune') ? 'jaune' : 'vert';
     window.L.polyline(sorted.map((s) => [s.lat, s.lon]), { color: levelColor(maxLevel), weight: 4, opacity: 0.75 })
       .bindPopup(`Cours d'eau: ${escapeHtml(sorted[0].river || sorted[0].station || 'Isère')} · Niveau max: ${maxLevel}`)
+      .addTo(hydroLineLayer);
+  });
+
+  troncons.forEach((troncon) => {
+    const polyline = Array.isArray(troncon?.polyline) ? troncon.polyline : [];
+    if (!polyline.length || String(troncon?.code || '').toUpperCase() !== 'AN20') return;
+    const points = polyline
+      .map((point) => Array.isArray(point) && point.length >= 2 ? normalizeMapCoordinates(point[0], point[1]) : null)
+      .filter(Boolean);
+    if (points.length < 2) return;
+    const level = normalizeLevel(troncon.level || 'vert');
+    window.L.polyline(points.map((point) => [point.lat, point.lon]), { color: levelColor(level), weight: 6, opacity: 0.9 })
+      .bindPopup(`<strong>${escapeHtml(troncon.name || 'Isère aval')}</strong><br>Code: ${escapeHtml(troncon.code || 'AN20')}<br>Niveau: ${escapeHtml(level)}${troncon.rss ? `<br><a href="${escapeHtml(troncon.rss)}" target="_blank" rel="noopener noreferrer">Flux RSS</a>` : ''}`)
       .addTo(hydroLineLayer);
   });
 
@@ -3249,7 +3266,7 @@ function renderExternalRisks(data = {}) {
   setText('map-itinisere-precision', `${preciseLocations}/${itinisereEvents.length || 0} avec lieu identifié`);
   setText('map-seismic-level', georisques.highest_seismic_zone_label || 'inconnue');
   setText('map-flood-docs', String(georisques.flood_documents_total ?? 0));
-  renderStations(vigicrues.stations || []);
+  renderStations(vigicrues);
   renderSituationOverview();
 }
 
