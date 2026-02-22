@@ -3163,13 +3163,17 @@ function renderSncfAlerts(sncf = {}) {
   setRiskText('sncf-status', `${sncf.status || 'inconnu'} · ${total} alerte(s)`, sncf.status === 'online' ? 'vert' : 'jaune');
   setText('sncf-info', `Filtre Isère · accidents/travaux de voie · source ${sncf.source || '-'}`);
   setHtml('sncf-alerts-list', alerts.slice(0, 10).map((alert) => {
-    const level = normalizeLevel(alert.severity || 'jaune');
+    const level = normalizeLevel(alert.level || alert.severity || 'jaune');
     const type = escapeHtml(alert.type || 'alerte');
     const title = escapeHtml(alert.title || 'Alerte SNCF');
     const desc = escapeHtml(alert.description || '');
     const location = Array.isArray(alert.locations) && alert.locations.length ? ` · ${escapeHtml(alert.locations.join(', '))}` : '';
+    const axes = Array.isArray(alert.axes) && alert.axes.length ? `<br><small><strong>Axe(s):</strong> ${escapeHtml(alert.axes.join(' · '))}</small>` : '';
+    const validity = alert.valid_from || alert.valid_until
+      ? `<br><small><strong>Période:</strong> ${escapeHtml(alert.valid_from || '?')} → ${escapeHtml(alert.valid_until || '?')}</small>`
+      : '';
     const link = String(alert.link || '').startsWith('http') ? alert.link : 'https://www.sncf.com/fr/itineraire-reservation/info-trafic';
-    return `<li><strong>${title}</strong> · <span style="color:${levelColor(level)}">${type}</span>${location}<br>${desc}${link ? `<br><a href="${link}" target="_blank" rel="noreferrer">Consulter SNCF</a>` : ''}</li>`;
+    return `<li><strong>${title}</strong> · <span style="color:${levelColor(level)}">${type}</span>${location}<br>${desc}${axes}${validity}${link ? `<br><a href="${link}" target="_blank" rel="noreferrer">Consulter SNCF</a>` : ''}</li>`;
   }).join('') || '<li>Aucune alerte SNCF accidents/travaux en Isère pour le moment.</li>');
 }
 
