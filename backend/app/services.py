@@ -1128,6 +1128,58 @@ def _fetch_vigicrues_isere_live(
             "polyline": isere_grenobloise_points,
         }
 
+        # Tracé du tronçon Vigicrues AN30 (Drac aval) sur l'axe principal
+        # du Drac entre Fontaine et Le Pont-de-Claix.
+        drac_aval_points = [
+            [45.20619481759856, 5.687024836831473],
+            [45.203934000000000, 5.688021000000000],
+            [45.201118000000000, 5.688910000000000],
+            [45.198072000000000, 5.689288000000000],
+            [45.194587000000000, 5.689017000000000],
+            [45.191164000000000, 5.688916000000000],
+            [45.187834000000000, 5.689359000000000],
+            [45.184271000000000, 5.689912000000000],
+            [45.180487000000000, 5.690442000000000],
+            [45.176594000000000, 5.691203000000000],
+            [45.172643000000000, 5.691976000000000],
+            [45.168799000000000, 5.692718000000000],
+            [45.164946000000000, 5.693483000000000],
+            [45.160809000000000, 5.694331000000000],
+            [45.156772000000000, 5.694893000000000],
+            [45.152643000000000, 5.695273000000000],
+            [45.148486000000000, 5.695597000000000],
+            [45.144291000000000, 5.695929000000000],
+            [45.140051000000000, 5.696118000000000],
+            [45.135802000000000, 5.696280000000000],
+            [45.131545000000000, 5.696487000000000],
+            [45.127267000000000, 5.696693000000000],
+            [45.123738000000000, 5.696734000000000],
+            [45.12021175849194, 5.696691586043316],
+        ]
+        drac_aval_level, drac_aval_rss = (None, None)
+        try:
+            drac_aval_level, drac_aval_rss = _fetch_vigicrues_troncon_rss_level("AN30")
+        except (ET.ParseError, HTTPError, URLError, TimeoutError, ValueError):
+            drac_aval_level, drac_aval_rss = (None, "https://www.vigicrues.gouv.fr/territoire/rss?CdEntVigiCru=AN30")
+
+        troncons_index["AN30 Drac aval"] = {
+            "code": "AN30",
+            "name": "Drac aval",
+            "level": drac_aval_level or "vert",
+            "territory": "19",
+            "rss": drac_aval_rss,
+            "stations": [
+                {"code": s["code"], "station": s["station"], "river": s["river"]}
+                for s in isere_stations
+                if "drac" in str(s.get("river") or "").lower()
+            ],
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [[point[1], point[0]] for point in drac_aval_points],
+            },
+            "polyline": drac_aval_points,
+        }
+
         # Tracé du tronçon Vigicrues AN20 (Isère aval).
         # Priorité au tracé en ligne (OSM/Nominatim), avec fallback local.
         isere_aval_points_fallback = _truncate_isere_aval_before_grenoble([
@@ -1286,7 +1338,7 @@ def _fetch_vigicrues_isere_live(
         levels.extend(
             [
                 normalize_level
-                for normalize_level in [isere_grenobloise_level, isere_aval_level]
+                for normalize_level in [isere_grenobloise_level, drac_aval_level, isere_aval_level]
                 if normalize_level
             ]
         )
