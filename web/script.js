@@ -1163,34 +1163,12 @@ async function renderMunicipalitiesOnMap(municipalities = []) {
   setMapFeedback(`${renderedCount}/${pcs.length} commune(s) PCS géolocalisée(s).`);
 }
 
-function getResourceCategoryLabel(type = 'all') {
-  if (type === 'all') return 'toutes les ressources';
-  return RESOURCE_TYPE_META[type]?.label || type.replace(/_/g, ' ');
-}
-
-function getPoiCategoryLabel(category = 'all') {
-  if (category === 'all') return 'tous les POI';
-  return ({
-    incident: 'Incidents',
-    evacuation: 'Évacuations',
-    water: 'Risque eau',
-    roadblock: 'Barrages',
-    medical: 'Médical',
-    logistics: 'Logistique',
-    command: 'Commandement',
-    poi: 'POI',
-    autre: 'Autres',
-  })[category] || category;
-}
-
 function refreshResourceTargetOptions() {
   const button = document.getElementById('resource-target-toggle-btn');
   if (!button) return;
-  const selectedCategory = document.getElementById('resource-target-category-filter')?.value || 'all';
-  const targetedResources = RESOURCE_POINTS.filter((resource) => selectedCategory === 'all' || resource.type === selectedCategory);
-  const hasVisible = targetedResources.some((resource) => resource.active);
-  button.disabled = targetedResources.length === 0;
-  button.textContent = hasVisible ? 'Masquer la catégorie' : 'Afficher la catégorie';
+  const hasVisible = RESOURCE_POINTS.some((resource) => resource.active);
+  button.disabled = RESOURCE_POINTS.length === 0;
+  button.textContent = hasVisible ? 'Masquer toutes les ressources' : 'Afficher toutes les ressources';
 }
 
 function applyResourceBulkAction() {
@@ -1209,26 +1187,22 @@ function applyResourceBulkAction() {
 }
 
 function toggleSelectedResource() {
-  const selectedCategory = document.getElementById('resource-target-category-filter')?.value || 'all';
-  const targetResources = RESOURCE_POINTS.filter((resource) => selectedCategory === 'all' || resource.type === selectedCategory);
-  if (!targetResources.length) return;
-  const hasVisible = targetResources.some((resource) => resource.active);
-  targetResources.forEach((resource) => {
+  if (!RESOURCE_POINTS.length) return;
+  const hasVisible = RESOURCE_POINTS.some((resource) => resource.active);
+  RESOURCE_POINTS.forEach((resource) => {
     resource.active = !hasVisible;
   });
   renderResources();
   fitMapToData();
-  setMapFeedback(`${getResourceCategoryLabel(selectedCategory)}: ${hasVisible ? 'masquées' : 'affichées'}.`);
+  setMapFeedback(`Ressources: ${hasVisible ? 'masquées' : 'affichées'} (toutes catégories).`);
 }
 
 function refreshPoiTargetOptions() {
   const button = document.getElementById('poi-target-toggle-btn');
   if (!button) return;
-  const selectedCategory = document.getElementById('poi-target-category-filter')?.value || 'all';
-  const targetPoints = mapPoints.filter((point) => selectedCategory === 'all' || point.category === selectedCategory);
-  const hasVisible = targetPoints.some((point) => mapPointVisibilityOverrides.get(point.id) !== false);
-  button.disabled = targetPoints.length === 0;
-  button.textContent = hasVisible ? 'Masquer la catégorie' : 'Afficher la catégorie';
+  const hasVisible = mapPoints.some((point) => mapPointVisibilityOverrides.get(point.id) !== false);
+  button.disabled = mapPoints.length === 0;
+  button.textContent = hasVisible ? 'Masquer tous les POI' : 'Afficher tous les POI';
 }
 
 function syncPoiTargetButton() {
@@ -1236,25 +1210,25 @@ function syncPoiTargetButton() {
 }
 
 function toggleSelectedPoiVisibility() {
-  const selectedCategory = document.getElementById('poi-target-category-filter')?.value || 'all';
-  const targetPoints = mapPoints.filter((point) => selectedCategory === 'all' || point.category === selectedCategory);
-  if (!targetPoints.length) return;
-  const hasVisible = targetPoints.some((point) => mapPointVisibilityOverrides.get(point.id) !== false);
-  targetPoints.forEach((point) => {
+  if (!mapPoints.length) return;
+  const hasVisible = mapPoints.some((point) => mapPointVisibilityOverrides.get(point.id) !== false);
+  mapPoints.forEach((point) => {
     mapPointVisibilityOverrides.set(point.id, !hasVisible);
   });
   renderCustomPoints();
   fitMapToData();
-  setMapFeedback(`${getPoiCategoryLabel(selectedCategory)}: ${hasVisible ? 'masqués' : 'affichés'}.`);
+  setMapFeedback(`POI personnalisés: ${hasVisible ? 'masqués' : 'affichés'} (toutes catégories).`);
 }
 
 function renderResources() {
   const showResources = document.getElementById('filter-resources-active')?.checked ?? true;
   const type = document.getElementById('resource-type-filter')?.value || 'all';
+  const targetCategory = document.getElementById('resource-target-category-filter')?.value || 'all';
   const priority = document.getElementById('resource-priority-filter')?.value || 'all';
   const query = (document.getElementById('map-search')?.value || '').trim().toLowerCase();
   const resources = showResources
     ? RESOURCE_POINTS.filter((r) => (type === 'all' || r.type === type)
+      && (targetCategory === 'all' || r.type === targetCategory)
       && r.active
       && (priority === 'all' || r.priority === priority)
       && (!query || `${r.name} ${r.address}`.toLowerCase().includes(query)))
@@ -2074,12 +2048,14 @@ function renderCustomPoints(showFeedback = true) {
   if (mapPointsLayer) mapPointsLayer.clearLayers();
 
   const selectedCategory = document.getElementById('map-point-category-filter')?.value || 'all';
+  const targetedCategory = document.getElementById('poi-target-category-filter')?.value || 'all';
   const poiVisible = document.getElementById('filter-map-poi')?.checked ?? true;
   const filteredPoints = mapPoints.filter((point) => {
     const isVisible = mapPointVisibilityOverrides.get(point.id) !== false;
     if (!isVisible) return false;
     if (!poiVisible && point.category === 'poi') return false;
-    return selectedCategory === 'all' || point.category === selectedCategory;
+    return (selectedCategory === 'all' || point.category === selectedCategory)
+      && (targetedCategory === 'all' || point.category === targetedCategory);
   });
   const listMarkup = filteredPoints
     .map((point) => {
@@ -3494,9 +3470,13 @@ function bindAppInteractions() {
     toggleResourceActive(button.dataset.resourceToggle || '');
   });
   document.getElementById('resource-bulk-action-btn')?.addEventListener('click', applyResourceBulkAction);
-  document.getElementById('resource-target-category-filter')?.addEventListener('change', refreshResourceTargetOptions);
+  document.getElementById('resource-target-category-filter')?.addEventListener('change', () => {
+    renderResources();
+  });
   document.getElementById('resource-target-toggle-btn')?.addEventListener('click', toggleSelectedResource);
-  document.getElementById('poi-target-category-filter')?.addEventListener('change', refreshPoiTargetOptions);
+  document.getElementById('poi-target-category-filter')?.addEventListener('change', () => {
+    renderCustomPoints();
+  });
   document.getElementById('poi-target-toggle-btn')?.addEventListener('click', toggleSelectedPoiVisibility);
   document.getElementById('map-point-category-filter')?.addEventListener('change', renderCustomPoints);
   document.getElementById('map-point-form-cancel')?.addEventListener('click', () => {
