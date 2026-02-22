@@ -1605,20 +1605,8 @@ def _fetch_vigicrues_isere_live(
         if station_limit is not None:
             isere_stations = isere_stations[:station_limit]
 
-        levels = [s["level"] for s in isere_stations]
-        levels.extend(
-            [
-                normalize_level
-                for normalize_level in [
-                    isere_moyenne_level,
-                    isere_grenobloise_level,
-                    drac_aval_level,
-                    romanche_aval_level,
-                    isere_aval_level,
-                ]
-                if normalize_level
-            ]
-        )
+        troncon_levels = [normalize_level(troncon.get("level") or "vert") for troncon in troncons if troncon.get("level")]
+        levels = troncon_levels or [normalize_level(s["level"]) for s in isere_stations]
         global_level = "rouge" if "rouge" in levels else "orange" if "orange" in levels else "jaune" if "jaune" in levels else "vert"
         return {
             "service": "Vigicrues",
