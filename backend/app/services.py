@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from copy import deepcopy
+from email.utils import parsedate_to_datetime
 from html import unescape
 from http.client import RemoteDisconnected
 import json
@@ -155,6 +156,54 @@ def _http_get_text(url: str, timeout: int = 12) -> str:
     request = Request(url, headers={"User-Agent": "ope-protec/1.0"})
     payload = _http_get_with_retries(request=request, timeout=timeout)
     return payload.decode("utf-8", errors="ignore")
+
+
+def _strip_html_tags(raw_html: str) -> str:
+    if not raw_html:
+        return ""
+    no_script = re.sub(r"<script[^>]*>.*?</script>", " ", raw_html, flags=re.IGNORECASE | re.DOTALL)
+    no_style = re.sub(r"<style[^>]*>.*?</style>", " ", no_script, flags=re.IGNORECASE | re.DOTALL)
+    no_tags = re.sub(r"<[^>]+>", " ", no_style)
+    return unescape(re.sub(r"\s+", " ", no_tags)).strip()
+
+
+def _resolve_prefecture_news_title(raw_title: str, link: str) -> str:
+    cleaned_title = unescape(re.sub(r"\s+", " ", (raw_title or "").strip()))
+    if cleaned_title:
+        return cleaned_title
+
+    parsed = urlparse(link or "")
+    slug = (parsed.path or "").rstrip("/").split("/")[-1]
+    slug = re.sub(r"\.[a-zA-Z0-9]+$", "", slug)
+    slug = unquote(slug)
+    slug = re.sub(r"[-_]+", " ", slug)
+    slug = re.sub(r"\s+", " ", slug).strip(" /")
+    return slug.capitalize() if slug else "Actualité Préfecture"
+
+
+def _parse_prefecture_published_date(raw_date: str) -> datetime:
+    value = (raw_date or "").strip()
+    if not value:
+        return datetime.min
+    try:
+        parsed = parsedate_to_datetime(value)
+        return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
+    except (TypeError, ValueError):
+        pass
+
+    for date_format in (
+        "%Y-%m-%dT%H:%M:%S%z",
+        "%Y-%m-%dT%H:%M:%SZ",
+        "%Y-%m-%d %H:%M:%S",
+        "%d/%m/%Y %H:%M",
+        "%Y-%m-%d",
+    ):
+        try:
+            parsed = datetime.strptime(value, date_format)
+            return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
+        except ValueError:
+            continue
+    return datetime.min
 
 
 
@@ -1412,9 +1461,28 @@ def fetch_dauphine_isere_news(limit: int = 7, force_refresh: bool = False) -> di
 
 
 def _fetch_sncf_isere_alerts_live() -> dict[str, Any]:
-    source = "https://www.ter.sncf.com/auvergne-rhone-alpes/se-deplacer/info-trafic"
+    sources = [
+        "https://www.ter.sncf.com/auvergne-rhone-alpes/se-deplacer/info-trafic",
+        "https://www.sncf.com/fr/itineraire-reservation/info-trafic/auvergne-rhone-alpes",
+    ]
+    source = sources[0]
     try:
-        html = _http_get_text(source)
+        html = ""
+        last_error: Exception | None = None
+        for candidate in sources:
+            source = candidate
+            try:
+                html = _http_get_text(candidate)
+                break
+            except HTTPError as exc:
+                last_error = exc
+                if exc.code != 403:
+                    raise
+                continue
+
+        if not html:
+            raise last_error or ValueError("Aucune source SNCF accessible")
+
         normalized = unescape(_strip_html_tags(html))
         compact = re.sub(r"\s+", " ", normalized)
 
