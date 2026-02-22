@@ -504,6 +504,28 @@
                   </select>
                   <label class="map-inline-checkbox"><input id="filter-map-poi" type="checkbox" checked /> POI visibles</label>
                 </div>
+                <div class="map-inline-actions map-inline-actions--stacked">
+                  <div class="map-bulk-controls">
+                    <select id="resource-bulk-action-select" aria-label="Action globale ressources">
+                      <option value="none">Ressources: aucune action</option>
+                      <option value="activate">Ressources: activer tout</option>
+                      <option value="deactivate">Ressources: désactiver tout</option>
+                    </select>
+                    <button id="resource-bulk-action-btn" type="button" class="ghost map-btn-lite">Appliquer</button>
+                  </div>
+                  <div class="map-bulk-controls">
+                    <select id="resource-target-select" aria-label="Choisir une ressource">
+                      <option value="">Ressource: choisir…</option>
+                    </select>
+                    <button id="resource-target-toggle-btn" type="button" class="ghost map-btn-lite" disabled>Activer/Désactiver</button>
+                  </div>
+                  <div class="map-bulk-controls">
+                    <select id="poi-target-select" aria-label="Choisir un point personnalisé">
+                      <option value="">POI perso: choisir…</option>
+                    </select>
+                    <button id="poi-target-toggle-btn" type="button" class="ghost map-btn-lite" disabled>Activer/Désactiver</button>
+                  </div>
+                </div>
                 <div class="map-toggle-grid">
                   <label><input id="filter-hydro" type="checkbox" checked /> Vigicrues</label>
                   <label><input id="filter-pcs" type="checkbox" checked /> Communes PCS</label>

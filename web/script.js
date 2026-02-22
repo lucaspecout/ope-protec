@@ -63,11 +63,7 @@ const RESOURCE_POINTS = [
   { id: 'seveso-stmicro-crolles', name: 'ST Microelectronics', type: 'lieu_risque', active: true, lat: 45.2667763, lon: 5.8841567, address: '38920 Crolles', priority: 'risk', info: 'Établissement SEVESO seuil haut (code S3IC 0061.02885).', source: 'https://www.georisques.gouv.fr/risques/installations/donnees' },
   { id: 'seveso-sobegal-domene', name: 'Sobegal', type: 'lieu_risque', active: true, lat: 45.20126076730851, lon: 5.826417249715717, address: '38420 Domène', priority: 'risk', info: 'Établissement SEVESO seuil haut (code S3IC 0061.02904).', source: 'https://www.georisques.gouv.fr/risques/installations/donnees' },
   { id: 'seveso-umicore-grenoble', name: 'Umicore Specialty Powders France', type: 'lieu_risque', active: true, lat: 45.1740634, lon: 5.703482, address: '38000 Grenoble', priority: 'risk', info: 'Établissement SEVESO seuil haut (code S3IC 0061.02962).', source: 'https://www.georisques.gouv.fr/risques/installations/donnees' },
-  { id: 'seveso-extracthive-pdc', name: 'Extracthive Chemical Products-Ex Isochem', type: 'lieu_risque', active: true, lat: 45.1236837, lon: 5.6978136, address: '38800 Le Pont-de-Claix', priority: 'risk', info: 'Établissement SEVESO seuil haut (code S3IC 0032.02504).', source: 'https://www.georisques.gouv.fr/risques/installations/donnees' },
-  { id: 'seveso-isochem-pdc', name: 'Isochem', type: 'lieu_risque', active: true, lat: 45.1236837, lon: 5.6978136, address: '38800 Le Pont-de-Claix', priority: 'risk', info: 'Établissement SEVESO seuil haut (code S3IC 0061.05220).', source: 'https://www.georisques.gouv.fr/risques/installations/donnees' },
-  { id: 'seveso-hexcel-roussillon', name: 'Hexcel Fibers', type: 'lieu_risque', active: true, lat: 45.3735991, lon: 4.8124049, address: '38150 Roussillon', priority: 'risk', info: 'Établissement SEVESO seuil haut (code S3IC 0061.14519).', source: 'https://www.georisques.gouv.fr/risques/installations/donnees' },
   { id: 'seveso-adisseo-stclair', name: 'Adisseo France Sas (Saint-Clair-du-Rhône)', type: 'lieu_risque', active: true, lat: 45.4407742, lon: 4.7644548, address: '38370 Saint-Clair-du-Rhône', priority: 'risk', info: 'Établissement SEVESO seuil haut (code S3IC 0061.05225).', source: 'https://www.georisques.gouv.fr/risques/installations/donnees' },
-  { id: 'seveso-total-sqf', name: 'Total Raffinage France (Saint-Quentin-Fallavier)', type: 'lieu_risque', active: true, lat: 45.6314982, lon: 5.1106322, address: '38070 Saint-Quentin-Fallavier', priority: 'risk', info: 'Établissement SEVESO seuil haut (code S3IC 0061.03163).', source: 'https://www.georisques.gouv.fr/risques/installations/donnees' },
   { id: 'seveso-sigma-sqf', name: 'Sigma Aldrich Chimie', type: 'lieu_risque', active: true, lat: 45.64319117656856, lon: 5.094081751338476, address: '38070 Saint-Quentin-Fallavier', priority: 'risk', info: 'Établissement SEVESO seuil haut (code S3IC 0061.03159).', source: 'https://www.georisques.gouv.fr/risques/installations/donnees' },
   { id: 'seveso-titanobel-stq', name: 'Titanobel', type: 'lieu_risque', active: true, lat: 45.254661813860125, lon: 5.627549791920214, address: '38210 Saint-Quentin-sur-Isère', priority: 'risk', info: 'Établissement SEVESO seuil haut (code S3IC 0061.03169).', source: 'https://www.georisques.gouv.fr/risques/installations/donnees' },
   { id: 'seveso-suez-salaise', name: 'Suez Rr Iws Chemicals France (Salaise-sur-Sanne)', type: 'lieu_risque', active: true, lat: 45.3441237, lon: 4.8189855, address: '38150 Salaise-sur-Sanne', priority: 'risk', info: 'Établissement SEVESO seuil haut (code S3IC 0104.00032).', source: 'https://www.georisques.gouv.fr/risques/installations/donnees' },
@@ -77,12 +73,10 @@ const RESOURCE_POINTS = [
   { id: 'seveso-engrais-salaise', name: 'Engrais Sud Vienne', type: 'lieu_risque', active: true, lat: 45.3362562, lon: 4.7885365, address: '38150 Salaise-sur-Sanne', priority: 'risk', info: 'Établissement SEVESO seuil haut (code S3IC 0061.03180).', source: 'https://www.georisques.gouv.fr/risques/installations/donnees' },
   { id: 'seveso-pec-tredi-salaise', name: 'Pec Tredi', type: 'lieu_risque', active: true, lat: 45.3441237, lon: 4.8189855, address: '38150 Salaise-sur-Sanne', priority: 'risk', info: 'Établissement SEVESO seuil haut (code S3IC 0061.03190).', source: 'https://www.georisques.gouv.fr/risques/installations/donnees' },
   { id: 'seveso-thor-salaise', name: 'Thor', type: 'lieu_risque', active: true, lat: 45.3385579, lon: 4.8002861, address: '38150 Salaise-sur-Sanne', priority: 'risk', info: 'Établissement SEVESO seuil haut (code S3IC 0061.03183).', source: 'https://www.georisques.gouv.fr/risques/installations/donnees' },
-  { id: 'seveso-adisseo-salaise', name: 'Adisseo France Sas (Salaise-sur-Sanne)', type: 'lieu_risque', active: true, lat: 45.3441237, lon: 4.8189855, address: '38150 Salaise-sur-Sanne', priority: 'risk', info: 'Établissement SEVESO seuil haut (code S3IC 0061.05223).', source: 'https://www.georisques.gouv.fr/risques/installations/donnees' },
   { id: 'seveso-elkem-salaise', name: 'Elkem Silicones France', type: 'lieu_risque', active: true, lat: 45.360477592838244, lon: 4.795869508883314, address: '38150 Salaise-sur-Sanne', priority: 'risk', info: 'Établissement SEVESO seuil haut (code S3IC 0061.05222).', source: 'https://www.georisques.gouv.fr/risques/installations/donnees' },
   { id: 'seveso-total-serpaize', name: 'Total Raffinage France (Serpaize)', type: 'lieu_risque', active: true, lat: 45.57315591438844, lon: 4.931628272923433, address: '38200 Serpaize', priority: 'risk', info: 'Établissement SEVESO seuil haut (code S3IC 0061.02999).', source: 'https://www.georisques.gouv.fr/risques/installations/donnees' },
   { id: 'seveso-esso-villette', name: 'Esso S.A.F.', type: 'lieu_risque', active: true, lat: 45.5867649, lon: 4.9140734, address: '38200 Villette-de-Vienne', priority: 'risk', info: 'Établissement SEVESO seuil haut (code S3IC 0061.03258).', source: 'https://www.georisques.gouv.fr/risques/installations/donnees' },
   { id: 'seveso-spmr-villette', name: 'Spmr', type: 'lieu_risque', active: true, lat: 45.5745417, lon: 4.915693, address: '38200 Villette-de-Vienne', priority: 'risk', info: 'Établissement SEVESO seuil haut (code S3IC 0061.03261).', source: 'https://www.georisques.gouv.fr/risques/installations/donnees' },
-  { id: 'seveso-total-villette', name: 'Total Raffinage France (Villette-de-Vienne)', type: 'lieu_risque', active: true, lat: 45.5867649, lon: 4.9140734, address: '38200 Villette-de-Vienne', priority: 'risk', info: 'Établissement SEVESO seuil haut (code S3IC 0061.03260).', source: 'https://www.georisques.gouv.fr/risques/installations/donnees' },
   { id: 'seveso-stepan-voreppe', name: 'Stepan Europe Sa', type: 'lieu_risque', active: true, lat: 45.292283, lon: 5.6235683, address: '38340 Voreppe', priority: 'risk', info: 'Établissement SEVESO seuil haut (code S3IC 0061.03282).', source: 'https://www.georisques.gouv.fr/risques/installations/donnees' },
 ];
 
@@ -119,6 +113,7 @@ let googleTrafficFlowLayer = null;
 let userLocationMarker = null;
 let mapAddPointMode = false;
 let mapPoints = [];
+const mapPointVisibilityOverrides = new Map();
 let pendingMapPointCoords = null;
 let mapIconTouched = false;
 let cachedStations = [];
@@ -808,6 +803,7 @@ async function resetMapFilters() {
     'map-point-category-filter': 'all',
     'resource-type-filter': 'all',
     'resource-priority-filter': 'all',
+    'resource-bulk-action-select': 'none',
     'map-basemap-select': 'osm',
   };
   Object.entries(defaults).forEach(([id, value]) => {
@@ -1165,6 +1161,91 @@ async function renderMunicipalitiesOnMap(municipalities = []) {
   setMapFeedback(`${renderedCount}/${pcs.length} commune(s) PCS géolocalisée(s).`);
 }
 
+function refreshResourceTargetOptions() {
+  const select = document.getElementById('resource-target-select');
+  if (!select) return;
+  const selectedValue = select.value;
+  const options = ['<option value="">Ressource: choisir…</option>']
+    .concat(RESOURCE_POINTS.map((resource) => `<option value="${escapeHtml(resource.id)}">${escapeHtml(resource.name)} (${resource.active ? 'active' : 'inactive'})</option>`));
+  select.innerHTML = options.join('');
+  if (RESOURCE_POINTS.some((resource) => resource.id === selectedValue)) select.value = selectedValue;
+  syncResourceTargetButton();
+}
+
+function syncResourceTargetButton() {
+  const select = document.getElementById('resource-target-select');
+  const button = document.getElementById('resource-target-toggle-btn');
+  if (!select || !button) return;
+  const resource = RESOURCE_POINTS.find((item) => item.id === select.value);
+  if (!resource) {
+    button.textContent = 'Activer/Désactiver';
+    button.disabled = true;
+    return;
+  }
+  button.disabled = false;
+  button.textContent = resource.active ? 'Désactiver sélection' : 'Activer sélection';
+}
+
+function applyResourceBulkAction() {
+  const action = document.getElementById('resource-bulk-action-select')?.value || 'none';
+  if (action === 'none') {
+    setMapFeedback('Aucune action globale appliquée aux ressources.');
+    return;
+  }
+  const shouldActivate = action === 'activate';
+  RESOURCE_POINTS.forEach((resource) => {
+    resource.active = shouldActivate;
+  });
+  renderResources();
+  fitMapToData();
+  setMapFeedback(shouldActivate ? 'Toutes les ressources sont activées.' : 'Toutes les ressources sont désactivées.');
+}
+
+function toggleSelectedResource() {
+  const resourceId = document.getElementById('resource-target-select')?.value || '';
+  if (!resourceId) return;
+  toggleResourceActive(resourceId);
+  fitMapToData();
+}
+
+function refreshPoiTargetOptions() {
+  const select = document.getElementById('poi-target-select');
+  if (!select) return;
+  const selectedValue = select.value;
+  const options = ['<option value="">POI perso: choisir…</option>']
+    .concat(mapPoints.map((point) => {
+      const isVisible = mapPointVisibilityOverrides.get(point.id) !== false;
+      return `<option value="${escapeHtml(point.id)}">${escapeHtml(point.name)} (${isVisible ? 'visible' : 'masqué'})</option>`;
+    }));
+  select.innerHTML = options.join('');
+  if (mapPoints.some((point) => point.id === selectedValue)) select.value = selectedValue;
+  syncPoiTargetButton();
+}
+
+function syncPoiTargetButton() {
+  const select = document.getElementById('poi-target-select');
+  const button = document.getElementById('poi-target-toggle-btn');
+  if (!select || !button) return;
+  const point = mapPoints.find((item) => item.id === select.value);
+  if (!point) {
+    button.textContent = 'Activer/Désactiver';
+    button.disabled = true;
+    return;
+  }
+  const isVisible = mapPointVisibilityOverrides.get(point.id) !== false;
+  button.disabled = false;
+  button.textContent = isVisible ? 'Désactiver sélection' : 'Activer sélection';
+}
+
+function toggleSelectedPoiVisibility() {
+  const pointId = document.getElementById('poi-target-select')?.value || '';
+  if (!pointId) return;
+  const isVisible = mapPointVisibilityOverrides.get(pointId) !== false;
+  mapPointVisibilityOverrides.set(pointId, !isVisible);
+  renderCustomPoints();
+  fitMapToData();
+}
+
 function renderResources() {
   const showResources = document.getElementById('filter-resources-active')?.checked ?? true;
   const type = document.getElementById('resource-type-filter')?.value || 'all';
@@ -1190,6 +1271,7 @@ function renderResources() {
   }).join('') || '<li>Aucune ressource avec ces filtres.</li>');
   mapStats.resources = resources.length;
   updateMapSummary();
+  refreshResourceTargetOptions();
   if (!resourceLayer) return;
   resourceLayer.clearLayers();
   resources.forEach((r) => {
@@ -1962,6 +2044,9 @@ async function loadMapPoints() {
       return { ...point, lat: coords.lat, lon: coords.lon };
     })
     .filter(Boolean);
+  Array.from(mapPointVisibilityOverrides.keys()).forEach((pointId) => {
+    if (!mapPoints.some((point) => point.id === pointId)) mapPointVisibilityOverrides.delete(pointId);
+  });
   renderCustomPoints(!usedCacheFallback);
   return { usedCacheFallback, count: loadedPoints.length };
 }
@@ -1988,6 +2073,8 @@ function renderCustomPoints(showFeedback = true) {
   const selectedCategory = document.getElementById('map-point-category-filter')?.value || 'all';
   const poiVisible = document.getElementById('filter-map-poi')?.checked ?? true;
   const filteredPoints = mapPoints.filter((point) => {
+    const isVisible = mapPointVisibilityOverrides.get(point.id) !== false;
+    if (!isVisible) return false;
     if (!poiVisible && point.category === 'poi') return false;
     return selectedCategory === 'all' || point.category === selectedCategory;
   });
@@ -2001,6 +2088,7 @@ function renderCustomPoints(showFeedback = true) {
 
   mapStats.custom = filteredPoints.length;
   updateMapSummary();
+  refreshPoiTargetOptions();
   if (!mapPointsLayer) return;
   filteredPoints.forEach((point) => {
     const marker = window.L.marker([point.lat, point.lon], { icon: markerIconForPoint(point) });
@@ -3402,6 +3490,11 @@ function bindAppInteractions() {
     if (!button) return;
     toggleResourceActive(button.dataset.resourceToggle || '');
   });
+  document.getElementById('resource-bulk-action-btn')?.addEventListener('click', applyResourceBulkAction);
+  document.getElementById('resource-target-select')?.addEventListener('change', syncResourceTargetButton);
+  document.getElementById('resource-target-toggle-btn')?.addEventListener('click', toggleSelectedResource);
+  document.getElementById('poi-target-select')?.addEventListener('change', syncPoiTargetButton);
+  document.getElementById('poi-target-toggle-btn')?.addEventListener('click', toggleSelectedPoiVisibility);
   document.getElementById('map-point-category-filter')?.addEventListener('change', renderCustomPoints);
   document.getElementById('map-point-form-cancel')?.addEventListener('click', () => {
     const modal = document.getElementById('map-point-modal');
