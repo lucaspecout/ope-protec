@@ -1093,14 +1093,14 @@ function renderStations(vigicruesPayload = []) {
 
   troncons.forEach((troncon) => {
     const polyline = Array.isArray(troncon?.polyline) ? troncon.polyline : [];
-    if (!polyline.length || String(troncon?.code || '').toUpperCase() !== 'AN20') return;
+    if (!polyline.length) return;
     const points = polyline
       .map((point) => Array.isArray(point) && point.length >= 2 ? normalizeMapCoordinates(point[0], point[1]) : null)
       .filter(Boolean);
     if (points.length < 2) return;
     const level = normalizeLevel(troncon.level || 'vert');
     window.L.polyline(points.map((point) => [point.lat, point.lon]), { color: levelColor(level), weight: 6, opacity: 0.9 })
-      .bindPopup(`<strong>${escapeHtml(troncon.name || 'Isère aval')}</strong><br>Code: ${escapeHtml(troncon.code || 'AN20')}<br>Niveau: ${escapeHtml(level)}${troncon.rss ? `<br><a href="${escapeHtml(troncon.rss)}" target="_blank" rel="noopener noreferrer">Flux RSS</a>` : ''}`)
+      .bindPopup(`<strong>${escapeHtml(troncon.name || 'Tronçon Isère')}</strong><br>Code: ${escapeHtml(troncon.code || 'N/A')}<br>Niveau: ${escapeHtml(level)}${troncon.rss ? `<br><a href="${escapeHtml(troncon.rss)}" target="_blank" rel="noopener noreferrer">Flux RSS</a>` : ''}`)
       .addTo(hydroLineLayer);
   });
 
