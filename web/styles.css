@@ -511,8 +511,6 @@ svg text { font-size: 14px; fill: #17335f; }
     transform: none;
     margin-top: .6rem;
   }
-  .map-workspace:not(.map-workspace--collapsed) .map-controls-toggle { right: .65rem; }
-  .map-fullscreen-toggle { top: .65rem; right: 3.1rem; }
 }
 
 
