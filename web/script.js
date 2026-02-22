@@ -8,8 +8,8 @@ const STORAGE_KEYS = {
   externalRisksSnapshot: 'externalRisksSnapshot',
   apiInterconnectionsSnapshot: 'apiInterconnectionsSnapshot',
 };
-const AUTO_REFRESH_MS = 300000;
-const EVENTS_LIVE_REFRESH_MS = 300000;
+const AUTO_REFRESH_MS = 60000;
+const EVENTS_LIVE_REFRESH_MS = 60000;
 const HOME_LIVE_REFRESH_MS = 300000;
 const API_CACHE_TTL_MS = 300000;
 const API_PANEL_REFRESH_MS = 300000;
@@ -2568,18 +2568,19 @@ function buildCriticalRisksMarkup(dashboard = {}, externalRisks = {}) {
   });
 
   const itinisereEvents = externalRisks?.itinisere?.events || [];
-  const bisonIsere = externalRisks?.bison_fute?.today?.isere || {};
   const georisques = externalRisks?.georisques?.data && typeof externalRisks.georisques.data === 'object'
     ? { ...externalRisks.georisques.data, ...externalRisks.georisques }
     : (externalRisks?.georisques || {});
 
   risks.push(`<li><strong>Itinisère</strong> · ${(itinisereEvents || []).length} événement(s) actif(s) · Statut ${escapeHtml(externalRisks?.itinisere?.status || 'inconnu')}</li>`);
-  risks.push(`<li><strong>Bison Futé</strong> · Départs ${escapeHtml(bisonIsere.departure || 'inconnu')} · Retours ${escapeHtml(bisonIsere.return || 'inconnu')}</li>`);
-  risks.push(`<li><strong>Vigieau</strong> · ${escapeHtml(String((externalRisks?.vigieau?.alerts || []).length))} restriction(s) d'eau active(s) en Isère</li>`);
   risks.push(`<li><strong>Géorisques</strong> · Sismicité ${escapeHtml(georisques.highest_seismic_zone_label || 'inconnue')} · ${Number(georisques.flood_documents_total ?? 0)} document(s) inondation</li>`);
 
   const fromDashboard = Array.isArray(dashboard?.latest_logs) ? dashboard.latest_logs : [];
-  const criticalLogs = fromDashboard.filter((log) => ['orange', 'rouge'].includes(normalizeLevel(log.danger_level)));
+  const criticalLogs = fromDashboard.filter((log) => {
+    const isCritical = ['orange', 'rouge'].includes(normalizeLevel(log.danger_level));
+    const isOpen = String(log.status || '').toLowerCase() !== 'clos';
+    return isCritical && isOpen;
+  });
   if (criticalLogs.length) {
     risks.unshift(`<li><strong>Main courante</strong> · ${criticalLogs.length} évènement(s) critique(s) orange/rouge.</li>`);
   }
@@ -2603,7 +2604,9 @@ function renderSituationOverview() {
   const globalRisk = normalizeLevel(dashboard.global_risk || vigilance);
   const crisisCount = Number(dashboard.communes_crise ?? 0);
 
-  const logs = Array.isArray(dashboard.latest_logs) ? dashboard.latest_logs : (Array.isArray(cachedLogs) ? cachedLogs.slice(0, 8) : []);
+  const logs = Array.isArray(cachedLogs) && cachedLogs.length
+    ? cachedLogs.slice(0, 8)
+    : (Array.isArray(dashboard.latest_logs) ? dashboard.latest_logs : []);
   const openLogs = logs.filter((log) => String(log.status || '').toLowerCase() !== 'clos');
   const closedLogs = logs.filter((log) => String(log.status || '').toLowerCase() === 'clos');
   const prefectureItems = Array.isArray(externalRisks?.prefecture_isere?.items)
@@ -3690,24 +3693,29 @@ async function refreshLiveEvents() {
   if (!token || document.hidden) return;
   return withPreservedScroll(async () => {
     try {
-      const [logs, risks] = await Promise.all([
+      const [logs, risks, dashboard] = await Promise.all([
         api('/logs', { cacheTtlMs: 0, bypassCache: true }),
         api('/external/isere/risks', { cacheTtlMs: 0, bypassCache: true }),
+        api('/dashboard', { cacheTtlMs: 0, bypassCache: true }),
       ]);
 
       cachedLogs = Array.isArray(logs) ? logs : [];
       renderLogsList();
 
-      if (cachedDashboardSnapshot && typeof cachedDashboardSnapshot === 'object') {
-        cachedDashboardSnapshot = {
-          ...cachedDashboardSnapshot,
+      cachedDashboardSnapshot = dashboard && typeof dashboard === 'object'
+        ? {
+          ...dashboard,
+          latest_logs: cachedLogs.slice(0, 8),
+        }
+        : {
+          ...(cachedDashboardSnapshot || {}),
           latest_logs: cachedLogs.slice(0, 8),
           updated_at: new Date().toISOString(),
         };
-        saveSnapshot(STORAGE_KEYS.dashboardSnapshot, cachedDashboardSnapshot);
-      }
+      saveSnapshot(STORAGE_KEYS.dashboardSnapshot, cachedDashboardSnapshot);
 
       renderExternalRisks(risks);
+      renderSituationOverview();
       saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, risks);
       saveSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot, risks);
       document.getElementById('dashboard-error').textContent = '';
