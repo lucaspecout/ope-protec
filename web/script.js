@@ -3688,6 +3688,33 @@ function setMapControlsCollapsed(collapsed) {
   if (leafletMap) setTimeout(() => leafletMap.invalidateSize(), 160);
 }
 
+function updateMapFullscreenButton() {
+  const button = document.getElementById('map-fullscreen-toggle');
+  const mapWrapper = document.querySelector('#map-panel .map-canvas-wrap');
+  if (!button || !mapWrapper) return;
+  const isFullscreen = document.fullscreenElement === mapWrapper;
+  button.textContent = isFullscreen ? '🡼' : '⛶';
+  button.setAttribute('aria-pressed', String(isFullscreen));
+  const label = isFullscreen ? 'Quitter le plein écran de la carte' : 'Passer la carte en plein écran';
+  button.title = label;
+  button.setAttribute('aria-label', label);
+  if (leafletMap) setTimeout(() => leafletMap.invalidateSize(), 150);
+}
+
+async function toggleMapFullscreen() {
+  const mapWrapper = document.querySelector('#map-panel .map-canvas-wrap');
+  if (!mapWrapper) return;
+  try {
+    if (document.fullscreenElement === mapWrapper) {
+      await document.exitFullscreen();
+    } else {
+      await mapWrapper.requestFullscreen();
+    }
+  } catch (error) {
+    setMapFeedback('Mode plein écran indisponible sur ce navigateur.', true);
+  }
+}
+
 function bindHomeInteractions() {
   const openLogin = () => showLogin();
   const mobileMenuButton = document.getElementById('mobile-menu-btn');
@@ -3738,6 +3765,9 @@ function bindAppInteractions() {
   document.getElementById('map-controls-toggle')?.addEventListener('click', () => {
     setMapControlsCollapsed(!mapControlsCollapsed);
   });
+  document.getElementById('map-fullscreen-toggle')?.addEventListener('click', toggleMapFullscreen);
+  document.addEventListener('fullscreenchange', updateMapFullscreenButton);
+  updateMapFullscreenButton();
   document.getElementById('map-fit-btn')?.addEventListener('click', () => fitMapToData(true));
   document.getElementById('map-locate-btn')?.addEventListener('click', locateUserOnMap);
   document.getElementById('map-add-point-btn')?.addEventListener('click', () => {
