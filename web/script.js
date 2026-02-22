@@ -25,10 +25,15 @@ const PANEL_TITLES = {
 };
 
 const RESOURCE_POINTS = [
-  { name: 'PC Départemental Grenoble', type: 'poste_commandement', active: true, lat: 45.1885, lon: 5.7245, address: 'Grenoble' },
-  { name: 'Centre hébergement Voiron', type: 'centre_hebergement', active: false, lat: 45.3667, lon: 5.5906, address: 'Voiron' },
-  { name: 'CHU Grenoble Alpes', type: 'hopital', active: true, lat: 45.1899, lon: 5.7428, address: 'La Tronche' },
-  { name: 'Caserne Bourgoin-Jallieu', type: 'caserne', active: true, lat: 45.5866, lon: 5.2732, address: 'Bourgoin-Jallieu' },
+  { name: 'PC Départemental Grenoble', type: 'poste_commandement', active: true, lat: 45.1885, lon: 5.7245, address: 'Grenoble', priority: 'critical' },
+  { name: 'Centre hébergement Voiron', type: 'centre_hebergement', active: false, lat: 45.3667, lon: 5.5906, address: 'Voiron', priority: 'vital' },
+  { name: 'CHU Grenoble Alpes', type: 'hopital', active: true, lat: 45.1899, lon: 5.7428, address: 'La Tronche', priority: 'critical' },
+  { name: 'Centre hospitalier de Vienne', type: 'hopital', active: true, lat: 45.5257, lon: 4.8745, address: 'Mont Salomon, Vienne', priority: 'vital' },
+  { name: 'Caserne Bourgoin-Jallieu', type: 'caserne', active: true, lat: 45.5866, lon: 5.2732, address: 'Bourgoin-Jallieu', priority: 'vital' },
+  { name: 'CEA Grenoble (site nucléaire de recherche)', type: 'centrale_nucleaire', active: true, lat: 45.202, lon: 5.7084, address: 'Presqu\'île, Grenoble', priority: 'critical' },
+  { name: 'CNPE Saint-Alban (rayon de vigilance Isère)', type: 'centrale_nucleaire', active: true, lat: 45.3949, lon: 4.7533, address: 'Saint-Maurice-l\'Exil', priority: 'risk' },
+  { name: 'Usine chimique Pont-de-Claix', type: 'lieu_risque', active: true, lat: 45.1232, lon: 5.7016, address: 'Pont-de-Claix', priority: 'risk' },
+  { name: 'Plateforme logistique de secours Isère', type: 'lieu_vital', active: true, lat: 45.2338, lon: 5.6805, address: 'Sassenage', priority: 'vital' },
 ];
 
 let token = localStorage.getItem(STORAGE_KEYS.token);
@@ -752,6 +757,7 @@ async function resetMapFilters() {
     'map-search': '',
     'map-point-category-filter': 'all',
     'resource-type-filter': 'all',
+    'resource-priority-filter': 'all',
     'map-basemap-select': 'osm',
   };
   Object.entries(defaults).forEach(([id, value]) => {
@@ -768,6 +774,7 @@ async function resetMapFilters() {
   const photoCameras = document.getElementById('filter-photo-cameras');
   const wazeClosedRoads = document.getElementById('filter-waze-closed-roads');
   const googleFlow = document.getElementById('filter-google-traffic-flow');
+  const poiVisible = document.getElementById('filter-map-poi');
   if (hydro) hydro.checked = true;
   if (pcs) pcs.checked = true;
   if (activeOnly) activeOnly.checked = false;
@@ -777,6 +784,7 @@ async function resetMapFilters() {
   if (photoCameras) photoCameras.checked = true;
   if (wazeClosedRoads) wazeClosedRoads.checked = true;
   if (googleFlow) googleFlow.checked = false;
+  if (poiVisible) poiVisible.checked = true;
   if (searchLayer) searchLayer.clearLayers();
   applyBasemap('osm');
   renderStations(cachedStations);
@@ -1112,9 +1120,15 @@ async function renderMunicipalitiesOnMap(municipalities = []) {
 function renderResources() {
   const onlyActive = document.getElementById('filter-resources-active')?.checked ?? false;
   const type = document.getElementById('resource-type-filter')?.value || 'all';
+  const priority = document.getElementById('resource-priority-filter')?.value || 'all';
   const query = (document.getElementById('map-search')?.value || '').trim().toLowerCase();
-  const resources = RESOURCE_POINTS.filter((r) => (!onlyActive || r.active) && (type === 'all' || r.type === type) && (!query || `${r.name} ${r.address}`.toLowerCase().includes(query)));
-  setHtml('resources-list', resources.map((r) => `<li><strong>${r.name}</strong> · ${r.address} · ${r.active ? 'activée' : 'en attente'}</li>`).join('') || '<li>Aucune ressource avec ces filtres.</li>');
+  const resources = RESOURCE_POINTS.filter((r) => (!onlyActive || r.active)
+    && (type === 'all' || r.type === type)
+    && (priority === 'all' || r.priority === priority)
+    && (!query || `${r.name} ${r.address}`.toLowerCase().includes(query)));
+  const priorityLabel = { critical: 'critique', vital: 'vital', risk: 'à risque' };
+  const markerColor = { critical: '#e03131', vital: '#1971c2', risk: '#f08c00' };
+  setHtml('resources-list', resources.map((r) => `<li><strong>${r.name}</strong> · ${r.address} · ${r.active ? 'activée' : 'en attente'} · ${priorityLabel[r.priority] || 'standard'}</li>`).join('') || '<li>Aucune ressource avec ces filtres.</li>');
   mapStats.resources = resources.length;
   updateMapSummary();
   if (!resourceLayer) return;
@@ -1122,8 +1136,8 @@ function renderResources() {
   resources.forEach((r) => {
     const coords = normalizeMapCoordinates(r.lat, r.lon);
     if (!coords) return;
-    window.L.circleMarker([coords.lat, coords.lon], { radius: 7, color: '#fff', weight: 1.5, fillColor: r.active ? '#2f9e44' : '#f59f00', fillOpacity: 0.95 })
-      .bindPopup(`<strong>${r.name}</strong><br>Type: ${r.type.replace('_', ' ')}<br>Adresse: ${r.address}<br>Activation: ${r.active ? 'oui' : 'non'}`)
+    window.L.circleMarker([coords.lat, coords.lon], { radius: 7, color: '#fff', weight: 1.5, fillColor: markerColor[r.priority] || (r.active ? '#2f9e44' : '#f59f00'), fillOpacity: 0.95 })
+      .bindPopup(`<strong>${r.name}</strong><br>Type: ${r.type.replace('_', ' ')}<br>Niveau: ${priorityLabel[r.priority] || 'standard'}<br>Adresse: ${r.address}<br>Activation: ${r.active ? 'oui' : 'non'}`)
       .addTo(resourceLayer);
   });
   setMapFeedback(`${resources.length} ressource(s) affichée(s).`);
@@ -1940,7 +1954,11 @@ function renderCustomPoints(showFeedback = true) {
   if (mapPointsLayer) mapPointsLayer.clearLayers();
 
   const selectedCategory = document.getElementById('map-point-category-filter')?.value || 'all';
-  const filteredPoints = mapPoints.filter((point) => selectedCategory === 'all' || point.category === selectedCategory);
+  const poiVisible = document.getElementById('filter-map-poi')?.checked ?? true;
+  const filteredPoints = mapPoints.filter((point) => {
+    if (!poiVisible && point.category === 'poi') return false;
+    return selectedCategory === 'all' || point.category === selectedCategory;
+  });
   const listMarkup = filteredPoints
     .map((point) => {
       const pointIcon = point.icon_url ? '🖼️' : (point.icon || iconForCategory(point.category));
@@ -3712,7 +3730,12 @@ function bindAppInteractions() {
       document.getElementById('users-error').textContent = sanitizeErrorMessage(error.message);
     }
   });
-  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'resource-type-filter', 'filter-itinisere', 'filter-bison-accidents', 'filter-bison-cameras', 'filter-photo-cameras', 'filter-waze-closed-roads'].forEach((id) => {
+
+  document.getElementById('filter-map-poi')?.addEventListener('change', () => {
+    renderCustomPoints();
+    fitMapToData();
+  });
+  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'resource-type-filter', 'resource-priority-filter', 'filter-itinisere', 'filter-bison-accidents', 'filter-bison-cameras', 'filter-photo-cameras', 'filter-waze-closed-roads'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       renderStations(cachedStations);
       await renderMunicipalitiesOnMap(cachedMunicipalities);

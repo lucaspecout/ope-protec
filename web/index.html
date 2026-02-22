@@ -489,18 +489,21 @@
                   <option value="light">Fond clair (lisible)</option>
                   <option value="ign">IGN (Plan IGN v2)</option>
                 </select>
-                <select id="map-point-category-filter">
-                  <option value="all">Tous les points opérationnels</option>
-                  <option value="incident">Incidents</option>
-                  <option value="evacuation">Évacuations</option>
-                  <option value="water">Risque eau</option>
-                  <option value="roadblock">Barrages</option>
-                  <option value="medical">Médical</option>
-                  <option value="logistics">Logistique</option>
-                  <option value="command">Commandement</option>
-                  <option value="poi">POI</option>
-                  <option value="autre">Autres</option>
-                </select>
+                <div class="map-inline-filter">
+                  <select id="map-point-category-filter">
+                    <option value="all">Tous les points opérationnels</option>
+                    <option value="incident">Incidents</option>
+                    <option value="evacuation">Évacuations</option>
+                    <option value="water">Risque eau</option>
+                    <option value="roadblock">Barrages</option>
+                    <option value="medical">Médical</option>
+                    <option value="logistics">Logistique</option>
+                    <option value="command">Commandement</option>
+                    <option value="poi">POI</option>
+                    <option value="autre">Autres</option>
+                  </select>
+                  <label class="map-inline-checkbox"><input id="filter-map-poi" type="checkbox" checked /> POI visibles</label>
+                </div>
                 <div class="map-toggle-grid">
                   <label><input id="filter-hydro" type="checkbox" checked /> Vigicrues</label>
                   <label><input id="filter-pcs" type="checkbox" checked /> Communes PCS</label>
@@ -517,7 +520,16 @@
                   <option value="poste_commandement">Postes de commandement</option>
                   <option value="centre_hebergement">Centres d'hébergement</option>
                   <option value="hopital">Hôpitaux</option>
+                  <option value="centrale_nucleaire">Centrales / sites nucléaires</option>
+                  <option value="lieu_risque">Lieux à risque</option>
+                  <option value="lieu_vital">Lieux vitaux</option>
                   <option value="caserne">Casernes</option>
+                </select>
+                <select id="resource-priority-filter">
+                  <option value="all">Tous niveaux de criticité</option>
+                  <option value="critical">Ressources critiques</option>
+                  <option value="vital">Lieux vitaux</option>
+                  <option value="risk">Lieux à risque</option>
                 </select>
               </div>
               <p id="map-feedback" class="muted"></p>
