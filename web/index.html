@@ -508,22 +508,46 @@
                   <div class="map-bulk-controls">
                     <select id="resource-bulk-action-select" aria-label="Action globale ressources">
                       <option value="none">Ressources: aucune action</option>
-                      <option value="activate">Ressources: activer tout</option>
-                      <option value="deactivate">Ressources: désactiver tout</option>
+                      <option value="show">Ressources: afficher tout</option>
+                      <option value="hide">Ressources: masquer tout</option>
                     </select>
                     <button id="resource-bulk-action-btn" type="button" class="ghost map-btn-lite">Appliquer</button>
                   </div>
                   <div class="map-bulk-controls">
+                    <select id="resource-target-category-filter" aria-label="Filtrer les ressources par catégorie">
+                      <option value="all">Ressource: toutes catégories</option>
+                      <option value="poste_commandement">Postes de commandement</option>
+                      <option value="centre_hebergement">Centres d'hébergement</option>
+                      <option value="hopital">Hôpitaux</option>
+                      <option value="centrale_nucleaire">Centrales / sites nucléaires</option>
+                      <option value="lieu_risque">Lieux à risque</option>
+                      <option value="lieu_vital">Lieux vitaux</option>
+                      <option value="caserne">Casernes</option>
+                      <option value="transport">Nœuds transport</option>
+                      <option value="energie">Énergie / barrages</option>
+                    </select>
                     <select id="resource-target-select" aria-label="Choisir une ressource">
                       <option value="">Ressource: choisir…</option>
                     </select>
-                    <button id="resource-target-toggle-btn" type="button" class="ghost map-btn-lite" disabled>Activer/Désactiver</button>
+                    <button id="resource-target-toggle-btn" type="button" class="ghost map-btn-lite" disabled>Afficher/Masquer</button>
                   </div>
                   <div class="map-bulk-controls">
+                    <select id="poi-target-category-filter" aria-label="Filtrer les POI par catégorie">
+                      <option value="all">POI perso: toutes catégories</option>
+                      <option value="incident">Incidents</option>
+                      <option value="evacuation">Évacuations</option>
+                      <option value="water">Risque eau</option>
+                      <option value="roadblock">Barrages</option>
+                      <option value="medical">Médical</option>
+                      <option value="logistics">Logistique</option>
+                      <option value="command">Commandement</option>
+                      <option value="poi">POI</option>
+                      <option value="autre">Autres</option>
+                    </select>
                     <select id="poi-target-select" aria-label="Choisir un point personnalisé">
                       <option value="">POI perso: choisir…</option>
                     </select>
-                    <button id="poi-target-toggle-btn" type="button" class="ghost map-btn-lite" disabled>Activer/Désactiver</button>
+                    <button id="poi-target-toggle-btn" type="button" class="ghost map-btn-lite" disabled>Afficher/Masquer</button>
                   </div>
                 </div>
                 <div class="map-toggle-grid">
