@@ -1471,67 +1471,61 @@ def fetch_dauphine_isere_news(limit: int = 7, force_refresh: bool = False) -> di
 
 
 def _fetch_sncf_isere_alerts_live() -> dict[str, Any]:
-    sources = [
-        "https://www.ter.sncf.com/auvergne-rhone-alpes/se-deplacer/info-trafic",
-        "https://www.sncf.com/fr/itineraire-reservation/info-trafic/auvergne-rhone-alpes",
-    ]
-    source = sources[0]
+    source = "https://proxy.transport.data.gouv.fr/resource/sncf-siri-lite-situation-exchange"
     try:
-        html = ""
-        last_error: Exception | None = None
-        for candidate in sources:
-            source = candidate
-            try:
-                request = Request(
-                    candidate,
-                    headers={
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
-                    },
-                )
-                html = _http_get_with_retries(request=request, timeout=12).decode("utf-8", errors="ignore")
-                break
-            except HTTPError as exc:
-                last_error = exc
-                if exc.code != 403:
-                    raise
-                continue
+        xml_payload = _http_get_text(source, timeout=18)
+        root = ET.fromstring(xml_payload)
+        namespace = {"siri": "http://www.siri.org.uk/siri"}
+        situations = root.findall(".//siri:PtSituationElement", namespace)
 
-        if not html:
-            raise last_error or ValueError("Aucune source SNCF accessible")
-
-        normalized = unescape(_strip_html_tags(html))
-        compact = re.sub(r"\s+", " ", normalized)
-
-        sentences = re.split(r"(?<=[.!?])\s+", compact)
-        keyword_scope = ("isere", "isère", "grenoble", "bourgoin", "vienne")
-        keyword_type = ("accident", "travaux", "voie", "perturb", "interrompu", "ralenti")
+        keyword_scope = (
+            "isere",
+            "isère",
+            "grenoble",
+            "bourgoin",
+            "vienne",
+            "voiron",
+            "rives",
+            "poliénas",
+            "saint-andre-le-gaz",
+            "pont-de-beauvoisin",
+        )
+        keyword_type = ("accident", "travaux", "voie", "perturb", "interrompu", "ralenti", "glissement")
 
         alerts: list[dict[str, Any]] = []
-        for sentence in sentences:
-            lower_sentence = sentence.lower()
-            if not any(token in lower_sentence for token in keyword_scope):
+        for situation in situations:
+            summary = re.sub(r"\s+", " ", (situation.findtext("siri:Summary", default="", namespaces=namespace) or "").strip())
+            description = re.sub(r"\s+", " ", (situation.findtext("siri:Description", default="", namespaces=namespace) or "").strip())
+            detail = re.sub(r"\s+", " ", (situation.findtext("siri:Detail", default="", namespaces=namespace) or "").strip())
+            text_blob = f"{summary} {description} {detail}".strip()
+            lower_blob = text_blob.lower()
+            if not lower_blob:
                 continue
-            if not any(token in lower_sentence for token in keyword_type):
+            if not any(token in lower_blob for token in keyword_scope):
+                continue
+            if not any(token in lower_blob for token in keyword_type):
                 continue
 
-            level = "orange" if any(token in lower_sentence for token in ("interrompu", "accident", "supprim")) else "jaune"
+            level = "orange" if any(token in lower_blob for token in ("interrompu", "accident", "supprim", "glissement")) else "jaune"
+            situation_number = (situation.findtext("siri:SituationNumber", default="", namespaces=namespace) or "").strip()
+            publication_window = (situation.findtext("siri:PublicationWindow/siri:StartTime", default="", namespaces=namespace) or "").strip()
             alerts.append(
                 {
-                    "title": "Alerte trafic TER Isère",
-                    "description": sentence[:320],
-                    "type": "accident" if "accident" in lower_sentence else "travaux",
+                    "title": summary or "Alerte trafic SNCF Isère",
+                    "description": (description or detail or text_blob)[:420],
+                    "type": "accident" if "accident" in lower_blob else "travaux",
                     "level": level,
                     "location": "Isère",
                     "link": source,
+                    "situation_number": situation_number,
+                    "published_at": publication_window,
                 }
             )
 
         deduplicated: list[dict[str, Any]] = []
         seen_descriptions: set[str] = set()
         for alert in alerts:
-            fingerprint = (alert.get("description") or "").lower()
+            fingerprint = f"{(alert.get('title') or '').lower()}::{(alert.get('description') or '').lower()}"
             if fingerprint in seen_descriptions:
                 continue
             seen_descriptions.add(fingerprint)
@@ -1545,7 +1539,7 @@ def _fetch_sncf_isere_alerts_live() -> dict[str, Any]:
             "alerts_total": len(deduplicated),
             "updated_at": datetime.utcnow().isoformat() + "Z",
         }
-    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError) as exc:
+    except (ET.ParseError, HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError) as exc:
         return {
             "service": "SNCF TER Auvergne-Rhône-Alpes",
             "status": "degraded",
