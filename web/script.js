@@ -165,6 +165,30 @@ const BISON_FUTE_CAMERAS = [
   { name: 'Bifurcation A43/A48 près de Bourgoin vers Chambéry', road: 'A43 / A48', lat: 45.56699881012449, lon: 5.344117226835471, manager: 'AREA', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/at_area06.mp4' },
   { name: 'A48 Châbons voie Sud', road: 'A48', lat: 45.44780572102549, lon: 5.399438919782866, manager: 'AREA', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/at_area11.mp4' },
 ];
+
+function nearestPointOnCorridor(corridor = [], anchor = null) {
+  if (!Array.isArray(corridor) || !corridor.length) return null;
+  if (!anchor || Number.isNaN(Number(anchor.lat)) || Number.isNaN(Number(anchor.lon))) {
+    const [lat, lon] = corridor[0];
+    return Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : null;
+  }
+
+  let nearest = null;
+  let shortestDistance = Number.POSITIVE_INFINITY;
+
+  corridor.forEach((point) => {
+    const [lat, lon] = point;
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    const distance = ((lat - anchor.lat) ** 2) + ((lon - anchor.lon) ** 2);
+    if (distance < shortestDistance) {
+      shortestDistance = distance;
+      nearest = { lat, lon };
+    }
+  });
+
+  return nearest;
+}
+
 const ITINISERE_PHOTO_CAMERAS = [
   {
     name: 'La Diat',
