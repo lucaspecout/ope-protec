@@ -1768,6 +1768,24 @@ function extractAlertDynamicHints(fullText = '') {
   return hints.slice(0, 8);
 }
 
+function buildItinisereMapQuery(event = {}) {
+  const candidates = [
+    event.address,
+    ...(Array.isArray(event.addresses) ? event.addresses : []),
+    ...(Array.isArray(event.locations) ? event.locations : []),
+    event.city,
+    ...(Array.isArray(event.roads) ? event.roads : []),
+    event.title,
+  ];
+
+  for (const candidate of candidates) {
+    const value = String(candidate || '').replace(/\s+/g, ' ').trim();
+    if (!value) continue;
+    return value;
+  }
+  return 'Isère';
+}
+
 function extractClosureCommuneHints(event = {}, fullText = '') {
   const hints = [];
   const pushHint = (value) => {
@@ -1856,7 +1874,7 @@ async function buildItinisereMapPoints(events = []) {
         position = await geocodeTrafficLabel(location);
         anchor = location;
         if (position) {
-          precision = position.precision === 'commune' ? 'centre-ville' : (position.precision || 'localité');
+          precision = position.precision === 'commune' ? 'commune' : (position.precision || 'localité');
           break;
         }
       }
@@ -1900,7 +1918,7 @@ async function buildItinisereMapPoints(events = []) {
         position = await geocodeTrafficLabel(commune);
         anchor = commune;
         if (position) {
-          precision = 'centre-ville';
+          precision = 'commune';
           break;
         }
       }
@@ -1941,7 +1959,7 @@ async function renderTrafficOnMap() {
     if (renderSequence !== trafficRenderSequence) return;
     mapStats.traffic += points.length;
     points.forEach((point) => {
-      const roadsText = point.precision === 'centre-ville' ? '' : (point.roads?.length ? `Axes détectés: ${point.roads.join(', ')}<br/>` : '');
+      const roadsText = point.precision === 'commune' ? '' : (point.roads?.length ? `Axes détectés: ${point.roads.join(', ')}<br/>` : '');
       const locations = Array.isArray(point.locations) && point.locations.length ? point.locations.join(', ') : point.anchor;
       const icon = trafficMarkerIcon('itinisere', point.category, `${point.title || ''} ${point.description || ''}`);
       const marker = window.L.marker([point.lat, point.lon], { icon: itinisereDivIcon(point) });
@@ -2113,7 +2131,7 @@ function renderItinisereEvents(events = [], targetId = 'itinerary-list') {
     const title = escapeHtml(e.title || 'Évènement');
     const description = escapeHtml(e.description || '');
     const safeLink = String(e.link || '').startsWith('http') ? e.link : '#';
-    const mapQuery = escapeHtml(e.title || '').replace(/"/g, '&quot;');
+    const mapQuery = escapeHtml(buildItinisereMapQuery(e)).replace(/"/g, '&quot;');
     const category = escapeHtml(e.category || 'trafic');
     const severity = normalizeTrafficSeverity(e.severity || 'jaune');
     const roads = Array.isArray(e.roads) && e.roads.length ? ` · Axes: ${escapeHtml(e.roads.join(', '))}` : '';
