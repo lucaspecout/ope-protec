@@ -396,6 +396,98 @@ def _point_distance_meters(start: list[float], end: list[float]) -> float:
     return (lat_delta**2 + lon_delta**2) ** 0.5
 
 
+def _nearest_polyline_point(reference: list[float], polyline: list[list[float]]) -> list[float] | None:
+    """Return the nearest point on a polyline (vertex-based) from a reference lat/lon."""
+    if (
+        not isinstance(reference, list)
+        or len(reference) < 2
+        or not isinstance(polyline, list)
+        or not polyline
+    ):
+        return None
+
+    ref = [float(reference[0]), float(reference[1])]
+    best_point: list[float] | None = None
+    best_distance: float | None = None
+    for point in polyline:
+        if not isinstance(point, list) or len(point) < 2:
+            continue
+        if not isinstance(point[0], (int, float)) or not isinstance(point[1], (int, float)):
+            continue
+        candidate = [float(point[0]), float(point[1])]
+        distance = _point_distance_meters(ref, candidate)
+        if best_distance is None or distance < best_distance:
+            best_distance = distance
+            best_point = candidate
+
+    return best_point
+
+
+def _match_station_to_troncon(station: dict[str, Any], troncons: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """List traced tronçons compatible with the station river name."""
+    river = str(station.get("river") or "").lower()
+    if not river:
+        return []
+
+    if "drac" in river:
+        match = troncons.get("AN30 Drac aval")
+        return [match] if match else []
+    if "romanche" in river:
+        match = troncons.get("AN31 Romanche aval")
+        return [match] if match else []
+    if "is" in river and "re" in river:
+        return [
+            troncons.get("AN12 Isère grenobloise"),
+            troncons.get("AN11 Isère moyenne"),
+            troncons.get("AN20 Isère aval"),
+        ]
+    return []
+
+
+def _relocate_station_on_traced_troncon(station: dict[str, Any], troncons: dict[str, dict[str, Any]]) -> None:
+    """Snap station to existing tronçon near the station commune when possible."""
+    candidates = [candidate for candidate in _match_station_to_troncon(station, troncons) if isinstance(candidate, dict)]
+    if not candidates:
+        return
+
+    commune_code = str(station.get("commune_code") or "")
+    commune_center = _commune_center(commune_code) if commune_code else None
+    lat = station.get("lat")
+    lon = station.get("lon")
+    reference = None
+    if isinstance(commune_center, tuple) and len(commune_center) == 2:
+        reference = [float(commune_center[0]), float(commune_center[1])]
+    elif isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
+        reference = [float(lat), float(lon)]
+
+    if reference is None:
+        return
+
+    selected_troncon: dict[str, Any] | None = None
+    selected_point: list[float] | None = None
+    selected_distance: float | None = None
+    for troncon in candidates:
+        polyline = troncon.get("polyline")
+        if not isinstance(polyline, list) or not polyline:
+            continue
+        snapped = _nearest_polyline_point(reference, polyline)
+        if not snapped:
+            continue
+        distance = _point_distance_meters(reference, snapped)
+        if selected_distance is None or distance < selected_distance:
+            selected_distance = distance
+            selected_troncon = troncon
+            selected_point = snapped
+
+    if not selected_troncon or not selected_point:
+        return
+
+    station["lat"] = selected_point[0]
+    station["lon"] = selected_point[1]
+    station["troncon"] = selected_troncon.get("name") or station.get("troncon") or ""
+    station["troncon_code"] = selected_troncon.get("code") or station.get("troncon_code") or ""
+
+
 def _truncate_isere_aval_before_grenoble(points: list[list[float]]) -> list[list[float]]:
     """Trim AN20 to stop at the requested Grenoble-end point on the Isère."""
     if not isinstance(points, list) or len(points) < 2:
@@ -1608,6 +1700,9 @@ def _fetch_vigicrues_isere_live(
             },
             "polyline": isere_aval_points,
         }
+
+        for station in isere_stations:
+            _relocate_station_on_traced_troncon(station, troncons_index)
 
         troncons = list(troncons_index.values())
 
