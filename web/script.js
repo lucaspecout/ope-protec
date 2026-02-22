@@ -2964,17 +2964,41 @@ function buildSitrepHtml() {
 }
 
 function exportSitrepPdf() {
-  const popup = window.open('', '_blank', 'noopener,noreferrer,width=1024,height=900');
-  if (!popup) {
-    throw new Error('Impossible d’ouvrir la fenêtre d’impression. Autorisez les popups pour générer le SITREP PDF.');
+  const iframe = document.createElement('iframe');
+  iframe.setAttribute('aria-hidden', 'true');
+  iframe.style.position = 'fixed';
+  iframe.style.right = '0';
+  iframe.style.bottom = '0';
+  iframe.style.width = '0';
+  iframe.style.height = '0';
+  iframe.style.border = '0';
+  iframe.style.opacity = '0';
+
+  const cleanup = () => {
+    setTimeout(() => {
+      iframe.remove();
+    }, 800);
+  };
+
+  iframe.onload = () => {
+    const frameWindow = iframe.contentWindow;
+    if (frameWindow) {
+      frameWindow.focus();
+      frameWindow.print();
+    }
+    cleanup();
+  };
+
+  document.body.appendChild(iframe);
+  const frameDocument = iframe.contentDocument || iframe.contentWindow?.document;
+  if (!frameDocument) {
+    cleanup();
+    throw new Error('Impossible de préparer le document SITREP PDF.');
   }
-  popup.document.open();
-  popup.document.write(buildSitrepHtml());
-  popup.document.close();
-  popup.focus();
-  setTimeout(() => {
-    popup.print();
-  }, 250);
+
+  frameDocument.open();
+  frameDocument.write(buildSitrepHtml());
+  frameDocument.close();
 }
 
 function bindSituationActions() {
