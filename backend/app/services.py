@@ -158,6 +158,14 @@ def _http_get_text(url: str, timeout: int = 12) -> str:
     return payload.decode("utf-8", errors="ignore")
 
 
+def _extract_html_title(raw_html: str) -> str:
+    match = re.search(r"<title[^>]*>(.*?)</title>", raw_html or "", flags=re.IGNORECASE | re.DOTALL)
+    if not match:
+        return ""
+    title = _strip_html_tags(match.group(1))
+    return re.sub(r"\s+", " ", title).strip()
+
+
 def _strip_html_tags(raw_html: str) -> str:
     if not raw_html:
         return ""
@@ -1014,16 +1022,18 @@ def _itinisere_is_isere_event(title: str, description: str, roads: list[str] | N
     return bool(set(roads or []) & isere_roads)
 
 
-def _itinisere_is_road_closure_pass_or_camera_event(title: str, description: str, category: str) -> bool:
+def _itinisere_is_road_closure_pass_or_camera_event(title: str, description: str, category: str, roads: list[str] | None = None) -> bool:
     text = f"{title} {description}".lower()
     closure_tokens = ("fermet", "route coup", "interdit", "barr", "réouvert", "reouvert", "ouvert")
     pass_tokens = ("col ", "cols ", "col du", "col de", "col des")
     camera_tokens = ("caméra", "camera", "webcam", "vidéo", "video")
+    works_tokens = ("travaux", "chantier", "basculement", "alternat", "neutralis")
 
     has_closure_signal = category == "fermeture" or any(token in text for token in closure_tokens)
     has_pass_signal = any(token in text for token in pass_tokens)
     has_camera_signal = any(token in text for token in camera_tokens)
-    return has_closure_signal or has_pass_signal or has_camera_signal
+    has_road_works_signal = category == "travaux" and (bool(roads) or any(token in text for token in works_tokens))
+    return has_closure_signal or has_pass_signal or has_camera_signal or has_road_works_signal
 
 
 def _itinisere_extract_locations(*chunks: str) -> list[str]:
@@ -1209,7 +1219,7 @@ def _fetch_itinisere_disruptions_live(limit: int = 60) -> dict[str, Any]:
                 continue
             if not _itinisere_is_isere_event(final_title, final_description, roads=roads, locations=locations):
                 continue
-            if not _itinisere_is_road_closure_pass_or_camera_event(final_title, final_description, category):
+            if not _itinisere_is_road_closure_pass_or_camera_event(final_title, final_description, category, roads=roads):
                 continue
             events.append(
                 {
@@ -1472,7 +1482,15 @@ def _fetch_sncf_isere_alerts_live() -> dict[str, Any]:
         for candidate in sources:
             source = candidate
             try:
-                html = _http_get_text(candidate)
+                request = Request(
+                    candidate,
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
+                    },
+                )
+                html = _http_get_with_retries(request=request, timeout=12).decode("utf-8", errors="ignore")
                 break
             except HTTPError as exc:
                 last_error = exc
