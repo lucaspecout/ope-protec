@@ -718,6 +718,7 @@ function updateMapSummary() {
 function applyBasemap(style = 'osm') {
   if (!leafletMap || typeof window.L === 'undefined') return;
   if (mapTileLayer) leafletMap.removeLayer(mapTileLayer);
+  const isereBounds = [[44.6, 4.7], [45.9, 6.4]];
   const layers = {
     osm: {
       url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -739,9 +740,24 @@ function applyBasemap(style = 'osm') {
       url: 'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png',
       options: { maxZoom: 19, attribution: '&copy; IGN/Geoportail France' },
     },
+    'isere-flood': {
+      type: 'wms',
+      url: 'https://georisques.gouv.fr/services',
+      options: {
+        layers: 'MASQ_EAIP',
+        format: 'image/png',
+        transparent: false,
+        version: '1.3.0',
+        maxZoom: 16,
+        bounds: isereBounds,
+        attribution: '&copy; GéoRisques / BRGM',
+      },
+    },
   };
   const selected = layers[style] || layers.osm;
-  mapTileLayer = window.L.tileLayer(selected.url, selected.options).addTo(leafletMap);
+  mapTileLayer = selected.type === 'wms'
+    ? window.L.tileLayer.wms(selected.url, selected.options).addTo(leafletMap)
+    : window.L.tileLayer(selected.url, selected.options).addTo(leafletMap);
   applyGoogleTrafficFlowOverlay();
 }
 
