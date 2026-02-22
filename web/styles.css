@@ -486,7 +486,9 @@ svg text { font-size: 14px; fill: #17335f; }
     pointer-events: auto;
     transform: none;
   }
-  .map-controls-toggle, .map-fullscreen-toggle { display: none; }
+  .map-controls-toggle, .map-fullscreen-toggle { display: inline-flex; }
+  .map-workspace:not(.map-workspace--collapsed) .map-controls-toggle { right: .65rem; }
+  .map-fullscreen-toggle { top: .65rem; right: 3.1rem; }
   .status-grid { grid-template-columns: 1fr; }
   .hero-main h1 { font-size: clamp(1.65rem, 7vw, 2.3rem); }
   .menu-toggle { display: inline-flex; align-items: center; justify-content: center; }
@@ -511,8 +513,6 @@ svg text { font-size: 14px; fill: #17335f; }
     transform: none;
     margin-top: .6rem;
   }
-  .map-workspace:not(.map-workspace--collapsed) .map-controls-toggle { right: .65rem; }
-  .map-fullscreen-toggle { top: .65rem; right: 3.1rem; }
 }
 
 
