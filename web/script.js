@@ -2616,11 +2616,13 @@ function renderSituationOverview() {
     { label: 'Communes en crise', value: String(crisisCount), info: 'PCS actif', css: crisisCount > 0 ? 'rouge' : 'vert' },
   ];
   const bisonDeparture = normalizeLevel(externalRisks?.bison_fute?.today?.isere?.departure || 'inconnu');
+  const bisonReturn = normalizeLevel(externalRisks?.bison_fute?.today?.isere?.return || 'inconnu');
   const vigieauAlertsCount = Number((externalRisks?.vigieau?.alerts || []).length);
   const atmoLevel = normalizeLevel(externalRisks?.atmo_aura?.today?.level || 'inconnu');
   const sncfIncidentsCount = Number(externalRisks?.sncf_isere?.alerts_total ?? (externalRisks?.sncf_isere?.alerts || []).length);
   const mobilityCards = [
-    { label: 'Bison Futé (38)', value: bisonDeparture, info: 'Tendance départ Isère', css: bisonDeparture },
+    { label: 'Bison Futé (38) · Départs', value: bisonDeparture, info: 'Tendance départ Isère', css: bisonDeparture },
+    { label: 'Bison Futé (38) · Retours', value: bisonReturn, info: 'Tendance retour Isère', css: bisonReturn },
     { label: 'Vigieau', value: `${vigieauAlertsCount}`, info: "Restriction(s) d'eau active(s)", css: vigieauAlertsCount > 0 ? 'jaune' : 'vert' },
     { label: "Qualité de l'air", value: atmoLevel, info: 'Source Atmo AURA', css: atmoLevel },
     { label: 'Incidents SNCF', value: `${sncfIncidentsCount}`, info: 'Accidents / travaux Isère', css: sncfIncidentsCount > 0 ? 'orange' : 'vert' },
