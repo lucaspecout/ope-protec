@@ -440,7 +440,26 @@
             </select>
           </div>
           <p class="muted">Entrées affichées: <strong id="logs-count">0</strong> · <button id="logs-export" type="button" class="ghost">Exporter CSV</button></p>
-          <ul id="logs-list" class="list"></ul>
+          <div class="logs-tables-grid">
+            <article>
+              <h4>En cours</h4>
+              <table class="users-table">
+                <thead>
+                  <tr><th>Horodatage</th><th>Périmètre</th><th>Criticité</th><th>Évènement</th><th>Statut</th><th>Détails</th><th>Actions</th></tr>
+                </thead>
+                <tbody id="logs-table-open"></tbody>
+              </table>
+            </article>
+            <article>
+              <h4>Clos</h4>
+              <table class="users-table">
+                <thead>
+                  <tr><th>Horodatage</th><th>Périmètre</th><th>Criticité</th><th>Évènement</th><th>Statut</th><th>Détails</th><th>Actions</th></tr>
+                </thead>
+                <tbody id="logs-table-closed"></tbody>
+              </table>
+            </article>
+          </div>
         </section>
 
         <section id="map-panel" class="panel view hidden" hidden>
@@ -492,7 +511,7 @@
                 </select>
                 <div class="map-inline-filter">
                   <select id="map-point-category-filter">
-                    <option value="all">Tous les points opérationnels</option>
+                    <option value="all">Catégories POI</option>
                     <option value="incident">Incidents</option>
                     <option value="evacuation">Évacuations</option>
                     <option value="water">Risque eau</option>
@@ -503,7 +522,6 @@
                     <option value="poi">POI</option>
                     <option value="autre">Autres</option>
                   </select>
-                  <label class="map-inline-checkbox"><input id="filter-map-poi" type="checkbox" checked /> POI visibles</label>
                 </div>
                 <div class="map-inline-actions map-inline-actions--stacked">
                   <div class="map-bulk-controls">

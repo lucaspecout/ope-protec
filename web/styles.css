@@ -441,6 +441,10 @@ svg text { font-size: 14px; fill: #17335f; }
 .users-table { width: 100%; border-collapse: collapse; }
 .users-table th, .users-table td { border-bottom: 1px solid var(--line); padding: .58rem; text-align: left; }
 
+.logs-tables-grid { display: grid; gap: .9rem; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+.logs-tables-grid h4 { margin: .4rem 0; }
+.logs-tables-grid .users-table td { vertical-align: top; }
+
 .users-actions { display: flex; flex-wrap: wrap; gap: .35rem; }
 .users-actions button { padding: .3rem .5rem; font-size: .75rem; border-radius: 8px; }
 #users-success { min-height: 1rem; }

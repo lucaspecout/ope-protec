@@ -765,15 +765,12 @@ def _fetch_vigicrues_isere_live(
     try:
         stations_by_code: dict[str, dict[str, Any]] = {}
         isere_catalog_codes = set(fallback_isere_codes)
-        focused_codes = [code for code in fallback_isere_codes if code]
-        remaining_codes = [code for code in fallback_isere_codes if code]
+        try:
+            hubeau_codes = sorted(_fetch_hubeau_isere_station_codes())
+        except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError):
+            hubeau_codes = []
 
-        target_isere_count = max(station_limit or 0, len(focus_station_filters), len(remaining_codes))
-        max_lookups = max(220, target_isere_count * 12)
-        if sample_size > 0:
-            max_lookups = min(max_lookups, sample_size)
-
-        candidate_codes = (focused_codes + remaining_codes + list(fallback_isere_codes))[:max_lookups]
+        candidate_codes = [*hubeau_codes, *fallback_isere_codes]
         candidate_codes = [code for code in candidate_codes if code]
         if not candidate_codes:
             raise ValueError("Aucune station candidate détectée pour l'Isère")
@@ -787,10 +784,14 @@ def _fetch_vigicrues_isere_live(
             seen_codes.add(code)
             unique_candidate_codes.append(code)
 
-        target_isere_count = station_limit if station_limit is not None else len(unique_candidate_codes)
+        target_isere_count = station_limit if station_limit is not None else max(13, len(hubeau_codes), len(fallback_isere_codes))
+        max_lookups = max(220, target_isere_count * 16)
+        if sample_size > 0:
+            max_lookups = min(max_lookups, sample_size)
+        unique_candidate_codes = unique_candidate_codes[:max_lookups]
         worker_count = min(10, max(4, min(max(target_isere_count, 1), 24)))
         executor = ThreadPoolExecutor(max_workers=worker_count)
-        force_include_codes = set(focused_codes)
+        force_include_codes = set(fallback_isere_codes)
         futures = [
             executor.submit(
                 _vigicrues_build_station_entry,
@@ -836,7 +837,7 @@ def _fetch_vigicrues_isere_live(
 
         troncons = list(troncons_index.values())
 
-        isere_stations.sort(key=lambda station: (not station["is_priority"], station["station"] or ""))
+        isere_stations.sort(key=lambda station: (not station["is_priority"], station["station"] or "", station["code"] or ""))
         troncons.sort(key=lambda troncon: troncon.get("name") or "")
 
         if station_limit is not None:
