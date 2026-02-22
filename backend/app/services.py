@@ -920,27 +920,61 @@ def _fetch_vigicrues_isere_live(
             group["stations"].append({"code": station["code"], "station": station["station"], "river": station["river"]})
             group["level"] = _highest_vigilance_level([{"level": group["level"]}, {"level": station["level"]}])
 
-        # Tracé simplifié du tronçon Vigicrues AN20 (Isère aval),
-        # de l'aval immédiat de Grenoble vers la confluence avec le Rhône
-        # (secteur Pont-de-l'Isère / La Roche-de-Glun).
+        # Tracé du tronçon Vigicrues AN20 (Isère aval), extrait d'un GeoJSON
+        # en ligne (OSM/Nominatim - relation "L'Isère", osm_id 1067839), puis
+        # simplifié pour un rendu web léger. Segment conservé: Grenoble -> Rhône.
         isere_aval_points = [
-            [45.1885, 5.7245],  # Grenoble (limite aval secteur grenoblois)
-            [45.1719, 5.6899],  # Sassenage
-            [45.1475, 5.6365],  # Noyarey
-            [45.1156, 5.5489],  # Voreppe
-            [45.0849, 5.4914],  # Moirans
-            [45.0586, 5.4825],  # Tullins
-            [45.0236, 5.4461],  # Poliénas / Saint-Quentin-sur-Isère
-            [45.0039, 5.4139],  # Saint-Gervais
-            [44.9762, 5.3587],  # Cognin-les-Gorges
-            [44.9648, 5.3189],  # Saint-Just-de-Claix
-            [44.9528, 5.2316],  # Saint-Romans
-            [44.9496, 5.1674],  # Chatte
-            [44.9349, 5.0988],  # Saint-Nazaire-en-Royans
-            [45.0016, 5.0502],  # Romans-sur-Isère / Bourg-de-Péage
-            [44.9668, 4.9214],  # Beaumont-Monteux
-            [44.9442, 4.8792],  # Pont-de-l'Isère
-            [44.9336, 4.8924],  # Confluence Isère-Rhône
+            [45.192742, 5.720049],
+            [45.206842, 5.703633],
+            [45.217251, 5.672787],
+            [45.251863, 5.644286],
+            [45.277327, 5.619103],
+            [45.302241, 5.604425],
+            [45.296397, 5.561819],
+            [45.280496, 5.525988],
+            [45.252306, 5.508979],
+            [45.226758, 5.486298],
+            [45.212167, 5.473645],
+            [45.202350, 5.455610],
+            [45.199289, 5.439137],
+            [45.194998, 5.424278],
+            [45.190110, 5.420185],
+            [45.180661, 5.415909],
+            [45.174636, 5.393739],
+            [45.168977, 5.384745],
+            [45.161916, 5.371167],
+            [45.153272, 5.362820],
+            [45.142324, 5.360823],
+            [45.132696, 5.352811],
+            [45.127379, 5.342799],
+            [45.127172, 5.334868],
+            [45.121460, 5.321617],
+            [45.118260, 5.306793],
+            [45.115968, 5.295162],
+            [45.111472, 5.280445],
+            [45.102455, 5.272477],
+            [45.091423, 5.272402],
+            [45.080409, 5.269849],
+            [45.068838, 5.262774],
+            [45.066465, 5.251642],
+            [45.067256, 5.242671],
+            [45.073257, 5.229234],
+            [45.079992, 5.222998],
+            [45.083637, 5.198930],
+            [45.084675, 5.182364],
+            [45.076013, 5.172771],
+            [45.067283, 5.168274],
+            [45.051601, 5.155182],
+            [45.037207, 5.122742],
+            [45.039407, 5.080372],
+            [45.041306, 5.045120],
+            [45.028236, 5.041771],
+            [45.032738, 5.000246],
+            [45.039306, 4.950251],
+            [45.021887, 4.945380],
+            [45.015669, 4.910498],
+            [44.998560, 4.880949],
+            [44.981814, 4.852909],
         ]
         isere_aval_level, isere_aval_rss = (None, None)
         try:
