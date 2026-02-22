@@ -525,6 +525,19 @@ svg text { font-size: 14px; fill: #17335f; }
   font-size: 16px;
 }
 .map-emoji-icon span { line-height: 1; }
+
+.map-resource-icon-wrap { background: transparent; border: 0; }
+.map-resource-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  border: 2px solid #fff;
+  box-shadow: 0 2px 7px rgba(0, 0, 0, .32);
+  font-size: 13px;
+  line-height: 1;
+}
 .map-emoji-icon--traffic-closed {
   width: 18px;
   height: 18px;
