@@ -1163,32 +1163,34 @@ async function renderMunicipalitiesOnMap(municipalities = []) {
   setMapFeedback(`${renderedCount}/${pcs.length} commune(s) PCS géolocalisée(s).`);
 }
 
-function refreshResourceTargetOptions() {
-  const select = document.getElementById('resource-target-select');
-  if (!select) return;
-  const selectedValue = select.value;
-  const selectedCategory = document.getElementById('resource-target-category-filter')?.value || 'all';
-  const options = ['<option value="">Ressource: choisir…</option>']
-    .concat(RESOURCE_POINTS
-      .filter((resource) => selectedCategory === 'all' || resource.type === selectedCategory)
-      .map((resource) => `<option value="${escapeHtml(resource.id)}">${escapeHtml(resource.name)} (${resource.active ? 'affichée' : 'masquée'})</option>`));
-  select.innerHTML = options.join('');
-  if (RESOURCE_POINTS.some((resource) => resource.id === selectedValue && (selectedCategory === 'all' || resource.type === selectedCategory))) select.value = selectedValue;
-  syncResourceTargetButton();
+function getResourceCategoryLabel(type = 'all') {
+  if (type === 'all') return 'toutes les ressources';
+  return RESOURCE_TYPE_META[type]?.label || type.replace(/_/g, ' ');
 }
 
-function syncResourceTargetButton() {
-  const select = document.getElementById('resource-target-select');
+function getPoiCategoryLabel(category = 'all') {
+  if (category === 'all') return 'tous les POI';
+  return ({
+    incident: 'Incidents',
+    evacuation: 'Évacuations',
+    water: 'Risque eau',
+    roadblock: 'Barrages',
+    medical: 'Médical',
+    logistics: 'Logistique',
+    command: 'Commandement',
+    poi: 'POI',
+    autre: 'Autres',
+  })[category] || category;
+}
+
+function refreshResourceTargetOptions() {
   const button = document.getElementById('resource-target-toggle-btn');
-  if (!select || !button) return;
-  const resource = RESOURCE_POINTS.find((item) => item.id === select.value);
-  if (!resource) {
-    button.textContent = 'Afficher/Masquer';
-    button.disabled = true;
-    return;
-  }
-  button.disabled = false;
-  button.textContent = resource.active ? 'Masquer sélection' : 'Afficher sélection';
+  if (!button) return;
+  const selectedCategory = document.getElementById('resource-target-category-filter')?.value || 'all';
+  const targetedResources = RESOURCE_POINTS.filter((resource) => selectedCategory === 'all' || resource.type === selectedCategory);
+  const hasVisible = targetedResources.some((resource) => resource.active);
+  button.disabled = targetedResources.length === 0;
+  button.textContent = hasVisible ? 'Masquer la catégorie' : 'Afficher la catégorie';
 }
 
 function applyResourceBulkAction() {
@@ -1207,51 +1209,43 @@ function applyResourceBulkAction() {
 }
 
 function toggleSelectedResource() {
-  const resourceId = document.getElementById('resource-target-select')?.value || '';
-  if (!resourceId) return;
-  toggleResourceActive(resourceId);
+  const selectedCategory = document.getElementById('resource-target-category-filter')?.value || 'all';
+  const targetResources = RESOURCE_POINTS.filter((resource) => selectedCategory === 'all' || resource.type === selectedCategory);
+  if (!targetResources.length) return;
+  const hasVisible = targetResources.some((resource) => resource.active);
+  targetResources.forEach((resource) => {
+    resource.active = !hasVisible;
+  });
+  renderResources();
   fitMapToData();
+  setMapFeedback(`${getResourceCategoryLabel(selectedCategory)}: ${hasVisible ? 'masquées' : 'affichées'}.`);
 }
 
 function refreshPoiTargetOptions() {
-  const select = document.getElementById('poi-target-select');
-  if (!select) return;
-  const selectedValue = select.value;
+  const button = document.getElementById('poi-target-toggle-btn');
+  if (!button) return;
   const selectedCategory = document.getElementById('poi-target-category-filter')?.value || 'all';
-  const options = ['<option value="">POI perso: choisir…</option>']
-    .concat(mapPoints
-      .filter((point) => selectedCategory === 'all' || point.category === selectedCategory)
-      .map((point) => {
-        const isVisible = mapPointVisibilityOverrides.get(point.id) !== false;
-        return `<option value="${escapeHtml(point.id)}">${escapeHtml(point.name)} (${isVisible ? 'visible' : 'masqué'})</option>`;
-      }));
-  select.innerHTML = options.join('');
-  if (mapPoints.some((point) => point.id === selectedValue && (selectedCategory === 'all' || point.category === selectedCategory))) select.value = selectedValue;
-  syncPoiTargetButton();
+  const targetPoints = mapPoints.filter((point) => selectedCategory === 'all' || point.category === selectedCategory);
+  const hasVisible = targetPoints.some((point) => mapPointVisibilityOverrides.get(point.id) !== false);
+  button.disabled = targetPoints.length === 0;
+  button.textContent = hasVisible ? 'Masquer la catégorie' : 'Afficher la catégorie';
 }
 
 function syncPoiTargetButton() {
-  const select = document.getElementById('poi-target-select');
-  const button = document.getElementById('poi-target-toggle-btn');
-  if (!select || !button) return;
-  const point = mapPoints.find((item) => item.id === select.value);
-  if (!point) {
-    button.textContent = 'Afficher/Masquer';
-    button.disabled = true;
-    return;
-  }
-  const isVisible = mapPointVisibilityOverrides.get(point.id) !== false;
-  button.disabled = false;
-  button.textContent = isVisible ? 'Masquer sélection' : 'Afficher sélection';
+  refreshPoiTargetOptions();
 }
 
 function toggleSelectedPoiVisibility() {
-  const pointId = document.getElementById('poi-target-select')?.value || '';
-  if (!pointId) return;
-  const isVisible = mapPointVisibilityOverrides.get(pointId) !== false;
-  mapPointVisibilityOverrides.set(pointId, !isVisible);
+  const selectedCategory = document.getElementById('poi-target-category-filter')?.value || 'all';
+  const targetPoints = mapPoints.filter((point) => selectedCategory === 'all' || point.category === selectedCategory);
+  if (!targetPoints.length) return;
+  const hasVisible = targetPoints.some((point) => mapPointVisibilityOverrides.get(point.id) !== false);
+  targetPoints.forEach((point) => {
+    mapPointVisibilityOverrides.set(point.id, !hasVisible);
+  });
   renderCustomPoints();
   fitMapToData();
+  setMapFeedback(`${getPoiCategoryLabel(selectedCategory)}: ${hasVisible ? 'masqués' : 'affichés'}.`);
 }
 
 function renderResources() {
@@ -3501,10 +3495,8 @@ function bindAppInteractions() {
   });
   document.getElementById('resource-bulk-action-btn')?.addEventListener('click', applyResourceBulkAction);
   document.getElementById('resource-target-category-filter')?.addEventListener('change', refreshResourceTargetOptions);
-  document.getElementById('resource-target-select')?.addEventListener('change', syncResourceTargetButton);
   document.getElementById('resource-target-toggle-btn')?.addEventListener('click', toggleSelectedResource);
   document.getElementById('poi-target-category-filter')?.addEventListener('change', refreshPoiTargetOptions);
-  document.getElementById('poi-target-select')?.addEventListener('change', syncPoiTargetButton);
   document.getElementById('poi-target-toggle-btn')?.addEventListener('click', toggleSelectedPoiVisibility);
   document.getElementById('map-point-category-filter')?.addEventListener('change', renderCustomPoints);
   document.getElementById('map-point-form-cancel')?.addEventListener('click', () => {
