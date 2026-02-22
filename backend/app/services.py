@@ -386,7 +386,8 @@ _sncf_isere_cache_lock = Lock()
 _sncf_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _isere_aval_polyline_cache_lock = Lock()
 _isere_aval_polyline_cache: dict[str, Any] = {"points": None, "expires_at": datetime.min}
-_ISERE_AVAL_GRENOBLE_CUTOFF_LON = 5.46
+_ISERE_AVAL_GRENOBLE_CUTOFF_LON = 5.67526671768763
+_ISERE_AVAL_END_POINT = [45.21599236499436, 5.67526671768763]
 
 
 def _point_distance_meters(start: list[float], end: list[float]) -> float:
@@ -396,7 +397,7 @@ def _point_distance_meters(start: list[float], end: list[float]) -> float:
 
 
 def _truncate_isere_aval_before_grenoble(points: list[list[float]]) -> list[list[float]]:
-    """Trim AN20 to stop before Grenoble; AN12 covers the Grenoble section."""
+    """Trim AN20 to stop at the requested Grenoble-end point on the Isère."""
     if not isinstance(points, list) or len(points) < 2:
         return points
 
@@ -407,7 +408,16 @@ def _truncate_isere_aval_before_grenoble(points: list[list[float]]) -> list[list
         and isinstance(lon, (int, float))
         and float(lon) <= _ISERE_AVAL_GRENOBLE_CUTOFF_LON
     ]
-    return trimmed if len(trimmed) >= 2 else points
+    if len(trimmed) < 2:
+        return points
+
+    endpoint = [float(_ISERE_AVAL_END_POINT[0]), float(_ISERE_AVAL_END_POINT[1])]
+    if trimmed[0] != endpoint and trimmed[-1] != endpoint:
+        if _point_distance_meters(trimmed[0], endpoint) <= _point_distance_meters(trimmed[-1], endpoint):
+            trimmed.insert(0, endpoint)
+        else:
+            trimmed.append(endpoint)
+    return trimmed
 
 
 def _load_isere_aval_polyline_online() -> list[list[float]]:
