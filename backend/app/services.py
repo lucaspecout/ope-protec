@@ -1470,6 +1470,41 @@ def fetch_dauphine_isere_news(limit: int = 7, force_refresh: bool = False) -> di
     )
 
 
+def _sncf_extract_links(detail_html: str) -> list[str]:
+    links = re.findall(r'href=["\'](.*?)["\']', detail_html or '', flags=re.IGNORECASE)
+    normalized: list[str] = []
+    for link in links:
+        if link.startswith("http") and link not in normalized:
+            normalized.append(link)
+    return normalized
+
+
+def _sncf_extract_axes(text: str) -> list[str]:
+    matches = re.findall(r"axe\s+([A-Za-zÀ-ÿ']+(?:[ -][A-Za-zÀ-ÿ']+){0,2}\s*-\s*[A-Za-zÀ-ÿ']+(?:[ -][A-Za-zÀ-ÿ']+){0,2})", text, flags=re.IGNORECASE)
+    axes: list[str] = []
+    for match in matches:
+        normalized = re.sub(r"\s+", " ", match).strip(" .")
+        if "-" in normalized:
+            left, right = [chunk.strip() for chunk in normalized.split("-", 1)]
+            right = re.split(r"\b(?:le|la|les|du|des|suite|est|sont)\b", right, maxsplit=1, flags=re.IGNORECASE)[0].strip(" .")
+            normalized = f"{left} - {right}" if left and right else normalized
+        if normalized and normalized not in axes:
+            axes.append(normalized)
+    return axes
+
+
+def _sncf_level(lower_blob: str, severity: str) -> str:
+    if any(token in lower_blob for token in ("interrompu", "accident", "supprim", "glissement")):
+        return "orange"
+    severity_map = {
+        "verySevere": "rouge",
+        "severe": "orange",
+        "normal": "jaune",
+        "slight": "jaune",
+    }
+    return severity_map.get((severity or "").strip(), "jaune")
+
+
 def _fetch_sncf_isere_alerts_live() -> dict[str, Any]:
     source = "https://proxy.transport.data.gouv.fr/resource/sncf-siri-lite-situation-exchange"
     try:
@@ -1479,16 +1514,7 @@ def _fetch_sncf_isere_alerts_live() -> dict[str, Any]:
         situations = root.findall(".//siri:PtSituationElement", namespace)
 
         keyword_scope = (
-            "isere",
-            "isère",
-            "grenoble",
-            "bourgoin",
-            "vienne",
-            "voiron",
-            "rives",
-            "poliénas",
-            "saint-andre-le-gaz",
-            "pont-de-beauvoisin",
+            "isere", "isère", "grenoble", "bourgoin", "vienne", "voiron", "rives", "poliénas", "saint-andre-le-gaz", "pont-de-beauvoisin",
         )
         keyword_type = ("accident", "travaux", "voie", "perturb", "interrompu", "ralenti", "glissement")
 
@@ -1496,8 +1522,9 @@ def _fetch_sncf_isere_alerts_live() -> dict[str, Any]:
         for situation in situations:
             summary = re.sub(r"\s+", " ", (situation.findtext("siri:Summary", default="", namespaces=namespace) or "").strip())
             description = re.sub(r"\s+", " ", (situation.findtext("siri:Description", default="", namespaces=namespace) or "").strip())
-            detail = re.sub(r"\s+", " ", (situation.findtext("siri:Detail", default="", namespaces=namespace) or "").strip())
-            text_blob = f"{summary} {description} {detail}".strip()
+            detail_html = (situation.findtext("siri:Detail", default="", namespaces=namespace) or "").strip()
+            detail_text = re.sub(r"\s+", " ", _strip_html_tags(unescape(detail_html))).strip()
+            text_blob = f"{summary} {description} {detail_text}".strip()
             lower_blob = text_blob.lower()
             if not lower_blob:
                 continue
@@ -1506,21 +1533,29 @@ def _fetch_sncf_isere_alerts_live() -> dict[str, Any]:
             if not any(token in lower_blob for token in keyword_type):
                 continue
 
-            level = "orange" if any(token in lower_blob for token in ("interrompu", "accident", "supprim", "glissement")) else "jaune"
+            severity_raw = (situation.findtext("siri:Severity", default="", namespaces=namespace) or "").strip()
+            level = _sncf_level(lower_blob, severity_raw)
             situation_number = (situation.findtext("siri:SituationNumber", default="", namespaces=namespace) or "").strip()
             publication_window = (situation.findtext("siri:PublicationWindow/siri:StartTime", default="", namespaces=namespace) or "").strip()
-            alerts.append(
-                {
-                    "title": summary or "Alerte trafic SNCF Isère",
-                    "description": (description or detail or text_blob)[:420],
-                    "type": "accident" if "accident" in lower_blob else "travaux",
-                    "level": level,
-                    "location": "Isère",
-                    "link": source,
-                    "situation_number": situation_number,
-                    "published_at": publication_window,
-                }
-            )
+            validity_start = (situation.findtext("siri:ValidityPeriod/siri:StartTime", default="", namespaces=namespace) or "").strip()
+            validity_end = (situation.findtext("siri:ValidityPeriod/siri:EndTime", default="", namespaces=namespace) or "").strip()
+            links = _sncf_extract_links(detail_html)
+            axes = _sncf_extract_axes(text_blob)
+            alerts.append({
+                "title": summary or "Alerte trafic SNCF Isère",
+                "description": (description or detail_text or text_blob)[:600],
+                "type": "accident" if "accident" in lower_blob else "travaux",
+                "level": level,
+                "severity_raw": severity_raw,
+                "locations": ["Isère"],
+                "axes": axes,
+                "link": links[0] if links else source,
+                "links": links,
+                "situation_number": situation_number,
+                "published_at": publication_window,
+                "valid_from": validity_start,
+                "valid_until": validity_end,
+            })
 
         deduplicated: list[dict[str, Any]] = []
         seen_descriptions: set[str] = set()
