@@ -1202,6 +1202,17 @@ def _fetch_itinisere_disruptions_live(limit: int = 60) -> dict[str, Any]:
         }
 
 
+def fetch_itinisere_disruptions(limit: int = 60, force_refresh: bool = False) -> dict[str, Any]:
+    safe_limit = max(1, min(limit, 120))
+    return _cached_external_payload(
+        cache=_itinisere_cache,
+        lock=_itinisere_cache_lock,
+        ttl_seconds=_ITINISERE_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=lambda: _fetch_itinisere_disruptions_live(limit=safe_limit),
+    )
+
+
 def _fetch_prefecture_isere_news_live(limit: int = 7) -> dict[str, Any]:
     source = "https://www.isere.gouv.fr/syndication/flux/actualites"
     try:
