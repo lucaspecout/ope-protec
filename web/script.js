@@ -2850,6 +2850,55 @@ function toSitrepBulletItems(items = [], emptyLabel = 'Aucune donnée disponible
   return items.map((item) => `<li>${item}</li>`).join('');
 }
 
+function isSameDayLocal(a, b) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+function isPreviousDayLocal(candidate, reference) {
+  const previous = new Date(reference);
+  previous.setDate(reference.getDate() - 1);
+  return isSameDayLocal(candidate, previous);
+}
+
+function projectToIsereMap(lat, lon, width = 480, height = 280, padding = 16) {
+  const bounds = { minLat: 44.75, maxLat: 45.95, minLon: 4.7, maxLon: 6.45 };
+  const normalizedX = (Number(lon) - bounds.minLon) / (bounds.maxLon - bounds.minLon);
+  const normalizedY = (bounds.maxLat - Number(lat)) / (bounds.maxLat - bounds.minLat);
+  const safeX = Number.isFinite(normalizedX) ? Math.max(0, Math.min(1, normalizedX)) : 0.5;
+  const safeY = Number.isFinite(normalizedY) ? Math.max(0, Math.min(1, normalizedY)) : 0.5;
+  return {
+    x: padding + safeX * (width - (padding * 2)),
+    y: padding + safeY * (height - (padding * 2)),
+  };
+}
+
+function buildSitrepMapSvg(title, points = [], lines = []) {
+  const width = 480;
+  const height = 280;
+  const frame = '<path d="M90 26 L376 26 L450 82 L432 246 L120 258 L40 194 L36 88 Z" fill="#f4f8ff" stroke="#163a87" stroke-width="2" />';
+  const lineSvg = lines.map((line) => {
+    const coords = (line.points || [])
+      .map((coord) => projectToIsereMap(coord.lat, coord.lon, width, height, 18))
+      .map((coord) => `${coord.x.toFixed(1)},${coord.y.toFixed(1)}`)
+      .join(' ');
+    if (!coords) return '';
+    return `<polyline points="${coords}" fill="none" stroke="${escapeHtml(line.color || '#d9480f')}" stroke-width="${line.weight || 3}" stroke-linecap="round" stroke-linejoin="round" opacity="0.88" />`;
+  }).join('');
+  const pointsSvg = points.map((point) => {
+    const position = projectToIsereMap(point.lat, point.lon, width, height, 18);
+    return `<circle cx="${position.x.toFixed(1)}" cy="${position.y.toFixed(1)}" r="4.2" fill="${escapeHtml(point.color || '#0d4b8e')}" stroke="#ffffff" stroke-width="1.2" />`;
+  }).join('');
+
+  return `<figure style="margin:10px 0 16px;">
+    <figcaption style="font-weight:700; margin-bottom:6px;">${escapeHtml(title)} (centrée Isère)</figcaption>
+    <svg viewBox="0 0 ${width} ${height}" width="100%" height="220" role="img" aria-label="${escapeHtml(title)}">
+      ${frame}
+      ${lineSvg}
+      ${pointsSvg}
+    </svg>
+  </figure>`;
+}
+
 function buildSitrepHtml() {
   const dashboard = cachedDashboardSnapshot && Object.keys(cachedDashboardSnapshot).length
     ? cachedDashboardSnapshot
@@ -2884,15 +2933,50 @@ function buildSitrepHtml() {
   const prefectureItems = prefecture.map((item) => `<strong>${escapeHtml(item.title || 'Actualité')}</strong>${item.published_at ? ` · ${escapeHtml(item.published_at)}` : ''}`);
   const vigieauItems = vigieau.map((item) => `<strong>${escapeHtml(item.level || 'Restriction')}</strong> · ${escapeHtml(item.zone || item.title || 'Isère')}`);
   const sncfItems = sncf.map((item) => `<strong>${escapeHtml(item.type || 'Alerte')}</strong> · ${escapeHtml(item.title || 'Incident réseau')}`);
-  const logItems = logs.map((log) => {
+  const now = new Date();
+  const detailedLogItems = logs.map((log) => {
     const at = safeDateToLocale(log.event_time || log.created_at || Date.now());
-    return `<strong>${escapeHtml(at)}</strong> · ${escapeHtml(log.event_type || 'Évènement')} (${escapeHtml(normalizeLevel(log.danger_level || 'vert'))})`;
+    const municipalityName = log.municipality_id ? getMunicipalityName(log.municipality_id) : 'Non précisée';
+    return {
+      when: new Date(log.event_time || log.created_at || Date.now()),
+      html: `<strong>${escapeHtml(at)}</strong> · ${escapeHtml(log.event_type || 'Évènement')} · ${escapeHtml(normalizeLevel(log.danger_level || 'vert'))}<br/>Commune concernée: <strong>${escapeHtml(municipalityName)}</strong> · Portée: ${escapeHtml(formatLogScope(log))}<br/>Statut: ${escapeHtml(LOG_STATUS_LABEL[String(log.status || 'nouveau')] || 'Nouveau')} · Lieu: ${escapeHtml(log.location || 'non précisé')}<br/>Source: ${escapeHtml(log.source || 'non précisée')} · Responsable: ${escapeHtml(log.assigned_to || 'non assigné')}<br/>Description: ${escapeHtml(log.description || 'Aucune description')} · Actions: ${escapeHtml(log.actions_taken || 'Aucune')}`,
+    };
   });
+  const logItemsToday = detailedLogItems.filter((entry) => isSameDayLocal(entry.when, now)).map((entry) => entry.html);
+  const logItemsYesterday = detailedLogItems.filter((entry) => isPreviousDayLocal(entry.when, now)).map((entry) => entry.html);
 
   const generatedAt = safeDateToLocale(Date.now(), { dateStyle: 'full', timeStyle: 'short' });
   const crisisCount = Number(dashboard.communes_crise ?? 0);
   const globalRisk = escapeHtml(normalizeLevel(dashboard.global_risk || meteo.level || 'vert'));
   const weatherLevel = escapeHtml(normalizeLevel(meteo.level || dashboard.vigilance || 'vert'));
+  const waterStations = Array.isArray(vigicrues.stations) ? vigicrues.stations : [];
+  const nonGreenWaterStations = waterStations.filter((station) => ['jaune', 'orange', 'rouge'].includes(stationStatusLevel(station)));
+  const waterSummary = nonGreenWaterStations.length
+    ? `Stations eau à surveiller: ${nonGreenWaterStations.map((station) => `${station.station || station.name || station.code || 'Station'} (${stationStatusLevel(station)})`).join(', ')}`
+    : `Toutes les stations eau sont vertes · score global ${escapeHtml(normalizeLevel(vigicrues.water_alert_level || globalRisk || 'vert'))}`;
+  const crisisMunicipalities = (Array.isArray(cachedMunicipalityRecords) ? cachedMunicipalityRecords : [])
+    .filter((municipality) => municipality.crisis_mode)
+    .map((municipality) => municipality.name)
+    .filter(Boolean);
+  const crisisMunicipalityLabel = crisisMunicipalities.length ? crisisMunicipalities.join(', ') : 'Aucune commune en crise';
+  const allPoints = [
+    ...RESOURCE_POINTS,
+    ...(Array.isArray(cachedStations) ? cachedStations.filter((station) => station.lat != null && station.lon != null) : []),
+    ...(Array.isArray(mapPoints) ? mapPoints.filter((point) => point.lat != null && point.lon != null) : []),
+  ];
+  const crisisPoints = (Array.isArray(cachedMunicipalityRecords) ? cachedMunicipalityRecords : [])
+    .filter((municipality) => municipality.crisis_mode && municipality.lat != null && municipality.lon != null)
+    .map((municipality) => ({ lat: municipality.lat, lon: municipality.lon, color: '#e03131' }));
+  const itinisereTrafficPoints = Array.isArray(cachedItinisereEvents)
+    ? cachedItinisereEvents
+      .filter((event) => (event.lat != null && event.lon != null) || (event.position?.lat != null && event.position?.lon != null))
+      .map((event) => ({ lat: event.lat ?? event.position?.lat, lon: event.lon ?? event.position?.lon, color: '#d9480f' }))
+    : [];
+  const itinisereRoadLines = Object.values(ITINISERE_ROAD_CORRIDORS).map((corridor) => ({
+    color: '#f76707',
+    weight: 2.5,
+    points: corridor.map((coord) => ({ lat: coord[0], lon: coord[1] })),
+  }));
 
   return `<!doctype html>
 <html lang="fr">
@@ -2921,7 +3005,7 @@ function buildSitrepHtml() {
     <span class="badge">Protection Civile · Isère (38)</span>
     <h1>SITREP quotidien · Conditions météo & points d'intérêt</h1>
     <p><strong>Émis le :</strong> ${escapeHtml(generatedAt)}</p>
-    <p class="muted">Document opérationnel d'aide à la décision (couleurs Protection Civile).</p>
+    <p class="muted">Document opérationnel d'aide à la décision.</p>
     <div class="kpi">
       <article class="card"><p>Niveau météo</p><strong>${weatherLevel}</strong></article>
       <article class="card"><p>Risque global</p><strong>${globalRisk}</strong></article>
@@ -2948,6 +3032,7 @@ function buildSitrepHtml() {
   <section class="grid">
     <div>
       <h2>Restrictions eau</h2>
+      <p><strong>${waterSummary}</strong></p>
       <ul>${toSitrepBulletItems(vigieauItems, 'Aucune restriction Vigieau remontée.')}</ul>
     </div>
     <div>
@@ -2956,8 +3041,23 @@ function buildSitrepHtml() {
     </div>
   </section>
   <section>
-    <h2>Main courante (extrait)</h2>
-    <ul>${toSitrepBulletItems(logItems, 'Aucun évènement récent.')}</ul>
+    <h2>Main courante opérationnelle du jour</h2>
+    <ul>${toSitrepBulletItems(logItemsToday, 'Aucun évènement aujourd\'hui.')}</ul>
+  </section>
+  <section>
+    <h2>Main courante opérationnelle de veille (J-1)</h2>
+    <ul>${toSitrepBulletItems(logItemsYesterday, 'Aucun évènement sur la veille.')}</ul>
+  </section>
+  <section>
+    <h2>Communes en crise</h2>
+    <p><strong>${escapeHtml(crisisMunicipalityLabel)}</strong></p>
+    ${buildSitrepMapSvg('Carte communes en crise', crisisPoints)}
+  </section>
+  <section>
+    <h2>Cartographie opérationnelle</h2>
+    ${buildSitrepMapSvg('Carte Itinisère · routes barrées', itinisereTrafficPoints, itinisereRoadLines)}
+    ${buildSitrepMapSvg('Carte générale · tous les points', allPoints.map((point) => ({ lat: point.lat, lon: point.lon, color: '#0d4b8e' })))}
+    ${buildSitrepMapSvg('Carte générale · filtre trafic continu', itinisereTrafficPoints)}
   </section>
 </body>
 </html>`;
@@ -2980,11 +3080,16 @@ function exportSitrepPdf() {
     }, 800);
   };
 
+  let printTriggered = false;
   iframe.onload = () => {
+    if (printTriggered) return;
+    printTriggered = true;
     const frameWindow = iframe.contentWindow;
     if (frameWindow) {
-      frameWindow.focus();
-      frameWindow.print();
+      setTimeout(() => {
+        frameWindow.focus();
+        frameWindow.print();
+      }, 250);
     }
     cleanup();
   };
