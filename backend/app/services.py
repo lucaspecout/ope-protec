@@ -1411,6 +1411,76 @@ def fetch_dauphine_isere_news(limit: int = 7, force_refresh: bool = False) -> di
     )
 
 
+def _fetch_sncf_isere_alerts_live() -> dict[str, Any]:
+    source = "https://www.ter.sncf.com/auvergne-rhone-alpes/se-deplacer/info-trafic"
+    try:
+        html = _http_get_text(source)
+        normalized = unescape(_strip_html_tags(html))
+        compact = re.sub(r"\s+", " ", normalized)
+
+        sentences = re.split(r"(?<=[.!?])\s+", compact)
+        keyword_scope = ("isere", "isère", "grenoble", "bourgoin", "vienne")
+        keyword_type = ("accident", "travaux", "voie", "perturb", "interrompu", "ralenti")
+
+        alerts: list[dict[str, Any]] = []
+        for sentence in sentences:
+            lower_sentence = sentence.lower()
+            if not any(token in lower_sentence for token in keyword_scope):
+                continue
+            if not any(token in lower_sentence for token in keyword_type):
+                continue
+
+            level = "orange" if any(token in lower_sentence for token in ("interrompu", "accident", "supprim")) else "jaune"
+            alerts.append(
+                {
+                    "title": "Alerte trafic TER Isère",
+                    "description": sentence[:320],
+                    "type": "accident" if "accident" in lower_sentence else "travaux",
+                    "level": level,
+                    "location": "Isère",
+                    "link": source,
+                }
+            )
+
+        deduplicated: list[dict[str, Any]] = []
+        seen_descriptions: set[str] = set()
+        for alert in alerts:
+            fingerprint = (alert.get("description") or "").lower()
+            if fingerprint in seen_descriptions:
+                continue
+            seen_descriptions.add(fingerprint)
+            deduplicated.append(alert)
+
+        return {
+            "service": "SNCF TER Auvergne-Rhône-Alpes",
+            "status": "online",
+            "source": source,
+            "alerts": deduplicated[:10],
+            "alerts_total": len(deduplicated),
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError) as exc:
+        return {
+            "service": "SNCF TER Auvergne-Rhône-Alpes",
+            "status": "degraded",
+            "source": source,
+            "alerts": [],
+            "alerts_total": 0,
+            "error": str(exc),
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+
+
+def fetch_sncf_isere_alerts(force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_sncf_isere_cache,
+        lock=_sncf_isere_cache_lock,
+        ttl_seconds=_SNCF_ISERE_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=_fetch_sncf_isere_alerts_live,
+    )
+
+
 def fetch_atmo_aura_isere_air_quality(force_refresh: bool = False) -> dict[str, Any]:
     return _cached_external_payload(
         cache=_atmo_aura_cache,
