@@ -84,6 +84,7 @@ let cachedDashboardSnapshot = {};
 let cachedExternalRisksSnapshot = {};
 let isereBoundaryGeometry = null;
 let trafficRenderSequence = 0;
+let currentMunicipalityPreviewUrl = null;
 
 const ISERE_BOUNDARY_STYLE = { color: '#163a87', weight: 2, fillColor: '#63c27d', fillOpacity: 0.2 };
 const TRAFFIC_COMMUNES = ['Grenoble', 'Voiron', 'Vienne', 'Bourgoin-Jallieu', 'Pont-de-Claix', 'Meylan', 'Échirolles', 'L\'Isle-d\'Abeau', 'Saint-Martin-d\'Hères', 'La Tour-du-Pin', 'Rives', 'Sassenage', 'Crolles', 'Tullins'];
@@ -683,6 +684,10 @@ function applyBasemap(style = 'osm') {
     light: {
       url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
       options: { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors &copy; CARTO' },
+    },
+    ign: {
+      url: 'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png',
+      options: { maxZoom: 19, attribution: '&copy; IGN/Geoportail France' },
     },
   };
   const selected = layers[style] || layers.osm;
@@ -2265,8 +2270,46 @@ async function loadMunicipalityFiles(municipalityId) {
 
 function municipalityFilesMarkup(files = [], municipalityId) {
   const canManage = canMunicipalityFiles();
-  const list = files.map((file) => `<li><strong>${escapeHtml(file.title)}</strong> · <span class="badge neutral">${escapeHtml(file.doc_type)}</span> · ${new Date(file.created_at).toLocaleDateString()} · par ${escapeHtml(file.uploaded_by)} <button type="button" class="ghost inline-action" data-muni-file-open="${file.id}" data-muni-id="${municipalityId}">Consulter</button> ${canManage ? `<button type="button" class="ghost inline-action danger" data-muni-file-delete="${file.id}" data-muni-id="${municipalityId}">Supprimer</button>` : ''}</li>`).join('');
+  const list = files.map((file) => `<li><strong>${escapeHtml(file.title)}</strong> · <span class="badge neutral">${escapeHtml(file.doc_type)}</span> · ${new Date(file.created_at).toLocaleDateString()} · par ${escapeHtml(file.uploaded_by)} <button type="button" class="ghost inline-action" data-muni-file-open="${file.id}" data-muni-id="${municipalityId}">Consulter</button> <button type="button" class="ghost inline-action" data-muni-file-download="${file.id}" data-muni-id="${municipalityId}" data-muni-file-name="${escapeHtml(file.title || 'document')}">Télécharger</button> ${canManage ? `<button type="button" class="ghost inline-action danger" data-muni-file-delete="${file.id}" data-muni-id="${municipalityId}">Supprimer</button>` : ''}</li>`).join('');
   return list || '<li>Aucun fichier opérationnel.</li>';
+}
+
+function guessFileExtension(contentType = '') {
+  const normalized = String(contentType || '').split(';')[0].trim().toLowerCase();
+  return {
+    'application/pdf': 'pdf',
+    'image/png': 'png',
+    'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
+    'image/webp': 'webp',
+    'text/plain': 'txt',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+    'application/msword': 'doc',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+    'application/vnd.ms-excel': 'xls',
+  }[normalized] || 'bin';
+}
+
+function sanitizeFilename(name = '') {
+  return String(name || '')
+    .replace(/[^a-zA-Z0-9._-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 120);
+}
+
+async function downloadMunicipalityFile(municipalityId, fileId, preferredName = '') {
+  const { blob, contentType } = await apiFile(`/municipalities/${municipalityId}/files/${fileId}`);
+  const objectUrl = URL.createObjectURL(blob);
+  const downloadName = sanitizeFilename(preferredName) || `document_${fileId}`;
+  const hasExtension = /\.[a-z0-9]{2,6}$/i.test(downloadName);
+  const filename = hasExtension ? downloadName : `${downloadName}.${guessFileExtension(contentType)}`;
+  const link = document.createElement('a');
+  link.href = objectUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
 }
 
 function municipalityDocumentFiltersMarkup(state, municipalityId) {
@@ -3466,9 +3509,10 @@ function bindAppInteractions() {
   document.getElementById('municipality-details-content')?.addEventListener('click', async (event) => {
     const crisisButton = event.target.closest('[data-muni-detail-crisis]');
     const openFileButton = event.target.closest('[data-muni-file-open]');
+    const downloadFileButton = event.target.closest('[data-muni-file-download]');
     const uploadFileButton = event.target.closest('[data-muni-file-upload]');
     const deleteFileButton = event.target.closest('[data-muni-file-delete]');
-    if (!crisisButton && !openFileButton && !uploadFileButton && !deleteFileButton) return;
+    if (!crisisButton && !openFileButton && !downloadFileButton && !uploadFileButton && !deleteFileButton) return;
 
     const getMunicipality = (id) => cachedMunicipalityRecords.find((m) => String(m.id) === String(id));
 
@@ -3489,6 +3533,15 @@ function bindAppInteractions() {
         const municipalityId = openFileButton.getAttribute('data-muni-id');
         const fileId = openFileButton.getAttribute('data-muni-file-open');
         await openMunicipalityFile(municipalityId, fileId);
+        return;
+      }
+
+      if (downloadFileButton) {
+        if (!canMunicipalityFiles()) return;
+        const municipalityId = downloadFileButton.getAttribute('data-muni-id');
+        const fileId = downloadFileButton.getAttribute('data-muni-file-download');
+        const name = downloadFileButton.getAttribute('data-muni-file-name') || 'document';
+        await downloadMunicipalityFile(municipalityId, fileId, name);
         return;
       }
 
