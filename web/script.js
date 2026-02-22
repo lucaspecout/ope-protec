@@ -804,6 +804,8 @@ async function resetMapFilters() {
     'resource-type-filter': 'all',
     'resource-priority-filter': 'all',
     'resource-bulk-action-select': 'none',
+    'resource-target-category-filter': 'all',
+    'poi-target-category-filter': 'all',
     'map-basemap-select': 'osm',
   };
   Object.entries(defaults).forEach(([id, value]) => {
@@ -1165,10 +1167,13 @@ function refreshResourceTargetOptions() {
   const select = document.getElementById('resource-target-select');
   if (!select) return;
   const selectedValue = select.value;
+  const selectedCategory = document.getElementById('resource-target-category-filter')?.value || 'all';
   const options = ['<option value="">Ressource: choisir…</option>']
-    .concat(RESOURCE_POINTS.map((resource) => `<option value="${escapeHtml(resource.id)}">${escapeHtml(resource.name)} (${resource.active ? 'active' : 'inactive'})</option>`));
+    .concat(RESOURCE_POINTS
+      .filter((resource) => selectedCategory === 'all' || resource.type === selectedCategory)
+      .map((resource) => `<option value="${escapeHtml(resource.id)}">${escapeHtml(resource.name)} (${resource.active ? 'affichée' : 'masquée'})</option>`));
   select.innerHTML = options.join('');
-  if (RESOURCE_POINTS.some((resource) => resource.id === selectedValue)) select.value = selectedValue;
+  if (RESOURCE_POINTS.some((resource) => resource.id === selectedValue && (selectedCategory === 'all' || resource.type === selectedCategory))) select.value = selectedValue;
   syncResourceTargetButton();
 }
 
@@ -1178,12 +1183,12 @@ function syncResourceTargetButton() {
   if (!select || !button) return;
   const resource = RESOURCE_POINTS.find((item) => item.id === select.value);
   if (!resource) {
-    button.textContent = 'Activer/Désactiver';
+    button.textContent = 'Afficher/Masquer';
     button.disabled = true;
     return;
   }
   button.disabled = false;
-  button.textContent = resource.active ? 'Désactiver sélection' : 'Activer sélection';
+  button.textContent = resource.active ? 'Masquer sélection' : 'Afficher sélection';
 }
 
 function applyResourceBulkAction() {
@@ -1192,13 +1197,13 @@ function applyResourceBulkAction() {
     setMapFeedback('Aucune action globale appliquée aux ressources.');
     return;
   }
-  const shouldActivate = action === 'activate';
+  const shouldActivate = action === 'show';
   RESOURCE_POINTS.forEach((resource) => {
     resource.active = shouldActivate;
   });
   renderResources();
   fitMapToData();
-  setMapFeedback(shouldActivate ? 'Toutes les ressources sont activées.' : 'Toutes les ressources sont désactivées.');
+  setMapFeedback(shouldActivate ? 'Toutes les ressources sont affichées.' : 'Toutes les ressources sont masquées.');
 }
 
 function toggleSelectedResource() {
@@ -1212,13 +1217,16 @@ function refreshPoiTargetOptions() {
   const select = document.getElementById('poi-target-select');
   if (!select) return;
   const selectedValue = select.value;
+  const selectedCategory = document.getElementById('poi-target-category-filter')?.value || 'all';
   const options = ['<option value="">POI perso: choisir…</option>']
-    .concat(mapPoints.map((point) => {
-      const isVisible = mapPointVisibilityOverrides.get(point.id) !== false;
-      return `<option value="${escapeHtml(point.id)}">${escapeHtml(point.name)} (${isVisible ? 'visible' : 'masqué'})</option>`;
-    }));
+    .concat(mapPoints
+      .filter((point) => selectedCategory === 'all' || point.category === selectedCategory)
+      .map((point) => {
+        const isVisible = mapPointVisibilityOverrides.get(point.id) !== false;
+        return `<option value="${escapeHtml(point.id)}">${escapeHtml(point.name)} (${isVisible ? 'visible' : 'masqué'})</option>`;
+      }));
   select.innerHTML = options.join('');
-  if (mapPoints.some((point) => point.id === selectedValue)) select.value = selectedValue;
+  if (mapPoints.some((point) => point.id === selectedValue && (selectedCategory === 'all' || point.category === selectedCategory))) select.value = selectedValue;
   syncPoiTargetButton();
 }
 
@@ -1228,13 +1236,13 @@ function syncPoiTargetButton() {
   if (!select || !button) return;
   const point = mapPoints.find((item) => item.id === select.value);
   if (!point) {
-    button.textContent = 'Activer/Désactiver';
+    button.textContent = 'Afficher/Masquer';
     button.disabled = true;
     return;
   }
   const isVisible = mapPointVisibilityOverrides.get(point.id) !== false;
   button.disabled = false;
-  button.textContent = isVisible ? 'Désactiver sélection' : 'Activer sélection';
+  button.textContent = isVisible ? 'Masquer sélection' : 'Afficher sélection';
 }
 
 function toggleSelectedPoiVisibility() {
@@ -1253,6 +1261,7 @@ function renderResources() {
   const query = (document.getElementById('map-search')?.value || '').trim().toLowerCase();
   const resources = showResources
     ? RESOURCE_POINTS.filter((r) => (type === 'all' || r.type === type)
+      && r.active
       && (priority === 'all' || r.priority === priority)
       && (!query || `${r.name} ${r.address}`.toLowerCase().includes(query)))
     : [];
@@ -1260,13 +1269,13 @@ function renderResources() {
   const markerColor = { critical: '#e03131', vital: '#1971c2', risk: '#f08c00' };
   setHtml('resources-list', resources.map((r) => {
     const meta = RESOURCE_TYPE_META[r.type] || { label: r.type.replace(/_/g, ' '), icon: '📍' };
-    const statusLabel = r.active ? 'activée' : 'désactivée';
+    const statusLabel = r.active ? 'affichée' : 'masquée';
     return `<li>
       <strong>${meta.icon} ${r.name}</strong> · ${r.address}<br/>
       <span class="muted">${meta.label} · ${statusLabel} · ${priorityLabel[r.priority] || 'standard'}</span><br/>
       <span class="muted">${escapeHtml(r.info || 'Aucune information complémentaire.')}</span><br/>
       <a href="${escapeHtml(r.source || '#')}" target="_blank" rel="noreferrer">Source</a>
-      <button type="button" class="ghost" data-resource-toggle="${escapeHtml(r.id)}">${r.active ? 'Désactiver' : 'Activer'}</button>
+      <button type="button" class="ghost" data-resource-toggle="${escapeHtml(r.id)}">${r.active ? 'Masquer' : 'Afficher'}</button>
     </li>`;
   }).join('') || '<li>Aucune ressource avec ces filtres.</li>');
   mapStats.resources = resources.length;
@@ -1282,7 +1291,7 @@ function renderResources() {
     window.L.marker([coords.lat, coords.lon], {
       icon: window.L.divIcon({ className: 'map-resource-icon-wrap', html: markerHtml, iconSize: [24, 24], iconAnchor: [12, 12] }),
     })
-      .bindPopup(`<strong>${meta.icon} ${r.name}</strong><br>Type: ${meta.label}<br>Niveau: ${priorityLabel[r.priority] || 'standard'}<br>Adresse: ${r.address}<br>Activation: ${r.active ? 'oui' : 'non'}<br>${escapeHtml(r.info || '')}<br><a href="${escapeHtml(r.source || '#')}" target="_blank" rel="noreferrer">Source publique</a>`)
+      .bindPopup(`<strong>${meta.icon} ${r.name}</strong><br>Type: ${meta.label}<br>Niveau: ${priorityLabel[r.priority] || 'standard'}<br>Adresse: ${r.address}<br>Visibilité: ${r.active ? 'affichée' : 'masquée'}<br>${escapeHtml(r.info || '')}<br><a href="${escapeHtml(r.source || '#')}" target="_blank" rel="noreferrer">Source publique</a>`)
       .addTo(resourceLayer);
   });
   setMapFeedback(showResources ? `${resources.length} ressource(s) affichée(s).` : 'Affichage des ressources désactivé.');
@@ -3491,8 +3500,10 @@ function bindAppInteractions() {
     toggleResourceActive(button.dataset.resourceToggle || '');
   });
   document.getElementById('resource-bulk-action-btn')?.addEventListener('click', applyResourceBulkAction);
+  document.getElementById('resource-target-category-filter')?.addEventListener('change', refreshResourceTargetOptions);
   document.getElementById('resource-target-select')?.addEventListener('change', syncResourceTargetButton);
   document.getElementById('resource-target-toggle-btn')?.addEventListener('click', toggleSelectedResource);
+  document.getElementById('poi-target-category-filter')?.addEventListener('change', refreshPoiTargetOptions);
   document.getElementById('poi-target-select')?.addEventListener('change', syncPoiTargetButton);
   document.getElementById('poi-target-toggle-btn')?.addEventListener('click', toggleSelectedPoiVisibility);
   document.getElementById('map-point-category-filter')?.addEventListener('change', renderCustomPoints);
