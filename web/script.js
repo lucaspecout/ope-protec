@@ -2786,8 +2786,8 @@ function renderSituationOverview() {
   const logs = Array.isArray(cachedLogs) && cachedLogs.length
     ? cachedLogs.slice(0, 8)
     : (Array.isArray(dashboard.latest_logs) ? dashboard.latest_logs : []);
-  const openLogs = logs.filter((log) => String(log.status || '').toLowerCase() !== 'clos');
-  const closedLogs = logs.filter((log) => String(log.status || '').toLowerCase() === 'clos');
+  const activeSituationStatuses = new Set(['nouveau', 'en_cours', 'suivi']);
+  const activeLogs = logs.filter((log) => activeSituationStatuses.has(String(log.status || '').toLowerCase()));
   const prefectureItems = Array.isArray(externalRisks?.prefecture_isere?.items)
     ? sortPrefectureItemsByRecency(externalRisks.prefecture_isere.items).slice(0, 4)
     : [];
@@ -2851,12 +2851,8 @@ function renderSituationOverview() {
     <h3>Fil de situation</h3>
     <div class="situation-log-columns">
       <div>
-        <h4>Crises en cours</h4>
-        <ul class="list">${openLogs.slice(0, 8).map((log) => buildSituationLogMarkup(log)).join('') || '<li>Aucune crise en cours.</li>'}</ul>
-      </div>
-      <div>
-        <h4>Crises clôturées</h4>
-        <ul class="list">${closedLogs.slice(0, 8).map((log) => buildSituationLogMarkup(log)).join('') || '<li>Aucune crise clôturée récente.</li>'}</ul>
+        <h4>Nouveaux / En cours / Suivi</h4>
+        <ul class="list">${activeLogs.slice(0, 8).map((log) => buildSituationLogMarkup(log)).join('') || '<li>Aucune crise nouvelle / en cours / suivie.</li>'}</ul>
       </div>
     </div>
   `);
