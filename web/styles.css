@@ -392,6 +392,9 @@ label { display: block; margin-bottom: .8rem; }
 .map-search-inline { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: .45rem; }
 .map-inline-actions { display: flex; flex-wrap: nowrap; gap: .45rem; overflow-x: auto; }
 .map-inline-filter { display: grid; gap: .35rem; }
+.map-inline-actions--stacked { display: grid; gap: .35rem; }
+.map-bulk-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .35rem; }
+.map-bulk-controls .map-btn-lite[disabled] { opacity: .6; cursor: not-allowed; }
 .map-inline-checkbox { display: inline-flex; align-items: center; gap: .35rem; font-size: .78rem; color: #2a436f; }
 .map-inline-checkbox input { width: auto; margin: 0; }
 .map-btn-lite { border-radius: 8px; font-weight: 600; }
