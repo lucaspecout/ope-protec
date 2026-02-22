@@ -2615,10 +2615,24 @@ function renderSituationOverview() {
     { label: 'Risque global', value: globalRisk, info: 'Calcul consolidé', css: normalizeLevel(globalRisk) },
     { label: 'Communes en crise', value: String(crisisCount), info: 'PCS actif', css: crisisCount > 0 ? 'rouge' : 'vert' },
   ];
+  const bisonDeparture = normalizeLevel(externalRisks?.bison_fute?.today?.isere?.departure || 'inconnu');
+  const vigieauAlertsCount = Number((externalRisks?.vigieau?.alerts || []).length);
+  const atmoLevel = normalizeLevel(externalRisks?.atmo_aura?.today?.level || 'inconnu');
+  const sncfIncidentsCount = Number(externalRisks?.sncf_isere?.alerts_total ?? (externalRisks?.sncf_isere?.alerts || []).length);
+  const mobilityCards = [
+    { label: 'Bison Futé (38)', value: bisonDeparture, info: 'Tendance départ Isère', css: bisonDeparture },
+    { label: 'Vigieau', value: `${vigieauAlertsCount}`, info: "Restriction(s) d'eau active(s)", css: vigieauAlertsCount > 0 ? 'jaune' : 'vert' },
+    { label: "Qualité de l'air", value: atmoLevel, info: 'Source Atmo AURA', css: atmoLevel },
+    { label: 'Incidents SNCF', value: `${sncfIncidentsCount}`, info: 'Accidents / travaux Isère', css: sncfIncidentsCount > 0 ? 'orange' : 'vert' },
+  ];
 
   setHtml('situation-content', `
     <div class="situation-top-grid">
       ${kpiCards.map((card) => `<article class="tile situation-tile"><h3>${card.label}</h3><p class="kpi-value ${card.css}">${escapeHtml(card.value)}</p><p class="muted">${card.info}</p></article>`).join('')}
+    </div>
+
+    <div class="situation-top-grid">
+      ${mobilityCards.map((card) => `<article class="tile situation-tile"><h3>${card.label}</h3><p class="kpi-value ${card.css}">${escapeHtml(card.value)}</p><p class="muted">${card.info}</p></article>`).join('')}
     </div>
 
     <div class="situation-middle-grid">
