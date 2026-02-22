@@ -920,12 +920,27 @@ def _fetch_vigicrues_isere_live(
             group["stations"].append({"code": station["code"], "station": station["station"], "river": station["river"]})
             group["level"] = _highest_vigilance_level([{"level": group["level"]}, {"level": station["level"]}])
 
+        # Tracé simplifié du tronçon Vigicrues AN20 (Isère aval),
+        # de l'aval immédiat de Grenoble vers la confluence avec le Rhône
+        # (secteur Pont-de-l'Isère / La Roche-de-Glun).
         isere_aval_points = [
-            [45.1885, 5.7245],
-            [45.1456, 5.5852],
-            [45.1052, 5.3554],
-            [45.0539, 5.0536],
-            [44.9336, 4.8924],
+            [45.1885, 5.7245],  # Grenoble (limite aval secteur grenoblois)
+            [45.1719, 5.6899],  # Sassenage
+            [45.1475, 5.6365],  # Noyarey
+            [45.1156, 5.5489],  # Voreppe
+            [45.0849, 5.4914],  # Moirans
+            [45.0586, 5.4825],  # Tullins
+            [45.0236, 5.4461],  # Poliénas / Saint-Quentin-sur-Isère
+            [45.0039, 5.4139],  # Saint-Gervais
+            [44.9762, 5.3587],  # Cognin-les-Gorges
+            [44.9648, 5.3189],  # Saint-Just-de-Claix
+            [44.9528, 5.2316],  # Saint-Romans
+            [44.9496, 5.1674],  # Chatte
+            [44.9349, 5.0988],  # Saint-Nazaire-en-Royans
+            [45.0016, 5.0502],  # Romans-sur-Isère / Bourg-de-Péage
+            [44.9668, 4.9214],  # Beaumont-Monteux
+            [44.9442, 4.8792],  # Pont-de-l'Isère
+            [44.9336, 4.8924],  # Confluence Isère-Rhône
         ]
         isere_aval_level, isere_aval_rss = (None, None)
         try:
