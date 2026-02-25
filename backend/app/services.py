@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import csv
 from datetime import datetime, timedelta
 from copy import deepcopy
 from email.utils import parsedate_to_datetime
@@ -366,6 +367,7 @@ _VIGIEAU_CACHE_TTL_SECONDS = 900
 _ATMO_AURA_CACHE_TTL_SECONDS = 900
 _SNCF_ISERE_CACHE_TTL_SECONDS = 180
 _RTE_ELECTRICITY_CACHE_TTL_SECONDS = 300
+_FINESS_ISERE_CACHE_TTL_SECONDS = 43200
 
 _vigicrues_cache_lock = Lock()
 _vigicrues_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
@@ -387,6 +389,8 @@ _sncf_isere_cache_lock = Lock()
 _sncf_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _rte_electricity_cache_lock = Lock()
 _rte_electricity_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_finess_isere_cache_lock = Lock()
+_finess_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _isere_aval_polyline_cache_lock = Lock()
 _isere_aval_polyline_cache: dict[str, Any] = {"points": None, "expires_at": datetime.min}
 _ISERE_AVAL_GRENOBLE_CUTOFF_LON = 5.67526671768763
@@ -2494,6 +2498,153 @@ def fetch_rte_isere_electricity_status(force_refresh: bool = False) -> dict[str,
         ttl_seconds=_RTE_ELECTRICITY_CACHE_TTL_SECONDS,
         force_refresh=force_refresh,
         loader=_fetch_rte_isere_electricity_live,
+    )
+
+
+def _extract_city_from_finess_address_line(value: str) -> tuple[str | None, str | None]:
+    blob = re.sub(r"\s+", " ", (value or "").strip())
+    if not blob:
+        return None, None
+    match = re.match(r"^(\d{5})\s+(.+)$", blob)
+    if not match:
+        return None, blob.title()
+    postal_code = match.group(1)
+    city = match.group(2).strip().title()
+    return postal_code, city
+
+
+def _finess_isere_kind(row: list[str]) -> str | None:
+    blob = " ".join((row[3] if len(row) > 3 else "", row[4] if len(row) > 4 else "", row[19] if len(row) > 19 else "", row[21] if len(row) > 21 else "")).lower()
+    if any(token in blob for token in ("ehpad", "hebergement pour personnes agees dependantes", "hébergement pour personnes âgées dépendantes")):
+        return "ehpad"
+    if any(token in blob for token in ("hopital", "hôpital", "hospital", "clinique", "chu", "centre hospitalier")):
+        return "hopital"
+    return None
+
+
+def _finess_commune_center(city: str) -> tuple[float, float] | None:
+    try:
+        payload = _http_get_json(
+            f"https://geo.api.gouv.fr/communes?nom={quote_plus(city)}&codeDepartement=38&fields=centre&boost=population&limit=1",
+            timeout=8,
+        )
+    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, list) or not payload:
+        return None
+    coordinates = ((payload[0] or {}).get("centre") or {}).get("coordinates")
+    if not isinstance(coordinates, list) or len(coordinates) != 2:
+        return None
+    lon, lat = coordinates
+    try:
+        return float(lat), float(lon)
+    except (TypeError, ValueError):
+        return None
+
+
+def _fetch_finess_isere_resources_live(limit: int = 250) -> dict[str, Any]:
+    dataset_url = "https://www.data.gouv.fr/api/1/datasets/finess-extraction-du-fichier-des-etablissements/"
+    dataset = _http_get_json(dataset_url, timeout=12)
+    resources = dataset.get("resources") if isinstance(dataset, dict) else []
+    csv_url = ""
+    for resource in resources or []:
+        title = str(resource.get("title") or "").lower()
+        if "géolocalis" in title and str(resource.get("url") or "").endswith(".csv"):
+            csv_url = str(resource.get("url") or "")
+            break
+    if not csv_url:
+        raise RuntimeError("Ressource FINESS géolocalisée introuvable sur data.gouv.fr")
+
+    request = Request(csv_url, headers={"User-Agent": "ope-protec/1.0"})
+    csv_bytes = _http_get_with_retries(request=request, timeout=45)
+    decoded = csv_bytes.decode("utf-8", errors="ignore").splitlines()
+    rows = csv.reader(decoded, delimiter=";")
+    next(rows, None)  # ligne métadonnées
+
+    commune_center_cache: dict[str, tuple[float, float] | None] = {}
+    points: list[dict[str, Any]] = []
+    hospitals_total = 0
+    ehpad_total = 0
+    for row in rows:
+        if len(row) < 22 or row[13].strip() != "38":
+            continue
+        kind = _finess_isere_kind(row)
+        if not kind:
+            continue
+        if kind == "hopital":
+            hospitals_total += 1
+        if kind == "ehpad":
+            ehpad_total += 1
+        if len(points) >= max(20, min(limit, 400)):
+            continue
+
+        postal_code, city = _extract_city_from_finess_address_line(row[15] if len(row) > 15 else "")
+        if not city:
+            continue
+        if city not in commune_center_cache:
+            commune_center_cache[city] = _finess_commune_center(city)
+        coords = commune_center_cache.get(city)
+        if not coords:
+            continue
+        lat, lon = coords
+        address_parts = [row[8] if len(row) > 8 else "", row[9] if len(row) > 9 else "", row[15] if len(row) > 15 else ""]
+        points.append(
+            {
+                "id": f"finess-{row[1] if len(row) > 1 else len(points)}",
+                "name": str((row[4] if len(row) > 4 else "") or (row[3] if len(row) > 3 else "")).strip() or "Établissement FINESS",
+                "short_name": str(row[3] if len(row) > 3 else "").strip() or "",
+                "type": kind,
+                "category": str(row[21] if len(row) > 21 else "").strip(),
+                "lat": lat,
+                "lon": lon,
+                "city": city,
+                "postal_code": postal_code,
+                "address": re.sub(r"\s+", " ", " ".join(part for part in address_parts if part).strip()),
+                "finess_id": str(row[1] if len(row) > 1 else "").strip(),
+                "source": "https://www.data.gouv.fr/fr/datasets/finess-extraction-du-fichier-des-etablissements/",
+                "info": f"Source FINESS data.gouv.fr · {kind.upper()}",
+                "active": True,
+                "priority": "critical" if kind == "hopital" else "vital",
+                "dynamic": True,
+            }
+        )
+
+    return {
+        "status": "online",
+        "source": "FINESS data.gouv.fr",
+        "dataset_url": "https://www.data.gouv.fr/fr/datasets/finess-extraction-du-fichier-des-etablissements/",
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+        "hospitals_total": hospitals_total,
+        "ehpad_total": ehpad_total,
+        "resources_total": len(points),
+        "resources": points,
+    }
+
+
+def fetch_finess_isere_resources(force_refresh: bool = False, limit: int = 250) -> dict[str, Any]:
+    safe_limit = max(20, min(limit, 400))
+
+    def loader() -> dict[str, Any]:
+        try:
+            return _fetch_finess_isere_resources_live(limit=safe_limit)
+        except Exception as exc:
+            return {
+                "status": "degraded",
+                "source": "FINESS data.gouv.fr",
+                "updated_at": datetime.utcnow().isoformat() + "Z",
+                "hospitals_total": 0,
+                "ehpad_total": 0,
+                "resources_total": 0,
+                "resources": [],
+                "error": str(exc),
+            }
+
+    return _cached_external_payload(
+        cache=_finess_isere_cache,
+        lock=_finess_isere_cache_lock,
+        ttl_seconds=_FINESS_ISERE_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=loader,
     )
 
 
