@@ -365,6 +365,7 @@ _DAUPHINE_CACHE_TTL_SECONDS = 300
 _VIGIEAU_CACHE_TTL_SECONDS = 900
 _ATMO_AURA_CACHE_TTL_SECONDS = 900
 _SNCF_ISERE_CACHE_TTL_SECONDS = 180
+_RTE_ELECTRICITY_CACHE_TTL_SECONDS = 300
 
 _vigicrues_cache_lock = Lock()
 _vigicrues_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
@@ -384,6 +385,8 @@ _atmo_aura_cache_lock = Lock()
 _atmo_aura_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _sncf_isere_cache_lock = Lock()
 _sncf_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_rte_electricity_cache_lock = Lock()
+_rte_electricity_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _isere_aval_polyline_cache_lock = Lock()
 _isere_aval_polyline_cache: dict[str, Any] = {"points": None, "expires_at": datetime.min}
 _ISERE_AVAL_GRENOBLE_CUTOFF_LON = 5.67526671768763
@@ -2406,6 +2409,91 @@ def fetch_sncf_isere_alerts(force_refresh: bool = False) -> dict[str, Any]:
         ttl_seconds=_SNCF_ISERE_CACHE_TTL_SECONDS,
         force_refresh=force_refresh,
         loader=_fetch_sncf_isere_alerts_live,
+    )
+
+
+def _rte_electricity_risk_level(supply_margin_mw: int | float | None) -> str:
+    if supply_margin_mw is None:
+        return "inconnu"
+    if supply_margin_mw >= 1000:
+        return "vert"
+    if supply_margin_mw >= 300:
+        return "jaune"
+    if supply_margin_mw >= 0:
+        return "orange"
+    return "rouge"
+
+
+def _fetch_rte_isere_electricity_live() -> dict[str, Any]:
+    dataset_api = "https://www.data.gouv.fr/api/1/datasets/donnees-eco2mix-regionales-temps-reel-1/"
+    records_api = (
+        "https://odre.opendatasoft.com/api/explore/v2.1/catalog/datasets/eco2mix-regional-tr/records"
+        "?select=code_insee_region,libelle_region,date_heure,consommation,thermique,nucleaire,eolien,solaire,hydraulique,bioenergies,ech_physiques"
+        "&where=code_insee_region%3D%2784%27%20and%20consommation%20is%20not%20null"
+        "&order_by=date_heure%20desc&limit=1"
+    )
+
+    try:
+        dataset_payload = _http_get_json(dataset_api)
+        records_payload = _http_get_json(records_api)
+        records = records_payload.get("results") or []
+        if not records:
+            raise ValueError("Aucune donnée éCO2mix disponible pour la région ARA")
+
+        latest = records[0]
+        consumption = int(latest.get("consommation") or 0)
+        production_breakdown = {
+            "nucleaire": int(latest.get("nucleaire") or 0),
+            "hydraulique": int(latest.get("hydraulique") or 0),
+            "solaire": int(latest.get("solaire") or 0),
+            "eolien": int(latest.get("eolien") or 0),
+            "thermique": int(latest.get("thermique") or 0),
+            "bioenergies": int(latest.get("bioenergies") or 0),
+        }
+        regional_generation = sum(production_breakdown.values())
+        supply_margin_mw = regional_generation - consumption
+        exchange = int(latest.get("ech_physiques") or 0)
+        level = _rte_electricity_risk_level(supply_margin_mw)
+
+        return {
+            "service": "RTE éCO2mix régional",
+            "status": "online",
+            "department": "Isère (38)",
+            "scope": "Proxy régional Auvergne-Rhône-Alpes (code INSEE 84)",
+            "source": records_api,
+            "dataset": {
+                "title": dataset_payload.get("title", "Données éCO2mix régionales temps réel"),
+                "page": dataset_payload.get("page", "https://www.data.gouv.fr/datasets/donnees-eco2mix-regionales-temps-reel-1"),
+            },
+            "observed_at": latest.get("date_heure"),
+            "level": level,
+            "consumption_mw": consumption,
+            "regional_generation_mw": regional_generation,
+            "supply_margin_mw": supply_margin_mw,
+            "exchange_mw": exchange,
+            "production_breakdown_mw": production_breakdown,
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
+        return {
+            "service": "RTE éCO2mix régional",
+            "status": "degraded",
+            "department": "Isère (38)",
+            "scope": "Proxy régional Auvergne-Rhône-Alpes (code INSEE 84)",
+            "source": records_api,
+            "level": "inconnu",
+            "error": str(exc),
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+
+
+def fetch_rte_isere_electricity_status(force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_rte_electricity_cache,
+        lock=_rte_electricity_cache_lock,
+        ttl_seconds=_RTE_ELECTRICITY_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=_fetch_rte_isere_electricity_live,
     )
 
 
