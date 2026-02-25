@@ -118,6 +118,7 @@ const mapPointVisibilityOverrides = new Map();
 let pendingMapPointCoords = null;
 let mapIconTouched = false;
 let cachedStations = [];
+let cachedVigicruesPayload = { stations: [], troncons: [] };
 let cachedMunicipalities = [];
 let cachedMunicipalityRecords = [];
 let cachedItinisereEvents = [];
@@ -847,7 +848,6 @@ function setMapFeedback(message = '', isError = false) {
 async function resetMapFilters() {
   const defaults = {
     'map-search': '',
-    'map-point-category-filter': 'all',
     'resource-target-category-filter': 'all',
     'poi-target-category-filter': 'all',
     'map-basemap-select': 'osm',
@@ -875,7 +875,7 @@ async function resetMapFilters() {
   if (googleFlow) googleFlow.checked = false;
   if (searchLayer) searchLayer.clearLayers();
   applyBasemap('osm');
-  renderStations(cachedStations);
+  renderStations(cachedVigicruesPayload);
   renderCustomPoints();
   renderResources();
   await renderMunicipalitiesOnMap(cachedMunicipalities);
@@ -1205,25 +1205,6 @@ async function renderMunicipalitiesOnMap(municipalities = []) {
   setMapFeedback(`${renderedCount}/${pcs.length} commune(s) PCS géolocalisée(s).`);
 }
 
-function refreshResourceTargetOptions() {
-  const button = document.getElementById('resource-target-toggle-btn');
-  if (!button) return;
-  const hasVisible = RESOURCE_POINTS.some((resource) => resource.active);
-  button.disabled = RESOURCE_POINTS.length === 0;
-  button.textContent = hasVisible ? 'Masquer toutes les ressources' : 'Afficher toutes les ressources';
-}
-
-function toggleSelectedResource() {
-  if (!RESOURCE_POINTS.length) return;
-  const hasVisible = RESOURCE_POINTS.some((resource) => resource.active);
-  RESOURCE_POINTS.forEach((resource) => {
-    resource.active = !hasVisible;
-  });
-  renderResources();
-  fitMapToData();
-  setMapFeedback(`Ressources: ${hasVisible ? 'masquées' : 'affichées'} (toutes catégories).`);
-}
-
 function refreshPoiTargetOptions() {
   const button = document.getElementById('poi-target-toggle-btn');
   if (!button) return;
@@ -1243,7 +1224,6 @@ function toggleSelectedPoiVisibility() {
     mapPointVisibilityOverrides.set(point.id, !hasVisible);
   });
   renderCustomPoints();
-  fitMapToData();
   setMapFeedback(`POI personnalisés: ${hasVisible ? 'masqués' : 'affichés'} (toutes catégories).`);
 }
 
@@ -1271,7 +1251,6 @@ function renderResources() {
   }).join('') || '<li>Aucune ressource avec ces filtres.</li>');
   mapStats.resources = resources.length;
   updateMapSummary();
-  refreshResourceTargetOptions();
   if (!resourceLayer) return;
   resourceLayer.clearLayers();
   resources.forEach((r) => {
@@ -3195,6 +3174,10 @@ function renderExternalRisks(data = {}) {
   cachedExternalRisksSnapshot = data && typeof data === 'object' ? data : {};
   const meteo = data?.meteo_france || {};
   const vigicrues = data?.vigicrues || {};
+  cachedVigicruesPayload = {
+    stations: Array.isArray(vigicrues.stations) ? vigicrues.stations : [],
+    troncons: Array.isArray(vigicrues.troncons) ? vigicrues.troncons : [],
+  };
   const itinisere = data?.itinisere || {};
   const bisonFute = data?.bison_fute || {};
   const prefecture = data?.prefecture_isere || {};
@@ -3250,7 +3233,7 @@ function renderExternalRisks(data = {}) {
   setText('map-itinisere-precision', `${preciseLocations}/${itinisereEvents.length || 0} avec lieu identifié`);
   setText('map-seismic-level', georisques.highest_seismic_zone_label || 'inconnue');
   setText('map-flood-docs', String(georisques.flood_documents_total ?? 0));
-  renderStations(vigicrues);
+  renderStations(cachedVigicruesPayload);
   renderSituationOverview();
 }
 
@@ -3819,12 +3802,10 @@ function bindAppInteractions() {
   document.getElementById('resource-target-category-filter')?.addEventListener('change', () => {
     renderResources();
   });
-  document.getElementById('resource-target-toggle-btn')?.addEventListener('click', toggleSelectedResource);
   document.getElementById('poi-target-category-filter')?.addEventListener('change', () => {
     renderCustomPoints();
   });
   document.getElementById('poi-target-toggle-btn')?.addEventListener('click', toggleSelectedPoiVisibility);
-  document.getElementById('map-point-category-filter')?.addEventListener('change', renderCustomPoints);
   document.getElementById('map-point-form-cancel')?.addEventListener('click', () => {
     const modal = document.getElementById('map-point-modal');
     mapAddPointMode = false;
@@ -4192,11 +4173,10 @@ function bindAppInteractions() {
 
   ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-itinisere', 'filter-bison-accidents', 'filter-bison-cameras', 'filter-photo-cameras'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
-      renderStations(cachedStations);
+      renderStations(cachedVigicruesPayload);
       await renderMunicipalitiesOnMap(cachedMunicipalities);
       renderResources();
       await renderTrafficOnMap();
-      fitMapToData();
     });
   });
 }
