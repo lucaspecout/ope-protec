@@ -1310,7 +1310,6 @@ function classifyInstitutionPoint(element = {}) {
   const name = String(tags.name || '').toLowerCase();
   const policeType = String(tags.police || '').toLowerCase();
   const railway = String(tags.railway || '').toLowerCase();
-  const publicTransport = String(tags.public_transport || '').toLowerCase();
   const aeroway = String(tags.aeroway || '').toLowerCase();
 
   if (amenity === 'kindergarten') return 'creche';
@@ -1328,7 +1327,7 @@ function classifyInstitutionPoint(element = {}) {
     return 'commissariat_police_nationale';
   }
   if (amenity === 'bus_station') return 'transport_gare_routiere';
-  if (railway === 'station' || publicTransport === 'station') return 'transport_gare_sncf';
+  if (railway === 'station') return 'transport_gare_sncf';
   if (aeroway === 'aerodrome' || aeroway === 'airport') return 'transport_aeroport';
   return null;
 }
@@ -1480,7 +1479,6 @@ area["boundary"="administrative"]["admin_level"="6"]["name"="Isère"]->.searchAr
   nwr["amenity"~"school|college|university|kindergarten|police|fire_station|bus_station"](area.searchArea);
   nwr["railway"="station"](area.searchArea);
   nwr["aeroway"~"aerodrome|airport"](area.searchArea);
-  nwr["public_transport"="station"](area.searchArea);
 );
 out center tags;`;
   try {
