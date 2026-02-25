@@ -560,18 +560,6 @@
                 </select>
                 <div class="map-inline-actions map-inline-actions--stacked">
                   <div class="map-bulk-controls">
-                    <select id="resource-target-category-filter" aria-label="Filtrer les ressources par catégorie">
-                      <option value="all">Ressources: afficher tout</option>
-                      <option value="transport">Transports</option>
-                      <option value="lieu_risque">Sites Seveso</option>
-                      <option value="poste_commandement">Centres de commandement</option>
-                      <option value="centrale_nucleaire">Sites nucléaires</option>
-                      <option value="centre_hebergement">Centres d'hébergement</option>
-                      <option value="energie">Barrages</option>
-                    </select>
-                    <button id="resource-target-toggle-btn" type="button" class="ghost map-btn-lite">Masquer les ressources</button>
-                  </div>
-                  <div class="map-bulk-controls">
                     <select id="poi-target-category-filter" aria-label="Filtrer les POI par catégorie">
                       <option value="all">POI perso: afficher tout</option>
                       <option value="incident">Incidents</option>
@@ -590,6 +578,8 @@
                 <div class="map-toggle-grid">
                   <label><input id="filter-hydro" type="checkbox" checked /> Vigicrues</label>
                   <label><input id="filter-pcs" type="checkbox" checked /> Communes PCS</label>
+                  <label><input id="filter-resources-command" type="checkbox" checked /> Centres de commandement</label>
+                  <label><input id="filter-resources-shelter" type="checkbox" checked /> Centres d'hébergement</label>
                   <label><input id="filter-resources-schools" type="checkbox" /> Écoles, collèges, lycées, universités, crèches (Isère)
                     <select id="filter-resources-schools-type" aria-label="Filtrer les établissements scolaires">
                       <option value="all">Tous les types</option>

@@ -165,6 +165,8 @@ const FIRE_RESOURCE_TYPES = new Set(['caserne_pompier']);
 const HEALTH_RESOURCE_TYPES = new Set(['hopital', 'ehpad']);
 const RISK_RESOURCE_TYPES = new Set(['lieu_risque', 'centrale_nucleaire', 'energie']);
 const TRANSPORT_RESOURCE_TYPES = new Set(['transport', 'transport_gare_sncf', 'transport_gare_routiere', 'transport_aeroport']);
+const COMMAND_RESOURCE_TYPES = new Set(['poste_commandement']);
+const SHELTER_RESOURCE_TYPES = new Set(['centre_hebergement']);
 
 const ISERE_BOUNDARY_STYLE = { color: '#163a87', weight: 2, fillColor: '#63c27d', fillOpacity: 0.2 };
 const TRAFFIC_COMMUNES = ['Grenoble', 'Voiron', 'Vienne', 'Bourgoin-Jallieu', 'Pont-de-Claix', 'Meylan', 'Échirolles', 'L\'Isle-d\'Abeau', 'Saint-Martin-d\'Hères', 'La Tour-du-Pin', 'Rives', 'Sassenage', 'Crolles', 'Tullins'];
@@ -883,7 +885,6 @@ function setMapFeedback(message = '', isError = false) {
 async function resetMapFilters() {
   const defaults = {
     'map-search': '',
-    'resource-target-category-filter': 'all',
     'poi-target-category-filter': 'all',
     'filter-resources-schools-type': 'all',
     'filter-resources-security-type': 'all',
@@ -909,6 +910,8 @@ async function resetMapFilters() {
   const cameras = document.getElementById('filter-cameras');
   const googleFlow = document.getElementById('filter-google-traffic-flow');
   const healthResources = document.getElementById('filter-resources-health');
+  const commandResources = document.getElementById('filter-resources-command');
+  const shelterResources = document.getElementById('filter-resources-shelter');
   if (hydro) hydro.checked = true;
   if (pcs) pcs.checked = true;
   if (activeOnly) activeOnly.checked = true;
@@ -920,6 +923,8 @@ async function resetMapFilters() {
   if (trafficIncidents) trafficIncidents.checked = true;
   if (cameras) cameras.checked = true;
   if (healthResources) healthResources.checked = false;
+  if (commandResources) commandResources.checked = true;
+  if (shelterResources) shelterResources.checked = true;
   if (googleFlow) googleFlow.checked = false;
   resourceVisibilityOverrides.clear();
   if (searchLayer) searchLayer.clearLayers();
@@ -1267,33 +1272,6 @@ function syncPoiTargetButton() {
   refreshPoiTargetOptions();
 }
 
-function refreshResourceTargetOptions() {
-  const button = document.getElementById('resource-target-toggle-btn');
-  if (!button) return;
-  const targetCategory = document.getElementById('resource-target-category-filter')?.value || 'all';
-  const allResources = [...RESOURCE_POINTS, ...institutionPointsCache, ...finessPointsCache]
-    .filter((resource) => matchesResourceCategory(resource, targetCategory));
-  const hasVisible = allResources.some((resource) => resourceVisibilityOverrides.get(resource.id) !== false);
-  button.disabled = allResources.length === 0;
-  button.textContent = hasVisible ? 'Masquer les ressources' : 'Afficher les ressources';
-}
-
-function toggleSelectedResourceVisibility() {
-  const targetCategory = document.getElementById('resource-target-category-filter')?.value || 'all';
-  const allResources = [...RESOURCE_POINTS, ...institutionPointsCache, ...finessPointsCache]
-    .filter((resource) => matchesResourceCategory(resource, targetCategory));
-  if (!allResources.length) return;
-  const hasVisible = allResources.some((resource) => resourceVisibilityOverrides.get(resource.id) !== false);
-  allResources.forEach((resource) => {
-    resourceVisibilityOverrides.set(resource.id, !hasVisible);
-  });
-  renderResources();
-  const targetLabel = targetCategory === 'all'
-    ? 'toutes catégories'
-    : (RESOURCE_TYPE_META[targetCategory]?.label || targetCategory.replace(/_/g, ' '));
-  setMapFeedback(`Ressources: ${hasVisible ? 'masquées' : 'affichées'} (${targetLabel}).`);
-}
-
 function toggleSelectedPoiVisibility() {
   if (!mapPoints.length) return;
   const hasVisible = mapPoints.some((point) => mapPointVisibilityOverrides.get(point.id) !== false);
@@ -1370,10 +1348,10 @@ function shouldDisplayInstitutionType(type = '') {
   return false;
 }
 
-function matchesResourceCategory(resource = {}, targetCategory = 'all') {
-  if (targetCategory === 'all') return true;
-  if (targetCategory === 'transport') return TRANSPORT_RESOURCE_TYPES.has(resource.type);
-  return resource.type === targetCategory;
+function shouldDisplayBaseResourceType(type = '') {
+  if (COMMAND_RESOURCE_TYPES.has(type)) return document.getElementById('filter-resources-command')?.checked ?? true;
+  if (SHELTER_RESOURCE_TYPES.has(type)) return document.getElementById('filter-resources-shelter')?.checked ?? true;
+  return true;
 }
 
 async function loadFinessIsereResources() {
@@ -1521,19 +1499,17 @@ out center tags;`;
 }
 
 function getDisplayedResources() {
-  const targetCategory = document.getElementById('resource-target-category-filter')?.value || 'all';
   const query = (document.getElementById('map-search')?.value || '').trim().toLowerCase();
   const staticResources = RESOURCE_POINTS
     .filter((r) => r.active)
     .filter((r) => resourceVisibilityOverrides.get(r.id) !== false)
+    .filter((r) => shouldDisplayBaseResourceType(r.type))
     .filter((r) => !HEALTH_RESOURCE_TYPES.has(r.type) || shouldDisplayInstitutionType(r.type))
-    .filter((r) => matchesResourceCategory(r, targetCategory))
     .filter((r) => !query || `${r.name} ${r.address}`.toLowerCase().includes(query))
     .map((r) => ({ ...r, dynamic: false }));
   const dynamicResources = [...institutionPointsCache, ...finessPointsCache]
     .filter((r) => shouldDisplayInstitutionType(r.type))
     .filter((r) => resourceVisibilityOverrides.get(r.id) !== false)
-    .filter((r) => matchesResourceCategory(r, targetCategory))
     .filter((r) => !query || `${r.name} ${r.address}`.toLowerCase().includes(query));
   return [...staticResources, ...dynamicResources];
 }
@@ -1557,7 +1533,6 @@ async function renderResources() {
   }).join('') || '<li>Aucune ressource avec ces filtres.</li>');
   mapStats.resources = resources.length;
   updateMapSummary();
-  refreshResourceTargetOptions();
   if (!resourceLayer) return;
   resourceLayer.clearLayers();
   resources.forEach((r) => {
@@ -4176,10 +4151,6 @@ function bindAppInteractions() {
     if (!button) return;
     toggleResourceActive(button.dataset.resourceToggle || '');
   });
-  document.getElementById('resource-target-category-filter')?.addEventListener('change', () => {
-    renderResources();
-  });
-  document.getElementById('resource-target-toggle-btn')?.addEventListener('click', toggleSelectedResourceVisibility);
   document.getElementById('poi-target-category-filter')?.addEventListener('change', () => {
     renderCustomPoints();
   });
@@ -4549,7 +4520,7 @@ function bindAppInteractions() {
     }
   });
 
-  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-traffic-incidents', 'filter-cameras'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-command', 'filter-resources-shelter', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-traffic-incidents', 'filter-cameras'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       renderStations(cachedVigicruesPayload);
       await renderMunicipalitiesOnMap(cachedMunicipalities);
