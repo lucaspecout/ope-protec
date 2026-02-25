@@ -161,7 +161,7 @@ let iserePopulationLoaded = false;
 
 const SCHOOL_RESOURCE_TYPES = new Set(['ecole_primaire', 'college', 'lycee', 'universite', 'creche']);
 const SECURITY_RESOURCE_TYPES = new Set(['gendarmerie', 'commissariat_police_nationale', 'police_municipale']);
-const FIRE_RESOURCE_TYPES = new Set(['caserne_pompier']);
+const FIRE_RESOURCE_TYPES = new Set(['caserne_pompier', 'caserne']);
 const HEALTH_RESOURCE_TYPES = new Set(['hopital', 'ehpad']);
 const RISK_RESOURCE_TYPES = new Set(['lieu_risque', 'centrale_nucleaire', 'energie']);
 const TRANSPORT_RESOURCE_TYPES = new Set(['transport', 'transport_gare_sncf', 'transport_gare_routiere', 'transport_aeroport']);
@@ -1310,31 +1310,29 @@ function classifyInstitutionPoint(element = {}) {
   return null;
 }
 
-function shouldDisplayInstitutionType(type = '') {
-  const schoolTypeFilter = document.getElementById('filter-resources-schools-type')?.value || 'all';
-  const securityTypeFilter = document.getElementById('filter-resources-security-type')?.value || 'all';
-  const risksTypeFilter = document.getElementById('filter-resources-risks-type')?.value || 'all';
-  const transportTypeFilter = document.getElementById('filter-resources-transport-type')?.value || 'all';
-  const healthTypeFilter = document.getElementById('filter-resources-health-type')?.value || 'all';
-
+function shouldDisplayBaseResourceType(type = '') {
   if (SCHOOL_RESOURCE_TYPES.has(type)) {
     const schoolsEnabled = document.getElementById('filter-resources-schools')?.checked ?? false;
+    const schoolTypeFilter = document.getElementById('filter-resources-schools-type')?.value || 'all';
     if (!schoolsEnabled) return false;
     return schoolTypeFilter === 'all' || schoolTypeFilter === type;
   }
   if (SECURITY_RESOURCE_TYPES.has(type)) {
     const securityEnabled = document.getElementById('filter-resources-security')?.checked ?? false;
+    const securityTypeFilter = document.getElementById('filter-resources-security-type')?.value || 'all';
     if (!securityEnabled) return false;
     return securityTypeFilter === 'all' || securityTypeFilter === type;
   }
   if (FIRE_RESOURCE_TYPES.has(type)) return document.getElementById('filter-resources-fire')?.checked ?? false;
   if (RISK_RESOURCE_TYPES.has(type)) {
     const risksEnabled = document.getElementById('filter-resources-risks')?.checked ?? false;
+    const risksTypeFilter = document.getElementById('filter-resources-risks-type')?.value || 'all';
     if (!risksEnabled) return false;
     return risksTypeFilter === 'all' || risksTypeFilter === type;
   }
   if (TRANSPORT_RESOURCE_TYPES.has(type)) {
     const transportEnabled = document.getElementById('filter-resources-transport')?.checked ?? false;
+    const transportTypeFilter = document.getElementById('filter-resources-transport-type')?.value || 'all';
     if (!transportEnabled) return false;
     if (transportTypeFilter === 'all') return true;
     if (type === 'transport' && transportTypeFilter === 'transport_gare_sncf') return true;
@@ -1342,13 +1340,10 @@ function shouldDisplayInstitutionType(type = '') {
   }
   if (HEALTH_RESOURCE_TYPES.has(type)) {
     const healthEnabled = document.getElementById('filter-resources-health')?.checked ?? false;
+    const healthTypeFilter = document.getElementById('filter-resources-health-type')?.value || 'all';
     if (!healthEnabled) return false;
     return healthTypeFilter === 'all' || healthTypeFilter === type;
   }
-  return false;
-}
-
-function shouldDisplayBaseResourceType(type = '') {
   if (COMMAND_RESOURCE_TYPES.has(type)) return document.getElementById('filter-resources-command')?.checked ?? true;
   if (SHELTER_RESOURCE_TYPES.has(type)) return document.getElementById('filter-resources-shelter')?.checked ?? true;
   return true;
@@ -1504,11 +1499,10 @@ function getDisplayedResources() {
     .filter((r) => r.active)
     .filter((r) => resourceVisibilityOverrides.get(r.id) !== false)
     .filter((r) => shouldDisplayBaseResourceType(r.type))
-    .filter((r) => !HEALTH_RESOURCE_TYPES.has(r.type) || shouldDisplayInstitutionType(r.type))
     .filter((r) => !query || `${r.name} ${r.address}`.toLowerCase().includes(query))
     .map((r) => ({ ...r, dynamic: false }));
   const dynamicResources = [...institutionPointsCache, ...finessPointsCache]
-    .filter((r) => shouldDisplayInstitutionType(r.type))
+    .filter((r) => shouldDisplayBaseResourceType(r.type))
     .filter((r) => resourceVisibilityOverrides.get(r.id) !== false)
     .filter((r) => !query || `${r.name} ${r.address}`.toLowerCase().includes(query));
   return [...staticResources, ...dynamicResources];
