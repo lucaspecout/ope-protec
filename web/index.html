@@ -609,7 +609,23 @@
                     </select>
                   </label>
                   <label><input id="filter-resources-fire" type="checkbox" /> Casernes de pompiers (Isère)</label>
-                  <label><input id="filter-resources-health" type="checkbox" checked /> Hôpitaux + EHPAD (Isère)
+                  <label><input id="filter-resources-risks" type="checkbox" /> Sites sensibles (Seveso, nucléaire, barrages)
+                    <select id="filter-resources-risks-type" aria-label="Filtrer les sites sensibles">
+                      <option value="all">Tous les types</option>
+                      <option value="lieu_risque">Seveso</option>
+                      <option value="centrale_nucleaire">Nucléaire</option>
+                      <option value="energie">Barrages</option>
+                    </select>
+                  </label>
+                  <label><input id="filter-resources-transport" type="checkbox" /> Transports (gares routières, gares SNCF, aéroports)
+                    <select id="filter-resources-transport-type" aria-label="Filtrer les transports">
+                      <option value="all">Tous les types</option>
+                      <option value="transport_gare_sncf">Gares SNCF</option>
+                      <option value="transport_gare_routiere">Gares routières</option>
+                      <option value="transport_aeroport">Aéroports</option>
+                    </select>
+                  </label>
+                  <label><input id="filter-resources-health" type="checkbox" /> Hôpitaux + EHPAD (Isère)
                     <select id="filter-resources-health-type" aria-label="Filtrer les établissements de santé">
                       <option value="all">Tous les types</option>
                       <option value="hopital">Hôpitaux</option>

@@ -44,6 +44,9 @@ const RESOURCE_TYPE_META = {
   lieu_risque: { label: 'Site Seveso / risque technologique', icon: '⚠️' },
   lieu_vital: { label: 'Lieu vital logistique', icon: '📦' },
   transport: { label: 'Nœud transport', icon: '🚉' },
+  transport_gare_sncf: { label: 'Gare SNCF', icon: '🚆' },
+  transport_gare_routiere: { label: 'Gare routière', icon: '🚌' },
+  transport_aeroport: { label: 'Aéroport', icon: '✈️' },
   energie: { label: 'Énergie / barrage', icon: '⚡' },
 };
 
@@ -58,11 +61,11 @@ const RESOURCE_POINTS = [
   { id: 'cea-grenoble', name: 'CEA Grenoble – Presqu’île scientifique', type: 'centrale_nucleaire', active: true, lat: 45.201145835693275, lon: 5.705203927562952, address: '17 Av. des Martyrs, 38000 Grenoble', priority: 'critical', info: 'Site de recherche sensible avec enjeux continuité d’activité et sûreté.', source: 'https://www.cea.fr' },
   { id: 'cnpe-saint-alban', name: 'CNPE EDF Saint-Alban / Saint-Maurice', type: 'centrale_nucleaire', active: true, lat: 45.405422953042404, lon: 4.757081312357517, address: 'Rte de la Centrale, 38550 Saint-Maurice-l\'Exil', priority: 'risk', info: 'Installation nucléaire majeure sous surveillance pour la frange sud-ouest Isère.', source: 'https://www.edf.fr/centrale-nucleaire-saint-alban' },
   { id: 'pont-de-claix-chem', name: 'Plateforme chimique de Pont-de-Claix', type: 'lieu_risque', active: true, lat: 45.13180530005534, lon: 5.706618216387599, address: 'Francia, Rue Lavoisier, Le Pont-de-Claix', priority: 'risk', info: 'Cluster industriel SEVESO de l’agglomération grenobloise.', source: 'https://www.pontdeclaix.fr' },
-  { id: 'gare-grenoble', name: 'Gare de Grenoble', type: 'transport', active: true, lat: 45.19142, lon: 5.71472, address: '1 place de la Gare, 38000 Grenoble', priority: 'vital', info: 'Hub ferroviaire principal pour mobilité de crise et évacuation.', source: 'https://www.garesetconnexions.sncf/fr/gares-services/grenoble' },
+  { id: 'gare-grenoble', name: 'Gare de Grenoble', type: 'transport_gare_sncf', active: true, lat: 45.19142, lon: 5.71472, address: '1 place de la Gare, 38000 Grenoble', priority: 'vital', info: 'Hub ferroviaire principal pour mobilité de crise et évacuation.', source: 'https://www.garesetconnexions.sncf/fr/gares-services/grenoble' },
   { id: 'barrage-verney', name: 'Barrage du Verney', type: 'energie', active: true, lat: 45.12920201985221, lon: 6.043436022227785, address: '38114 Allemond', priority: 'risk', info: 'Ouvrage hydraulique structurant de la vallée de l’Eau d’Olle.', source: 'https://www.edf.fr/hydraulique-isere' },
   { id: 'plateforme-chem-jarrie', name: 'Plateforme chimique de Jarrie', type: 'lieu_risque', active: true, lat: 45.08694132318529, lon: 5.736251871908567, address: 'N85 BP 16, 38560 Jarrie', priority: 'risk', info: 'Zone industrielle sensible en continuité du couloir chimique sud grenoblois.', source: 'https://www.jarrie.fr' },
   { id: 'centrale-barrage-grandmaison', name: 'STEP de Grand’Maison', type: 'energie', active: true, lat: 45.206053828393784, lon: 6.116978747872993, address: '38114 Vaujany', priority: 'risk', info: 'Infrastructure énergétique stratégique pour la stabilité du réseau.', source: 'https://www.edf.fr/hydraulique-isere' },
-  { id: 'aeroport-grenoble', name: 'Aéroport Grenoble Alpes Isère', type: 'transport', active: true, lat: 45.361, lon: 5.33056, address: '38590 Saint-Étienne-de-Saint-Geoirs', priority: 'vital', info: 'Plateforme aérienne de soutien logistique et d’évacuation sanitaire.', source: 'https://www.grenoble-airport.com' },
+  { id: 'aeroport-grenoble', name: 'Aéroport Grenoble Alpes Isère', type: 'transport_aeroport', active: true, lat: 45.361, lon: 5.33056, address: '38590 Saint-Étienne-de-Saint-Geoirs', priority: 'vital', info: 'Plateforme aérienne de soutien logistique et d’évacuation sanitaire.', source: 'https://www.grenoble-airport.com' },
   { id: 'palais-sports', name: 'Palais des Sports de Grenoble (centre d’accueil)', type: 'centre_hebergement', active: true, lat: 45.18565564489357, lon: 5.7408451908719655, address: '14 Bd Clemenceau, 38029 Grenoble', priority: 'vital', info: 'Site de regroupement mobilisable pour accueil population/renforts.', source: 'https://www.grenoble.fr' },
   { id: 'barrage-chambon', name: 'Barrage du Chambon', type: 'energie', active: true, lat: 45.04554730445581, lon: 6.137479156603567, address: '38860 Les Deux Alpes', priority: 'risk', info: 'Barrage alpin stratégique de la vallée de la Romanche.', source: 'https://fr.wikipedia.org/wiki/Barrage_du_Chambon' },
   { id: 'barrage-sautet', name: 'Barrage du Sautet', type: 'energie', active: true, lat: 44.81749004792632, lon: 5.908287667268233, address: '38970 Pellafol', priority: 'risk', info: 'Ouvrage hydroélectrique majeur entre Isère et Hautes-Alpes.', source: 'https://fr.wikipedia.org/wiki/Barrage_du_Sautet' },
@@ -160,6 +163,8 @@ const SCHOOL_RESOURCE_TYPES = new Set(['ecole_primaire', 'college', 'lycee', 'un
 const SECURITY_RESOURCE_TYPES = new Set(['gendarmerie', 'commissariat_police_nationale', 'police_municipale']);
 const FIRE_RESOURCE_TYPES = new Set(['caserne_pompier']);
 const HEALTH_RESOURCE_TYPES = new Set(['hopital', 'ehpad']);
+const RISK_RESOURCE_TYPES = new Set(['lieu_risque', 'centrale_nucleaire', 'energie']);
+const TRANSPORT_RESOURCE_TYPES = new Set(['transport', 'transport_gare_sncf', 'transport_gare_routiere', 'transport_aeroport']);
 
 const ISERE_BOUNDARY_STYLE = { color: '#163a87', weight: 2, fillColor: '#63c27d', fillOpacity: 0.2 };
 const TRAFFIC_COMMUNES = ['Grenoble', 'Voiron', 'Vienne', 'Bourgoin-Jallieu', 'Pont-de-Claix', 'Meylan', 'Échirolles', 'L\'Isle-d\'Abeau', 'Saint-Martin-d\'Hères', 'La Tour-du-Pin', 'Rives', 'Sassenage', 'Crolles', 'Tullins'];
@@ -882,6 +887,8 @@ async function resetMapFilters() {
     'poi-target-category-filter': 'all',
     'filter-resources-schools-type': 'all',
     'filter-resources-security-type': 'all',
+    'filter-resources-risks-type': 'all',
+    'filter-resources-transport-type': 'all',
     'filter-resources-health-type': 'all',
     'map-basemap-select': 'osm',
   };
@@ -896,6 +903,8 @@ async function resetMapFilters() {
   const schools = document.getElementById('filter-resources-schools');
   const security = document.getElementById('filter-resources-security');
   const fireStations = document.getElementById('filter-resources-fire');
+  const riskResources = document.getElementById('filter-resources-risks');
+  const transportResources = document.getElementById('filter-resources-transport');
   const trafficIncidents = document.getElementById('filter-traffic-incidents');
   const cameras = document.getElementById('filter-cameras');
   const googleFlow = document.getElementById('filter-google-traffic-flow');
@@ -906,9 +915,11 @@ async function resetMapFilters() {
   if (schools) schools.checked = false;
   if (security) security.checked = false;
   if (fireStations) fireStations.checked = false;
+  if (riskResources) riskResources.checked = false;
+  if (transportResources) transportResources.checked = false;
   if (trafficIncidents) trafficIncidents.checked = true;
   if (cameras) cameras.checked = true;
-  if (healthResources) healthResources.checked = true;
+  if (healthResources) healthResources.checked = false;
   if (googleFlow) googleFlow.checked = false;
   resourceVisibilityOverrides.clear();
   if (searchLayer) searchLayer.clearLayers();
@@ -1261,7 +1272,7 @@ function refreshResourceTargetOptions() {
   if (!button) return;
   const targetCategory = document.getElementById('resource-target-category-filter')?.value || 'all';
   const allResources = [...RESOURCE_POINTS, ...institutionPointsCache, ...finessPointsCache]
-    .filter((resource) => targetCategory === 'all' || resource.type === targetCategory);
+    .filter((resource) => matchesResourceCategory(resource, targetCategory));
   const hasVisible = allResources.some((resource) => resourceVisibilityOverrides.get(resource.id) !== false);
   button.disabled = allResources.length === 0;
   button.textContent = hasVisible ? 'Masquer les ressources' : 'Afficher les ressources';
@@ -1270,7 +1281,7 @@ function refreshResourceTargetOptions() {
 function toggleSelectedResourceVisibility() {
   const targetCategory = document.getElementById('resource-target-category-filter')?.value || 'all';
   const allResources = [...RESOURCE_POINTS, ...institutionPointsCache, ...finessPointsCache]
-    .filter((resource) => targetCategory === 'all' || resource.type === targetCategory);
+    .filter((resource) => matchesResourceCategory(resource, targetCategory));
   if (!allResources.length) return;
   const hasVisible = allResources.some((resource) => resourceVisibilityOverrides.get(resource.id) !== false);
   allResources.forEach((resource) => {
@@ -1298,6 +1309,9 @@ function classifyInstitutionPoint(element = {}) {
   const amenity = String(tags.amenity || '').toLowerCase();
   const name = String(tags.name || '').toLowerCase();
   const policeType = String(tags.police || '').toLowerCase();
+  const railway = String(tags.railway || '').toLowerCase();
+  const publicTransport = String(tags.public_transport || '').toLowerCase();
+  const aeroway = String(tags.aeroway || '').toLowerCase();
 
   if (amenity === 'kindergarten') return 'creche';
   if (amenity === 'university') return 'universite';
@@ -1313,12 +1327,17 @@ function classifyInstitutionPoint(element = {}) {
     if (name.includes('municipale') || policeType.includes('municipal')) return 'police_municipale';
     return 'commissariat_police_nationale';
   }
+  if (amenity === 'bus_station') return 'transport_gare_routiere';
+  if (railway === 'station' || publicTransport === 'station') return 'transport_gare_sncf';
+  if (aeroway === 'aerodrome' || aeroway === 'airport') return 'transport_aeroport';
   return null;
 }
 
 function shouldDisplayInstitutionType(type = '') {
   const schoolTypeFilter = document.getElementById('filter-resources-schools-type')?.value || 'all';
   const securityTypeFilter = document.getElementById('filter-resources-security-type')?.value || 'all';
+  const risksTypeFilter = document.getElementById('filter-resources-risks-type')?.value || 'all';
+  const transportTypeFilter = document.getElementById('filter-resources-transport-type')?.value || 'all';
   const healthTypeFilter = document.getElementById('filter-resources-health-type')?.value || 'all';
 
   if (SCHOOL_RESOURCE_TYPES.has(type)) {
@@ -1332,12 +1351,30 @@ function shouldDisplayInstitutionType(type = '') {
     return securityTypeFilter === 'all' || securityTypeFilter === type;
   }
   if (FIRE_RESOURCE_TYPES.has(type)) return document.getElementById('filter-resources-fire')?.checked ?? false;
+  if (RISK_RESOURCE_TYPES.has(type)) {
+    const risksEnabled = document.getElementById('filter-resources-risks')?.checked ?? false;
+    if (!risksEnabled) return false;
+    return risksTypeFilter === 'all' || risksTypeFilter === type;
+  }
+  if (TRANSPORT_RESOURCE_TYPES.has(type)) {
+    const transportEnabled = document.getElementById('filter-resources-transport')?.checked ?? false;
+    if (!transportEnabled) return false;
+    if (transportTypeFilter === 'all') return true;
+    if (type === 'transport' && transportTypeFilter === 'transport_gare_sncf') return true;
+    return transportTypeFilter === type;
+  }
   if (HEALTH_RESOURCE_TYPES.has(type)) {
-    const healthEnabled = document.getElementById('filter-resources-health')?.checked ?? true;
+    const healthEnabled = document.getElementById('filter-resources-health')?.checked ?? false;
     if (!healthEnabled) return false;
     return healthTypeFilter === 'all' || healthTypeFilter === type;
   }
   return false;
+}
+
+function matchesResourceCategory(resource = {}, targetCategory = 'all') {
+  if (targetCategory === 'all') return true;
+  if (targetCategory === 'transport') return TRANSPORT_RESOURCE_TYPES.has(resource.type);
+  return resource.type === targetCategory;
 }
 
 async function loadFinessIsereResources() {
@@ -1440,7 +1477,10 @@ async function loadIsereInstitutions() {
   const query = `[out:json][timeout:40];
 area["boundary"="administrative"]["admin_level"="6"]["name"="Isère"]->.searchArea;
 (
-  nwr["amenity"~"school|college|university|kindergarten|police|fire_station"](area.searchArea);
+  nwr["amenity"~"school|college|university|kindergarten|police|fire_station|bus_station"](area.searchArea);
+  nwr["railway"="station"](area.searchArea);
+  nwr["aeroway"~"aerodrome|airport"](area.searchArea);
+  nwr["public_transport"="station"](area.searchArea);
 );
 out center tags;`;
   try {
@@ -1489,13 +1529,13 @@ function getDisplayedResources() {
     .filter((r) => r.active)
     .filter((r) => resourceVisibilityOverrides.get(r.id) !== false)
     .filter((r) => !HEALTH_RESOURCE_TYPES.has(r.type) || shouldDisplayInstitutionType(r.type))
-    .filter((r) => targetCategory === 'all' || r.type === targetCategory)
+    .filter((r) => matchesResourceCategory(r, targetCategory))
     .filter((r) => !query || `${r.name} ${r.address}`.toLowerCase().includes(query))
     .map((r) => ({ ...r, dynamic: false }));
   const dynamicResources = [...institutionPointsCache, ...finessPointsCache]
     .filter((r) => shouldDisplayInstitutionType(r.type))
     .filter((r) => resourceVisibilityOverrides.get(r.id) !== false)
-    .filter((r) => targetCategory === 'all' || r.type === targetCategory)
+    .filter((r) => matchesResourceCategory(r, targetCategory))
     .filter((r) => !query || `${r.name} ${r.address}`.toLowerCase().includes(query));
   return [...staticResources, ...dynamicResources];
 }
@@ -4511,7 +4551,7 @@ function bindAppInteractions() {
     }
   });
 
-  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-health', 'filter-resources-health-type', 'filter-traffic-incidents', 'filter-cameras'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-traffic-incidents', 'filter-cameras'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       renderStations(cachedVigicruesPayload);
       await renderMunicipalitiesOnMap(cachedMunicipalities);
