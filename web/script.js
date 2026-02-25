@@ -2385,6 +2385,37 @@ function renderVigieauAlerts(vigieau = {}) {
   }).join('') || "<li>Aucune restriction d'eau active signalée pour l'Isère.</li>");
 }
 
+function renderElectricityStatus(electricity = {}) {
+  const status = electricity.status || 'inconnu';
+  const level = normalizeLevel(electricity.level || 'inconnu');
+  const consumption = Number.isFinite(Number(electricity.consumption_mw)) ? `${Number(electricity.consumption_mw)} MW` : '-';
+  const generation = Number.isFinite(Number(electricity.regional_generation_mw)) ? `${Number(electricity.regional_generation_mw)} MW` : '-';
+  const margin = Number.isFinite(Number(electricity.supply_margin_mw)) ? `${Number(electricity.supply_margin_mw)} MW` : '-';
+  const observedAt = electricity.observed_at ? escapeHtml(electricity.observed_at) : 'non précisé';
+  const scope = escapeHtml(electricity.scope || 'Proxy régional ARA');
+
+  setRiskText('electricity-status', `${status} · niveau ${level}`, electricity.level || 'vert');
+  setText('electricity-info', `Conso ${consumption} · Prod ${generation} · Marge ${margin}`);
+
+  const breakdown = electricity.production_breakdown_mw && typeof electricity.production_breakdown_mw === 'object'
+    ? Object.entries(electricity.production_breakdown_mw)
+      .map(([key, value]) => `${escapeHtml(key)}: ${Number.isFinite(Number(value)) ? Number(value) : '-' } MW`)
+      .join(' · ')
+    : '';
+
+  const rows = [
+    `<li><strong>Dernière mesure:</strong> ${observedAt}</li>`,
+    `<li><strong>Périmètre:</strong> ${scope}</li>`,
+    `<li><strong>Consommation:</strong> ${consumption}</li>`,
+    `<li><strong>Production:</strong> ${generation}</li>`,
+    `<li><strong>Marge offre/demande:</strong> ${margin}</li>`,
+    breakdown ? `<li><strong>Mix régional:</strong> ${breakdown}</li>` : '',
+    electricity.error ? `<li><strong>Erreur:</strong> ${escapeHtml(electricity.error)}</li>` : '',
+  ].filter(Boolean);
+
+  setHtml('electricity-list', rows.join('') || '<li>Aucune donnée électrique disponible.</li>');
+}
+
 function renderBisonFuteSummary(bison = {}) {
   cachedBisonFute = bison || {};
   const today = bison.today || {};
@@ -3379,6 +3410,7 @@ function renderExternalRisks(data = {}) {
   const sncf = data?.sncf_isere || {};
   const vigieau = data?.vigieau || {};
   const atmo = data?.atmo_aura || {};
+  const electricity = data?.electricity_isere || {};
   const georisquesPayload = data?.georisques || {};
   const georisques = georisquesPayload?.data && typeof georisquesPayload.data === 'object'
     ? { ...georisquesPayload.data, ...georisquesPayload }
@@ -3405,6 +3437,7 @@ function renderExternalRisks(data = {}) {
   renderDauphineNews(dauphine);
   renderSncfAlerts(sncf);
   renderVigieauAlerts(vigieau);
+  renderElectricityStatus(electricity);
   const atmoToday = atmo?.today || {};
   const atmoLevel = normalizeLevel(atmoToday.level || 'inconnu');
   setRiskText('atmo-status', `${atmo.status || 'inconnu'} · indice ${atmoToday.index ?? '-'}`, atmoToday.level || 'vert');
