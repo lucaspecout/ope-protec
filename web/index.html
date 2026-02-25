@@ -554,6 +554,7 @@
                   <option value="satellite">Vue satellite</option>
                   <option value="topo">Relief (topographique)</option>
                   <option value="light">Fond clair (lisible)</option>
+                  <option value="population">Population légale (fond thématique)</option>
                   <option value="ign">IGN (Plan IGN v2)</option>
                   <option value="isere-flood">Zones inondables (Isère)</option>
                 </select>
@@ -562,8 +563,6 @@
                     <select id="resource-target-category-filter" aria-label="Filtrer les ressources par catégorie">
                       <option value="all">Ressources: afficher tout</option>
                       <option value="transport">Transports</option>
-                      <option value="hopital">Hôpitaux</option>
-                      <option value="ehpad">EHPAD</option>
                       <option value="lieu_risque">Sites Seveso</option>
                       <option value="poste_commandement">Centres de commandement</option>
                       <option value="centrale_nucleaire">Sites nucléaires</option>
@@ -610,12 +609,15 @@
                     </select>
                   </label>
                   <label><input id="filter-resources-fire" type="checkbox" /> Casernes de pompiers (Isère)</label>
-                  <label><input id="filter-resources-finess" type="checkbox" checked /> FINESS Isère · Hôpitaux + EHPAD</label>
-                  <label><input id="filter-population-by-city" type="checkbox" /> Population légale INSEE (par ville, couleur)</label>
-                  <label><input id="filter-itinisere" type="checkbox" checked /> Itinisère</label>
-                  <label><input id="filter-bison-accidents" type="checkbox" checked /> Accidents en cours Isère (Bison Futé)</label>
-                  <label><input id="filter-bison-cameras" type="checkbox" checked /> Caméras routières Bison Futé (Isère)</label>
-                  <label><input id="filter-photo-cameras" type="checkbox" checked /> Caméras photo Itinisère (maj 1 min)</label>
+                  <label><input id="filter-resources-health" type="checkbox" checked /> Hôpitaux + EHPAD (Isère)
+                    <select id="filter-resources-health-type" aria-label="Filtrer les établissements de santé">
+                      <option value="all">Tous les types</option>
+                      <option value="hopital">Hôpitaux</option>
+                      <option value="ehpad">EHPAD</option>
+                    </select>
+                  </label>
+                  <label><input id="filter-traffic-incidents" type="checkbox" checked /> Accidents et routes barrées (Itinisère + Bison Futé)</label>
+                  <label><input id="filter-cameras" type="checkbox" checked /> Caméras (Bison Futé + Itinisère photo)</label>
                   <label><input id="filter-google-traffic-flow" type="checkbox" /> Trafic continu (style Google Maps)</label>
                 </div>
                 
