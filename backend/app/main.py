@@ -53,6 +53,7 @@ from .services import (
     fetch_itinisere_disruptions,
     fetch_prefecture_isere_news,
     fetch_dauphine_isere_news,
+    fetch_finess_isere_resources,
     fetch_sncf_isere_alerts,
     fetch_rte_isere_electricity_status,
     fetch_atmo_aura_isere_air_quality,
@@ -624,6 +625,7 @@ def build_external_risks_payload(refresh: bool = False, db: Session | None = Non
         "vigieau": (lambda: fetch_vigieau_restrictions(force_refresh=refresh), {"status": "degraded", "alerts": [], "max_level": "vert"}),
         "atmo_aura": (lambda: fetch_atmo_aura_isere_air_quality(force_refresh=refresh), {"status": "degraded", "today": {}, "tomorrow": {}}),
         "electricity_isere": (lambda: fetch_rte_isere_electricity_status(force_refresh=refresh), {"status": "degraded", "level": "inconnu"}),
+        "finess_isere": (lambda: fetch_finess_isere_resources(force_refresh=refresh), {"status": "degraded", "resources": [], "resources_total": 0}),
     }
 
     results: dict[str, dict] = {}
@@ -648,6 +650,7 @@ def build_external_risks_payload(refresh: bool = False, db: Session | None = Non
         "vigieau": results["vigieau"],
         "atmo_aura": results["atmo_aura"],
         "electricity_isere": results["electricity_isere"],
+        "finess_isere": results["finess_isere"],
     }
     if errors:
         payload["errors"] = errors
@@ -661,7 +664,7 @@ def get_external_risks_payload(refresh: bool = False, db: Session | None = None)
         return payload
 
     snapshot = _get_external_risks_snapshot()
-    if snapshot and any(snapshot.get(key) for key in ("meteo_france", "vigicrues", "itinisere", "bison_fute", "georisques", "prefecture_isere", "dauphine_isere", "sncf_isere", "vigieau", "atmo_aura", "electricity_isere")):
+    if snapshot and any(snapshot.get(key) for key in ("meteo_france", "vigicrues", "itinisere", "bison_fute", "georisques", "prefecture_isere", "dauphine_isere", "sncf_isere", "vigieau", "atmo_aura", "electricity_isere", "finess_isere")):
         return snapshot
 
     payload = build_external_risks_payload(refresh=True, db=db)
@@ -743,6 +746,16 @@ def interactive_map_vigieau_alerts(
     _: User = Depends(require_roles(*READ_ROLES)),
 ):
     return fetch_vigieau_restrictions(force_refresh=refresh)
+
+
+@app.get("/api/finess/isere/resources")
+def interactive_map_finess_isere_resources(
+    refresh: bool = False,
+    limit: int = 250,
+    _: User = Depends(require_roles(*READ_ROLES)),
+):
+    safe_limit = max(20, min(limit, 400))
+    return fetch_finess_isere_resources(force_refresh=refresh, limit=safe_limit)
 
 
 @app.get("/supervision/overview")

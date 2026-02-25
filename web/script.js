@@ -29,6 +29,7 @@ const RESOURCE_TYPE_META = {
   poste_commandement: { label: 'Poste de commandement', icon: '🛰️' },
   centre_hebergement: { label: 'Centre d\'hébergement', icon: '🏘️' },
   hopital: { label: 'Hôpital', icon: '🏥' },
+  ehpad: { label: 'EHPAD', icon: '🧓' },
   ecole_primaire: { label: 'École primaire', icon: '🧒' },
   college: { label: 'Collège', icon: '🎒' },
   lycee: { label: 'Lycée', icon: '📘' },
@@ -118,6 +119,7 @@ let bisonLayer = null;
 let bisonCameraLayer = null;
 let photoCameraLayer = null;
 let institutionLayer = null;
+let populationLayer = null;
 let mapTileLayer = null;
 let mapFloodOverlayLayer = null;
 let googleTrafficFlowLayer = null;
@@ -149,6 +151,10 @@ let trafficRenderSequence = 0;
 let currentMunicipalityPreviewUrl = null;
 let institutionPointsCache = [];
 let institutionsLoaded = false;
+let finessPointsCache = [];
+let finessLoaded = false;
+let iserePopulationPointsCache = [];
+let iserePopulationLoaded = false;
 
 const SCHOOL_RESOURCE_TYPES = new Set(['ecole_primaire', 'college', 'lycee', 'universite', 'creche']);
 const SECURITY_RESOURCE_TYPES = new Set(['gendarmerie', 'commissariat_police_nationale', 'police_municipale']);
@@ -850,6 +856,7 @@ function initMap() {
   bisonCameraLayer = window.L.layerGroup().addTo(leafletMap);
   photoCameraLayer = window.L.layerGroup().addTo(leafletMap);
   institutionLayer = window.L.layerGroup().addTo(leafletMap);
+  populationLayer = window.L.layerGroup().addTo(leafletMap);
   leafletMap.on('click', onMapClickAddPoint);
   leafletMap.on('popupopen', refreshPhotoCameraImages);
   startPhotoCameraAutoRefresh();
@@ -888,6 +895,7 @@ async function resetMapFilters() {
   const bisonCameras = document.getElementById('filter-bison-cameras');
   const photoCameras = document.getElementById('filter-photo-cameras');
   const googleFlow = document.getElementById('filter-google-traffic-flow');
+  const populationByCity = document.getElementById('filter-population-by-city');
   if (hydro) hydro.checked = true;
   if (pcs) pcs.checked = true;
   if (activeOnly) activeOnly.checked = true;
@@ -899,6 +907,7 @@ async function resetMapFilters() {
   if (bisonCameras) bisonCameras.checked = true;
   if (photoCameras) photoCameras.checked = true;
   if (googleFlow) googleFlow.checked = false;
+  if (populationByCity) populationByCity.checked = false;
   resourceVisibilityOverrides.clear();
   if (searchLayer) searchLayer.clearLayers();
   applyBasemap('osm');
@@ -906,6 +915,7 @@ async function resetMapFilters() {
   renderCustomPoints();
   renderResources();
   await renderMunicipalitiesOnMap(cachedMunicipalities);
+  await renderPopulationByCityLayer();
   await renderTrafficOnMap();
   renderMapChecks([]);
   setMapFeedback('Filtres carte réinitialisés.');
@@ -938,7 +948,7 @@ function toggleMapContrast() {
 
 function fitMapToData(showFeedback = false) {
   if (!leafletMap) return;
-  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsBoundaryLayer, pcsLayer, resourceLayer, institutionLayer, searchLayer, customPointsLayer, mapPointsLayer, itinisereLayer, bisonLayer, bisonCameraLayer, photoCameraLayer].filter(Boolean);
+  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsBoundaryLayer, pcsLayer, resourceLayer, institutionLayer, populationLayer, searchLayer, customPointsLayer, mapPointsLayer, itinisereLayer, bisonLayer, bisonCameraLayer, photoCameraLayer].filter(Boolean);
   const bounds = window.L.latLngBounds([]);
   layers.forEach((layer) => {
     if (layer?.getBounds) {
@@ -1248,7 +1258,7 @@ function refreshResourceTargetOptions() {
   const button = document.getElementById('resource-target-toggle-btn');
   if (!button) return;
   const targetCategory = document.getElementById('resource-target-category-filter')?.value || 'all';
-  const allResources = [...RESOURCE_POINTS, ...institutionPointsCache]
+  const allResources = [...RESOURCE_POINTS, ...institutionPointsCache, ...finessPointsCache]
     .filter((resource) => targetCategory === 'all' || resource.type === targetCategory);
   const hasVisible = allResources.some((resource) => resourceVisibilityOverrides.get(resource.id) !== false);
   button.disabled = allResources.length === 0;
@@ -1257,7 +1267,7 @@ function refreshResourceTargetOptions() {
 
 function toggleSelectedResourceVisibility() {
   const targetCategory = document.getElementById('resource-target-category-filter')?.value || 'all';
-  const allResources = [...RESOURCE_POINTS, ...institutionPointsCache]
+  const allResources = [...RESOURCE_POINTS, ...institutionPointsCache, ...finessPointsCache]
     .filter((resource) => targetCategory === 'all' || resource.type === targetCategory);
   if (!allResources.length) return;
   const hasVisible = allResources.some((resource) => resourceVisibilityOverrides.get(resource.id) !== false);
@@ -1319,7 +1329,103 @@ function shouldDisplayInstitutionType(type = '') {
     return securityTypeFilter === 'all' || securityTypeFilter === type;
   }
   if (FIRE_RESOURCE_TYPES.has(type)) return document.getElementById('filter-resources-fire')?.checked ?? false;
+  if (type === 'hopital' || type === 'ehpad') return document.getElementById('filter-resources-finess')?.checked ?? true;
   return false;
+}
+
+async function loadFinessIsereResources() {
+  if (finessLoaded) return finessPointsCache;
+  try {
+    const payload = await api('/api/finess/isere/resources', { cacheTtlMs: 12 * 60 * 60 * 1000 });
+    const resources = Array.isArray(payload?.resources) ? payload.resources : [];
+    finessPointsCache = resources
+      .map((resource) => {
+        const lat = Number(resource?.lat);
+        const lon = Number(resource?.lon);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+        const type = resource?.type === 'ehpad' ? 'ehpad' : 'hopital';
+        return {
+          id: String(resource?.id || `finess-${resource?.finess_id || Math.random().toString(36).slice(2)}`),
+          name: String(resource?.name || 'Établissement FINESS'),
+          type,
+          lat,
+          lon,
+          active: true,
+          address: String(resource?.address || resource?.city || 'Adresse non renseignée'),
+          priority: type === 'hopital' ? 'critical' : 'vital',
+          info: String(resource?.info || 'Source FINESS data.gouv.fr'),
+          source: String(resource?.source || 'https://www.data.gouv.fr/fr/datasets/finess-extraction-du-fichier-des-etablissements/'),
+          dynamic: true,
+        };
+      })
+      .filter(Boolean);
+  } catch {
+    finessPointsCache = [];
+  }
+  finessLoaded = true;
+  return finessPointsCache;
+}
+
+async function loadIserePopulationPoints() {
+  if (iserePopulationLoaded) return iserePopulationPointsCache;
+  try {
+    const payload = await fetch('https://geo.api.gouv.fr/departements/38/communes?fields=nom,population,centre&format=json').then((r) => r.json());
+    const rows = Array.isArray(payload) ? payload : [];
+    iserePopulationPointsCache = rows
+      .map((row) => {
+        const coordinates = row?.centre?.coordinates;
+        if (!Array.isArray(coordinates) || coordinates.length !== 2) return null;
+        const [lon, lat] = coordinates;
+        const population = Number(row?.population || 0);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(population)) return null;
+        return {
+          name: String(row?.nom || 'Commune'),
+          population,
+          lat,
+          lon,
+        };
+      })
+      .filter(Boolean);
+  } catch {
+    iserePopulationPointsCache = [];
+  }
+  iserePopulationLoaded = true;
+  return iserePopulationPointsCache;
+}
+
+function populationColor(population = 0) {
+  if (population >= 50000) return '#7f0000';
+  if (population >= 20000) return '#b30000';
+  if (population >= 10000) return '#e34a33';
+  if (population >= 5000) return '#fc8d59';
+  return '#fdcc8a';
+}
+
+function populationRadius(population = 0) {
+  if (population >= 100000) return 11;
+  if (population >= 50000) return 9;
+  if (population >= 20000) return 7;
+  if (population >= 10000) return 6;
+  return 4;
+}
+
+async function renderPopulationByCityLayer() {
+  if (!populationLayer) return;
+  populationLayer.clearLayers();
+  const enabled = document.getElementById('filter-population-by-city')?.checked ?? false;
+  if (!enabled) return;
+  const points = await loadIserePopulationPoints();
+  points.forEach((point) => {
+    window.L.circleMarker([point.lat, point.lon], {
+      radius: populationRadius(point.population),
+      color: '#fff',
+      weight: 1,
+      fillColor: populationColor(point.population),
+      fillOpacity: 0.72,
+    })
+      .bindPopup(`<strong>${escapeHtml(point.name)}</strong><br>Population légale INSEE: ${Number(point.population).toLocaleString('fr-FR')}`)
+      .addTo(populationLayer);
+  });
 }
 
 async function loadIsereInstitutions() {
@@ -1378,7 +1484,7 @@ function getDisplayedResources() {
     .filter((r) => targetCategory === 'all' || r.type === targetCategory)
     .filter((r) => !query || `${r.name} ${r.address}`.toLowerCase().includes(query))
     .map((r) => ({ ...r, dynamic: false }));
-  const dynamicResources = institutionPointsCache
+  const dynamicResources = [...institutionPointsCache, ...finessPointsCache]
     .filter((r) => shouldDisplayInstitutionType(r.type))
     .filter((r) => resourceVisibilityOverrides.get(r.id) !== false)
     .filter((r) => targetCategory === 'all' || r.type === targetCategory)
@@ -1387,7 +1493,7 @@ function getDisplayedResources() {
 }
 
 async function renderResources() {
-  await loadIsereInstitutions();
+  await Promise.all([loadIsereInstitutions(), loadFinessIsereResources()]);
   const resources = getDisplayedResources();
   const priorityLabel = { critical: 'critique', vital: 'vital', risk: 'à risque', standard: 'standard' };
   const markerColor = { critical: '#e03131', vital: '#1971c2', risk: '#f08c00', standard: '#2f9e44' };
@@ -4400,11 +4506,12 @@ function bindAppInteractions() {
     }
   });
 
-  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-itinisere', 'filter-bison-accidents', 'filter-bison-cameras', 'filter-photo-cameras'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-finess', 'filter-population-by-city', 'filter-itinisere', 'filter-bison-accidents', 'filter-bison-cameras', 'filter-photo-cameras'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       renderStations(cachedVigicruesPayload);
       await renderMunicipalitiesOnMap(cachedMunicipalities);
-      renderResources();
+      await renderResources();
+      await renderPopulationByCityLayer();
       await renderTrafficOnMap();
     });
   });
