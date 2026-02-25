@@ -29,6 +29,15 @@ const RESOURCE_TYPE_META = {
   poste_commandement: { label: 'Poste de commandement', icon: '🛰️' },
   centre_hebergement: { label: 'Centre d\'hébergement', icon: '🏘️' },
   hopital: { label: 'Hôpital', icon: '🏥' },
+  ecole_primaire: { label: 'École primaire', icon: '🧒' },
+  college: { label: 'Collège', icon: '🎒' },
+  lycee: { label: 'Lycée', icon: '📘' },
+  universite: { label: 'Université', icon: '🎓' },
+  creche: { label: 'Crèche', icon: '🍼' },
+  gendarmerie: { label: 'Gendarmerie', icon: '🛡️' },
+  commissariat_police_nationale: { label: 'Commissariat (police nationale)', icon: '🚓' },
+  police_municipale: { label: 'Police municipale', icon: '👮' },
+  caserne_pompier: { label: 'Caserne de pompiers', icon: '🚒' },
   caserne: { label: 'Caserne', icon: '🚒' },
   centrale_nucleaire: { label: 'Site nucléaire', icon: '☢️' },
   lieu_risque: { label: 'Site Seveso / risque technologique', icon: '⚠️' },
@@ -108,6 +117,7 @@ let itinisereLayer = null;
 let bisonLayer = null;
 let bisonCameraLayer = null;
 let photoCameraLayer = null;
+let institutionLayer = null;
 let mapTileLayer = null;
 let mapFloodOverlayLayer = null;
 let googleTrafficFlowLayer = null;
@@ -136,6 +146,12 @@ let cachedExternalRisksSnapshot = {};
 let isereBoundaryGeometry = null;
 let trafficRenderSequence = 0;
 let currentMunicipalityPreviewUrl = null;
+let institutionPointsCache = [];
+let institutionsLoaded = false;
+
+const SCHOOL_RESOURCE_TYPES = new Set(['ecole_primaire', 'college', 'lycee', 'universite', 'creche']);
+const SECURITY_RESOURCE_TYPES = new Set(['gendarmerie', 'commissariat_police_nationale', 'police_municipale']);
+const FIRE_RESOURCE_TYPES = new Set(['caserne_pompier']);
 
 const ISERE_BOUNDARY_STYLE = { color: '#163a87', weight: 2, fillColor: '#63c27d', fillOpacity: 0.2 };
 const TRAFFIC_COMMUNES = ['Grenoble', 'Voiron', 'Vienne', 'Bourgoin-Jallieu', 'Pont-de-Claix', 'Meylan', 'Échirolles', 'L\'Isle-d\'Abeau', 'Saint-Martin-d\'Hères', 'La Tour-du-Pin', 'Rives', 'Sassenage', 'Crolles', 'Tullins'];
@@ -832,6 +848,7 @@ function initMap() {
   bisonLayer = window.L.layerGroup().addTo(leafletMap);
   bisonCameraLayer = window.L.layerGroup().addTo(leafletMap);
   photoCameraLayer = window.L.layerGroup().addTo(leafletMap);
+  institutionLayer = window.L.layerGroup().addTo(leafletMap);
   leafletMap.on('click', onMapClickAddPoint);
   leafletMap.on('popupopen', refreshPhotoCameraImages);
   startPhotoCameraAutoRefresh();
@@ -860,6 +877,9 @@ async function resetMapFilters() {
   const hydro = document.getElementById('filter-hydro');
   const pcs = document.getElementById('filter-pcs');
   const activeOnly = document.getElementById('filter-resources-active');
+  const schools = document.getElementById('filter-resources-schools');
+  const security = document.getElementById('filter-resources-security');
+  const fireStations = document.getElementById('filter-resources-fire');
   const itinisere = document.getElementById('filter-itinisere');
   const bisonAccidents = document.getElementById('filter-bison-accidents');
   const bisonCameras = document.getElementById('filter-bison-cameras');
@@ -868,6 +888,9 @@ async function resetMapFilters() {
   if (hydro) hydro.checked = true;
   if (pcs) pcs.checked = true;
   if (activeOnly) activeOnly.checked = true;
+  if (schools) schools.checked = false;
+  if (security) security.checked = false;
+  if (fireStations) fireStations.checked = false;
   if (itinisere) itinisere.checked = true;
   if (bisonAccidents) bisonAccidents.checked = true;
   if (bisonCameras) bisonCameras.checked = true;
@@ -911,7 +934,7 @@ function toggleMapContrast() {
 
 function fitMapToData(showFeedback = false) {
   if (!leafletMap) return;
-  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsBoundaryLayer, pcsLayer, resourceLayer, searchLayer, customPointsLayer, mapPointsLayer, itinisereLayer, bisonLayer, bisonCameraLayer, photoCameraLayer].filter(Boolean);
+  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsBoundaryLayer, pcsLayer, resourceLayer, institutionLayer, searchLayer, customPointsLayer, mapPointsLayer, itinisereLayer, bisonLayer, bisonCameraLayer, photoCameraLayer].filter(Boolean);
   const bounds = window.L.latLngBounds([]);
   layers.forEach((layer) => {
     if (layer?.getBounds) {
@@ -1227,26 +1250,113 @@ function toggleSelectedPoiVisibility() {
   setMapFeedback(`POI personnalisés: ${hasVisible ? 'masqués' : 'affichés'} (toutes catégories).`);
 }
 
-function renderResources() {
-  const showResources = document.getElementById('filter-resources-active')?.checked ?? true;
+function classifyInstitutionPoint(element = {}) {
+  const tags = element.tags || {};
+  const amenity = String(tags.amenity || '').toLowerCase();
+  const name = String(tags.name || '').toLowerCase();
+  const policeType = String(tags.police || '').toLowerCase();
+
+  if (amenity === 'kindergarten') return 'creche';
+  if (amenity === 'university') return 'universite';
+  if (amenity === 'college') return 'college';
+  if (amenity === 'school') {
+    if (name.includes('lycée') || name.includes('lycee')) return 'lycee';
+    if (name.includes('collège') || name.includes('college')) return 'college';
+    return 'ecole_primaire';
+  }
+  if (amenity === 'fire_station') return 'caserne_pompier';
+  if (amenity === 'police') {
+    if (name.includes('gendarmerie') || policeType.includes('gendarmerie')) return 'gendarmerie';
+    if (name.includes('municipale') || policeType.includes('municipal')) return 'police_municipale';
+    return 'commissariat_police_nationale';
+  }
+  return null;
+}
+
+function shouldDisplayInstitutionType(type = '') {
+  if (SCHOOL_RESOURCE_TYPES.has(type)) return document.getElementById('filter-resources-schools')?.checked ?? false;
+  if (SECURITY_RESOURCE_TYPES.has(type)) return document.getElementById('filter-resources-security')?.checked ?? false;
+  if (FIRE_RESOURCE_TYPES.has(type)) return document.getElementById('filter-resources-fire')?.checked ?? false;
+  return false;
+}
+
+async function loadIsereInstitutions() {
+  if (institutionsLoaded) return institutionPointsCache;
+  const query = `[out:json][timeout:40];
+area["boundary"="administrative"]["admin_level"="6"]["name"="Isère"]->.searchArea;
+(
+  nwr["amenity"~"school|college|university|kindergarten|police|fire_station"](area.searchArea);
+);
+out center tags;`;
+  try {
+    const response = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+      body: query,
+    });
+    const payload = await parseJsonResponse(response, 'overpass-institutions');
+    const elements = Array.isArray(payload?.elements) ? payload.elements : [];
+    institutionPointsCache = elements
+      .map((element) => {
+        const type = classifyInstitutionPoint(element);
+        if (!type) return null;
+        const lat = Number(element.lat ?? element.center?.lat);
+        const lon = Number(element.lon ?? element.center?.lon);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+        const name = String(element.tags?.name || '').trim() || 'Établissement';
+        const address = [element.tags?.['addr:housenumber'], element.tags?.['addr:street'], element.tags?.['addr:city']].filter(Boolean).join(' ') || 'Adresse non renseignée';
+        return {
+          id: `osm-${element.type}-${element.id}`,
+          name,
+          type,
+          lat,
+          lon,
+          active: true,
+          address,
+          priority: 'standard',
+          info: `Source OSM · amenity=${String(element.tags?.amenity || '-')}`,
+          source: `https://www.openstreetmap.org/${element.type}/${element.id}`,
+          dynamic: true,
+        };
+      })
+      .filter(Boolean);
+  } catch {
+    institutionPointsCache = [];
+  }
+  institutionsLoaded = true;
+  return institutionPointsCache;
+}
+
+function getDisplayedResources() {
   const targetCategory = document.getElementById('resource-target-category-filter')?.value || 'all';
   const query = (document.getElementById('map-search')?.value || '').trim().toLowerCase();
-  const resources = showResources
-    ? RESOURCE_POINTS.filter((r) => (targetCategory === 'all' || r.type === targetCategory)
-      && r.active
-      && (!query || `${r.name} ${r.address}`.toLowerCase().includes(query)))
-    : [];
-  const priorityLabel = { critical: 'critique', vital: 'vital', risk: 'à risque' };
-  const markerColor = { critical: '#e03131', vital: '#1971c2', risk: '#f08c00' };
+  const staticResources = RESOURCE_POINTS
+    .filter((r) => r.active)
+    .filter((r) => targetCategory === 'all' || r.type === targetCategory)
+    .filter((r) => !query || `${r.name} ${r.address}`.toLowerCase().includes(query))
+    .map((r) => ({ ...r, dynamic: false }));
+  const dynamicResources = institutionPointsCache
+    .filter((r) => shouldDisplayInstitutionType(r.type))
+    .filter((r) => targetCategory === 'all' || r.type === targetCategory)
+    .filter((r) => !query || `${r.name} ${r.address}`.toLowerCase().includes(query));
+  return [...staticResources, ...dynamicResources];
+}
+
+async function renderResources() {
+  await loadIsereInstitutions();
+  const resources = getDisplayedResources();
+  const priorityLabel = { critical: 'critique', vital: 'vital', risk: 'à risque', standard: 'standard' };
+  const markerColor = { critical: '#e03131', vital: '#1971c2', risk: '#f08c00', standard: '#2f9e44' };
   setHtml('resources-list', resources.map((r) => {
     const meta = RESOURCE_TYPE_META[r.type] || { label: r.type.replace(/_/g, ' '), icon: '📍' };
     const statusLabel = r.active ? 'affichée' : 'masquée';
+    const toggleButton = r.dynamic ? '' : `<button type="button" class="ghost" data-resource-toggle="${escapeHtml(r.id)}">${r.active ? 'Masquer' : 'Afficher'}</button>`;
     return `<li>
       <strong>${meta.icon} ${r.name}</strong> · ${r.address}<br/>
       <span class="muted">${meta.label} · ${statusLabel} · ${priorityLabel[r.priority] || 'standard'}</span><br/>
       <span class="muted">${escapeHtml(r.info || 'Aucune information complémentaire.')}</span><br/>
       <a href="${escapeHtml(r.source || '#')}" target="_blank" rel="noreferrer">Source</a>
-      <button type="button" class="ghost" data-resource-toggle="${escapeHtml(r.id)}">${r.active ? 'Masquer' : 'Afficher'}</button>
+      ${toggleButton}
     </li>`;
   }).join('') || '<li>Aucune ressource avec ces filtres.</li>');
   mapStats.resources = resources.length;
@@ -1257,14 +1367,14 @@ function renderResources() {
     const coords = normalizeMapCoordinates(r.lat, r.lon);
     if (!coords) return;
     const meta = RESOURCE_TYPE_META[r.type] || { label: r.type.replace(/_/g, ' '), icon: '📍' };
-    const markerHtml = `<span class="map-resource-icon" style="background:${markerColor[r.priority] || (r.active ? '#2f9e44' : '#f59f00')}">${meta.icon}</span>`;
+    const markerHtml = `<span class="map-resource-icon" style="background:${markerColor[r.priority] || '#2f9e44'}">${meta.icon}</span>`;
     window.L.marker([coords.lat, coords.lon], {
       icon: window.L.divIcon({ className: 'map-resource-icon-wrap', html: markerHtml, iconSize: [24, 24], iconAnchor: [12, 12] }),
     })
-      .bindPopup(`<strong>${meta.icon} ${r.name}</strong><br>Type: ${meta.label}<br>Niveau: ${priorityLabel[r.priority] || 'standard'}<br>Adresse: ${r.address}<br>Visibilité: ${r.active ? 'affichée' : 'masquée'}<br>${escapeHtml(r.info || '')}<br><a href="${escapeHtml(r.source || '#')}" target="_blank" rel="noreferrer">Source publique</a>`)
+      .bindPopup(`<strong>${meta.icon} ${r.name}</strong><br>Type: ${meta.label}<br>Niveau: ${priorityLabel[r.priority] || 'standard'}<br>Adresse: ${r.address}<br>${escapeHtml(r.info || '')}<br><a href="${escapeHtml(r.source || '#')}" target="_blank" rel="noreferrer">Source publique</a>`)
       .addTo(resourceLayer);
   });
-  setMapFeedback(showResources ? `${resources.length} ressource(s) affichée(s).` : 'Affichage des ressources désactivé.');
+  setMapFeedback(`${resources.length} ressource(s) affichée(s).`);
 }
 
 function toggleResourceActive(resourceId = '') {
@@ -1283,7 +1393,8 @@ function tryLocalMapSearch(query = '') {
     const point = geocodeCache.get(cacheKey);
     if (point) return { ...point, label: `${municipality.name} (commune)` };
   }
-  const resource = RESOURCE_POINTS.find((item) => `${item.name} ${item.address}`.toLowerCase().includes(needle));
+  const resources = [...RESOURCE_POINTS, ...institutionPointsCache];
+  const resource = resources.find((item) => `${item.name} ${item.address}`.toLowerCase().includes(needle));
   if (resource) {
     const coords = normalizeMapCoordinates(resource.lat, resource.lon);
     if (coords) return { ...coords, label: `${resource.name} (${resource.address})` };
@@ -2130,6 +2241,33 @@ function sortPrefectureItemsByRecency(items = []) {
   return [...items].sort((a, b) => toTimestamp(b?.published_at) - toTimestamp(a?.published_at));
 }
 
+function detectNewsCategory(item = {}) {
+  const text = `${item.title || ''} ${item.description || ''}`.toLowerCase();
+  if (/police|gendarmer|pompi|incend|secours/.test(text)) return 'Sécurité & secours';
+  if (/météo|orage|inond|neige|canicule|tempête|risque/.test(text)) return 'Météo & risques';
+  if (/route|trafic|accident|a48|a43|sncf|transport|train/.test(text)) return 'Mobilité & transport';
+  if (/commune|mairie|prefecture|préfecture|département/.test(text)) return 'Institutions locales';
+  if (/école|ecole|lycée|lycee|collège|college|universit|crèche|creche/.test(text)) return 'Éducation';
+  return 'Autres actualités';
+}
+
+function renderNewsCategoryTable(items = []) {
+  const stats = new Map();
+  items.forEach((item) => {
+    const category = detectNewsCategory(item);
+    const previous = stats.get(category) || { count: 0, published_at: '' };
+    const nextDate = Date.parse(item.published_at || '') > Date.parse(previous.published_at || '')
+      ? item.published_at
+      : previous.published_at;
+    stats.set(category, { count: previous.count + 1, published_at: nextDate });
+  });
+  const rows = [...stats.entries()]
+    .sort((a, b) => b[1].count - a[1].count)
+    .map(([category, values]) => `<tr><td>${escapeHtml(category)}</td><td>${values.count}</td><td>${escapeHtml(values.published_at || 'Date non précisée')}</td></tr>`)
+    .join('');
+  setHtml('news-categories-table-body', rows || '<tr><td colspan="3">Aucune actualité catégorisable.</td></tr>');
+}
+
 function renderPrefectureNews(prefecture = {}) {
   const items = sortPrefectureItemsByRecency(Array.isArray(prefecture.items) ? prefecture.items : []);
   const latestTitle = items[0]?.title || "Actualité Préfecture de l'Isère";
@@ -2148,17 +2286,28 @@ function renderPrefectureNews(prefecture = {}) {
 
 function renderDauphineNews(dauphine = {}) {
   const items = sortPrefectureItemsByRecency(Array.isArray(dauphine.items) ? dauphine.items : []);
+  const panelItems = items.slice(0, 15);
   setRiskText('dauphine-status', `${dauphine.status || 'inconnu'} · ${items.length} article(s)`, dauphine.status === 'online' ? 'vert' : 'jaune');
   setText('dauphine-info', `Dernière mise à jour: ${dauphine.updated_at ? new Date(dauphine.updated_at).toLocaleString() : 'inconnue'}`);
-  const markup = items.slice(0, 7).map((item) => {
+  const servicesMarkup = items.slice(0, 7).map((item) => {
     const title = escapeHtml(item.title || 'Article Le Dauphiné Libéré');
     const description = escapeHtml(item.description || '');
     const published = item.published_at ? escapeHtml(item.published_at) : 'Date non précisée';
     const safeLink = String(item.link || '').startsWith('http') ? item.link : 'https://www.ledauphine.com/isere';
     return `<li><strong>${title}</strong><br><span class="muted">${published}</span>${description ? `<br>${description}` : ''}<br><a href="${safeLink}" target="_blank" rel="noreferrer">Lire l'article</a></li>`;
   }).join('') || '<li>Aucun article Isère disponible pour le moment.</li>';
-  setHtml('dauphine-news-list', markup);
-  setHtml('dauphine-news-panel-list', markup);
+  const panelMarkup = panelItems.map((item) => {
+    const title = escapeHtml(item.title || 'Article Le Dauphiné Libéré');
+    const description = escapeHtml(item.description || '');
+    const published = item.published_at ? escapeHtml(item.published_at) : 'Date non précisée';
+    const safeLink = String(item.link || '').startsWith('http') ? item.link : 'https://www.ledauphine.com/isere';
+    const category = detectNewsCategory(item);
+    return `<li><strong>${title}</strong> <span class="badge neutral">${escapeHtml(category)}</span><br><span class="muted">${published}</span>${description ? `<br>${description}` : ''}<br><a href="${safeLink}" target="_blank" rel="noreferrer">Lire l'article</a></li>`;
+  }).join('') || '<li>Aucun article Isère disponible pour le moment.</li>';
+  setHtml('dauphine-news-list', servicesMarkup);
+  setHtml('dauphine-news-panel-list', panelMarkup);
+  setText('dauphine-news-count', String(panelItems.length));
+  renderNewsCategoryTable(panelItems);
 }
 
 function sanitizeMeteoInformation(info = '') {
@@ -4171,7 +4320,7 @@ function bindAppInteractions() {
     }
   });
 
-  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-itinisere', 'filter-bison-accidents', 'filter-bison-cameras', 'filter-photo-cameras'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-schools', 'filter-resources-security', 'filter-resources-fire', 'filter-itinisere', 'filter-bison-accidents', 'filter-bison-cameras', 'filter-photo-cameras'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       renderStations(cachedVigicruesPayload);
       await renderMunicipalitiesOnMap(cachedMunicipalities);

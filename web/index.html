@@ -474,11 +474,18 @@
         <section id="news-panel" class="panel view hidden" hidden>
           <div class="panel-heading">
             <h3>Actualités opérationnelles · Isère</h3>
-            <p class="muted">Flux presse local du Dauphiné Libéré (section Isère), trié du plus récent au plus ancien.</p>
+            <p class="muted">Flux presse local du Dauphiné Libéré (section Isère), trié du plus récent au plus ancien avec synthèse par catégories.</p>
           </div>
           <p id="dauphine-status" class="service-status">-</p>
           <p id="dauphine-info" class="muted">-</p>
           <ul id="dauphine-news-panel-list" class="list"></ul>
+          <p class="muted">Articles analysés: <strong id="dauphine-news-count">0</strong></p>
+          <table class="users-table">
+            <thead>
+              <tr><th>Catégorie</th><th>Articles</th><th>Dernière publication</th></tr>
+            </thead>
+            <tbody id="news-categories-table-body"></tbody>
+          </table>
         </section>
 
         <section id="map-panel" class="panel view hidden" hidden>
@@ -545,6 +552,15 @@
                       <option value="poste_commandement">Postes de commandement</option>
                       <option value="centre_hebergement">Centres d'hébergement</option>
                       <option value="hopital">Hôpitaux</option>
+                      <option value="ecole_primaire">Écoles primaires</option>
+                      <option value="college">Collèges</option>
+                      <option value="lycee">Lycées</option>
+                      <option value="universite">Universités</option>
+                      <option value="creche">Crèches</option>
+                      <option value="gendarmerie">Gendarmeries</option>
+                      <option value="commissariat_police_nationale">Commissariats (police nationale)</option>
+                      <option value="police_municipale">Police municipale</option>
+                      <option value="caserne_pompier">Caserne pompiers</option>
                       <option value="centrale_nucleaire">Centrales / sites nucléaires</option>
                       <option value="lieu_risque">Site Seveso / risque technologique</option>
                       <option value="lieu_vital">Lieux vitaux</option>
@@ -572,6 +588,9 @@
                 <div class="map-toggle-grid">
                   <label><input id="filter-hydro" type="checkbox" checked /> Vigicrues</label>
                   <label><input id="filter-pcs" type="checkbox" checked /> Communes PCS</label>
+                  <label><input id="filter-resources-schools" type="checkbox" /> Écoles, collèges, lycées, universités, crèches (Isère)</label>
+                  <label><input id="filter-resources-security" type="checkbox" /> Commissariats, police municipale et gendarmeries (Isère)</label>
+                  <label><input id="filter-resources-fire" type="checkbox" /> Casernes de pompiers (Isère)</label>
                   <label><input id="filter-itinisere" type="checkbox" checked /> Itinisère</label>
                   <label><input id="filter-bison-accidents" type="checkbox" checked /> Accidents en cours Isère (Bison Futé)</label>
                   <label><input id="filter-bison-cameras" type="checkbox" checked /> Caméras routières Bison Futé (Isère)</label>
