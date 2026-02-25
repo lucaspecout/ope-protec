@@ -159,6 +159,7 @@ let iserePopulationLoaded = false;
 const SCHOOL_RESOURCE_TYPES = new Set(['ecole_primaire', 'college', 'lycee', 'universite', 'creche']);
 const SECURITY_RESOURCE_TYPES = new Set(['gendarmerie', 'commissariat_police_nationale', 'police_municipale']);
 const FIRE_RESOURCE_TYPES = new Set(['caserne_pompier']);
+const HEALTH_RESOURCE_TYPES = new Set(['hopital', 'ehpad']);
 
 const ISERE_BOUNDARY_STYLE = { color: '#163a87', weight: 2, fillColor: '#63c27d', fillOpacity: 0.2 };
 const TRAFFIC_COMMUNES = ['Grenoble', 'Voiron', 'Vienne', 'Bourgoin-Jallieu', 'Pont-de-Claix', 'Meylan', 'Échirolles', 'L\'Isle-d\'Abeau', 'Saint-Martin-d\'Hères', 'La Tour-du-Pin', 'Rives', 'Sassenage', 'Crolles', 'Tullins'];
@@ -788,6 +789,10 @@ function applyBasemap(style = 'osm') {
       url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
       options: { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors &copy; CARTO' },
     },
+    population: {
+      url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+      options: { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors &copy; CARTO · INSEE (population légale)' },
+    },
     ign: {
       url: 'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png',
       options: { maxZoom: 19, attribution: '&copy; IGN/Geoportail France' },
@@ -877,6 +882,7 @@ async function resetMapFilters() {
     'poi-target-category-filter': 'all',
     'filter-resources-schools-type': 'all',
     'filter-resources-security-type': 'all',
+    'filter-resources-health-type': 'all',
     'map-basemap-select': 'osm',
   };
   Object.entries(defaults).forEach(([id, value]) => {
@@ -890,24 +896,20 @@ async function resetMapFilters() {
   const schools = document.getElementById('filter-resources-schools');
   const security = document.getElementById('filter-resources-security');
   const fireStations = document.getElementById('filter-resources-fire');
-  const itinisere = document.getElementById('filter-itinisere');
-  const bisonAccidents = document.getElementById('filter-bison-accidents');
-  const bisonCameras = document.getElementById('filter-bison-cameras');
-  const photoCameras = document.getElementById('filter-photo-cameras');
+  const trafficIncidents = document.getElementById('filter-traffic-incidents');
+  const cameras = document.getElementById('filter-cameras');
   const googleFlow = document.getElementById('filter-google-traffic-flow');
-  const populationByCity = document.getElementById('filter-population-by-city');
+  const healthResources = document.getElementById('filter-resources-health');
   if (hydro) hydro.checked = true;
   if (pcs) pcs.checked = true;
   if (activeOnly) activeOnly.checked = true;
   if (schools) schools.checked = false;
   if (security) security.checked = false;
   if (fireStations) fireStations.checked = false;
-  if (itinisere) itinisere.checked = true;
-  if (bisonAccidents) bisonAccidents.checked = true;
-  if (bisonCameras) bisonCameras.checked = true;
-  if (photoCameras) photoCameras.checked = true;
+  if (trafficIncidents) trafficIncidents.checked = true;
+  if (cameras) cameras.checked = true;
+  if (healthResources) healthResources.checked = true;
   if (googleFlow) googleFlow.checked = false;
-  if (populationByCity) populationByCity.checked = false;
   resourceVisibilityOverrides.clear();
   if (searchLayer) searchLayer.clearLayers();
   applyBasemap('osm');
@@ -1317,6 +1319,7 @@ function classifyInstitutionPoint(element = {}) {
 function shouldDisplayInstitutionType(type = '') {
   const schoolTypeFilter = document.getElementById('filter-resources-schools-type')?.value || 'all';
   const securityTypeFilter = document.getElementById('filter-resources-security-type')?.value || 'all';
+  const healthTypeFilter = document.getElementById('filter-resources-health-type')?.value || 'all';
 
   if (SCHOOL_RESOURCE_TYPES.has(type)) {
     const schoolsEnabled = document.getElementById('filter-resources-schools')?.checked ?? false;
@@ -1329,7 +1332,11 @@ function shouldDisplayInstitutionType(type = '') {
     return securityTypeFilter === 'all' || securityTypeFilter === type;
   }
   if (FIRE_RESOURCE_TYPES.has(type)) return document.getElementById('filter-resources-fire')?.checked ?? false;
-  if (type === 'hopital' || type === 'ehpad') return document.getElementById('filter-resources-finess')?.checked ?? true;
+  if (HEALTH_RESOURCE_TYPES.has(type)) {
+    const healthEnabled = document.getElementById('filter-resources-health')?.checked ?? true;
+    if (!healthEnabled) return false;
+    return healthTypeFilter === 'all' || healthTypeFilter === type;
+  }
   return false;
 }
 
@@ -1402,17 +1409,17 @@ function populationColor(population = 0) {
 }
 
 function populationRadius(population = 0) {
-  if (population >= 100000) return 11;
-  if (population >= 50000) return 9;
-  if (population >= 20000) return 7;
-  if (population >= 10000) return 6;
-  return 4;
+  if (population >= 100000) return 16;
+  if (population >= 50000) return 14;
+  if (population >= 20000) return 12;
+  if (population >= 10000) return 10;
+  return 8;
 }
 
 async function renderPopulationByCityLayer() {
   if (!populationLayer) return;
   populationLayer.clearLayers();
-  const enabled = document.getElementById('filter-population-by-city')?.checked ?? false;
+  const enabled = (document.getElementById('map-basemap-select')?.value || 'osm') === 'population';
   if (!enabled) return;
   const points = await loadIserePopulationPoints();
   points.forEach((point) => {
@@ -1481,6 +1488,7 @@ function getDisplayedResources() {
   const staticResources = RESOURCE_POINTS
     .filter((r) => r.active)
     .filter((r) => resourceVisibilityOverrides.get(r.id) !== false)
+    .filter((r) => !HEALTH_RESOURCE_TYPES.has(r.type) || shouldDisplayInstitutionType(r.type))
     .filter((r) => targetCategory === 'all' || r.type === targetCategory)
     .filter((r) => !query || `${r.name} ${r.address}`.toLowerCase().includes(query))
     .map((r) => ({ ...r, dynamic: false }));
@@ -2194,8 +2202,8 @@ async function renderTrafficOnMap() {
   photoCameraLayer.clearLayers();
   mapStats.traffic = 0;
 
-  const showItinisere = document.getElementById('filter-itinisere')?.checked ?? true;
-  if (showItinisere) {
+  const showTrafficIncidents = document.getElementById('filter-traffic-incidents')?.checked ?? true;
+  if (showTrafficIncidents) {
     const points = await buildItinisereMapPoints(cachedItinisereEvents || []);
     if (renderSequence !== trafficRenderSequence) return;
     mapStats.traffic += points.length;
@@ -2209,8 +2217,8 @@ async function renderTrafficOnMap() {
     });
   }
 
-  const showBisonCameras = document.getElementById('filter-bison-cameras')?.checked ?? true;
-  if (showBisonCameras) {
+  const showCameras = document.getElementById('filter-cameras')?.checked ?? true;
+  if (showCameras) {
     BISON_FUTE_CAMERAS.forEach((camera) => {
       const coords = normalizeMapCoordinates(camera.lat, camera.lon);
       if (!coords) return;
@@ -2219,10 +2227,7 @@ async function renderTrafficOnMap() {
       window.L.marker([coords.lat, coords.lon], { icon: pointIcon }).bindPopup(popupHtml).addTo(bisonCameraLayer);
     });
     mapStats.traffic += BISON_FUTE_CAMERAS.length;
-  }
 
-  const showPhotoCameras = document.getElementById('filter-photo-cameras')?.checked ?? true;
-  if (showPhotoCameras) {
     ITINISERE_PHOTO_CAMERAS.forEach((camera) => {
       const coords = normalizeMapCoordinates(camera.lat, camera.lon);
       if (!coords) return;
@@ -4110,7 +4115,7 @@ function bindAppInteractions() {
       setMapFeedback(sanitizeErrorMessage(error.message), true);
     }
   });
-  document.getElementById('map-basemap-select')?.addEventListener('change', (event) => applyBasemap(event.target.value));
+  document.getElementById('map-basemap-select')?.addEventListener('change', async (event) => { applyBasemap(event.target.value); await renderPopulationByCityLayer(); });
   document.getElementById('filter-google-traffic-flow')?.addEventListener('change', () => applyGoogleTrafficFlowOverlay());
   document.getElementById('api-refresh-btn')?.addEventListener('click', async () => {
     try {
@@ -4506,7 +4511,7 @@ function bindAppInteractions() {
     }
   });
 
-  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-finess', 'filter-population-by-city', 'filter-itinisere', 'filter-bison-accidents', 'filter-bison-cameras', 'filter-photo-cameras'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-health', 'filter-resources-health-type', 'filter-traffic-incidents', 'filter-cameras'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       renderStations(cachedVigicruesPayload);
       await renderMunicipalitiesOnMap(cachedMunicipalities);
