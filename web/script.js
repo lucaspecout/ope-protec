@@ -2481,19 +2481,16 @@ function sanitizeMeteoInformation(info = '') {
 }
 
 function bisonTrafficSplitBar(departureLevel, arrivalLevel) {
-  const departure = {
-    css: normalizeLevel(departureLevel || 'inconnu'),
-    value: escapeHtml(departureLevel || 'inconnu'),
-  };
-  const arrival = {
-    css: normalizeLevel(arrivalLevel || 'inconnu'),
-    value: escapeHtml(arrivalLevel || 'inconnu'),
-  };
+  const severityByLevel = { inconnu: -1, vert: 0, jaune: 1, orange: 2, rouge: 3 };
+  const departure = normalizeLevel(departureLevel || 'inconnu');
+  const arrival = normalizeLevel(arrivalLevel || 'inconnu');
+  const dominantLevel = (severityByLevel[arrival] ?? -1) > (severityByLevel[departure] ?? -1) ? arrival : departure;
+  const label = `${escapeHtml(departureLevel || 'inconnu')} / ${escapeHtml(arrivalLevel || 'inconnu')}`;
 
   return `
-    <div class="bison-isere-square__split" role="img" aria-label="Bison Futé Isère: départ ${departure.value}, arrivée ${arrival.value}">
-      <div class="bison-isere-square__segment ${departure.css}"><span>Départ</span><strong>${departure.value}</strong></div>
-      <div class="bison-isere-square__segment ${arrival.css}"><span>Arrivée</span><strong>${arrival.value}</strong></div>
+    <div class="bison-isere-square__single ${dominantLevel}" role="img" aria-label="Bison Futé Isère: départ / arrivée ${label}">
+      <span>Départ / Arrivée</span>
+      <strong>${label}</strong>
     </div>
   `;
 }
