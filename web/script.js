@@ -4005,6 +4005,7 @@ function setMapControlsCollapsed(collapsed) {
   const workspace = document.querySelector('#map-panel .map-workspace');
   const controls = document.getElementById('map-controls-panel');
   const toggle = document.getElementById('map-controls-toggle');
+  const toolbarToggle = document.getElementById('map-toolbar-collapse-toggle');
   if (!workspace || !controls || !toggle) return;
   workspace.classList.toggle('map-workspace--collapsed', mapControlsCollapsed);
   controls.setAttribute('aria-hidden', String(mapControlsCollapsed));
@@ -4013,11 +4014,16 @@ function setMapControlsCollapsed(collapsed) {
   const toggleLabel = mapControlsCollapsed ? 'Afficher les options de la carte' : 'Ranger les options de la carte';
   toggle.title = toggleLabel;
   toggle.setAttribute('aria-label', toggleLabel);
+  if (toolbarToggle) {
+    toolbarToggle.setAttribute('aria-expanded', String(!mapControlsCollapsed));
+    toolbarToggle.textContent = mapControlsCollapsed ? '🧰 Afficher menu carte' : '📌 Ranger menu carte';
+  }
   if (leafletMap) setTimeout(() => leafletMap.invalidateSize(), 160);
 }
 
 function updateMapFullscreenButton() {
   const button = document.getElementById('map-fullscreen-toggle');
+  const toolbarButton = document.getElementById('map-toolbar-fullscreen-toggle');
   const mapWrapper = document.querySelector('#map-panel .map-canvas-wrap');
   if (!button || !mapWrapper) return;
   const isFullscreen = document.fullscreenElement === mapWrapper;
@@ -4026,6 +4032,12 @@ function updateMapFullscreenButton() {
   const label = isFullscreen ? 'Quitter le plein écran de la carte' : 'Passer la carte en plein écran';
   button.title = label;
   button.setAttribute('aria-label', label);
+  if (toolbarButton) {
+    toolbarButton.setAttribute('aria-pressed', String(isFullscreen));
+    toolbarButton.textContent = isFullscreen ? '🡼 Quitter plein écran' : '⛶ Plein écran';
+    toolbarButton.title = label;
+    toolbarButton.setAttribute('aria-label', label);
+  }
   if (leafletMap) setTimeout(() => leafletMap.invalidateSize(), 150);
 }
 
@@ -4093,7 +4105,11 @@ function bindAppInteractions() {
   document.getElementById('map-controls-toggle')?.addEventListener('click', () => {
     setMapControlsCollapsed(!mapControlsCollapsed);
   });
+  document.getElementById('map-toolbar-collapse-toggle')?.addEventListener('click', () => {
+    setMapControlsCollapsed(!mapControlsCollapsed);
+  });
   document.getElementById('map-fullscreen-toggle')?.addEventListener('click', toggleMapFullscreen);
+  document.getElementById('map-toolbar-fullscreen-toggle')?.addEventListener('click', toggleMapFullscreen);
   document.addEventListener('fullscreenchange', updateMapFullscreenButton);
   updateMapFullscreenButton();
   document.getElementById('map-fit-btn')?.addEventListener('click', () => fitMapToData(true));
