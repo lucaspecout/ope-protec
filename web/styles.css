@@ -372,9 +372,9 @@ label { display: block; margin-bottom: .8rem; }
 .map-controls-toggle {
   position: absolute;
   top: .65rem;
-  left: .65rem;
-  right: auto;
-  z-index: 30;
+  right: .65rem;
+  left: auto;
+  z-index: 1200;
   width: 34px;
   height: 34px;
   border-radius: 10px;
@@ -391,9 +391,9 @@ label { display: block; margin-bottom: .8rem; }
 .map-fullscreen-toggle {
   position: absolute;
   top: 3.15rem;
-  left: .65rem;
-  right: auto;
-  z-index: 30;
+  right: .65rem;
+  left: auto;
+  z-index: 1200;
   width: 34px;
   height: 34px;
   border-radius: 10px;
