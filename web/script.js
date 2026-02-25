@@ -3560,8 +3560,11 @@ function renderExternalRisks(data = {}) {
   const bergesStatus = mobilitesBerges?.grenoble_berges?.status || 'unknown';
   const bergesLevel = bergesStatus === 'open' ? 'vert' : bergesStatus === 'closed' ? 'rouge' : 'jaune';
   const bergesLabel = mobilitesBerges?.grenoble_berges?.label || 'non renseignée';
+  const bergesRouteHighlights = mobilitesBerges?.grenoble_berges?.route_highlights || [];
+  const bergesRouteText = bergesRouteHighlights.length ? `Infos route utiles: ${bergesRouteHighlights.join(' · ')}` : '';
+  const bergesBaseDetails = mobilitesBerges?.grenoble_berges?.details || 'Aucun commentaire voirie transmis par la source.';
   setRiskText('berges-status', `${mobilitesBerges.status || 'inconnu'} · ${bergesLabel}`, bergesLevel);
-  setText('berges-info', mobilitesBerges?.grenoble_berges?.details || 'Aucun commentaire voirie transmis par la source.');
+  setText('berges-info', [bergesBaseDetails, bergesRouteText].filter(Boolean).join(' | '));
   const atmoToday = atmo?.today || {};
   const atmoLevel = normalizeLevel(atmoToday.level || 'inconnu');
   setRiskText('atmo-status', `${atmo.status || 'inconnu'} · indice ${atmoToday.index ?? '-'}`, atmoToday.level || 'vert');
