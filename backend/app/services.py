@@ -368,7 +368,6 @@ _ATMO_AURA_CACHE_TTL_SECONDS = 900
 _SNCF_ISERE_CACHE_TTL_SECONDS = 180
 _RTE_ELECTRICITY_CACHE_TTL_SECONDS = 300
 _FINESS_ISERE_CACHE_TTL_SECONDS = 43200
-_MOBILITES_BERGES_CACHE_TTL_SECONDS = 180
 
 _vigicrues_cache_lock = Lock()
 _vigicrues_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
@@ -392,8 +391,6 @@ _rte_electricity_cache_lock = Lock()
 _rte_electricity_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _finess_isere_cache_lock = Lock()
 _finess_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
-_mobilites_berges_cache_lock = Lock()
-_mobilites_berges_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _isere_aval_polyline_cache_lock = Lock()
 _isere_aval_polyline_cache: dict[str, Any] = {"points": None, "expires_at": datetime.min}
 _ISERE_AVAL_GRENOBLE_CUTOFF_LON = 5.67526671768763
@@ -2743,99 +2740,6 @@ def fetch_bison_fute_traffic(force_refresh: bool = False) -> dict[str, Any]:
         ttl_seconds=_BISON_CACHE_TTL_SECONDS,
         force_refresh=force_refresh,
         loader=_fetch_bison_fute_traffic_live,
-    )
-
-
-def _extract_voies_sur_berges_status(raw_comment: str) -> tuple[str, str]:
-    text = re.sub(r"\s+", " ", str(raw_comment or "")).strip().lower()
-    if not text:
-        return "unknown", "information indisponible"
-
-    berge_tokens = ("voie sur berge", "voies sur berges", "berges")
-    closure_tokens = ("ferm", "coup", "interdit", "inaccess", "barri")
-    open_tokens = ("ouvert", "accessible", "réouvert", "ouverte")
-
-    if any(token in text for token in berge_tokens):
-        if any(token in text for token in closure_tokens):
-            return "closed", "fermée"
-        if any(token in text for token in open_tokens):
-            return "open", "ouverte"
-
-    return "unknown", "non renseignée"
-
-
-def _extract_route_highlights(raw_comment: str, limit: int = 3) -> list[str]:
-    text = re.sub(r"\s+", " ", str(raw_comment or "")).strip()
-    if not text:
-        return []
-
-    sentence_candidates = re.split(r"[.;!?]\s+", text)
-    road_tokens = (
-        "rd", "rn", "a", "route", "autoroute", "rocade", "échangeur", "sortie", "pont", "tunnel",
-    )
-    disruption_tokens = (
-        "ferm", "coup", "interdit", "eboulement", "éboulement", "accident", "verglas", "deviation", "déviation", "boue",
-    )
-
-    highlights: list[str] = []
-    seen: set[str] = set()
-    for sentence in sentence_candidates:
-        cleaned = sentence.strip(" \n-:,")
-        lowered = cleaned.lower()
-        has_road = bool(re.search(r"\b(?:rd|rn|d|a)\s?\d+[a-z]?\b", lowered)) or any(token in lowered for token in road_tokens)
-        has_disruption = any(token in lowered for token in disruption_tokens)
-        if not cleaned or not (has_road and has_disruption):
-            continue
-
-        normalized = cleaned[0].upper() + cleaned[1:] if len(cleaned) > 1 else cleaned.upper()
-        key = normalized.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        highlights.append(normalized)
-        if len(highlights) >= limit:
-            break
-
-    return highlights
-
-
-def _fetch_mobilites_grenoble_berges_live() -> dict[str, Any]:
-    source = "https://data.mobilites-m.fr/api/dyn/vh/json"
-    payload = _http_get_json(source, timeout=12)
-
-    data = payload.get("data") if isinstance(payload, dict) else {}
-    if not isinstance(data, dict):
-        data = {}
-
-    commentaire_interne = str(data.get("commentaire_interne") or "").strip()
-    commentaire_public = str(data.get("commentaire") or "").strip()
-    merged_comment = f"{commentaire_interne} {commentaire_public}".strip()
-    status, label = _extract_voies_sur_berges_status(merged_comment)
-    route_highlights = _extract_route_highlights(merged_comment)
-    details = commentaire_public or commentaire_interne or "Aucun commentaire voirie transmis."
-
-    return {
-        "status": "online",
-        "source": source,
-        "updated_at": datetime.utcnow().isoformat() + "Z",
-        "grenoble_berges": {
-            "status": status,
-            "label": label,
-            "details": details,
-            "route_highlights": route_highlights,
-            "time": payload.get("time") if isinstance(payload, dict) else None,
-            "publisher": data.get("valideur") or data.get("createur") or "mobilites-m",
-        },
-    }
-
-
-def fetch_mobilites_grenoble_berges(force_refresh: bool = False) -> dict[str, Any]:
-    return _cached_external_payload(
-        cache=_mobilites_berges_cache,
-        lock=_mobilites_berges_cache_lock,
-        ttl_seconds=_MOBILITES_BERGES_CACHE_TTL_SECONDS,
-        force_refresh=force_refresh,
-        loader=_fetch_mobilites_grenoble_berges_live,
     )
 
 

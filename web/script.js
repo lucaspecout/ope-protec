@@ -2480,11 +2480,22 @@ function sanitizeMeteoInformation(info = '') {
   return text;
 }
 
-function bisonSquareCell(label, level) {
-  const normalized = normalizeLevel(level || 'inconnu');
-  const safeLabel = escapeHtml(label);
-  const safeLevel = escapeHtml(level || 'inconnu');
-  return `<div class="bison-isere-square__cell ${normalized}"><span>${safeLabel}</span><strong>${safeLevel}</strong></div>`;
+function bisonTrafficSplitBar(departureLevel, arrivalLevel) {
+  const departure = {
+    css: normalizeLevel(departureLevel || 'inconnu'),
+    value: escapeHtml(departureLevel || 'inconnu'),
+  };
+  const arrival = {
+    css: normalizeLevel(arrivalLevel || 'inconnu'),
+    value: escapeHtml(arrivalLevel || 'inconnu'),
+  };
+
+  return `
+    <div class="bison-isere-square__split" role="img" aria-label="Bison Futé Isère: départ ${departure.value}, arrivée ${arrival.value}">
+      <div class="bison-isere-square__segment ${departure.css}"><span>Départ</span><strong>${departure.value}</strong></div>
+      <div class="bison-isere-square__segment ${arrival.css}"><span>Arrivée</span><strong>${arrival.value}</strong></div>
+    </div>
+  `;
 }
 
 function renderVigieauAlerts(vigieau = {}) {
@@ -2546,10 +2557,7 @@ function renderBisonFuteSummary(bison = {}) {
   setText('bison-info', `National J0: ${nationalToday.departure || 'inconnu'} / ${nationalToday.return || 'inconnu'} · J1: ${nationalTomorrow.departure || 'inconnu'} / ${nationalTomorrow.return || 'inconnu'}`);
   setText('map-bison-isere', `${isereToday.departure || 'inconnu'} (retour ${isereToday.return || 'inconnu'})`);
   setText('home-feature-bison-isere', `${isereToday.departure || 'inconnu'} / ${isereToday.return || 'inconnu'}`);
-  setHtml('bison-isere-square', [
-    bisonSquareCell('Départs', isereToday.departure || 'inconnu'),
-    bisonSquareCell('Retours', isereToday.return || 'inconnu'),
-  ].join(''));
+  setHtml('bison-isere-square', bisonTrafficSplitBar(isereToday.departure || 'inconnu', isereToday.return || 'inconnu'));
 
   const bisonMarkup = [
     `<li><strong>Aujourd'hui (${today.date || '-'})</strong><br>Isère départ: ${isereToday.departure || 'inconnu'} · Isère retour: ${isereToday.return || 'inconnu'}<br>National départ: ${nationalToday.departure || 'inconnu'} · National retour: ${nationalToday.return || 'inconnu'}<br><a href="https://www.bison-fute.gouv.fr" target="_blank" rel="noreferrer">Voir la carte Bison Futé</a></li>`,
@@ -3529,7 +3537,6 @@ function renderExternalRisks(data = {}) {
   const vigieau = data?.vigieau || {};
   const atmo = data?.atmo_aura || {};
   const electricity = data?.electricity_isere || {};
-  const mobilitesBerges = data?.mobilites_m_berges || {};
   const georisquesPayload = data?.georisques || {};
   const georisques = georisquesPayload?.data && typeof georisquesPayload.data === 'object'
     ? { ...georisquesPayload.data, ...georisquesPayload }
@@ -3557,14 +3564,6 @@ function renderExternalRisks(data = {}) {
   renderSncfAlerts(sncf);
   renderVigieauAlerts(vigieau);
   renderElectricityStatus(electricity);
-  const bergesStatus = mobilitesBerges?.grenoble_berges?.status || 'unknown';
-  const bergesLevel = bergesStatus === 'open' ? 'vert' : bergesStatus === 'closed' ? 'rouge' : 'jaune';
-  const bergesLabel = mobilitesBerges?.grenoble_berges?.label || 'non renseignée';
-  const bergesRouteHighlights = mobilitesBerges?.grenoble_berges?.route_highlights || [];
-  const bergesRouteText = bergesRouteHighlights.length ? `Infos route utiles: ${bergesRouteHighlights.join(' · ')}` : '';
-  const bergesBaseDetails = mobilitesBerges?.grenoble_berges?.details || 'Aucun commentaire voirie transmis par la source.';
-  setRiskText('berges-status', `${mobilitesBerges.status || 'inconnu'} · ${bergesLabel}`, bergesLevel);
-  setText('berges-info', [bergesBaseDetails, bergesRouteText].filter(Boolean).join(' | '));
   const atmoToday = atmo?.today || {};
   const atmoLevel = normalizeLevel(atmoToday.level || 'inconnu');
   setRiskText('atmo-status', `${atmo.status || 'inconnu'} · indice ${atmoToday.index ?? '-'}`, atmoToday.level || 'vert');
@@ -3617,7 +3616,6 @@ function renderApiInterconnections(data = {}) {
     { key: 'vigieau', label: 'Vigieau · Restrictions eau', level: `${(data.vigieau?.alerts || []).length} alerte(s)`, details: data.vigieau?.source || '-' },
     { key: 'electricity_isere', label: 'Électricité Isère · RTE éCO2mix', level: normalizeLevel(data.electricity_isere?.level || 'inconnu'), details: `marge ${data.electricity_isere?.supply_margin_mw ?? '-'} MW` },
     { key: 'atmo_aura', label: "Atmo AURA · Qualité de l'air", level: `indice ${data.atmo_aura?.today?.index ?? '-'}`, details: data.atmo_aura?.source || '-' },
-    { key: 'mobilites_m_berges', label: 'Mobilités M · Voies sur berges', level: data.mobilites_m_berges?.grenoble_berges?.label || 'non renseignée', details: data.mobilites_m_berges?.source || '-' },
   ];
 
   const cards = services.map((service) => {
@@ -4658,7 +4656,6 @@ async function loadHomeLiveStatus() {
       document.getElementById('home-feature-itinisere-status').textContent = data.itinisere?.status || 'inconnu';
       document.getElementById('home-feature-itinisere-events').textContent = String(data.itinisere?.events_count ?? 0);
       document.getElementById('home-feature-bison-isere').textContent = `${data.bison_fute?.today?.isere?.departure || 'inconnu'} / ${data.bison_fute?.today?.isere?.return || 'inconnu'}`;
-      document.getElementById('home-feature-berges-status').textContent = data.mobilites_m_berges?.grenoble_berges?.label || 'non renseignée';
       renderHomeMeteoSituation(data.meteo_france?.current_situation || []);
       const updatedLabel = data?.updated_at ? new Date(data.updated_at).toLocaleString() : 'inconnue';
       document.getElementById('home-live-updated').textContent = `Dernière mise à jour: ${updatedLabel}`;
