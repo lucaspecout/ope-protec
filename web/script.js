@@ -3529,6 +3529,7 @@ function renderExternalRisks(data = {}) {
   const vigieau = data?.vigieau || {};
   const atmo = data?.atmo_aura || {};
   const electricity = data?.electricity_isere || {};
+  const mobilitesBerges = data?.mobilites_m_berges || {};
   const georisquesPayload = data?.georisques || {};
   const georisques = georisquesPayload?.data && typeof georisquesPayload.data === 'object'
     ? { ...georisquesPayload.data, ...georisquesPayload }
@@ -3556,6 +3557,11 @@ function renderExternalRisks(data = {}) {
   renderSncfAlerts(sncf);
   renderVigieauAlerts(vigieau);
   renderElectricityStatus(electricity);
+  const bergesStatus = mobilitesBerges?.grenoble_berges?.status || 'unknown';
+  const bergesLevel = bergesStatus === 'open' ? 'vert' : bergesStatus === 'closed' ? 'rouge' : 'jaune';
+  const bergesLabel = mobilitesBerges?.grenoble_berges?.label || 'non renseignée';
+  setRiskText('berges-status', `${mobilitesBerges.status || 'inconnu'} · ${bergesLabel}`, bergesLevel);
+  setText('berges-info', mobilitesBerges?.grenoble_berges?.details || 'Aucun commentaire voirie transmis par la source.');
   const atmoToday = atmo?.today || {};
   const atmoLevel = normalizeLevel(atmoToday.level || 'inconnu');
   setRiskText('atmo-status', `${atmo.status || 'inconnu'} · indice ${atmoToday.index ?? '-'}`, atmoToday.level || 'vert');
@@ -3608,6 +3614,7 @@ function renderApiInterconnections(data = {}) {
     { key: 'vigieau', label: 'Vigieau · Restrictions eau', level: `${(data.vigieau?.alerts || []).length} alerte(s)`, details: data.vigieau?.source || '-' },
     { key: 'electricity_isere', label: 'Électricité Isère · RTE éCO2mix', level: normalizeLevel(data.electricity_isere?.level || 'inconnu'), details: `marge ${data.electricity_isere?.supply_margin_mw ?? '-'} MW` },
     { key: 'atmo_aura', label: "Atmo AURA · Qualité de l'air", level: `indice ${data.atmo_aura?.today?.index ?? '-'}`, details: data.atmo_aura?.source || '-' },
+    { key: 'mobilites_m_berges', label: 'Grenoble · Voies sur berges', level: data.mobilites_m_berges?.grenoble_berges?.label || 'non renseignée', details: data.mobilites_m_berges?.source || '-' },
   ];
 
   const cards = services.map((service) => {
@@ -4648,6 +4655,7 @@ async function loadHomeLiveStatus() {
       document.getElementById('home-feature-itinisere-status').textContent = data.itinisere?.status || 'inconnu';
       document.getElementById('home-feature-itinisere-events').textContent = String(data.itinisere?.events_count ?? 0);
       document.getElementById('home-feature-bison-isere').textContent = `${data.bison_fute?.today?.isere?.departure || 'inconnu'} / ${data.bison_fute?.today?.isere?.return || 'inconnu'}`;
+      document.getElementById('home-feature-berges-status').textContent = data.mobilites_m_berges?.grenoble_berges?.label || 'non renseignée';
       renderHomeMeteoSituation(data.meteo_france?.current_situation || []);
       const updatedLabel = data?.updated_at ? new Date(data.updated_at).toLocaleString() : 'inconnue';
       document.getElementById('home-live-updated').textContent = `Dernière mise à jour: ${updatedLabel}`;
