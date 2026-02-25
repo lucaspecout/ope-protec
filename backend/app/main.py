@@ -55,6 +55,7 @@ from .services import (
     fetch_dauphine_isere_news,
     fetch_finess_isere_resources,
     fetch_sncf_isere_alerts,
+    fetch_mobilites_grenoble_berges,
     fetch_rte_isere_electricity_status,
     fetch_atmo_aura_isere_air_quality,
     fetch_vigicrues_isere,
@@ -145,6 +146,7 @@ _external_risks_snapshot: dict = {
         "prefecture_isere": {},
         "dauphine_isere": {},
         "atmo_aura": {},
+        "mobilites_m_berges": {},
     },
 }
 ALLOWED_DOC_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
@@ -349,6 +351,7 @@ def public_live_status(db: Session = Depends(get_db)):
     bison_fute = risks_snapshot.get("bison_fute") or {}
     georisques = risks_snapshot.get("georisques") or {}
     prefecture = risks_snapshot.get("prefecture_isere") or {}
+    mobilites_berges = risks_snapshot.get("mobilites_m_berges") or {}
     weather_situation = [
         {
             "label": alert.get("phenomenon", "Risque météo"),
@@ -384,6 +387,7 @@ def public_live_status(db: Session = Depends(get_db)):
         "bison_fute": bison_fute,
         "georisques": georisques,
         "prefecture_isere": prefecture,
+        "mobilites_m_berges": mobilites_berges,
     }
 
 
@@ -626,6 +630,7 @@ def build_external_risks_payload(refresh: bool = False, db: Session | None = Non
         "atmo_aura": (lambda: fetch_atmo_aura_isere_air_quality(force_refresh=refresh), {"status": "degraded", "today": {}, "tomorrow": {}}),
         "electricity_isere": (lambda: fetch_rte_isere_electricity_status(force_refresh=refresh), {"status": "degraded", "level": "inconnu"}),
         "finess_isere": (lambda: fetch_finess_isere_resources(force_refresh=refresh), {"status": "degraded", "resources": [], "resources_total": 0}),
+        "mobilites_m_berges": (lambda: fetch_mobilites_grenoble_berges(force_refresh=refresh), {"status": "degraded", "grenoble_berges": {"status": "unknown", "label": "non renseignée"}}),
     }
 
     results: dict[str, dict] = {}
@@ -651,6 +656,7 @@ def build_external_risks_payload(refresh: bool = False, db: Session | None = Non
         "atmo_aura": results["atmo_aura"],
         "electricity_isere": results["electricity_isere"],
         "finess_isere": results["finess_isere"],
+        "mobilites_m_berges": results["mobilites_m_berges"],
     }
     if errors:
         payload["errors"] = errors
@@ -664,7 +670,7 @@ def get_external_risks_payload(refresh: bool = False, db: Session | None = None)
         return payload
 
     snapshot = _get_external_risks_snapshot()
-    if snapshot and any(snapshot.get(key) for key in ("meteo_france", "vigicrues", "itinisere", "bison_fute", "georisques", "prefecture_isere", "dauphine_isere", "sncf_isere", "vigieau", "atmo_aura", "electricity_isere", "finess_isere")):
+    if snapshot and any(snapshot.get(key) for key in ("meteo_france", "vigicrues", "itinisere", "bison_fute", "georisques", "prefecture_isere", "dauphine_isere", "sncf_isere", "vigieau", "atmo_aura", "electricity_isere", "finess_isere", "mobilites_m_berges")):
         return snapshot
 
     payload = build_external_risks_payload(refresh=True, db=db)
@@ -786,6 +792,7 @@ def supervision_overview(
             "prefecture_isere": prefecture,
             "dauphine_isere": dauphine,
             "electricity_isere": risks_payload.get("electricity_isere") or {},
+            "mobilites_m_berges": risks_payload.get("mobilites_m_berges") or {},
         },
         "crisis_municipalities": [MunicipalityOut.model_validate(c).model_dump() for c in crisis],
         "timeline": [OperationalLogOut.model_validate(log).model_dump() for log in latest_logs],
