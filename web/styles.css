@@ -372,8 +372,9 @@ label { display: block; margin-bottom: .8rem; }
 .map-controls-toggle {
   position: absolute;
   top: .65rem;
-  right: .65rem;
-  z-index: 8;
+  left: .65rem;
+  right: auto;
+  z-index: 30;
   width: 34px;
   height: 34px;
   border-radius: 10px;
@@ -390,8 +391,9 @@ label { display: block; margin-bottom: .8rem; }
 .map-fullscreen-toggle {
   position: absolute;
   top: 3.15rem;
-  right: .65rem;
-  z-index: 10;
+  left: .65rem;
+  right: auto;
+  z-index: 30;
   width: 34px;
   height: 34px;
   border-radius: 10px;
@@ -405,7 +407,6 @@ label { display: block; margin-bottom: .8rem; }
   box-shadow: 0 4px 16px rgba(16, 48, 106, .15);
 }
 .map-fullscreen-toggle:hover { background: #eaf1ff; }
-.map-workspace:not(.map-workspace--collapsed) .map-controls-toggle { right: calc(260px + 1.2rem); }
 .map-toolbar { display: flex; flex-wrap: wrap; gap: .45rem; margin-bottom: .55rem; }
 .map-toolbar--compact { flex-direction: column; }
 .map-toolbar input, .map-toolbar select { min-height: 33px; margin-top: 0; padding: .4rem .56rem; font-size: .82rem; }
