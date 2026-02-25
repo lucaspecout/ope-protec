@@ -234,14 +234,9 @@ label { display: block; margin-bottom: .8rem; }
 .service-card a { color: #0b4daa; font-weight: 600; }
 
 .bison-isere-square { margin-top: .2rem; }
-.bison-isere-square__split {
+.bison-isere-square__single {
   border: 1px solid var(--line);
   border-radius: 11px;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  overflow: hidden;
-}
-.bison-isere-square__segment {
   min-height: 48px;
   display: grid;
   place-items: center;
@@ -249,13 +244,12 @@ label { display: block; margin-bottom: .8rem; }
   padding: .35rem .3rem;
   text-align: center;
 }
-.bison-isere-square__segment + .bison-isere-square__segment { border-left: 1px solid rgba(16, 29, 56, .12); }
-.bison-isere-square__segment span { font-size: .7rem; text-transform: uppercase; letter-spacing: .03em; color: #1e2f50; font-weight: 700; }
-.bison-isere-square__segment strong { font-size: .88rem; }
-.bison-isere-square__segment.vert { background: #e9f8ee; color: #1f6d34; }
-.bison-isere-square__segment.jaune { background: #fffbe0; color: #8a6a00; }
-.bison-isere-square__segment.orange { background: #fff0e2; color: #9a4e00; }
-.bison-isere-square__segment.rouge { background: #ffe7eb; color: #a61e39; }
+.bison-isere-square__single span { font-size: .7rem; text-transform: uppercase; letter-spacing: .03em; color: #1e2f50; font-weight: 700; }
+.bison-isere-square__single strong { font-size: .88rem; }
+.bison-isere-square__single.vert { background: #e9f8ee; color: #1f6d34; }
+.bison-isere-square__single.jaune { background: #fffbe0; color: #8a6a00; }
+.bison-isere-square__single.orange { background: #fff0e2; color: #9a4e00; }
+.bison-isere-square__single.rouge { background: #ffe7eb; color: #a61e39; }
 .services-lists { display: grid; gap: .7rem; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); margin-top: .7rem; }
 
 .georisques-kpis .tile p { font-size: 1.15rem; }
