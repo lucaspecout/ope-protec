@@ -3617,7 +3617,7 @@ function renderApiInterconnections(data = {}) {
     { key: 'vigieau', label: 'Vigieau · Restrictions eau', level: `${(data.vigieau?.alerts || []).length} alerte(s)`, details: data.vigieau?.source || '-' },
     { key: 'electricity_isere', label: 'Électricité Isère · RTE éCO2mix', level: normalizeLevel(data.electricity_isere?.level || 'inconnu'), details: `marge ${data.electricity_isere?.supply_margin_mw ?? '-'} MW` },
     { key: 'atmo_aura', label: "Atmo AURA · Qualité de l'air", level: `indice ${data.atmo_aura?.today?.index ?? '-'}`, details: data.atmo_aura?.source || '-' },
-    { key: 'mobilites_m_berges', label: 'Grenoble · Voies sur berges', level: data.mobilites_m_berges?.grenoble_berges?.label || 'non renseignée', details: data.mobilites_m_berges?.source || '-' },
+    { key: 'mobilites_m_berges', label: 'Mobilités M · Voies sur berges', level: data.mobilites_m_berges?.grenoble_berges?.label || 'non renseignée', details: data.mobilites_m_berges?.source || '-' },
   ];
 
   const cards = services.map((service) => {
