@@ -125,6 +125,7 @@ let userLocationMarker = null;
 let mapAddPointMode = false;
 let mapPoints = [];
 const mapPointVisibilityOverrides = new Map();
+const resourceVisibilityOverrides = new Map();
 let pendingMapPointCoords = null;
 let mapIconTouched = false;
 let cachedStations = [];
@@ -867,6 +868,8 @@ async function resetMapFilters() {
     'map-search': '',
     'resource-target-category-filter': 'all',
     'poi-target-category-filter': 'all',
+    'filter-resources-schools-type': 'all',
+    'filter-resources-security-type': 'all',
     'map-basemap-select': 'osm',
   };
   Object.entries(defaults).forEach(([id, value]) => {
@@ -896,6 +899,7 @@ async function resetMapFilters() {
   if (bisonCameras) bisonCameras.checked = true;
   if (photoCameras) photoCameras.checked = true;
   if (googleFlow) googleFlow.checked = false;
+  resourceVisibilityOverrides.clear();
   if (searchLayer) searchLayer.clearLayers();
   applyBasemap('osm');
   renderStations(cachedVigicruesPayload);
@@ -1240,6 +1244,33 @@ function syncPoiTargetButton() {
   refreshPoiTargetOptions();
 }
 
+function refreshResourceTargetOptions() {
+  const button = document.getElementById('resource-target-toggle-btn');
+  if (!button) return;
+  const targetCategory = document.getElementById('resource-target-category-filter')?.value || 'all';
+  const allResources = [...RESOURCE_POINTS, ...institutionPointsCache]
+    .filter((resource) => targetCategory === 'all' || resource.type === targetCategory);
+  const hasVisible = allResources.some((resource) => resourceVisibilityOverrides.get(resource.id) !== false);
+  button.disabled = allResources.length === 0;
+  button.textContent = hasVisible ? 'Masquer les ressources' : 'Afficher les ressources';
+}
+
+function toggleSelectedResourceVisibility() {
+  const targetCategory = document.getElementById('resource-target-category-filter')?.value || 'all';
+  const allResources = [...RESOURCE_POINTS, ...institutionPointsCache]
+    .filter((resource) => targetCategory === 'all' || resource.type === targetCategory);
+  if (!allResources.length) return;
+  const hasVisible = allResources.some((resource) => resourceVisibilityOverrides.get(resource.id) !== false);
+  allResources.forEach((resource) => {
+    resourceVisibilityOverrides.set(resource.id, !hasVisible);
+  });
+  renderResources();
+  const targetLabel = targetCategory === 'all'
+    ? 'toutes catégories'
+    : (RESOURCE_TYPE_META[targetCategory]?.label || targetCategory.replace(/_/g, ' '));
+  setMapFeedback(`Ressources: ${hasVisible ? 'masquées' : 'affichées'} (${targetLabel}).`);
+}
+
 function toggleSelectedPoiVisibility() {
   if (!mapPoints.length) return;
   const hasVisible = mapPoints.some((point) => mapPointVisibilityOverrides.get(point.id) !== false);
@@ -1274,8 +1305,19 @@ function classifyInstitutionPoint(element = {}) {
 }
 
 function shouldDisplayInstitutionType(type = '') {
-  if (SCHOOL_RESOURCE_TYPES.has(type)) return document.getElementById('filter-resources-schools')?.checked ?? false;
-  if (SECURITY_RESOURCE_TYPES.has(type)) return document.getElementById('filter-resources-security')?.checked ?? false;
+  const schoolTypeFilter = document.getElementById('filter-resources-schools-type')?.value || 'all';
+  const securityTypeFilter = document.getElementById('filter-resources-security-type')?.value || 'all';
+
+  if (SCHOOL_RESOURCE_TYPES.has(type)) {
+    const schoolsEnabled = document.getElementById('filter-resources-schools')?.checked ?? false;
+    if (!schoolsEnabled) return false;
+    return schoolTypeFilter === 'all' || schoolTypeFilter === type;
+  }
+  if (SECURITY_RESOURCE_TYPES.has(type)) {
+    const securityEnabled = document.getElementById('filter-resources-security')?.checked ?? false;
+    if (!securityEnabled) return false;
+    return securityTypeFilter === 'all' || securityTypeFilter === type;
+  }
   if (FIRE_RESOURCE_TYPES.has(type)) return document.getElementById('filter-resources-fire')?.checked ?? false;
   return false;
 }
@@ -1332,11 +1374,13 @@ function getDisplayedResources() {
   const query = (document.getElementById('map-search')?.value || '').trim().toLowerCase();
   const staticResources = RESOURCE_POINTS
     .filter((r) => r.active)
+    .filter((r) => resourceVisibilityOverrides.get(r.id) !== false)
     .filter((r) => targetCategory === 'all' || r.type === targetCategory)
     .filter((r) => !query || `${r.name} ${r.address}`.toLowerCase().includes(query))
     .map((r) => ({ ...r, dynamic: false }));
   const dynamicResources = institutionPointsCache
     .filter((r) => shouldDisplayInstitutionType(r.type))
+    .filter((r) => resourceVisibilityOverrides.get(r.id) !== false)
     .filter((r) => targetCategory === 'all' || r.type === targetCategory)
     .filter((r) => !query || `${r.name} ${r.address}`.toLowerCase().includes(query));
   return [...staticResources, ...dynamicResources];
@@ -1361,6 +1405,7 @@ async function renderResources() {
   }).join('') || '<li>Aucune ressource avec ces filtres.</li>');
   mapStats.resources = resources.length;
   updateMapSummary();
+  refreshResourceTargetOptions();
   if (!resourceLayer) return;
   resourceLayer.clearLayers();
   resources.forEach((r) => {
@@ -3951,6 +3996,7 @@ function bindAppInteractions() {
   document.getElementById('resource-target-category-filter')?.addEventListener('change', () => {
     renderResources();
   });
+  document.getElementById('resource-target-toggle-btn')?.addEventListener('click', toggleSelectedResourceVisibility);
   document.getElementById('poi-target-category-filter')?.addEventListener('change', () => {
     renderCustomPoints();
   });
@@ -4320,7 +4366,7 @@ function bindAppInteractions() {
     }
   });
 
-  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-schools', 'filter-resources-security', 'filter-resources-fire', 'filter-itinisere', 'filter-bison-accidents', 'filter-bison-cameras', 'filter-photo-cameras'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-itinisere', 'filter-bison-accidents', 'filter-bison-cameras', 'filter-photo-cameras'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       renderStations(cachedVigicruesPayload);
       await renderMunicipalitiesOnMap(cachedMunicipalities);
