@@ -549,25 +549,15 @@
                   <div class="map-bulk-controls">
                     <select id="resource-target-category-filter" aria-label="Filtrer les ressources par catégorie">
                       <option value="all">Ressources: afficher tout</option>
-                      <option value="poste_commandement">Postes de commandement</option>
-                      <option value="centre_hebergement">Centres d'hébergement</option>
+                      <option value="transport">Transports</option>
                       <option value="hopital">Hôpitaux</option>
-                      <option value="ecole_primaire">Écoles primaires</option>
-                      <option value="college">Collèges</option>
-                      <option value="lycee">Lycées</option>
-                      <option value="universite">Universités</option>
-                      <option value="creche">Crèches</option>
-                      <option value="gendarmerie">Gendarmeries</option>
-                      <option value="commissariat_police_nationale">Commissariats (police nationale)</option>
-                      <option value="police_municipale">Police municipale</option>
-                      <option value="caserne_pompier">Caserne pompiers</option>
-                      <option value="centrale_nucleaire">Centrales / sites nucléaires</option>
-                      <option value="lieu_risque">Site Seveso / risque technologique</option>
-                      <option value="lieu_vital">Lieux vitaux</option>
-                      <option value="caserne">Casernes</option>
-                      <option value="transport">Nœuds transport</option>
-                      <option value="energie">Énergie / barrages</option>
+                      <option value="lieu_risque">Sites Seveso</option>
+                      <option value="poste_commandement">Centres de commandement</option>
+                      <option value="centrale_nucleaire">Sites nucléaires</option>
+                      <option value="centre_hebergement">Centres d'hébergement</option>
+                      <option value="energie">Barrages</option>
                     </select>
+                    <button id="resource-target-toggle-btn" type="button" class="ghost map-btn-lite">Masquer les ressources</button>
                   </div>
                   <div class="map-bulk-controls">
                     <select id="poi-target-category-filter" aria-label="Filtrer les POI par catégorie">
@@ -588,8 +578,24 @@
                 <div class="map-toggle-grid">
                   <label><input id="filter-hydro" type="checkbox" checked /> Vigicrues</label>
                   <label><input id="filter-pcs" type="checkbox" checked /> Communes PCS</label>
-                  <label><input id="filter-resources-schools" type="checkbox" /> Écoles, collèges, lycées, universités, crèches (Isère)</label>
-                  <label><input id="filter-resources-security" type="checkbox" /> Commissariats, police municipale et gendarmeries (Isère)</label>
+                  <label><input id="filter-resources-schools" type="checkbox" /> Écoles, collèges, lycées, universités, crèches (Isère)
+                    <select id="filter-resources-schools-type" aria-label="Filtrer les établissements scolaires">
+                      <option value="all">Tous les types</option>
+                      <option value="ecole_primaire">Écoles primaires</option>
+                      <option value="college">Collèges</option>
+                      <option value="lycee">Lycées</option>
+                      <option value="universite">Universités</option>
+                      <option value="creche">Crèches</option>
+                    </select>
+                  </label>
+                  <label><input id="filter-resources-security" type="checkbox" /> Commissariats, police municipale et gendarmeries (Isère)
+                    <select id="filter-resources-security-type" aria-label="Filtrer les forces de sécurité">
+                      <option value="all">Tous les types</option>
+                      <option value="gendarmerie">Gendarmeries</option>
+                      <option value="commissariat_police_nationale">Commissariats (police nationale)</option>
+                      <option value="police_municipale">Police municipale</option>
+                    </select>
+                  </label>
                   <label><input id="filter-resources-fire" type="checkbox" /> Casernes de pompiers (Isère)</label>
                   <label><input id="filter-itinisere" type="checkbox" checked /> Itinisère</label>
                   <label><input id="filter-bison-accidents" type="checkbox" checked /> Accidents en cours Isère (Bison Futé)</label>
