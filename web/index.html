@@ -669,12 +669,16 @@
                       <option value="arcep_mobile_outage">Sites indisponibles ARCEP</option>
                     </select>
                   </label>
-                  <label><input id="filter-traffic-incidents" type="checkbox" checked /> Bison Futé Isère (données trafic)</label>
-                  <label><input id="filter-bison-ralentissement" type="checkbox" checked /> Ralentissements</label>
-                  <label><input id="filter-bison-travaux" type="checkbox" checked /> Travaux</label>
-                  <label><input id="filter-bison-incident" type="checkbox" checked /> Incidents</label>
-                  <label><input id="filter-bison-danger" type="checkbox" checked /> Dangers</label>
-                  <label><input id="filter-bison-info" type="checkbox" checked /> Infos circulation</label>
+                  <label><input id="filter-traffic-incidents" type="checkbox" checked /> Bison Futé Isère (données trafic)
+                    <select id="filter-bison-type" aria-label="Filtrer les événements Bison Futé Isère">
+                      <option value="all">Tous les événements</option>
+                      <option value="ralentissement">Ralentissements</option>
+                      <option value="travaux">Travaux</option>
+                      <option value="incident">Incidents</option>
+                      <option value="danger">Dangers</option>
+                      <option value="info">Infos circulation</option>
+                    </select>
+                  </label>
                   <label><input id="filter-cameras" type="checkbox" checked /> Camera</label>
                   <label><input id="filter-google-traffic-flow" type="checkbox" /> Trafic continu (style Google Maps)</label>
                 </div>
