@@ -3516,18 +3516,44 @@ def _fetch_anfr_isere_antennas_live() -> dict[str, Any]:
         station_idx = header.index("STA_NM_ANFR") if "STA_NM_ANFR" in header else -1
         height_idx = header.index("SUP_NM_HAUT") if "SUP_NM_HAUT" in header else -1
 
+        def _dms_to_decimal(deg: str | None, minute: str | None, second: str | None, direction: str | None) -> float | None:
+            try:
+                d = float(str(deg or "0").replace(",", "."))
+                m = float(str(minute or "0").replace(",", "."))
+                s = float(str(second or "0").replace(",", "."))
+            except ValueError:
+                return None
+            value = d + (m / 60.0) + (s / 3600.0)
+            cardinal = str(direction or "").strip().upper()
+            if cardinal in {"S", "W", "O"}:
+                value *= -1
+            return round(value, 7)
+
+        lat_deg_idx = header.index("COR_NB_DG_LAT") if "COR_NB_DG_LAT" in header else -1
+        lat_min_idx = header.index("COR_NB_MN_LAT") if "COR_NB_MN_LAT" in header else -1
+        lat_sec_idx = header.index("COR_NB_SC_LAT") if "COR_NB_SC_LAT" in header else -1
+        lat_dir_idx = header.index("COR_CD_NS_LAT") if "COR_CD_NS_LAT" in header else -1
+        lon_deg_idx = header.index("COR_NB_DG_LON") if "COR_NB_DG_LON" in header else -1
+        lon_min_idx = header.index("COR_NB_MN_LON") if "COR_NB_MN_LON" in header else -1
+        lon_sec_idx = header.index("COR_NB_SC_LON") if "COR_NB_SC_LON" in header else -1
+        lon_dir_idx = header.index("COR_CD_EW_LON") if "COR_CD_EW_LON" in header else -1
+
         supports: set[str] = set()
         stations: set[str] = set()
         heights: list[float] = []
+        support_points: list[dict[str, Any]] = []
+        seen_support_ids: set[str] = set()
         for line in rows[1:]:
             parts = line.split(";")
+            support_id = ""
             if insee_idx < 0 or len(parts) <= insee_idx:
                 continue
             insee_code = str(parts[insee_idx] or "").strip()
             if not insee_code.startswith("38"):
                 continue
             if support_idx >= 0 and len(parts) > support_idx and parts[support_idx]:
-                supports.add(parts[support_idx])
+                support_id = str(parts[support_idx]).strip()
+                supports.add(support_id)
             if station_idx >= 0 and len(parts) > station_idx and parts[station_idx]:
                 stations.add(parts[station_idx])
             if height_idx >= 0 and len(parts) > height_idx:
@@ -3535,6 +3561,27 @@ def _fetch_anfr_isere_antennas_live() -> dict[str, Any]:
                     heights.append(float(str(parts[height_idx]).replace(",", ".")))
                 except ValueError:
                     pass
+
+            if not support_id or support_id in seen_support_ids:
+                continue
+
+            if min(lat_deg_idx, lat_min_idx, lat_sec_idx, lat_dir_idx, lon_deg_idx, lon_min_idx, lon_sec_idx, lon_dir_idx) < 0:
+                continue
+            if len(parts) <= max(lat_deg_idx, lat_min_idx, lat_sec_idx, lat_dir_idx, lon_deg_idx, lon_min_idx, lon_sec_idx, lon_dir_idx):
+                continue
+
+            lat = _dms_to_decimal(parts[lat_deg_idx], parts[lat_min_idx], parts[lat_sec_idx], parts[lat_dir_idx])
+            lon = _dms_to_decimal(parts[lon_deg_idx], parts[lon_min_idx], parts[lon_sec_idx], parts[lon_dir_idx])
+            if lat is None or lon is None:
+                continue
+
+            support_points.append({
+                "id": support_id,
+                "lat": lat,
+                "lon": lon,
+                "station_name": str(parts[station_idx]).strip() if station_idx >= 0 and len(parts) > station_idx else "",
+            })
+            seen_support_ids.add(support_id)
 
         avg_height = round(sum(heights) / len(heights), 1) if heights else None
         return {
@@ -3545,6 +3592,7 @@ def _fetch_anfr_isere_antennas_live() -> dict[str, Any]:
             "supports_total": len(supports),
             "stations_total": len(stations),
             "average_support_height_m": avg_height,
+            "supports_points": support_points,
             "data_release": latest_resource.get("title") or "publication mensuelle",
             "resource_updated_at": latest_resource.get("last_modified") or latest_resource.get("created_at"),
             "updated_at": datetime.utcnow().isoformat() + "Z",
@@ -3559,6 +3607,7 @@ def _fetch_anfr_isere_antennas_live() -> dict[str, Any]:
             "supports_total": 0,
             "stations_total": 0,
             "average_support_height_m": None,
+            "supports_points": [],
             "updated_at": datetime.utcnow().isoformat() + "Z",
             "error": str(exc),
         }
@@ -3582,11 +3631,15 @@ def _fetch_arcep_isere_mobile_outages_live() -> dict[str, Any]:
         payload = _http_get_json(str(latest_resource.get("url")), timeout=45)
         features = payload.get("features") or []
 
-        isere_features = []
+        isere_features: list[dict[str, Any]] = []
         for feature in features:
             props = feature.get("properties") or {}
             dept = str(props.get("departement") or "").strip()
             if dept == "38":
+                geometry = feature.get("geometry") or {}
+                coords = geometry.get("coordinates") if geometry.get("type") == "Point" else None
+                if isinstance(coords, list) and len(coords) >= 2:
+                    props = {**props, "lon": coords[0], "lat": coords[1]}
                 isere_features.append(props)
 
         operator_counts: dict[str, int] = {}
@@ -3603,6 +3656,22 @@ def _fetch_arcep_isere_mobile_outages_live() -> dict[str, Any]:
                 data_impacted += 1
             if str(props.get("voix") or "").upper() == "HS":
                 voice_impacted += 1
+
+        outages_points = []
+        for props in isere_features:
+            lat = props.get("lat")
+            lon = props.get("lon")
+            if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
+                continue
+            outages_points.append({
+                "id": str(props.get("id") or props.get("gid") or f"{props.get('commune', 'site')}-{props.get('operateur', 'operateur')}-{len(outages_points)+1}"),
+                "lat": round(float(lat), 7),
+                "lon": round(float(lon), 7),
+                "commune": str(props.get("commune") or "").strip(),
+                "operator": str(props.get("operateur") or "inconnu"),
+                "voice": str(props.get("voix") or "").strip(),
+                "data": str(props.get("data") or "").strip(),
+            })
 
         top_operators = [
             {"operator": name, "outages": count}
@@ -3625,6 +3694,7 @@ def _fetch_arcep_isere_mobile_outages_live() -> dict[str, Any]:
             "communes_total": len(communes),
             "voice_impacted_total": voice_impacted,
             "data_impacted_total": data_impacted,
+            "outages_points": outages_points,
             "top_operators": top_operators,
             "resource_date": latest_resource.get("title"),
             "resource_updated_at": latest_resource.get("last_modified") or latest_resource.get("created_at"),
@@ -3642,6 +3712,7 @@ def _fetch_arcep_isere_mobile_outages_live() -> dict[str, Any]:
             "communes_total": 0,
             "voice_impacted_total": 0,
             "data_impacted_total": 0,
+            "outages_points": [],
             "top_operators": [],
             "updated_at": datetime.utcnow().isoformat() + "Z",
             "error": str(exc),
