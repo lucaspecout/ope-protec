@@ -48,6 +48,8 @@ const RESOURCE_TYPE_META = {
   transport_gare_routiere: { label: 'Gare routière', icon: '🚌' },
   transport_aeroport: { label: 'Aéroport', icon: '✈️' },
   energie: { label: 'Énergie / barrage', icon: '⚡' },
+  anfr_antenna: { label: 'Antenne ANFR', icon: '📡' },
+  arcep_mobile_outage: { label: 'Site mobile indisponible (ARCEP)', icon: '🔴' },
 };
 
 const RESOURCE_POINTS = [
@@ -162,6 +164,8 @@ let finessPointsCache = [];
 let finessLoaded = false;
 let iserePopulationPointsCache = [];
 let iserePopulationLoaded = false;
+let telecomPointsCache = [];
+let telecomLoaded = false;
 
 const SCHOOL_RESOURCE_TYPES = new Set(['ecole_primaire', 'college', 'lycee', 'universite', 'creche']);
 const SECURITY_RESOURCE_TYPES = new Set(['gendarmerie', 'commissariat_police_nationale', 'police_municipale']);
@@ -171,6 +175,7 @@ const RISK_RESOURCE_TYPES = new Set(['lieu_risque', 'centrale_nucleaire', 'energ
 const TRANSPORT_RESOURCE_TYPES = new Set(['transport', 'transport_gare_sncf', 'transport_gare_routiere', 'transport_aeroport']);
 const COMMAND_RESOURCE_TYPES = new Set(['poste_commandement']);
 const SHELTER_RESOURCE_TYPES = new Set(['centre_hebergement']);
+const TELECOM_RESOURCE_TYPES = new Set(['anfr_antenna', 'arcep_mobile_outage']);
 
 const ISERE_BOUNDARY_STYLE = { color: '#163a87', weight: 2, fillColor: '#63c27d', fillOpacity: 0.2 };
 const TRAFFIC_COMMUNES = ['Grenoble', 'Voiron', 'Vienne', 'Bourgoin-Jallieu', 'Pont-de-Claix', 'Meylan', 'Échirolles', 'L\'Isle-d\'Abeau', 'Saint-Martin-d\'Hères', 'La Tour-du-Pin', 'Rives', 'Sassenage', 'Crolles', 'Tullins'];
@@ -918,6 +923,7 @@ async function resetMapFilters() {
   const healthResources = document.getElementById('filter-resources-health');
   const commandResources = document.getElementById('filter-resources-command');
   const shelterResources = document.getElementById('filter-resources-shelter');
+  const telecomResources = document.getElementById('filter-resources-telecom');
   if (hydro) hydro.checked = true;
   if (pcs) pcs.checked = true;
   if (activeOnly) activeOnly.checked = true;
@@ -931,6 +937,7 @@ async function resetMapFilters() {
   if (healthResources) healthResources.checked = false;
   if (commandResources) commandResources.checked = true;
   if (shelterResources) shelterResources.checked = true;
+  if (telecomResources) telecomResources.checked = true;
   if (googleFlow) googleFlow.checked = false;
   resourceVisibilityOverrides.clear();
   if (searchLayer) searchLayer.clearLayers();
@@ -1317,6 +1324,9 @@ function classifyInstitutionPoint(element = {}) {
 }
 
 function shouldDisplayBaseResourceType(type = '') {
+  if (TELECOM_RESOURCE_TYPES.has(type)) {
+    return document.getElementById('filter-resources-telecom')?.checked ?? true;
+  }
   if (SCHOOL_RESOURCE_TYPES.has(type)) {
     const schoolsEnabled = document.getElementById('filter-resources-schools')?.checked ?? false;
     const schoolTypeFilter = document.getElementById('filter-resources-schools-type')?.value || 'all';
@@ -1499,6 +1509,66 @@ out center tags;`;
   return institutionPointsCache;
 }
 
+async function loadTelecomPoints() {
+  if (telecomLoaded) return telecomPointsCache;
+  try {
+    const payload = await api('/external/isere/risks', { cacheTtlMs: 10 * 60 * 1000 });
+    const anfrPoints = Array.isArray(payload?.anfr_isere?.supports_points) ? payload.anfr_isere.supports_points : [];
+    const arcepPoints = Array.isArray(payload?.arcep_isere?.outages_points) ? payload.arcep_isere.outages_points : [];
+
+    const anfrResources = anfrPoints.map((point) => {
+      const lat = Number(point?.lat);
+      const lon = Number(point?.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+      const supportId = String(point?.id || '').trim();
+      const stationName = String(point?.station_name || '').trim();
+      return {
+        id: `anfr-${supportId || Math.random().toString(36).slice(2)}`,
+        name: stationName || `Support ANFR ${supportId || ''}`.trim(),
+        type: 'anfr_antenna',
+        lat,
+        lon,
+        active: true,
+        address: 'Isère (38)',
+        priority: 'standard',
+        info: `Support ANFR ${supportId || '-'}`,
+        source: 'https://www.data.gouv.fr/fr/datasets/donnees-sur-les-installations-radioelectriques-de-plus-de-5-watts-1/',
+        dynamic: true,
+      };
+    }).filter(Boolean);
+
+    const arcepResources = arcepPoints.map((point) => {
+      const lat = Number(point?.lat);
+      const lon = Number(point?.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+      const commune = String(point?.commune || '').trim() || 'Commune non renseignée';
+      const operator = String(point?.operator || 'inconnu').trim();
+      const dataState = String(point?.data || '-').trim();
+      const voiceState = String(point?.voice || '-').trim();
+      const id = String(point?.id || '').trim();
+      return {
+        id: `arcep-${id || Math.random().toString(36).slice(2)}`,
+        name: `Site mobile indisponible · ${commune}`,
+        type: 'arcep_mobile_outage',
+        lat,
+        lon,
+        active: true,
+        address: commune,
+        priority: 'critical',
+        info: `Opérateur ${operator} · voix ${voiceState} · data ${dataState}`,
+        source: 'https://www.data.gouv.fr/fr/datasets/sites-indisponibles/',
+        dynamic: true,
+      };
+    }).filter(Boolean);
+
+    telecomPointsCache = [...anfrResources, ...arcepResources];
+  } catch {
+    telecomPointsCache = [];
+  }
+  telecomLoaded = true;
+  return telecomPointsCache;
+}
+
 function getDisplayedResources() {
   const query = (document.getElementById('map-search')?.value || '').trim().toLowerCase();
   const staticResources = RESOURCE_POINTS
@@ -1507,7 +1577,7 @@ function getDisplayedResources() {
     .filter((r) => shouldDisplayBaseResourceType(r.type))
     .filter((r) => !query || `${r.name} ${r.address}`.toLowerCase().includes(query))
     .map((r) => ({ ...r, dynamic: false }));
-  const dynamicResources = [...institutionPointsCache, ...finessPointsCache]
+  const dynamicResources = [...institutionPointsCache, ...finessPointsCache, ...telecomPointsCache]
     .filter((r) => shouldDisplayBaseResourceType(r.type))
     .filter((r) => resourceVisibilityOverrides.get(r.id) !== false)
     .filter((r) => !query || `${r.name} ${r.address}`.toLowerCase().includes(query));
@@ -1515,7 +1585,7 @@ function getDisplayedResources() {
 }
 
 async function renderResources() {
-  await Promise.all([loadIsereInstitutions(), loadFinessIsereResources()]);
+  await Promise.all([loadIsereInstitutions(), loadFinessIsereResources(), loadTelecomPoints()]);
   const resources = getDisplayedResources();
   const priorityLabel = { critical: 'critique', vital: 'vital', risk: 'à risque', standard: 'standard' };
   const markerColor = { critical: '#e03131', vital: '#1971c2', risk: '#f08c00', standard: '#2f9e44' };
@@ -4704,7 +4774,7 @@ function bindAppInteractions() {
     }
   });
 
-  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-command', 'filter-resources-shelter', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-traffic-incidents', 'filter-cameras'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-command', 'filter-resources-shelter', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-telecom', 'filter-traffic-incidents', 'filter-cameras'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       renderStations(cachedVigicruesPayload);
       await renderMunicipalitiesOnMap(cachedMunicipalities);
