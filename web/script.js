@@ -3262,11 +3262,15 @@ function renderSituationOverview() {
   const vigieauAlertsCount = Number((externalRisks?.vigieau?.alerts || []).length);
   const atmoLevel = normalizeLevel(externalRisks?.atmo_aura?.today?.level || 'inconnu');
   const sncfIncidentsCount = Number(externalRisks?.sncf_isere?.alerts_total ?? (externalRisks?.sncf_isere?.alerts || []).length);
+  const arcepOutages = Number(externalRisks?.arcep_isere?.outages_total ?? 0);
+  const anfrSupports = Number(externalRisks?.anfr_isere?.supports_total ?? 0);
   const mobilityCards = [
     { label: 'Bison Futé (38) · Départ / Arrivée', value: `${bisonDeparture} / ${bisonReturn}`, info: 'Tendance Isère départ / arrivée', css: bisonCombinedLevel },
     { label: 'Vigieau', value: `${vigieauAlertsCount}`, info: "Restriction(s) d'eau active(s)", css: vigieauAlertsCount > 0 ? 'jaune' : 'vert' },
     { label: "Qualité de l'air", value: atmoLevel, info: 'Source Atmo AURA', css: atmoLevel },
     { label: 'Incidents SNCF', value: `${sncfIncidentsCount}`, info: 'Accidents / travaux Isère', css: sncfIncidentsCount > 0 ? 'orange' : 'vert' },
+    { label: 'ARCEP · sites indisponibles', value: `${arcepOutages}`, info: 'Pannes mobiles Isère', css: arcepOutages > 0 ? 'jaune' : 'vert' },
+    { label: 'ANFR · supports antennes', value: `${anfrSupports}`, info: 'Implantations recensées Isère', css: anfrSupports > 0 ? 'vert' : 'jaune' },
   ];
   const generatedAt = safeDateToLocale(Date.now());
 
@@ -3666,6 +3670,8 @@ function renderExternalRisks(data = {}) {
   const vigieau = data?.vigieau || {};
   const atmo = data?.atmo_aura || {};
   const electricity = data?.electricity_isere || {};
+  const anfr = data?.anfr_isere || {};
+  const arcep = data?.arcep_isere || {};
   const georisquesPayload = data?.georisques || {};
   const georisques = georisquesPayload?.data && typeof georisquesPayload.data === 'object'
     ? { ...georisquesPayload.data, ...georisquesPayload }
@@ -3697,6 +3703,17 @@ function renderExternalRisks(data = {}) {
   const atmoLevel = normalizeLevel(atmoToday.level || 'inconnu');
   setRiskText('atmo-status', `${atmo.status || 'inconnu'} · indice ${atmoToday.index ?? '-'}`, atmoToday.level || 'vert');
   setText('atmo-info', `${atmoToday.date || 'date inconnue'} · niveau ${atmoLevel}${atmo.has_pollution_episode ? ' · épisode en cours' : ''}`);
+  setRiskText('anfr-status', `${anfr.status || 'inconnu'} · ${anfr.supports_total ?? 0} support(s)`, anfr.status === 'online' ? 'vert' : 'jaune');
+  setText('anfr-info', `${anfr.stations_total ?? 0} station(s) · hauteur moyenne ${anfr.average_support_height_m ?? '-'} m`);
+  setHtml('anfr-list', [
+    `<li><strong>Publication:</strong> ${escapeHtml(anfr.data_release || '-')}</li>`,
+    `<li><strong>Supports recensés:</strong> ${Number(anfr.supports_total ?? 0)}</li>`,
+    `<li><strong>Stations ANFR:</strong> ${Number(anfr.stations_total ?? 0)}</li>`,
+  ].join(''));
+  const arcepLevel = normalizeLevel(arcep.level || (Number(arcep.outages_total ?? 0) > 0 ? 'jaune' : 'vert'));
+  setRiskText('arcep-status', `${arcep.status || 'inconnu'} · ${arcep.outages_total ?? 0} indisponibilité(s)`, arcepLevel);
+  setText('arcep-info', `${arcep.communes_total ?? 0} commune(s) · voix HS ${arcep.voice_impacted_total ?? 0} · data HS ${arcep.data_impacted_total ?? 0}`);
+  setHtml('arcep-list', (arcep.top_operators || []).map((item) => `<li><strong>${escapeHtml(item.operator || 'Opérateur')}</strong> · ${Number(item.outages ?? 0)} site(s)</li>`).join('') || '<li>Aucune indisponibilité signalée en Isère.</li>');
   setRiskText('georisques-status', `${georisques.status || 'inconnu'} · sismicité ${georisques.highest_seismic_zone_label || 'inconnue'}`, georisques.status === 'online' ? 'vert' : 'jaune');
   setText('georisques-info', `${georisques.flood_documents_total ?? 0} AZI · ${georisques.ppr_total ?? 0} PPR · ${georisques.ground_movements_total ?? 0} mouvements`);
   renderGeorisquesDetails(georisques);
@@ -3745,6 +3762,8 @@ function renderApiInterconnections(data = {}) {
     { key: 'vigieau', label: 'Vigieau · Restrictions eau', level: `${(data.vigieau?.alerts || []).length} alerte(s)`, details: data.vigieau?.source || '-' },
     { key: 'electricity_isere', label: 'Électricité Isère · RTE éCO2mix', level: normalizeLevel(data.electricity_isere?.level || 'inconnu'), details: `marge ${data.electricity_isere?.supply_margin_mw ?? '-'} MW` },
     { key: 'atmo_aura', label: "Atmo AURA · Qualité de l'air", level: `indice ${data.atmo_aura?.today?.index ?? '-'}`, details: data.atmo_aura?.source || '-' },
+    { key: 'anfr_isere', label: 'ANFR · Antennes mobiles Isère', level: `${data.anfr_isere?.supports_total ?? 0} support(s)`, details: data.anfr_isere?.data_release || '-' },
+    { key: 'arcep_isere', label: 'ARCEP · Sites mobiles indisponibles', level: `${data.arcep_isere?.outages_total ?? 0} indisponibilité(s)`, details: data.arcep_isere?.resource_date || '-' },
   ];
 
   const cards = services.map((service) => {

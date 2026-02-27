@@ -43,7 +43,7 @@ Ou via script:
 - Gestion des communes (ajout, enrichissement contacts/informations, bascule mode crise, import ORSEC et conventions).
 - Main courante locale (ajout d’évènements horodatés).
 - Carte opérationnelle embarquée (OpenStreetMap).
-- Connexion aux flux externes Isère : Météo-France (état de disponibilité et infos vigilance), Vigicrues (stations du département + vigilances de tronçons + niveau d'alerte eau calculé), Atmo AURA (indice qualité de l'air Grenoble/Isère) et RTE éCO2mix (proxy électrique régional ARA pour suivi Isère).
+- Connexion aux flux externes Isère : Météo-France (état de disponibilité et infos vigilance), Vigicrues (stations du département + vigilances de tronçons + niveau d'alerte eau calculé), Atmo AURA (indice qualité de l'air Grenoble/Isère), RTE éCO2mix (proxy électrique régional ARA pour suivi Isère), ANFR (supports/antennes radioélectriques du 38) et ARCEP (sites mobiles indisponibles en Isère).
 
 
 ## Géorisques API v2 (clé annuelle)
@@ -85,6 +85,8 @@ Retourne un bloc consolidé :
 - `sncf_isere` : alertes SNCF filtrées sur l'Isère (accidents et travaux de voie) issues du flux temps réel SNCF (SIRI SX Lite / GTFS-RT Service Alerts).
 - `atmo_aura` : indice ATMO (J/J+1), commentaire et statut d'épisode pollution via Atmo Auvergne-Rhône-Alpes (commune de Grenoble).
 - `electricity_isere` : état électrique Isère via jeu officiel data.gouv RTE éCO2mix régional (consommation, production, marge de sécurité, échanges).
+- `anfr_isere` : synthèse ANFR Isère (supports recensés, stations ANFR associées, hauteur moyenne des supports).
+- `arcep_isere` : indisponibilités mobiles ARCEP sur l'Isère (volumétrie, communes touchées, opérateurs les plus impactés).
 
 
 ## Alignement besoins métier

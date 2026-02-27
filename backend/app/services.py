@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import csv
 from datetime import datetime, timedelta
 from copy import deepcopy
+import io
 from email.utils import parsedate_to_datetime
 from html import unescape
 from http.client import RemoteDisconnected
@@ -16,6 +17,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote_plus, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 import xml.etree.ElementTree as ET
+import zipfile
 
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
@@ -368,6 +370,8 @@ _ATMO_AURA_CACHE_TTL_SECONDS = 900
 _SNCF_ISERE_CACHE_TTL_SECONDS = 180
 _RTE_ELECTRICITY_CACHE_TTL_SECONDS = 300
 _FINESS_ISERE_CACHE_TTL_SECONDS = 43200
+_ANFR_ISERE_CACHE_TTL_SECONDS = 43200
+_ARCEP_ISERE_CACHE_TTL_SECONDS = 900
 
 _vigicrues_cache_lock = Lock()
 _vigicrues_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
@@ -391,6 +395,10 @@ _rte_electricity_cache_lock = Lock()
 _rte_electricity_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _finess_isere_cache_lock = Lock()
 _finess_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_anfr_isere_cache_lock = Lock()
+_anfr_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_arcep_isere_cache_lock = Lock()
+_arcep_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _isere_aval_polyline_cache_lock = Lock()
 _isere_aval_polyline_cache: dict[str, Any] = {"points": None, "expires_at": datetime.min}
 _ISERE_AVAL_GRENOBLE_CUTOFF_LON = 5.67526671768763
@@ -3467,6 +3475,196 @@ def fetch_georisques_isere_summary(force_refresh: bool = False, commune_names: l
         ttl_seconds=_GEORISQUES_CACHE_TTL_SECONDS,
         force_refresh=force_refresh,
         loader=lambda: _fetch_georisques_isere_summary_live(commune_names=commune_names),
+    )
+
+
+def _fetch_anfr_isere_antennas_live() -> dict[str, Any]:
+    dataset_id = "551d4ff3c751df55da0cd89f"
+    source = "https://www.data.gouv.fr/fr/datasets/donnees-sur-les-installations-radioelectriques-de-plus-de-5-watts-1/"
+    try:
+        dataset = _http_get_json(f"https://www.data.gouv.fr/api/1/datasets/{dataset_id}/")
+        resources = dataset.get("resources") or []
+        candidates = [
+            resource for resource in resources
+            if "supports antennes" in str(resource.get("title") or "").lower() and str(resource.get("url") or "").startswith("http")
+        ]
+        if not candidates:
+            raise ValueError("Aucune ressource ANFR exploitable")
+
+        latest_resource = sorted(
+            candidates,
+            key=lambda item: str(item.get("last_modified") or item.get("created_at") or ""),
+            reverse=True,
+        )[0]
+
+        archive_bytes = _http_get_with_retries(
+            Request(str(latest_resource.get("url")), headers={"User-Agent": "ope-protec/1.0"}),
+            timeout=80,
+            retries=1,
+            retry_delay_seconds=1.2,
+        )
+        with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+            with archive.open("SUP_SUPPORT.txt") as handle:
+                rows = handle.read().decode("latin-1", errors="ignore").splitlines()
+
+        if not rows:
+            raise ValueError("Archive ANFR vide")
+
+        header = rows[0].split(";")
+        insee_idx = header.index("COM_CD_INSEE") if "COM_CD_INSEE" in header else -1
+        support_idx = header.index("SUP_ID") if "SUP_ID" in header else -1
+        station_idx = header.index("STA_NM_ANFR") if "STA_NM_ANFR" in header else -1
+        height_idx = header.index("SUP_NM_HAUT") if "SUP_NM_HAUT" in header else -1
+
+        supports: set[str] = set()
+        stations: set[str] = set()
+        heights: list[float] = []
+        for line in rows[1:]:
+            parts = line.split(";")
+            if insee_idx < 0 or len(parts) <= insee_idx:
+                continue
+            insee_code = str(parts[insee_idx] or "").strip()
+            if not insee_code.startswith("38"):
+                continue
+            if support_idx >= 0 and len(parts) > support_idx and parts[support_idx]:
+                supports.add(parts[support_idx])
+            if station_idx >= 0 and len(parts) > station_idx and parts[station_idx]:
+                stations.add(parts[station_idx])
+            if height_idx >= 0 and len(parts) > height_idx:
+                try:
+                    heights.append(float(str(parts[height_idx]).replace(",", ".")))
+                except ValueError:
+                    pass
+
+        avg_height = round(sum(heights) / len(heights), 1) if heights else None
+        return {
+            "service": "ANFR",
+            "status": "online",
+            "source": source,
+            "department": "Isère (38)",
+            "supports_total": len(supports),
+            "stations_total": len(stations),
+            "average_support_height_m": avg_height,
+            "data_release": latest_resource.get("title") or "publication mensuelle",
+            "resource_updated_at": latest_resource.get("last_modified") or latest_resource.get("created_at"),
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+            "error": None,
+        }
+    except Exception as exc:
+        return {
+            "service": "ANFR",
+            "status": "degraded",
+            "source": source,
+            "department": "Isère (38)",
+            "supports_total": 0,
+            "stations_total": 0,
+            "average_support_height_m": None,
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+            "error": str(exc),
+        }
+
+
+def _fetch_arcep_isere_mobile_outages_live() -> dict[str, Any]:
+    dataset_id = "5f7c7fae9cd6c79b58da3e20"
+    source = "https://www.data.gouv.fr/fr/datasets/sites-indisponibles/"
+    try:
+        dataset = _http_get_json(f"https://www.data.gouv.fr/api/1/datasets/{dataset_id}/")
+        resources = dataset.get("resources") or []
+        candidates = [resource for resource in resources if str(resource.get("url") or "").endswith(".geojson")]
+        if not candidates:
+            raise ValueError("Aucune ressource ARCEP GeoJSON")
+
+        latest_resource = sorted(
+            candidates,
+            key=lambda item: str(item.get("title") or ""),
+            reverse=True,
+        )[0]
+        payload = _http_get_json(str(latest_resource.get("url")), timeout=45)
+        features = payload.get("features") or []
+
+        isere_features = []
+        for feature in features:
+            props = feature.get("properties") or {}
+            dept = str(props.get("departement") or "").strip()
+            if dept == "38":
+                isere_features.append(props)
+
+        operator_counts: dict[str, int] = {}
+        communes: set[str] = set()
+        data_impacted = 0
+        voice_impacted = 0
+        for props in isere_features:
+            operator = str(props.get("operateur") or "inconnu")
+            operator_counts[operator] = operator_counts.get(operator, 0) + 1
+            commune = str(props.get("commune") or "").strip()
+            if commune:
+                communes.add(commune)
+            if str(props.get("data") or "").upper() == "HS":
+                data_impacted += 1
+            if str(props.get("voix") or "").upper() == "HS":
+                voice_impacted += 1
+
+        top_operators = [
+            {"operator": name, "outages": count}
+            for name, count in sorted(operator_counts.items(), key=lambda item: item[1], reverse=True)[:4]
+        ]
+
+        level = "vert"
+        if len(isere_features) >= 25:
+            level = "orange"
+        elif len(isere_features) >= 8:
+            level = "jaune"
+
+        return {
+            "service": "ARCEP",
+            "status": "online",
+            "source": source,
+            "department": "Isère (38)",
+            "level": level,
+            "outages_total": len(isere_features),
+            "communes_total": len(communes),
+            "voice_impacted_total": voice_impacted,
+            "data_impacted_total": data_impacted,
+            "top_operators": top_operators,
+            "resource_date": latest_resource.get("title"),
+            "resource_updated_at": latest_resource.get("last_modified") or latest_resource.get("created_at"),
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+            "error": None,
+        }
+    except Exception as exc:
+        return {
+            "service": "ARCEP",
+            "status": "degraded",
+            "source": source,
+            "department": "Isère (38)",
+            "level": "inconnu",
+            "outages_total": 0,
+            "communes_total": 0,
+            "voice_impacted_total": 0,
+            "data_impacted_total": 0,
+            "top_operators": [],
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+            "error": str(exc),
+        }
+
+
+def fetch_anfr_isere_antennas(force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_anfr_isere_cache,
+        lock=_anfr_isere_cache_lock,
+        ttl_seconds=_ANFR_ISERE_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=_fetch_anfr_isere_antennas_live,
+    )
+
+
+def fetch_arcep_isere_mobile_outages(force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_arcep_isere_cache,
+        lock=_arcep_isere_cache_lock,
+        ttl_seconds=_ARCEP_ISERE_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=_fetch_arcep_isere_mobile_outages_live,
     )
 
 
