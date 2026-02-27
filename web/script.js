@@ -902,6 +902,7 @@ async function resetMapFilters() {
     'filter-resources-risks-type': 'all',
     'filter-resources-transport-type': 'all',
     'filter-resources-health-type': 'all',
+    'filter-resources-telecom-type': 'all',
     'map-basemap-select': 'osm',
   };
   Object.entries(defaults).forEach(([id, value]) => {
@@ -937,9 +938,10 @@ async function resetMapFilters() {
   if (healthResources) healthResources.checked = false;
   if (commandResources) commandResources.checked = true;
   if (shelterResources) shelterResources.checked = true;
-  if (telecomResources) telecomResources.checked = true;
+  if (telecomResources) telecomResources.checked = false;
   if (googleFlow) googleFlow.checked = false;
   resourceVisibilityOverrides.clear();
+  syncTelecomFilterState();
   if (searchLayer) searchLayer.clearLayers();
   applyBasemap('osm');
   renderStations(cachedVigicruesPayload);
@@ -1325,7 +1327,10 @@ function classifyInstitutionPoint(element = {}) {
 
 function shouldDisplayBaseResourceType(type = '') {
   if (TELECOM_RESOURCE_TYPES.has(type)) {
-    return document.getElementById('filter-resources-telecom')?.checked ?? true;
+    const telecomEnabled = document.getElementById('filter-resources-telecom')?.checked ?? false;
+    const telecomTypeFilter = document.getElementById('filter-resources-telecom-type')?.value || 'all';
+    if (!telecomEnabled) return false;
+    return telecomTypeFilter === 'all' || telecomTypeFilter === type;
   }
   if (SCHOOL_RESOURCE_TYPES.has(type)) {
     const schoolsEnabled = document.getElementById('filter-resources-schools')?.checked ?? false;
@@ -1509,6 +1514,17 @@ out center tags;`;
   return institutionPointsCache;
 }
 
+
+function parseTelecomGenerations(value = '') {
+  const text = String(value || '').toLowerCase();
+  const generations = new Set();
+  if (text.includes('5g') || text.includes('nr')) generations.add('5G');
+  if (text.includes('4g') || text.includes('lte')) generations.add('4G');
+  if (text.includes('3g') || text.includes('umts')) generations.add('3G');
+  if (text.includes('2g') || text.includes('gsm')) generations.add('2G');
+  return Array.from(generations);
+}
+
 async function loadTelecomPoints() {
   if (telecomLoaded) return telecomPointsCache;
   try {
@@ -1522,6 +1538,10 @@ async function loadTelecomPoints() {
       if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
       const supportId = String(point?.id || '').trim();
       const stationName = String(point?.station_name || '').trim();
+      const operator = String(point?.operator || 'non renseigné (ANFR)').trim();
+      const availableData = Array.isArray(point?.data_services) ? point.data_services.map((item) => String(item || '').trim()).filter(Boolean) : [];
+      const availableVoice = String(point?.voice_service || (availableData.length ? 'possible selon opérateur' : 'inconnu')).trim();
+      const dataLabel = availableData.length ? availableData.join(', ') : 'inconnue';
       return {
         id: `anfr-${supportId || Math.random().toString(36).slice(2)}`,
         name: stationName || `Support ANFR ${supportId || ''}`.trim(),
@@ -1531,7 +1551,7 @@ async function loadTelecomPoints() {
         active: true,
         address: 'Isère (38)',
         priority: 'standard',
-        info: `Support ANFR ${supportId || '-'}`,
+        info: `Support ANFR ${supportId || '-'} · opérateur ${operator} · voix ${availableVoice} · data ${dataLabel}`,
         source: 'https://www.data.gouv.fr/fr/datasets/donnees-sur-les-installations-radioelectriques-de-plus-de-5-watts-1/',
         dynamic: true,
       };
@@ -1545,6 +1565,8 @@ async function loadTelecomPoints() {
       const operator = String(point?.operator || 'inconnu').trim();
       const dataState = String(point?.data || '-').trim();
       const voiceState = String(point?.voice || '-').trim();
+      const impactedGenerations = parseTelecomGenerations(dataState);
+      const generationsLabel = impactedGenerations.length ? impactedGenerations.join(', ') : 'non précisé';
       const id = String(point?.id || '').trim();
       return {
         id: `arcep-${id || Math.random().toString(36).slice(2)}`,
@@ -1555,7 +1577,7 @@ async function loadTelecomPoints() {
         active: true,
         address: commune,
         priority: 'critical',
-        info: `Opérateur ${operator} · voix ${voiceState} · data ${dataState}`,
+        info: `Opérateur ${operator} · voix ${voiceState} · data ${dataState} (2G/3G/4G/5G: ${generationsLabel})`,
         source: 'https://www.data.gouv.fr/fr/datasets/sites-indisponibles/',
         dynamic: true,
       };
@@ -1582,6 +1604,15 @@ function getDisplayedResources() {
     .filter((r) => resourceVisibilityOverrides.get(r.id) !== false)
     .filter((r) => !query || `${r.name} ${r.address}`.toLowerCase().includes(query));
   return [...staticResources, ...dynamicResources];
+}
+
+
+function syncTelecomFilterState() {
+  const telecomToggle = document.getElementById('filter-resources-telecom');
+  const telecomTypeFilter = document.getElementById('filter-resources-telecom-type');
+  if (!telecomTypeFilter) return;
+  telecomTypeFilter.disabled = !(telecomToggle?.checked);
+  if (!telecomToggle?.checked) telecomTypeFilter.value = 'all';
 }
 
 async function renderResources() {
@@ -4368,6 +4399,10 @@ function bindAppInteractions() {
   });
   document.getElementById('map-basemap-select')?.addEventListener('change', async (event) => { applyBasemap(event.target.value); await renderPopulationByCityLayer(); });
   document.getElementById('filter-google-traffic-flow')?.addEventListener('change', () => applyGoogleTrafficFlowOverlay());
+  document.getElementById('filter-resources-telecom')?.addEventListener('change', () => {
+    syncTelecomFilterState();
+    renderResources();
+  });
   document.getElementById('api-refresh-btn')?.addEventListener('click', async () => {
     try {
       await loadApiInterconnections(true);
@@ -4774,7 +4809,7 @@ function bindAppInteractions() {
     }
   });
 
-  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-command', 'filter-resources-shelter', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-telecom', 'filter-traffic-incidents', 'filter-cameras'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-command', 'filter-resources-shelter', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-traffic-incidents', 'filter-cameras'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       renderStations(cachedVigicruesPayload);
       await renderMunicipalitiesOnMap(cachedMunicipalities);

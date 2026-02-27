@@ -658,7 +658,13 @@
                       <option value="ehpad">EHPAD</option>
                     </select>
                   </label>
-                  <label><input id="filter-resources-telecom" type="checkbox" checked /> Télécom (ANFR + sites mobiles indisponibles)</label>
+                  <label><input id="filter-resources-telecom" type="checkbox" /> Télécom (ANFR + sites mobiles indisponibles)
+                    <select id="filter-resources-telecom-type" aria-label="Filtrer les ressources télécom" disabled>
+                      <option value="all">Tous les types</option>
+                      <option value="anfr_antenna">Antennes ANFR</option>
+                      <option value="arcep_mobile_outage">Sites indisponibles ARCEP</option>
+                    </select>
+                  </label>
                   <label><input id="filter-traffic-incidents" type="checkbox" checked /> Info route</label>
                   <label><input id="filter-cameras" type="checkbox" checked /> Camera</label>
                   <label><input id="filter-google-traffic-flow" type="checkbox" /> Trafic continu (style Google Maps)</label>
