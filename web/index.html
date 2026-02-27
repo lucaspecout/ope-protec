@@ -8,7 +8,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
-  <link rel="stylesheet" href="/styles.css?v=20260218-ops3" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" crossorigin="" />
+  <link rel="stylesheet" href="/styles.css?v=20260218-ops4" />
 </head>
 <body>
   <main class="shell">
@@ -559,6 +560,19 @@
                   <option value="ign">IGN (Plan IGN v2)</option>
                   <option value="isere-flood">Zones inondables (Isère)</option>
                 </select>
+
+                <div class="map-inline-actions map-inline-actions--stacked" data-requires-edit>
+                  <p class="muted">Module tactique collaboratif</p>
+                  <div class="map-bulk-controls">
+                    <input id="map-annotation-color" type="color" value="#d7263d" aria-label="Couleur annotation" />
+                    <select id="map-annotation-weight" aria-label="Épaisseur annotation">
+                      <option value="2">Trait fin</option>
+                      <option value="3" selected>Trait normal</option>
+                      <option value="5">Trait épais</option>
+                    </select>
+                  </div>
+                  <button id="map-annotation-clear-btn" type="button" class="ghost map-btn-lite">🧽 Effacer toutes mes annotations locales</button>
+                </div>
                 <div class="map-inline-actions map-inline-actions--stacked">
                   <div class="map-bulk-controls">
                     <select id="poi-target-category-filter" aria-label="Filtrer les POI par catégorie">
@@ -669,6 +683,8 @@
               <ul id="resources-list" class="list practical"></ul>
               <h4>Points opérationnels personnalisés</h4>
               <ul id="custom-points-list" class="list practical"></ul>
+              <h4>Annotations tactiques synchronisées</h4>
+              <ul id="map-annotations-list" class="list practical"></ul>
               <h4>Alertes mobilité Itinisère</h4>
               <ul id="itinerary-list" class="list practical"></ul>
               <h4>Tendance Bison Futé</h4>
@@ -738,10 +754,11 @@
     </section>
   </main>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js" crossorigin=""></script>
   <!-- Compatibilité avec d'anciens scripts qui pilotent #isere-shape. -->
   <svg aria-hidden="true" width="0" height="0" focusable="false" style="position:absolute">
     <path id="isere-shape" d="M0 0h1v1H0z"></path>
   </svg>
-  <script src="/script.js?v=20260218-ops2"></script>
+  <script src="/script.js?v=20260218-ops3"></script>
 </body>
 </html>

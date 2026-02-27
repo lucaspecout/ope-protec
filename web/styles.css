@@ -711,3 +711,19 @@ svg text { font-size: 14px; fill: #17335f; }
 @media (max-width: 760px) {
   .situation-toolbar__actions { width: 100%; justify-content: space-between; }
 }
+
+
+.map-text-annotation {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #123b80;
+  border-radius: 8px;
+  padding: .2rem .4rem;
+  font-weight: 700;
+  color: #123b80;
+  white-space: nowrap;
+}
+
+.map-controls .leaflet-draw,
+.map-canvas-wrap .leaflet-draw {
+  z-index: 500;
+}

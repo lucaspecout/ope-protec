@@ -449,3 +449,68 @@ class MapPointOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class MapAnnotationCreate(BaseModel):
+    annotation_type: str
+    geojson: dict
+    text_label: str | None = None
+    color: str = "#d7263d"
+    weight: int = 3
+    fill_opacity: float = 0.18
+    municipality_id: int | None = None
+
+    @field_validator("annotation_type")
+    @classmethod
+    def validate_annotation_type(cls, value: str) -> str:
+        allowed = {"polygon", "polyline", "rectangle", "text"}
+        normalized = value.strip().lower()
+        if normalized not in allowed:
+            raise ValueError("Type d'annotation invalide")
+        return normalized
+
+    @field_validator("text_label")
+    @classmethod
+    def normalize_annotation_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        sanitized = value.strip()
+        return sanitized or None
+
+    @field_validator("color")
+    @classmethod
+    def validate_color(cls, value: str) -> str:
+        sanitized = value.strip()
+        if not sanitized.startswith("#") or len(sanitized) not in {4, 7}:
+            raise ValueError("Couleur invalide")
+        return sanitized
+
+    @field_validator("weight")
+    @classmethod
+    def validate_weight(cls, value: int) -> int:
+        if value < 1 or value > 12:
+            raise ValueError("Épaisseur invalide")
+        return value
+
+    @field_validator("fill_opacity")
+    @classmethod
+    def validate_fill_opacity(cls, value: float) -> float:
+        if value < 0 or value > 1:
+            raise ValueError("Opacité invalide")
+        return value
+
+
+class MapAnnotationOut(BaseModel):
+    id: int
+    annotation_type: str
+    geojson: dict
+    text_label: str | None = None
+    color: str
+    weight: int
+    fill_opacity: float
+    municipality_id: int | None = None
+    created_by_id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
