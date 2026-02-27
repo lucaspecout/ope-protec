@@ -2304,15 +2304,15 @@ function initMapAnnotationModule() {
 
     try {
       let payload = null;
+      const label = window.prompt('Description de la forme (visible par tous). Laissez vide pour ignorer.', '');
+      const textLabel = (label || '').trim() || null;
       if (layerType === 'marker') {
-        const label = window.prompt('Texte tactique à afficher pour les équipes', 'Position équipe alpha');
-        if (!label) return;
         const feature = layer.toGeoJSON();
-        payload = { annotation_type: 'text', geojson: feature, text_label: label, color, weight, fill_opacity: 0.2 };
+        payload = { annotation_type: 'text', geojson: feature, text_label: textLabel || 'Repère tactique', color, weight, fill_opacity: 0.2 };
       } else {
         if (typeof layer.setStyle === 'function') layer.setStyle({ color, weight, fillOpacity: 0.2 });
         const feature = layer.toGeoJSON();
-        payload = { annotation_type: layerType, geojson: feature, color, weight, fill_opacity: 0.2 };
+        payload = { annotation_type: layerType, geojson: feature, text_label: textLabel, color, weight, fill_opacity: 0.2 };
       }
       await api('/map/annotations', {
         method: 'POST',
@@ -2354,7 +2354,8 @@ function renderMapAnnotations(showFeedback = false) {
     } else {
       const geo = window.L.geoJSON(record.geojson, { style });
       geo.eachLayer((layer) => {
-        layer.bindPopup(`<strong>Annotation ${escapeHtml(record.annotation_type)}</strong>`);
+        const description = record.text_label ? `<br/>${escapeHtml(record.text_label)}` : '';
+        layer.bindPopup(`<strong>Annotation ${escapeHtml(record.annotation_type)}</strong>${description}`);
       });
       geo.addTo(mapAnnotationFeatureGroup);
     }
