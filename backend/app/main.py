@@ -577,7 +577,11 @@ async def stream_map_annotations(request: Request, token: str = Query(...), db: 
                 yield f"data: {json.dumps({'revision': current_revision})}\n\n"
             await asyncio.sleep(1.0)
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/auth/register", response_model=UserOut)
