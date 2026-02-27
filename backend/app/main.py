@@ -62,6 +62,8 @@ from .services import (
     fetch_sncf_isere_alerts,
     fetch_rte_isere_electricity_status,
     fetch_atmo_aura_isere_air_quality,
+    fetch_anfr_isere_antennas,
+    fetch_arcep_isere_mobile_outages,
     fetch_vigicrues_isere,
     fetch_vigieau_restrictions,
     generate_pdf_report,
@@ -164,6 +166,8 @@ _external_risks_snapshot: dict = {
         "prefecture_isere": {},
         "dauphine_isere": {},
         "atmo_aura": {},
+        "anfr_isere": {},
+        "arcep_isere": {},
     },
 }
 ALLOWED_DOC_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
@@ -781,6 +785,8 @@ def build_external_risks_payload(refresh: bool = False, db: Session | None = Non
         "sncf_isere": (lambda: fetch_sncf_isere_alerts(force_refresh=refresh), {"status": "degraded", "alerts": [], "alerts_total": 0}),
         "vigieau": (lambda: fetch_vigieau_restrictions(force_refresh=refresh), {"status": "degraded", "alerts": [], "max_level": "vert"}),
         "atmo_aura": (lambda: fetch_atmo_aura_isere_air_quality(force_refresh=refresh), {"status": "degraded", "today": {}, "tomorrow": {}}),
+        "anfr_isere": (lambda: fetch_anfr_isere_antennas(force_refresh=refresh), {"status": "degraded", "supports_total": 0}),
+        "arcep_isere": (lambda: fetch_arcep_isere_mobile_outages(force_refresh=refresh), {"status": "degraded", "outages_total": 0, "communes": []}),
         "electricity_isere": (lambda: fetch_rte_isere_electricity_status(force_refresh=refresh), {"status": "degraded", "level": "inconnu"}),
         "finess_isere": (lambda: fetch_finess_isere_resources(force_refresh=refresh), {"status": "degraded", "resources": [], "resources_total": 0}),
     }
@@ -806,6 +812,8 @@ def build_external_risks_payload(refresh: bool = False, db: Session | None = Non
         "sncf_isere": results["sncf_isere"],
         "vigieau": results["vigieau"],
         "atmo_aura": results["atmo_aura"],
+        "anfr_isere": results["anfr_isere"],
+        "arcep_isere": results["arcep_isere"],
         "electricity_isere": results["electricity_isere"],
         "finess_isere": results["finess_isere"],
     }
@@ -821,7 +829,7 @@ def get_external_risks_payload(refresh: bool = False, db: Session | None = None)
         return payload
 
     snapshot = _get_external_risks_snapshot()
-    if snapshot and any(snapshot.get(key) for key in ("meteo_france", "vigicrues", "itinisere", "bison_fute", "georisques", "prefecture_isere", "dauphine_isere", "sncf_isere", "vigieau", "atmo_aura", "electricity_isere", "finess_isere")):
+    if snapshot and any(snapshot.get(key) for key in ("meteo_france", "vigicrues", "itinisere", "bison_fute", "georisques", "prefecture_isere", "dauphine_isere", "sncf_isere", "vigieau", "atmo_aura", "anfr_isere", "arcep_isere", "electricity_isere", "finess_isere")):
         return snapshot
 
     payload = build_external_risks_payload(refresh=True, db=db)
@@ -942,6 +950,8 @@ def supervision_overview(
             "georisques": georisques,
             "prefecture_isere": prefecture,
             "dauphine_isere": dauphine,
+            "anfr_isere": risks_payload.get("anfr_isere") or {},
+            "arcep_isere": risks_payload.get("arcep_isere") or {},
             "electricity_isere": risks_payload.get("electricity_isere") or {},
         },
         "crisis_municipalities": [MunicipalityOut.model_validate(c).model_dump() for c in crisis],
