@@ -3506,6 +3506,8 @@ def _fetch_anfr_isere_antennas_live() -> dict[str, Any]:
         with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
             with archive.open("SUP_SUPPORT.txt") as handle:
                 rows = handle.read().decode("latin-1", errors="ignore").splitlines()
+            with archive.open("SUP_EMETTEUR.txt") as handle:
+                emetteur_rows = handle.read().decode("latin-1", errors="ignore").splitlines()
 
         if not rows:
             raise ValueError("Archive ANFR vide")
@@ -3515,6 +3517,22 @@ def _fetch_anfr_isere_antennas_live() -> dict[str, Any]:
         support_idx = header.index("SUP_ID") if "SUP_ID" in header else -1
         station_idx = header.index("STA_NM_ANFR") if "STA_NM_ANFR" in header else -1
         height_idx = header.index("SUP_NM_HAUT") if "SUP_NM_HAUT" in header else -1
+
+        station_systems: dict[str, set[str]] = {}
+        if emetteur_rows:
+            emetteur_header = emetteur_rows[0].split(";")
+            emetteur_station_idx = emetteur_header.index("STA_NM_ANFR") if "STA_NM_ANFR" in emetteur_header else -1
+            emetteur_system_idx = emetteur_header.index("EMR_LB_SYSTEME") if "EMR_LB_SYSTEME" in emetteur_header else -1
+            if emetteur_station_idx >= 0 and emetteur_system_idx >= 0:
+                for emetteur_line in emetteur_rows[1:]:
+                    values = emetteur_line.split(";")
+                    if len(values) <= max(emetteur_station_idx, emetteur_system_idx):
+                        continue
+                    station = str(values[emetteur_station_idx] or "").strip()
+                    system_label = str(values[emetteur_system_idx] or "").strip()
+                    if not station or not system_label:
+                        continue
+                    station_systems.setdefault(station, set()).add(system_label)
 
         def _dms_to_decimal(deg: str | None, minute: str | None, second: str | None, direction: str | None) -> float | None:
             try:
@@ -3528,6 +3546,21 @@ def _fetch_anfr_isere_antennas_live() -> dict[str, Any]:
             if cardinal in {"S", "W", "O"}:
                 value *= -1
             return round(value, 7)
+
+        def _extract_data_services(labels: set[str]) -> list[str]:
+            services: set[str] = set()
+            for label in labels:
+                lower = label.lower()
+                if "5g" in lower or "nr" in lower:
+                    services.add("5G")
+                if "4g" in lower or "lte" in lower:
+                    services.add("4G")
+                if "3g" in lower or "umts" in lower:
+                    services.add("3G")
+                if "2g" in lower or "gsm" in lower:
+                    services.add("2G")
+            ordered = [item for item in ("2G", "3G", "4G", "5G") if item in services]
+            return ordered
 
         lat_deg_idx = header.index("COR_NB_DG_LAT") if "COR_NB_DG_LAT" in header else -1
         lat_min_idx = header.index("COR_NB_MN_LAT") if "COR_NB_MN_LAT" in header else -1
@@ -3543,6 +3576,7 @@ def _fetch_anfr_isere_antennas_live() -> dict[str, Any]:
         heights: list[float] = []
         support_points: list[dict[str, Any]] = []
         seen_support_ids: set[str] = set()
+        support_station_ids: dict[str, set[str]] = {}
         for line in rows[1:]:
             parts = line.split(";")
             support_id = ""
@@ -3555,7 +3589,10 @@ def _fetch_anfr_isere_antennas_live() -> dict[str, Any]:
                 support_id = str(parts[support_idx]).strip()
                 supports.add(support_id)
             if station_idx >= 0 and len(parts) > station_idx and parts[station_idx]:
-                stations.add(parts[station_idx])
+                station_id = str(parts[station_idx]).strip()
+                stations.add(station_id)
+                if support_id:
+                    support_station_ids.setdefault(support_id, set()).add(station_id)
             if height_idx >= 0 and len(parts) > height_idx:
                 try:
                     heights.append(float(str(parts[height_idx]).replace(",", ".")))
@@ -3575,11 +3612,20 @@ def _fetch_anfr_isere_antennas_live() -> dict[str, Any]:
             if lat is None or lon is None:
                 continue
 
+            station_name = str(parts[station_idx]).strip() if station_idx >= 0 and len(parts) > station_idx else ""
+            systems = set()
+            for station_ref in support_station_ids.get(support_id, set()):
+                systems.update(station_systems.get(station_ref, set()))
+            data_services = _extract_data_services(systems)
+
             support_points.append({
                 "id": support_id,
                 "lat": lat,
                 "lon": lon,
-                "station_name": str(parts[station_idx]).strip() if station_idx >= 0 and len(parts) > station_idx else "",
+                "station_name": station_name,
+                "operator": "non renseigné (ANFR)",
+                "voice_service": "possible" if systems else "inconnu",
+                "data_services": data_services,
             })
             seen_support_ids.add(support_id)
 
