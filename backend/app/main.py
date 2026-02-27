@@ -8,7 +8,10 @@ from threading import Lock, Thread
 from time import sleep
 from typing import Callable
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+import asyncio
+import json
+
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -19,8 +22,10 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import Base, engine, get_db
-from .models import MapPoint, Municipality, MunicipalityDocument, OperationalLog, PublicShare, RiverStation, User, WeatherAlert
+from .models import MapAnnotation, MapPoint, Municipality, MunicipalityDocument, OperationalLog, PublicShare, RiverStation, User, WeatherAlert
 from .schemas import (
+    MapAnnotationCreate,
+    MapAnnotationOut,
     MapPointCreate,
     MapPointOut,
     MunicipalityCreate,
@@ -120,6 +125,20 @@ with engine.begin() as conn:
         )
     """))
     conn.execute(text("ALTER TABLE map_points ADD COLUMN IF NOT EXISTS icon_url VARCHAR(512)"))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS map_annotations (
+            id SERIAL PRIMARY KEY,
+            annotation_type VARCHAR(24) NOT NULL DEFAULT 'polygon',
+            geojson TEXT NOT NULL,
+            text_label VARCHAR(180),
+            color VARCHAR(16) NOT NULL DEFAULT '#d7263d',
+            weight INTEGER NOT NULL DEFAULT 3,
+            fill_opacity DOUBLE PRECISION NOT NULL DEFAULT 0.18,
+            municipality_id INTEGER REFERENCES municipalities(id) ON DELETE SET NULL,
+            created_by_id INTEGER NOT NULL REFERENCES users(id),
+            created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+    """))
 
 
 app = FastAPI(title=settings.app_name)
@@ -148,6 +167,16 @@ _external_risks_snapshot: dict = {
     },
 }
 ALLOWED_DOC_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
+
+_map_annotations_revision_lock = Lock()
+_map_annotations_revision = 0
+
+
+def bump_map_annotations_revision() -> int:
+    global _map_annotations_revision
+    with _map_annotations_revision_lock:
+        _map_annotations_revision += 1
+        return _map_annotations_revision
 
 
 def utc_timestamp() -> str:
@@ -234,6 +263,23 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 
 
 def get_active_user(user: User = Depends(get_current_user)) -> User:
+    if user.must_change_password:
+        raise HTTPException(403, "Changement du mot de passe obligatoire")
+    return user
+
+
+def get_user_from_token_value(token: str, db: Session) -> User:
+    credentials_exception = HTTPException(status_code=401, detail="Invalid credentials")
+    try:
+        payload = jwt.decode(token, settings.secret_key, algorithms=["HS256"])
+        username = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+    except JWTError as exc:
+        raise credentials_exception from exc
+    user = db.query(User).filter(User.username == username).first()
+    if not user:
+        raise credentials_exception
     if user.must_change_password:
         raise HTTPException(403, "Changement du mot de passe obligatoire")
     return user
@@ -432,6 +478,106 @@ def delete_map_point(point_id: int, db: Session = Depends(get_db), user: User = 
     db.delete(point)
     db.commit()
     return {"status": "deleted", "id": point_id}
+
+
+@app.get("/map/annotations", response_model=list[MapAnnotationOut])
+def list_map_annotations(db: Session = Depends(get_db), user: User = Depends(require_roles(*READ_ROLES))):
+    query = db.query(MapAnnotation)
+    if user.role == "mairie":
+        municipality_id = get_user_municipality_id(user, db)
+        if municipality_id is None:
+            return []
+        query = query.filter((MapAnnotation.municipality_id == municipality_id) | (MapAnnotation.municipality_id.is_(None)))
+    records = query.order_by(MapAnnotation.created_at.desc()).all()
+    return [
+        {
+            "id": row.id,
+            "annotation_type": row.annotation_type,
+            "geojson": json.loads(row.geojson),
+            "text_label": row.text_label,
+            "color": row.color,
+            "weight": row.weight,
+            "fill_opacity": row.fill_opacity,
+            "municipality_id": row.municipality_id,
+            "created_by_id": row.created_by_id,
+            "created_at": row.created_at,
+        }
+        for row in records
+    ]
+
+
+@app.post("/map/annotations", response_model=MapAnnotationOut)
+def create_map_annotation(payload: MapAnnotationCreate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "ope", "mairie"))):
+    if payload.municipality_id:
+        ensure_municipality_scope(user, db, payload.municipality_id)
+
+    if user.role == "mairie" and payload.municipality_id is None:
+        payload = payload.model_copy(update={"municipality_id": get_user_municipality_id(user, db)})
+
+    entity = MapAnnotation(
+        annotation_type=payload.annotation_type,
+        geojson=json.dumps(payload.geojson),
+        text_label=payload.text_label,
+        color=payload.color,
+        weight=payload.weight,
+        fill_opacity=payload.fill_opacity,
+        municipality_id=payload.municipality_id,
+        created_by_id=user.id,
+    )
+    db.add(entity)
+    db.commit()
+    db.refresh(entity)
+    bump_map_annotations_revision()
+    return {
+        "id": entity.id,
+        "annotation_type": entity.annotation_type,
+        "geojson": json.loads(entity.geojson),
+        "text_label": entity.text_label,
+        "color": entity.color,
+        "weight": entity.weight,
+        "fill_opacity": entity.fill_opacity,
+        "municipality_id": entity.municipality_id,
+        "created_by_id": entity.created_by_id,
+        "created_at": entity.created_at,
+    }
+
+
+@app.delete("/map/annotations/{annotation_id}")
+def delete_map_annotation(annotation_id: int, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "ope", "mairie"))):
+    entity = db.get(MapAnnotation, annotation_id)
+    if not entity:
+        raise HTTPException(404, "Annotation introuvable")
+
+    if user.role == "mairie":
+        municipality_id = get_user_municipality_id(user, db)
+        if municipality_id is None or entity.municipality_id not in {None, municipality_id}:
+            raise HTTPException(403, "Suppression non autorisée")
+
+    db.delete(entity)
+    db.commit()
+    bump_map_annotations_revision()
+    return {"status": "deleted", "id": annotation_id}
+
+
+@app.get("/map/annotations/stream")
+async def stream_map_annotations(request: Request, token: str = Query(...), db: Session = Depends(get_db)):
+    user = get_user_from_token_value(token, db)
+    if user.role not in READ_ROLES:
+        raise HTTPException(403, "Droits insuffisants")
+
+    async def event_stream():
+        last_sent = -1
+        while True:
+            if await request.is_disconnected():
+                break
+            with _map_annotations_revision_lock:
+                current_revision = _map_annotations_revision
+            if current_revision != last_sent:
+                last_sent = current_revision
+                yield f"data: {json.dumps({'revision': current_revision})}\n\n"
+            await asyncio.sleep(1.0)
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @app.post("/auth/register", response_model=UserOut)

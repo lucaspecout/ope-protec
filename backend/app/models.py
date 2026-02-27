@@ -101,6 +101,24 @@ class MapPoint(Base):
     created_by = relationship("User")
 
 
+class MapAnnotation(Base):
+    __tablename__ = "map_annotations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    annotation_type: Mapped[str] = mapped_column(String(24), default="polygon")
+    geojson: Mapped[str] = mapped_column(Text)
+    text_label: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    color: Mapped[str] = mapped_column(String(16), default="#d7263d")
+    weight: Mapped[int] = mapped_column(Integer, default=3)
+    fill_opacity: Mapped[float] = mapped_column(Float, default=0.18)
+    municipality_id: Mapped[int | None] = mapped_column(ForeignKey("municipalities.id"), nullable=True)
+    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    municipality = relationship("Municipality")
+    created_by = relationship("User")
+
+
 class OperationalLog(Base):
     __tablename__ = "operational_logs"
 

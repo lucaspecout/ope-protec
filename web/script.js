@@ -129,6 +129,10 @@ let googleTrafficFlowLayer = null;
 let userLocationMarker = null;
 let mapAddPointMode = false;
 let mapPoints = [];
+let mapAnnotations = [];
+let mapAnnotationsSync = null;
+let mapDrawControl = null;
+let mapAnnotationFeatureGroup = null;
 const mapPointVisibilityOverrides = new Map();
 const resourceVisibilityOverrides = new Map();
 let pendingMapPointCoords = null;
@@ -863,6 +867,8 @@ function initMap() {
   searchLayer = window.L.layerGroup().addTo(leafletMap);
   customPointsLayer = window.L.layerGroup().addTo(leafletMap);
   mapPointsLayer = window.L.layerGroup().addTo(leafletMap);
+  mapAnnotationFeatureGroup = window.L.featureGroup().addTo(leafletMap);
+  initMapAnnotationModule();
   itinisereLayer = window.L.layerGroup().addTo(leafletMap);
   bisonLayer = window.L.layerGroup().addTo(leafletMap);
   bisonCameraLayer = window.L.layerGroup().addTo(leafletMap);
@@ -2255,6 +2261,131 @@ function renderMapIconSuggestions(category = 'autre') {
   setHtml('map-icon-suggestions', `${icons
     .map((icon) => `<button type="button" class="ghost inline-action map-icon-chip" data-map-icon="${escapeHtml(icon)}">${escapeHtml(icon)}</button>`)
     .join('')}<span class="muted">ou saisissez votre emoji.</span>`);
+}
+
+function mapAnnotationStyle(record = {}) {
+  return {
+    color: record.color || '#d7263d',
+    weight: Number(record.weight || 3),
+    fillOpacity: Number(record.fill_opacity ?? 0.18),
+  };
+}
+
+function mapTextAnnotationIcon(record = {}) {
+  const text = escapeHtml(record.text_label || 'Repère');
+  return window.L.divIcon({ className: 'map-text-annotation', html: text, iconSize: null });
+}
+
+function initMapAnnotationModule() {
+  if (!leafletMap || typeof window.L === 'undefined') return;
+  if (!mapAnnotationFeatureGroup) mapAnnotationFeatureGroup = window.L.featureGroup().addTo(leafletMap);
+  if (mapDrawControl || !window.L.Control?.Draw || !canEdit()) return;
+
+  mapDrawControl = new window.L.Control.Draw({
+    position: 'topleft',
+    draw: {
+      polygon: true,
+      polyline: true,
+      rectangle: true,
+      circle: false,
+      circlemarker: false,
+      marker: true,
+    },
+    edit: { featureGroup: mapAnnotationFeatureGroup, remove: false },
+  });
+  leafletMap.addControl(mapDrawControl);
+
+  leafletMap.on('draw:created', async (event) => {
+    if (!canEdit()) return;
+    const color = document.getElementById('map-annotation-color')?.value || '#d7263d';
+    const weight = Number(document.getElementById('map-annotation-weight')?.value || 3);
+    const layerType = event.layerType;
+    const layer = event.layer;
+
+    try {
+      let payload = null;
+      if (layerType === 'marker') {
+        const label = window.prompt('Texte tactique à afficher pour les équipes', 'Position équipe alpha');
+        if (!label) return;
+        const feature = layer.toGeoJSON();
+        payload = { annotation_type: 'text', geojson: feature, text_label: label, color, weight, fill_opacity: 0.2 };
+      } else {
+        if (typeof layer.setStyle === 'function') layer.setStyle({ color, weight, fillOpacity: 0.2 });
+        const feature = layer.toGeoJSON();
+        payload = { annotation_type: layerType, geojson: feature, color, weight, fill_opacity: 0.2 };
+      }
+      await api('/map/annotations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      await loadMapAnnotations();
+      setMapFeedback('Annotation tactique synchronisée avec les autres opérateurs.');
+    } catch (error) {
+      setMapFeedback(`Annotation impossible: ${sanitizeErrorMessage(error.message)}`, true);
+    }
+  });
+}
+
+async function loadMapAnnotations(showFeedback = false) {
+  try {
+    const response = await api('/map/annotations', { cacheTtlMs: 0, bypassCache: true });
+    mapAnnotations = Array.isArray(response) ? response : [];
+    renderMapAnnotations(showFeedback);
+  } catch (error) {
+    if (showFeedback) setMapFeedback(`Annotations indisponibles: ${sanitizeErrorMessage(error.message)}`, true);
+  }
+}
+
+function renderMapAnnotations(showFeedback = false) {
+  if (!mapAnnotationFeatureGroup || typeof window.L === 'undefined') return;
+  mapAnnotationFeatureGroup.clearLayers();
+
+  const list = [];
+  mapAnnotations.forEach((record) => {
+    const style = mapAnnotationStyle(record);
+    if (record.annotation_type === 'text') {
+      const coords = record.geojson?.geometry?.coordinates || [];
+      if (coords.length >= 2) {
+        window.L.marker([coords[1], coords[0]], { icon: mapTextAnnotationIcon(record) })
+          .bindPopup(`<strong>Texte tactique</strong><br/>${escapeHtml(record.text_label || '-')}`)
+          .addTo(mapAnnotationFeatureGroup);
+      }
+    } else {
+      const geo = window.L.geoJSON(record.geojson, { style });
+      geo.eachLayer((layer) => {
+        layer.bindPopup(`<strong>Annotation ${escapeHtml(record.annotation_type)}</strong>`);
+      });
+      geo.addTo(mapAnnotationFeatureGroup);
+    }
+    if (canEdit()) {
+      list.push(`<li>${escapeHtml(record.annotation_type)} · ${escapeHtml(record.text_label || 'zone tracée')} <button type="button" data-remove-annotation="${record.id}">Supprimer</button></li>`);
+    } else {
+      list.push(`<li>${escapeHtml(record.annotation_type)} · ${escapeHtml(record.text_label || 'zone tracée')}</li>`);
+    }
+  });
+  setHtml('map-annotations-list', list.join('') || '<li>Aucune annotation tactique.</li>');
+  if (showFeedback) setMapFeedback(`${mapAnnotations.length} annotation(s) tactique(s) visible(s).`);
+}
+
+function stopMapAnnotationsSync() {
+  if (mapAnnotationsSync) {
+    mapAnnotationsSync.close();
+    mapAnnotationsSync = null;
+  }
+}
+
+function startMapAnnotationsSync() {
+  stopMapAnnotationsSync();
+  if (!token || typeof window.EventSource === 'undefined') return;
+  mapAnnotationsSync = new window.EventSource(`/map/annotations/stream?token=${encodeURIComponent(token)}`);
+  mapAnnotationsSync.onmessage = async () => {
+    await loadMapAnnotations();
+  };
+  mapAnnotationsSync.onerror = () => {
+    stopMapAnnotationsSync();
+    window.setTimeout(startMapAnnotationsSync, 4000);
+  };
 }
 
 async function loadMapPoints() {
@@ -3865,6 +3996,7 @@ async function refreshAll(forceRefresh = false) {
     try {
       await loadOperationsBootstrap(forceRefresh);
       await loadMapPoints();
+      await loadMapAnnotations();
       await renderTrafficOnMap();
       renderResources();
       document.getElementById('dashboard-error').textContent = '';
@@ -3879,6 +4011,7 @@ async function refreshAll(forceRefresh = false) {
         { label: 'utilisateurs', loader: loadUsers, optional: true },
         { label: 'interconnexions API', loader: loadApiInterconnections, optional: true },
         { label: 'points cartographiques', loader: loadMapPoints, optional: true },
+        { label: 'annotations tactiques', loader: loadMapAnnotations, optional: true },
       ];
 
       const results = await Promise.allSettled(loaders.map(({ loader }) => loader()));
@@ -4248,6 +4381,22 @@ function bindAppInteractions() {
       setMapFeedback(sanitizeErrorMessage(error.message), true);
     }
   });
+  document.getElementById('map-annotations-list')?.addEventListener('click', async (event) => {
+    const button = event.target.closest('[data-remove-annotation]');
+    if (!button) return;
+    try {
+      await api(`/map/annotations/${button.getAttribute('data-remove-annotation')}`, { method: 'DELETE' });
+      await loadMapAnnotations(true);
+    } catch (error) {
+      setMapFeedback(sanitizeErrorMessage(error.message), true);
+    }
+  });
+  document.getElementById('map-annotation-clear-btn')?.addEventListener('click', async () => {
+    if (!canEdit()) return;
+    const ids = mapAnnotations.map((a) => a.id);
+    await Promise.all(ids.map((id) => api(`/map/annotations/${id}`, { method: 'DELETE' }).catch(() => null)));
+    await loadMapAnnotations(true);
+  });
   document.getElementById('municipalities-list')?.addEventListener('click', async (event) => {
     const viewButton = event.target.closest('[data-muni-view], [data-muni-detail]');
     const editButton = event.target.closest('[data-muni-edit]');
@@ -4557,6 +4706,7 @@ function logout() {
   if (apiPanelTimer) clearInterval(apiPanelTimer);
   if (apiResyncTimer) clearInterval(apiResyncTimer);
   if (photoCameraRefreshTimer) clearInterval(photoCameraRefreshTimer);
+  stopMapAnnotationsSync();
   showHome();
 }
 
@@ -4701,6 +4851,7 @@ loginForm.addEventListener('submit', async (event) => {
     await refreshAll();
     startAutoRefresh();
     startLiveEventsRefresh();
+    startMapAnnotationsSync();
   } catch (error) {
     document.getElementById('login-error').textContent = error.message;
   }
@@ -4829,6 +4980,7 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
     await refreshAll();
     startAutoRefresh();
     startLiveEventsRefresh();
+    startMapAnnotationsSync();
   } catch (error) {
     if (Number(error?.status) === 401) {
       logout();
