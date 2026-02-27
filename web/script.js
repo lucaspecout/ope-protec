@@ -1878,16 +1878,9 @@ function bisonTrafficTypeLabel(type = '') {
 }
 
 function selectedBisonTrafficTypes() {
-  const mapping = {
-    ralentissement: 'filter-bison-ralentissement',
-    travaux: 'filter-bison-travaux',
-    incident: 'filter-bison-incident',
-    danger: 'filter-bison-danger',
-    info: 'filter-bison-info',
-  };
-  return Object.entries(mapping)
-    .filter(([, id]) => document.getElementById(id)?.checked ?? false)
-    .map(([type]) => type);
+  const selected = document.getElementById('filter-bison-type')?.value || 'all';
+  if (selected === 'all') return ['ralentissement', 'travaux', 'incident', 'danger', 'info'];
+  return [selected];
 }
 
 function itinisereDivIcon(point = {}) {
@@ -2819,7 +2812,8 @@ function renderBisonFuteSummary(bison = {}) {
   const nationalToday = today.national || {};
   const nationalTomorrow = tomorrow.national || {};
   setText('bison-status', `${bison.status || 'inconnu'} · Isère départ ${isereToday.departure || 'inconnu'} / retour ${isereToday.return || 'inconnu'}`);
-  setText('bison-info', `National J0: ${nationalToday.departure || 'inconnu'} / ${nationalToday.return || 'inconnu'} · J1: ${nationalTomorrow.departure || 'inconnu'} / ${nationalTomorrow.return || 'inconnu'}`);
+  const lastUpdate = bison.updated_at ? new Date(bison.updated_at).toLocaleTimeString() : 'non précisée';
+  setText('bison-info', `National J0: ${nationalToday.departure || 'inconnu'} / ${nationalToday.return || 'inconnu'} · J1: ${nationalTomorrow.departure || 'inconnu'} / ${nationalTomorrow.return || 'inconnu'} · MAJ ${lastUpdate}`);
   setText('map-bison-isere', `${isereToday.departure || 'inconnu'} (retour ${isereToday.return || 'inconnu'})`);
   setText('home-feature-bison-isere', `${isereToday.departure || 'inconnu'} / ${isereToday.return || 'inconnu'}`);
   setHtml('bison-isere-square', bisonTrafficSplitBar(isereToday.departure || 'inconnu', isereToday.return || 'inconnu'));
@@ -2831,7 +2825,7 @@ function renderBisonFuteSummary(bison = {}) {
   setHtml('bison-list', bisonMarkup);
 
   const communiqueMarkup = [
-    `<li><strong>Communiqué du jour (${today.date || '-'})</strong><br>Isère: départ <strong>${escapeHtml(isereToday.departure || 'inconnu')}</strong> · retour <strong>${escapeHtml(isereToday.return || 'inconnu')}</strong><br>National: départ ${escapeHtml(nationalToday.departure || 'inconnu')} · retour ${escapeHtml(nationalToday.return || 'inconnu')}<br><a href="https://www.bison-fute.gouv.fr/previsions.html" target="_blank" rel="noreferrer">Lire le communiqué Bison Futé</a></li>`,
+    `<li><strong>Communiqué du jour (${today.date || '-'})</strong><br>Isère: départ <strong>${escapeHtml(isereToday.departure || 'inconnu')}</strong> · retour <strong>${escapeHtml(isereToday.return || 'inconnu')}</strong><br>National: départ ${escapeHtml(nationalToday.departure || 'inconnu')} · retour ${escapeHtml(nationalToday.return || 'inconnu')}<br><span class="muted">Dernière mise à jour: ${escapeHtml(lastUpdate)}</span><br><a href="https://www.bison-fute.gouv.fr/previsions.html" target="_blank" rel="noreferrer">Lire le communiqué Bison Futé</a></li>`,
     `<li><strong>Communiqué de demain (${tomorrow.date || '-'})</strong><br>Isère: départ <strong>${escapeHtml(isereTomorrow.departure || 'inconnu')}</strong> · retour <strong>${escapeHtml(isereTomorrow.return || 'inconnu')}</strong><br>National: départ ${escapeHtml(nationalTomorrow.departure || 'inconnu')} · retour ${escapeHtml(nationalTomorrow.return || 'inconnu')}<br><a href="https://www.bison-fute.gouv.fr/previsions.html" target="_blank" rel="noreferrer">Voir les prévisions J+1</a></li>`,
   ].join('');
   setHtml('bison-communique-list', communiqueMarkup);
@@ -3885,7 +3879,7 @@ async function loadExternalRisks() {
     renderTrafficOnMap().catch(() => {});
   }
 
-  const data = await api('/external/isere/risks');
+  const data = await api('/external/isere/risks?refresh=true', { bypassCache: true });
   renderExternalRisks(data);
   saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, data);
   await renderTrafficOnMap();
@@ -4850,7 +4844,7 @@ function bindAppInteractions() {
     }
   });
 
-  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-command', 'filter-resources-shelter', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-traffic-incidents', 'filter-bison-ralentissement', 'filter-bison-travaux', 'filter-bison-incident', 'filter-bison-danger', 'filter-bison-info', 'filter-cameras'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-command', 'filter-resources-shelter', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       renderStations(cachedVigicruesPayload);
       await renderMunicipalitiesOnMap(cachedMunicipalities);
