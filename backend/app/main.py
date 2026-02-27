@@ -567,6 +567,7 @@ async def stream_map_annotations(request: Request, token: str = Query(...), db: 
 
     async def event_stream():
         last_sent = -1
+        last_heartbeat = asyncio.get_running_loop().time()
         while True:
             if await request.is_disconnected():
                 break
@@ -575,6 +576,12 @@ async def stream_map_annotations(request: Request, token: str = Query(...), db: 
             if current_revision != last_sent:
                 last_sent = current_revision
                 yield f"data: {json.dumps({'revision': current_revision})}\n\n"
+                last_heartbeat = asyncio.get_running_loop().time()
+            elif asyncio.get_running_loop().time() - last_heartbeat >= 15:
+                # Keep the SSE connection alive through reverse proxies even when
+                # no annotation changes occur for a while.
+                yield ": keep-alive\n\n"
+                last_heartbeat = asyncio.get_running_loop().time()
             await asyncio.sleep(1.0)
 
     return StreamingResponse(
