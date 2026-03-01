@@ -495,11 +495,23 @@ function showLogin() { setVisibility(homeView, false); setVisibility(loginView, 
 function showApp() { setVisibility(homeView, false); setVisibility(loginView, false); setVisibility(appView, true); }
 
 function apiOrigins() {
-  return Array.from(new Set([
-    window.location.origin,
+  const origins = [window.location.origin];
+  const { protocol, hostname, port } = window.location;
+  const isDefaultWebPort = (protocol === 'https:' && (port === '' || port === '443')) || (protocol === 'http:' && (port === '' || port === '80'));
+
+  if (hostname) {
+    const preferredProtocol = protocol === 'https:' ? 'https:' : 'http:';
+    origins.push(`${preferredProtocol}//${hostname}:1182`);
+    if (preferredProtocol === 'https:') origins.push(`http://${hostname}:1182`);
+    if (isDefaultWebPort) origins.push(`${preferredProtocol}//${hostname}`);
+  }
+
+  origins.push(
     'http://localhost:1182',
     'http://127.0.0.1:1182',
-  ]));
+  );
+
+  return Array.from(new Set(origins));
 }
 
 function buildApiUrl(path, origin) {
