@@ -532,6 +532,49 @@ function sanitizeErrorMessage(message) {
 }
 
 
+function setLoginError(message = '', debugDetails = '') {
+  const errorTarget = document.getElementById('login-error');
+  const debugWrap = document.getElementById('login-error-debug-wrap');
+  const debugTarget = document.getElementById('login-error-debug');
+
+  if (errorTarget) errorTarget.textContent = message;
+
+  if (!debugWrap || !debugTarget) return;
+  if (!debugDetails) {
+    debugWrap.classList.add('hidden');
+    debugWrap.open = false;
+    debugTarget.textContent = '';
+    return;
+  }
+
+  debugTarget.textContent = debugDetails;
+  debugWrap.classList.remove('hidden');
+}
+
+function buildLoginDebugDetails(error, username = '') {
+  const lines = [
+    `Horodatage: ${new Date().toISOString()}`,
+    `Identifiant saisi: ${username || '(vide)'}`,
+    `Message brut: ${String(error?.message || 'Erreur inconnue')}`,
+  ];
+
+  if (error?.status !== undefined && error?.status !== null && !Number.isNaN(Number(error.status))) {
+    lines.push(`HTTP status: ${Number(error.status)}`);
+  }
+
+  const triedOrigins = Array.isArray(error?.triedOrigins) && error.triedOrigins.length
+    ? error.triedOrigins.join(', ')
+    : 'non disponible';
+  lines.push(`Origines API testées: ${triedOrigins}`);
+
+  if (error?.cause?.message) {
+    lines.push(`Cause technique: ${String(error.cause.message)}`);
+  }
+
+  lines.push('Conseils: vérifier docker compose up -d, l\'écoute backend sur 0.0.0.0:1182, et le reverse proxy.');
+  return lines.join('\n');
+}
+
 function formatElapsedSince(timestamp) {
   if (!timestamp) return 'inconnue';
   const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
@@ -605,9 +648,10 @@ function isCacheableRequest(path, fetchOptions = {}) {
 }
 
 
-function createApiError(message, status = null) {
+function createApiError(message, status = null, context = {}) {
   const error = new Error(message);
   if (status !== null && status !== undefined) error.status = Number(status);
+  if (context && typeof context === 'object') Object.assign(error, context);
   return error;
 }
 
@@ -664,7 +708,7 @@ async function api(path, options = {}) {
       }
     }
 
-    throw createApiError(sanitizeErrorMessage(lastError?.message || 'API indisponible'), lastError?.status);
+    throw createApiError(sanitizeErrorMessage(lastError?.message || 'API indisponible'), lastError?.status, { cause: lastError, triedOrigins: apiOrigins() });
   })();
 
   if (!cacheable) {
@@ -4993,7 +5037,7 @@ function startHomeLiveRefresh() {
 
 loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
-  document.getElementById('login-error').textContent = '';
+  setLoginError('');
   const form = new FormData(loginForm);
   const username = String(form.get('username') || '');
   const password = String(form.get('password') || '');
@@ -5025,7 +5069,7 @@ loginForm.addEventListener('submit', async (event) => {
     startLiveEventsRefresh();
     startMapAnnotationsSync();
   } catch (error) {
-    document.getElementById('login-error').textContent = error.message;
+    setLoginError(error.message, buildLoginDebugDetails(error, username));
   }
 });
 
@@ -5041,7 +5085,7 @@ passwordForm.addEventListener('submit', async (event) => {
     });
     setVisibility(passwordForm, false);
     setVisibility(loginForm, true);
-    document.getElementById('login-error').textContent = 'Mot de passe modifié. Reconnectez-vous.';
+    setLoginError('Mot de passe modifié. Reconnectez-vous.');
   } catch (error) {
     document.getElementById('password-error').textContent = error.message;
   }
@@ -5158,7 +5202,7 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
       logout();
       return;
     }
-    document.getElementById('login-error').textContent = `Session conservée mais API indisponible: ${sanitizeErrorMessage(error?.message || 'erreur inconnue')}`;
+    setLoginError(`Session conservée mais API indisponible: ${sanitizeErrorMessage(error?.message || 'erreur inconnue')}`, buildLoginDebugDetails(error, currentUser?.username || 'session existante'));
     showLogin();
   }
 })();
