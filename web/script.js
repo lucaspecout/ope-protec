@@ -532,6 +532,13 @@ function sanitizeErrorMessage(message) {
   return normalized;
 }
 
+function isNetworkFetchError(error) {
+  const message = String(error?.message || '');
+  return message.includes('Failed to fetch')
+    || message.includes('NetworkError')
+    || message.includes('Load failed');
+}
+
 
 function setLoginError(message = '', debugDetails = '') {
   const errorTarget = document.getElementById('login-error');
@@ -704,8 +711,9 @@ async function api(path, options = {}) {
         }
         return payload;
       } catch (error) {
+        if (error?.status !== undefined && error?.status !== null) throw error;
         lastError = error;
-        if (!String(error.message || '').includes('Réponse non-JSON')) break;
+        if (!String(error.message || '').includes('Réponse non-JSON') && !isNetworkFetchError(error)) break;
       }
     }
 
@@ -764,7 +772,9 @@ async function apiFile(path) {
       }
       return { blob: await response.blob(), contentType: response.headers.get('content-type') || 'application/octet-stream' };
     } catch (error) {
+      if (error?.status !== undefined && error?.status !== null) throw error;
       lastError = error;
+      if (!isNetworkFetchError(error)) break;
     }
   }
   throw createApiError(sanitizeErrorMessage(lastError?.message || 'API indisponible'), lastError?.status);
