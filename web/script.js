@@ -145,6 +145,7 @@ let cachedMunicipalities = [];
 let cachedMunicipalityRecords = [];
 let cachedItinisereEvents = [];
 let cachedBisonFute = {};
+let cachedBisonLiveEvents = [];
 let geocodeCache = new Map();
 let municipalityContourCache = new Map();
 const municipalityDocumentsUiState = new Map();
@@ -2400,7 +2401,8 @@ async function renderTrafficOnMap() {
   const showTrafficIncidents = document.getElementById('filter-traffic-incidents')?.checked ?? true;
   if (showTrafficIncidents) {
     const selectedTypes = selectedBisonTrafficTypes();
-    const points = await buildItinisereMapPoints(cachedItinisereEvents || []);
+    const trafficEvents = [...(cachedItinisereEvents || []), ...(cachedBisonLiveEvents || [])];
+    const points = await buildItinisereMapPoints(trafficEvents);
     if (renderSequence !== trafficRenderSequence) return;
     const filteredPoints = points.filter((point) => selectedTypes.includes(bisonIsereTrafficType(point)));
     mapStats.traffic += filteredPoints.length;
@@ -2861,6 +2863,7 @@ function renderElectricityStatus(electricity = {}) {
 
 function renderBisonFuteSummary(bison = {}) {
   cachedBisonFute = bison || {};
+  cachedBisonLiveEvents = Array.isArray(bison.live?.events) ? bison.live.events : [];
   const today = bison.today || {};
   const tomorrow = bison.tomorrow || {};
   const isereToday = today.isere || {};
@@ -2869,7 +2872,8 @@ function renderBisonFuteSummary(bison = {}) {
   const nationalTomorrow = tomorrow.national || {};
   setText('bison-status', `${bison.status || 'inconnu'} · Isère départ ${isereToday.departure || 'inconnu'} / retour ${isereToday.return || 'inconnu'}`);
   const lastUpdate = bison.updated_at ? new Date(bison.updated_at).toLocaleTimeString() : 'non précisée';
-  setText('bison-info', `National J0: ${nationalToday.departure || 'inconnu'} / ${nationalToday.return || 'inconnu'} · J1: ${nationalTomorrow.departure || 'inconnu'} / ${nationalTomorrow.return || 'inconnu'} · MAJ ${lastUpdate}`);
+  const liveCount = Number(bison.live?.events_total || 0);
+  setText('bison-info', `National J0: ${nationalToday.departure || 'inconnu'} / ${nationalToday.return || 'inconnu'} · J1: ${nationalTomorrow.departure || 'inconnu'} / ${nationalTomorrow.return || 'inconnu'} · Événements trafic Isère: ${liveCount} · MAJ ${lastUpdate}`);
   setText('map-bison-isere', `${isereToday.departure || 'inconnu'} (retour ${isereToday.return || 'inconnu'})`);
   setText('home-feature-bison-isere', `${isereToday.departure || 'inconnu'} / ${isereToday.return || 'inconnu'}`);
   setHtml('bison-isere-square', bisonTrafficSplitBar(isereToday.departure || 'inconnu', isereToday.return || 'inconnu'));
@@ -3641,7 +3645,7 @@ function buildSitrepHtml() {
     .filter((municipality) => municipality.crisis_mode && municipality.lat != null && municipality.lon != null)
     .map((municipality) => ({ lat: municipality.lat, lon: municipality.lon, color: '#e03131' }));
   const itinisereTrafficPoints = Array.isArray(cachedItinisereEvents)
-    ? cachedItinisereEvents
+    ? [...cachedItinisereEvents, ...(Array.isArray(cachedBisonLiveEvents) ? cachedBisonLiveEvents : [])]
       .filter((event) => (event.lat != null && event.lon != null) || (event.position?.lat != null && event.position?.lon != null))
       .map((event) => ({ lat: event.lat ?? event.position?.lat, lon: event.lon ?? event.position?.lon, color: '#d9480f' }))
     : [];

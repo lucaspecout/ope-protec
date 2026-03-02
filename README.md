@@ -80,6 +80,7 @@ GET /external/isere/risks
 Retourne un bloc consolidé :
 - `meteo_france` : état de connexion au service vigilance Météo-France et bulletin Isère.
 - `vigicrues` : état de connexion, stations du département de l'Isère, vigilances des tronçons associés et niveau d'alerte eau courant (`vert`, `jaune`, `orange`, `rouge`).
+- `bison_fute` : état de connexion, prévisions trafic Isère (départs/retours J0/J1) et évènements temps réel filtrés Isère (accidents, pannes, incidents, travaux, réductions de voie).
 - `georisques` : synthèse multi-communes Isère (sismicité max, AZI, PPRN/PPRM/PPRT, DICRIM, TIM, information préventive risques, radon, mouvements de terrain et cavités).
 - `prefecture_isere` : flux RSS des actualités de la Préfecture de l'Isère (titres, dates, liens).
 - `sncf_isere` : alertes SNCF filtrées sur l'Isère (accidents et travaux de voie) issues du flux temps réel SNCF (SIRI SX Lite / GTFS-RT Service Alerts).

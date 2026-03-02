@@ -2685,6 +2685,107 @@ def _parse_bison_segment(segment: str) -> dict[str, str]:
     }
 
 
+def _is_isere_coordinate(lat: float, lon: float) -> bool:
+    return 44.6 <= lat <= 46.0 and 4.2 <= lon <= 6.8
+
+
+def _extract_bison_event_coordinates(geometry: dict[str, Any] | None) -> tuple[float, float] | None:
+    if not isinstance(geometry, dict):
+        return None
+    coords = geometry.get("coordinates")
+    if not isinstance(coords, list):
+        return None
+
+    geom_type = str(geometry.get("type") or "").lower()
+    candidate: list[float] | None = None
+    if geom_type == "point" and len(coords) >= 2:
+        candidate = coords
+    elif geom_type == "linestring" and coords and isinstance(coords[0], list) and len(coords[0]) >= 2:
+        candidate = coords[len(coords) // 2]
+    elif geom_type == "multilinestring" and coords and isinstance(coords[0], list) and coords[0] and isinstance(coords[0][0], list):
+        first_line = coords[0]
+        candidate = first_line[len(first_line) // 2]
+
+    if not candidate or len(candidate) < 2:
+        return None
+    lon = float(candidate[0])
+    lat = float(candidate[1])
+    if not _is_isere_coordinate(lat, lon):
+        return None
+    return (lat, lon)
+
+
+def _bison_event_category(value: str) -> str:
+    text = str(value or "").lower()
+    if any(token in text for token in ("travaux", "chantier")):
+        return "travaux"
+    if any(token in text for token in ("accident", "panne", "obstacle", "incident", "collision")):
+        return "incident"
+    if any(token in text for token in ("bouchon", "ralent", "congestion")):
+        return "ralentissement"
+    if any(token in text for token in ("voie", "réduction", "alternat", "circulation")):
+        return "restriction"
+    return "info"
+
+
+def _fetch_bison_fute_isere_live_events() -> dict[str, Any]:
+    base_url = "https://www.bison-fute.gouv.fr"
+    iteration_url = f"{base_url}/data/iteration/date.json"
+    try:
+        iteration_payload = _http_get_json(iteration_url)
+        iteration = int(iteration_payload[0]) if isinstance(iteration_payload, list) and iteration_payload else 0
+        if iteration <= 0:
+            raise ValueError("Horodate Bison Futé invalide")
+
+        folder = "data-" + datetime.fromtimestamp(iteration / 1000).strftime("%Y%m%d-%H%M%S")
+        events_url = f"{base_url}/data/{folder}/evenementsOL6/maintenant/tfs/evenements/evenementsOL6.json"
+        payload = _http_get_json(events_url)
+        features = payload.get("features") if isinstance(payload, dict) else []
+        if not isinstance(features, list):
+            features = []
+
+        events: list[dict[str, Any]] = []
+        for feature in features:
+            if not isinstance(feature, dict):
+                continue
+            props = feature.get("properties") if isinstance(feature.get("properties"), dict) else {}
+            geometry = feature.get("geometry") if isinstance(feature.get("geometry"), dict) else {}
+            coords = _extract_bison_event_coordinates(geometry)
+            if not coords:
+                continue
+
+            title = str(props.get("title") or props.get("libelle") or props.get("label") or "Évènement trafic")
+            description = str(props.get("description") or props.get("desc") or "")
+            category = _bison_event_category(f"{props.get('type') or ''} {props.get('categorie') or ''} {title} {description}")
+            events.append(
+                {
+                    "id": str(props.get("id") or props.get("eventId") or f"bison-{len(events)+1}"),
+                    "title": title,
+                    "description": description,
+                    "category": category,
+                    "severity": {"incident": "orange", "travaux": "jaune", "restriction": "jaune", "ralentissement": "jaune"}.get(category, "vert"),
+                    "lat": coords[0],
+                    "lon": coords[1],
+                    "link": "https://www.bison-fute.gouv.fr/maintenant.html",
+                }
+            )
+
+        return {
+            "status": "online",
+            "source": events_url,
+            "events_total": len(events),
+            "events": events[:120],
+        }
+    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
+        return {
+            "status": "degraded",
+            "source": iteration_url,
+            "events_total": 0,
+            "events": [],
+            "error": str(exc),
+        }
+
+
 def _fetch_bison_fute_traffic_live() -> dict[str, Any]:
     source = "https://www.bison-fute.gouv.fr/previsions/previsions.json"
     try:
@@ -2720,6 +2821,7 @@ def _fetch_bison_fute_traffic_live() -> dict[str, Any]:
             "source": source,
             "today": pick_entry(day_index),
             "tomorrow": pick_entry(tomorrow_index),
+            "live": _fetch_bison_fute_isere_live_events(),
             "updated_at": datetime.utcnow().isoformat() + "Z",
         }
     except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
@@ -2737,6 +2839,7 @@ def _fetch_bison_fute_traffic_live() -> dict[str, Any]:
                 "national": {"departure": "inconnu", "return": "inconnu"},
                 "isere": {"departure": "inconnu", "return": "inconnu"},
             },
+            "live": _fetch_bison_fute_isere_live_events(),
             "error": str(exc),
         }
 
