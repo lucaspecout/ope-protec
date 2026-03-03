@@ -648,6 +648,27 @@ svg text { font-size: 14px; fill: #17335f; }
   user-select: none;
 }
 
+.itinisere-icon-wrap--compact .itinisere-icon {
+  width: 14px;
+  height: 14px;
+  font-size: .54rem;
+}
+
+.itinisere-icon-wrap--compact .itinisere-source-badge {
+  width: 9px;
+  height: 9px;
+  right: -5px;
+  top: -5px;
+}
+
+.itinisere-icon-wrap--compact .itinisere-road-dot {
+  min-width: 13px;
+  height: 13px;
+  font-size: .4rem;
+  right: -7px;
+  bottom: -5px;
+}
+
 .itinisere-source-badge {
   position: absolute;
   right: -6px;
