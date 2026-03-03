@@ -630,12 +630,6 @@ svg text { font-size: 14px; fill: #17335f; }
   position: relative;
 }
 
-.leaflet-marker-pane.traffic-zoom-xs .itinisere-icon-wrap,
-.leaflet-marker-pane.traffic-zoom-sm .itinisere-icon-wrap,
-.leaflet-marker-pane.traffic-zoom-lg .itinisere-icon-wrap {
-  transform: none;
-}
-
 .itinisere-icon {
   width: 18px;
   height: 18px;
