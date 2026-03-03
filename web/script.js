@@ -2570,10 +2570,13 @@ async function buildItinisereMapPoints(events = []) {
     }
     if (!position) continue;
 
+    const normalizedPosition = normalizeMapCoordinates(position.lat, position.lon);
+    if (!normalizedPosition) continue;
+
     points.push({
       ...event,
-      lat: position.lat,
-      lon: position.lon,
+      lat: normalizedPosition.lat,
+      lon: normalizedPosition.lon,
       icon: trafficMarkerIcon('itinisere', event.category, fullText),
       roads,
       anchor,
@@ -2605,12 +2608,14 @@ async function renderTrafficOnMap() {
     const filteredPoints = points.filter((point) => selectedTypes.includes(bisonIsereTrafficType(point)));
     mapStats.traffic += filteredPoints.length;
     filteredPoints.forEach((point) => {
+      const coords = normalizeMapCoordinates(point.lat, point.lon);
+      if (!coords) return;
       const roadsText = point.precision === 'commune' ? '' : (point.roads?.length ? `Axes détectés: ${point.roads.join(', ')}<br/>` : '');
       const locations = Array.isArray(point.locations) && point.locations.length ? point.locations.join(', ') : point.anchor;
       const icon = trafficMarkerIcon('itinisere', point.category, `${point.title || ''} ${point.description || ''}`);
       const trafficType = bisonIsereTrafficType(point);
       const sourceLabel = String(point.source || '').includes('bison') ? 'Bison Futé' : 'Itinisère';
-      const marker = window.L.marker([point.lat, point.lon], { icon: itinisereDivIcon(point) });
+      const marker = window.L.marker([coords.lat, coords.lon], { icon: itinisereDivIcon(point) });
       marker.bindPopup(`<strong>${escapeHtml(icon)} ${escapeHtml(point.title || 'Évènement circulation Isère')}</strong><br/><span class="badge neutral">${escapeHtml(sourceLabel)} · ${escapeHtml(bisonTrafficTypeLabel(trafficType))} · ${escapeHtml(point.severity || 'jaune')}</span><br/>${escapeHtml(point.description || '')}<br/>Localisation: ${escapeHtml(locations || 'Commune Isère')} (${escapeHtml(point.precision || 'estimée')})<br/>${roadsText}<a href="${escapeHtml(point.link || '#')}" target="_blank" rel="noreferrer">Détail Itinisère / Bison Futé</a>`);
       marker.addTo(bisonLayer);
     });
