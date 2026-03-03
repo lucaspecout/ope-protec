@@ -361,6 +361,7 @@ label { display: block; margin-bottom: .8rem; }
 .api-card h4 { margin-bottom: .35rem; }
 .api-card .ok { color: var(--ok); font-weight: 700; }
 .api-card .ko { color: var(--danger); font-weight: 700; }
+.api-card-refresh { font-size: .74rem; margin-top: .35rem; }
 .api-raw-list { display: grid; gap: .6rem; }
 .api-raw-item { border: 1px solid var(--line); border-radius: 12px; background: #0f1f3e; color: #dbe8ff; overflow: hidden; }
 .api-raw-item summary { cursor: pointer; list-style: none; padding: .65rem .8rem; font-weight: 700; background: #1a3363; }

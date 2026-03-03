@@ -4132,7 +4132,8 @@ function renderApiInterconnections(data = {}) {
     const status = String(payload.status || 'inconnu');
     const degraded = status !== 'online' || Boolean(payload.error);
     const errorLabel = serviceErrorLabel(payload);
-    return `<article class="api-card"><h4>${service.label}</h4><p>Statut: <span class="${degraded ? 'ko' : 'ok'}">${status}</span></p><p>Indicateur: <strong>${escapeHtml(service.level)}</strong></p><p class="muted">${escapeHtml(service.details)}</p><p class="${degraded ? 'ko' : 'muted'}">Erreur actuelle: ${escapeHtml(errorLabel)}</p></article>`;
+    const updatedAt = payload.updated_at ? safeDateToLocale(payload.updated_at, { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-';
+    return `<article class="api-card"><h4>${service.label}</h4><p>Statut: <span class="${degraded ? 'ko' : 'ok'}">${status}</span></p><p>Indicateur: <strong>${escapeHtml(service.level)}</strong></p><p class="muted">${escapeHtml(service.details)}</p><p class="${degraded ? 'ko' : 'muted'}">Erreur actuelle: ${escapeHtml(errorLabel)}</p><p class="muted api-card-refresh">Dernière récupération API: ${escapeHtml(updatedAt)}</p></article>`;
   }).join('');
 
   const rawBlocks = services.map((service) => {
