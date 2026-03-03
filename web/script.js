@@ -2238,7 +2238,7 @@ function trafficPopupDetails(point = {}, sourceLabel = '', trafficType = '') {
     ${escapeHtml(point.description || 'Aucun détail complémentaire fourni.')}<br/>
     Axe(s): ${escapeHtml(roads)}<br/>
     Localisation: ${escapeHtml(locations)} (${escapeHtml(point.precision || 'estimée')})<br/>
-    Catégorie: ${escapeHtml(category)}${reference ? `<br/>Référence: ${escapeHtml(String(reference))}` : ''}${publishedAt ? `<br/>Mis à jour: ${escapeHtml(formatDatetime(publishedAt))}` : ''}${coords ? `<br/>Coordonnées: ${coords.lat.toFixed(5)}, ${coords.lon.toFixed(5)}` : ''}<br/>
+    Catégorie: ${escapeHtml(category)}${reference ? `<br/>Référence: ${escapeHtml(String(reference))}` : ''}${publishedAt ? `<br/>Mis à jour: ${escapeHtml(safeDateToLocale(publishedAt))}` : ''}${coords ? `<br/>Coordonnées: ${coords.lat.toFixed(5)}, ${coords.lon.toFixed(5)}` : ''}<br/>
     <a href="${escapeHtml(point.link || '#')}" target="_blank" rel="noreferrer">Voir la source officielle</a>`;
 }
 
