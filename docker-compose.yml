@@ -2,6 +2,7 @@ services:
   db:
     image: postgres:16-alpine
     restart: always
+    mem_limit: 1g
     environment:
       POSTGRES_DB: veille
       POSTGRES_USER: postgres
@@ -18,6 +19,7 @@ services:
   redis:
     image: redis:latest
     restart: always
+    mem_limit: 1g
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
@@ -32,6 +34,7 @@ services:
       context: .
       dockerfile: web/Dockerfile
     restart: always
+    mem_limit: 1g
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/veille
       REDIS_URL: redis://redis:6379/0
