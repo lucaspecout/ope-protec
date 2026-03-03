@@ -2708,41 +2708,15 @@ def _is_isere_coordinate(lat: float, lon: float) -> bool:
     return 44.6 <= lat <= 46.0 and 4.2 <= lon <= 6.8
 
 
-def _extract_bison_event_coordinates(geometry: dict[str, Any] | None) -> tuple[float, float] | None:
-    if not isinstance(geometry, dict):
-        return None
-    coords = geometry.get("coordinates")
-    if not isinstance(coords, list):
-        return None
-
-    geom_type = str(geometry.get("type") or "").lower()
-    candidate: list[float] | None = None
-    if geom_type == "point" and len(coords) >= 2:
-        candidate = coords
-    elif geom_type == "linestring" and coords and isinstance(coords[0], list) and len(coords[0]) >= 2:
-        candidate = coords[len(coords) // 2]
-    elif geom_type == "multilinestring" and coords and isinstance(coords[0], list) and coords[0] and isinstance(coords[0][0], list):
-        first_line = coords[0]
-        candidate = first_line[len(first_line) // 2]
-
-    if not candidate or len(candidate) < 2:
-        return None
-    lon = float(candidate[0])
-    lat = float(candidate[1])
-    if not _is_isere_coordinate(lat, lon):
-        return None
-    return (lat, lon)
-
-
 def _bison_event_category(value: str) -> str:
     text = str(value or "").lower()
-    if any(token in text for token in ("travaux", "chantier")):
+    if any(token in text for token in ("travaux", "chantier", "work", "maintenance")):
         return "travaux"
-    if any(token in text for token in ("accident", "collision")):
+    if any(token in text for token in ("accident", "collision", "crash")):
         return "accident"
     if any(token in text for token in ("panne", "obstacle", "incident")):
         return "incident"
-    if any(token in text for token in ("danger", "chaussée glissante", "visibilit", "contresens")):
+    if any(token in text for token in ("danger", "chaussée glissante", "visibilit", "contresens", "weather", "verglas", "neige", "fermeture", "ferm")):
         return "danger"
     if any(token in text for token in ("bouchon", "ralent", "congestion")):
         return "ralentissement"
@@ -2762,58 +2736,131 @@ def _bison_event_severity(category: str) -> str:
     }.get(category, "vert")
 
 
-def _fetch_bison_fute_isere_live_events() -> dict[str, Any]:
-    base_url = "https://www.bison-fute.gouv.fr"
-    iteration_url = f"{base_url}/data/iteration/date.json"
+def _bison_dataset_events_url() -> str:
+    dataset_api = "https://www.data.gouv.fr/api/1/datasets/evenements-routiers-sur-le-reseau-routier-national-non-concede/"
+    default_url = "http://tipi.bison-fute.gouv.fr/bison-fute-ouvert/publicationsDIR/Evenementiel-DIR/grt/RRN/content.xml"
     try:
-        iteration_payload = _http_get_json(iteration_url)
-        iteration = int(iteration_payload[0]) if isinstance(iteration_payload, list) and iteration_payload else 0
-        if iteration <= 0:
-            raise ValueError("Horodate Bison Futé invalide")
+        payload = _http_get_json(dataset_api)
+    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, json.JSONDecodeError):
+        return default_url
 
-        folder = "data-" + datetime.fromtimestamp(iteration / 1000).strftime("%Y%m%d-%H%M%S")
-        events_url = f"{base_url}/data/{folder}/evenementsOL6/maintenant/tfs/evenements/evenementsOL6.json"
-        payload = _http_get_json(events_url)
-        features = payload.get("features") if isinstance(payload, dict) else []
-        if not isinstance(features, list):
-            features = []
+    resources = payload.get("resources") if isinstance(payload, dict) else []
+    if not isinstance(resources, list):
+        return default_url
+
+    for resource in resources:
+        if not isinstance(resource, dict):
+            continue
+        candidate_url = str(resource.get("url") or "").strip()
+        if not candidate_url:
+            continue
+        if "content.xml" in candidate_url:
+            return candidate_url
+
+    for resource in resources:
+        if not isinstance(resource, dict):
+            continue
+        if str(resource.get("format") or "").lower() != "xml":
+            continue
+        candidate_url = str(resource.get("url") or "").strip()
+        if candidate_url:
+            return candidate_url
+
+    return default_url
+
+
+def _bison_comment_values(record: ET.Element, allowed_types: set[str] | None = None) -> list[str]:
+    values: list[str] = []
+    for comment in record.findall(".//{*}generalPublicComment"):
+        comment_type = str(comment.findtext("{*}commentType", default="") or "").strip().lower()
+        if allowed_types and comment_type and comment_type not in allowed_types:
+            continue
+        for value_node in comment.findall(".//{*}value"):
+            text_value = str(value_node.text or "").strip()
+            if text_value:
+                values.append(text_value)
+    return values
+
+
+def _bison_datex_coordinates(record: ET.Element) -> tuple[float, float] | None:
+    latitude_text = record.findtext(".//{*}pointCoordinates/{*}latitude")
+    longitude_text = record.findtext(".//{*}pointCoordinates/{*}longitude")
+    if latitude_text is None or longitude_text is None:
+        return None
+    try:
+        latitude = float(latitude_text)
+        longitude = float(longitude_text)
+    except ValueError:
+        return None
+    if not _is_isere_coordinate(latitude, longitude):
+        return None
+    return (latitude, longitude)
+
+
+def _bison_datex_severity(category: str, overall_severity: str) -> str:
+    mapped = {
+        "verylow": "vert",
+        "low": "jaune",
+        "medium": "orange",
+        "high": "rouge",
+        "veryhigh": "rouge",
+    }.get((overall_severity or "").strip().lower())
+    return mapped or _bison_event_severity(category)
+
+
+def _fetch_bison_fute_isere_live_events() -> dict[str, Any]:
+    events_url = _bison_dataset_events_url()
+    try:
+        xml_payload = _http_get_text(events_url, timeout=18)
+        root = ET.fromstring(xml_payload)
+        publication_time = str(root.findtext(".//{*}publicationTime") or "").strip()
+        situations = root.findall(".//{*}situation")
 
         events: list[dict[str, Any]] = []
-        for feature in features:
-            if not isinstance(feature, dict):
-                continue
-            props = feature.get("properties") if isinstance(feature.get("properties"), dict) else {}
-            geometry = feature.get("geometry") if isinstance(feature.get("geometry"), dict) else {}
-            coords = _extract_bison_event_coordinates(geometry)
-            if not coords:
-                continue
+        for situation in situations:
+            overall_severity = str(situation.findtext("{*}overallSeverity") or "").strip().lower()
+            situation_id = str(situation.attrib.get("id") or "").strip()
+            records = situation.findall("{*}situationRecord")
+            for record in records:
+                coords = _bison_datex_coordinates(record)
+                if not coords:
+                    continue
 
-            title = str(props.get("title") or props.get("libelle") or props.get("label") or "Évènement trafic")
-            description = str(props.get("description") or props.get("desc") or "")
-            category = _bison_event_category(f"{props.get('type') or ''} {props.get('categorie') or ''} {title} {description}")
-            events.append(
-                {
-                    "id": str(props.get("id") or props.get("eventId") or f"bison-{len(events)+1}"),
-                    "title": title,
-                    "description": description,
-                    "category": category,
-                    "severity": _bison_event_severity(category),
-                    "lat": coords[0],
-                    "lon": coords[1],
-                    "link": "https://www.bison-fute.gouv.fr/maintenant.html",
-                }
-            )
+                description_values = _bison_comment_values(record, {"description", "publiceventdescription"})
+                location_values = _bison_comment_values(record, {"locationdescriptor"})
+                road_label = str(record.findtext(".//{*}name/{*}descriptor/{*}values/{*}value") or "").strip()
+                title = location_values[0] if location_values else (road_label or "Évènement trafic")
+                description = " · ".join(description_values[:3])
+
+                xsi_type = str(record.attrib.get("{http://www.w3.org/2001/XMLSchema-instance}type") or "")
+                cause_type = str(record.findtext(".//{*}causeType") or "")
+                category = _bison_event_category(f"{xsi_type} {cause_type} {title} {description}")
+                event_id = str(record.attrib.get("id") or f"{situation_id}-{len(events)+1}" or f"bison-{len(events)+1}")
+
+                events.append(
+                    {
+                        "id": event_id,
+                        "title": title,
+                        "description": description,
+                        "category": category,
+                        "severity": _bison_datex_severity(category, overall_severity),
+                        "lat": coords[0],
+                        "lon": coords[1],
+                        "link": events_url,
+                    }
+                )
 
         return {
             "status": "online",
             "source": events_url,
             "events_total": len(events),
             "events": events[:120],
+            "updated_at": publication_time or (datetime.utcnow().isoformat() + "Z"),
         }
-    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
+    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError, ET.ParseError) as exc:
         return {
             "status": "degraded",
-            "source": iteration_url,
+            "source": events_url,
             "events_total": 0,
             "events": [],
             "error": str(exc),
