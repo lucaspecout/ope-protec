@@ -48,6 +48,7 @@ from .schemas import (
 )
 from .security import create_access_token, hash_password, verify_password
 from .services import (
+    fetch_bison_fute_live_events,
     fetch_bison_fute_traffic,
     fetch_georisques_commune_risks,
     cleanup_old_weather_alerts,
@@ -898,6 +899,17 @@ def interactive_map_itinisere_events(
     safe_limit = max(10, min(limit, 120))
     return fetch_itinisere_disruptions(limit=safe_limit, force_refresh=refresh)
 
+
+@app.get("/api/bison-fute/events")
+def interactive_map_bison_fute_events(
+    refresh: bool = False,
+    limit: int = 120,
+    categories: list[str] | None = Query(default=None),
+    _: User = Depends(require_roles(*READ_ROLES)),
+):
+    safe_limit = max(1, min(limit, 250))
+    normalized_categories = [str(item or "").strip().lower() for item in (categories or []) if str(item or "").strip()]
+    return fetch_bison_fute_live_events(categories=normalized_categories, limit=safe_limit, force_refresh=refresh)
 
 @app.get("/api/vigieau/alerts")
 def interactive_map_vigieau_alerts(

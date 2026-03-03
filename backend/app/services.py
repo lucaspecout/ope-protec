@@ -2738,13 +2738,28 @@ def _bison_event_category(value: str) -> str:
     text = str(value or "").lower()
     if any(token in text for token in ("travaux", "chantier")):
         return "travaux"
-    if any(token in text for token in ("accident", "panne", "obstacle", "incident", "collision")):
+    if any(token in text for token in ("accident", "collision")):
+        return "accident"
+    if any(token in text for token in ("panne", "obstacle", "incident")):
         return "incident"
+    if any(token in text for token in ("danger", "chaussée glissante", "visibilit", "contresens")):
+        return "danger"
     if any(token in text for token in ("bouchon", "ralent", "congestion")):
         return "ralentissement"
-    if any(token in text for token in ("voie", "réduction", "alternat", "circulation")):
-        return "restriction"
+    if any(token in text for token in ("voie", "réduction", "alternat", "neutralis", "circulation")):
+        return "reduction_voie"
     return "info"
+
+
+def _bison_event_severity(category: str) -> str:
+    return {
+        "accident": "orange",
+        "incident": "orange",
+        "travaux": "jaune",
+        "reduction_voie": "jaune",
+        "ralentissement": "jaune",
+        "danger": "orange",
+    }.get(category, "vert")
 
 
 def _fetch_bison_fute_isere_live_events() -> dict[str, Any]:
@@ -2782,7 +2797,7 @@ def _fetch_bison_fute_isere_live_events() -> dict[str, Any]:
                     "title": title,
                     "description": description,
                     "category": category,
-                    "severity": {"incident": "orange", "travaux": "jaune", "restriction": "jaune", "ralentissement": "jaune"}.get(category, "vert"),
+                    "severity": _bison_event_severity(category),
                     "lat": coords[0],
                     "lon": coords[1],
                     "link": "https://www.bison-fute.gouv.fr/maintenant.html",
@@ -2871,6 +2886,40 @@ def fetch_bison_fute_traffic(force_refresh: bool = False) -> dict[str, Any]:
         force_refresh=force_refresh,
         loader=_fetch_bison_fute_traffic_live,
     )
+
+
+def fetch_bison_fute_live_events(
+    *,
+    categories: list[str] | None = None,
+    limit: int = 120,
+    force_refresh: bool = False,
+) -> dict[str, Any]:
+    payload = fetch_bison_fute_traffic(force_refresh=force_refresh)
+    live = deepcopy(payload.get("live") if isinstance(payload, dict) else {})
+    events = live.get("events") if isinstance(live, dict) else []
+    if not isinstance(events, list):
+        events = []
+
+    normalized_categories = {str(item or "").strip().lower() for item in (categories or []) if str(item or "").strip()}
+    if normalized_categories:
+        events = [event for event in events if str((event or {}).get("category") or "").lower() in normalized_categories]
+
+    safe_limit = max(1, min(limit, 250))
+    if len(events) > safe_limit:
+        events = events[:safe_limit]
+
+    if isinstance(live, dict):
+        live["events"] = events
+        live["events_total"] = len(events)
+    else:
+        live = {
+            "status": "degraded",
+            "events_total": len(events),
+            "events": events,
+        }
+
+    live["categories"] = sorted({str((event or {}).get("category") or "info") for event in events})
+    return live
 
 
 def _vigieau_level_rank(level: str) -> int:
