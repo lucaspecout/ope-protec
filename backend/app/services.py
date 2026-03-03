@@ -2253,6 +2253,8 @@ def fetch_prefecture_isere_news(limit: int = 7, force_refresh: bool = False) -> 
 
 def _fetch_dauphine_isere_news_live(limit: int = 7) -> dict[str, Any]:
     source = "https://www.ledauphine.com/isere/rss"
+    allowed_hostnames = {"www.ledauphine.com", "ledauphine.com"}
+    allowed_path_prefix = "/isere"
     try:
         xml_payload = _http_get_text(source)
         root = ET.fromstring(xml_payload)
@@ -2260,6 +2262,14 @@ def _fetch_dauphine_isere_news_live(limit: int = 7) -> dict[str, Any]:
         for item in root.findall(".//item"):
             title = unescape((item.findtext("title") or "").strip()) or "Article Le Dauphiné Libéré"
             link = (item.findtext("link") or "https://www.ledauphine.com/isere").strip()
+            parsed_link = urlparse(link)
+            if parsed_link.scheme not in {"http", "https"}:
+                continue
+            if parsed_link.netloc.lower() not in allowed_hostnames:
+                continue
+            normalized_path = (parsed_link.path or "").lower()
+            if not (normalized_path == allowed_path_prefix or normalized_path.startswith(f"{allowed_path_prefix}/")):
+                continue
             description_html = (item.findtext("description") or "").strip()
             description = unescape(re.sub(r"\s+", " ", _strip_html_tags(description_html))).strip()
             published = (item.findtext("pubDate") or "").strip()
