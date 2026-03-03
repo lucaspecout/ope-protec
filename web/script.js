@@ -2170,16 +2170,25 @@ function trafficMarkerSpec(point = {}) {
 }
 
 function itinisereDivIcon(point = {}) {
+  return trafficDivIcon(point, { compact: false });
+}
+
+function bisonDivIcon(point = {}) {
+  return trafficDivIcon(point, { compact: true });
+}
+
+function trafficDivIcon(point = {}, options = {}) {
+  const compact = Boolean(options.compact);
   const roadBadge = itinisereRoadBadge(point);
   const road = roadBadge || '';
   const markerSpec = trafficMarkerSpec(point);
 
   return window.L.divIcon({
-    className: 'itinisere-icon-wrap',
+    className: compact ? 'itinisere-icon-wrap itinisere-icon-wrap--compact' : 'itinisere-icon-wrap',
     html: `<span class="itinisere-icon ${markerSpec.className}">${markerSpec.emoji}<span class="itinisere-source-badge ${markerSpec.sourceClass}">${markerSpec.sourceBadge}</span></span>${road ? `<span class="itinisere-road-dot">${escapeHtml(road)}</span>` : ''}`,
-    iconSize: [28, 28],
-    iconAnchor: [14, 22],
-    popupAnchor: [0, -20],
+    iconSize: compact ? [20, 20] : [28, 28],
+    iconAnchor: compact ? [10, 16] : [14, 22],
+    popupAnchor: compact ? [0, -14] : [0, -20],
   });
 }
 
@@ -2214,6 +2223,23 @@ function isPointInIsere(point = {}) {
   if (!coords) return false;
   return coords.lat >= ISERE_BOUNDS.latMin && coords.lat <= ISERE_BOUNDS.latMax
     && coords.lon >= ISERE_BOUNDS.lonMin && coords.lon <= ISERE_BOUNDS.lonMax;
+}
+
+function trafficPopupDetails(point = {}, sourceLabel = '', trafficType = '') {
+  const roads = Array.isArray(point.roads) && point.roads.length ? point.roads.join(', ') : 'Non précisé';
+  const locations = Array.isArray(point.locations) && point.locations.length ? point.locations.join(', ') : (point.anchor || 'Commune Isère');
+  const level = normalizeTrafficSeverity(point.severity || 'jaune');
+  const category = point.category || 'info';
+  const publishedAt = point.published_at || point.updated_at || point.timestamp || point.start_time || '';
+  const reference = point.id || point.event_id || point.uid || '';
+  const coords = normalizeMapCoordinates(point.lat, point.lon);
+  return `<strong>${escapeHtml(point.title || 'Évènement circulation Isère')}</strong><br/>
+    <span class="badge neutral">${escapeHtml(sourceLabel)} · ${escapeHtml(trafficType)} · ${escapeHtml(level)}</span><br/>
+    ${escapeHtml(point.description || 'Aucun détail complémentaire fourni.')}<br/>
+    Axe(s): ${escapeHtml(roads)}<br/>
+    Localisation: ${escapeHtml(locations)} (${escapeHtml(point.precision || 'estimée')})<br/>
+    Catégorie: ${escapeHtml(category)}${reference ? `<br/>Référence: ${escapeHtml(String(reference))}` : ''}${publishedAt ? `<br/>Mis à jour: ${escapeHtml(formatDatetime(publishedAt))}` : ''}${coords ? `<br/>Coordonnées: ${coords.lat.toFixed(5)}, ${coords.lon.toFixed(5)}` : ''}<br/>
+    <a href="${escapeHtml(point.link || '#')}" target="_blank" rel="noreferrer">Voir la source officielle</a>`;
 }
 
 function detectItinisereIcon(text = '') {
@@ -2608,18 +2634,17 @@ async function renderTrafficOnMap() {
     const points = await buildItinisereMapPoints(trafficEvents);
     if (renderSequence !== trafficRenderSequence) return;
     const filteredPoints = points.filter((point) => selectedTypes.includes(bisonIsereTrafficType(point)));
-    mapStats.traffic += filteredPoints.length;
     filteredPoints.forEach((point) => {
       const coords = normalizeMapCoordinates(point.lat, point.lon);
       if (!coords) return;
-      const roadsText = point.precision === 'commune' ? '' : (point.roads?.length ? `Axes détectés: ${point.roads.join(', ')}<br/>` : '');
-      const locations = Array.isArray(point.locations) && point.locations.length ? point.locations.join(', ') : point.anchor;
-      const icon = trafficMarkerIcon('itinisere', point.category, `${point.title || ''} ${point.description || ''}`);
+      if (String(point.source || '').includes('bison') && !isPointInIsere(coords)) return;
       const trafficType = bisonIsereTrafficType(point);
       const sourceLabel = String(point.source || '').includes('bison') ? 'Bison Futé' : 'Itinisère';
-      const marker = window.L.marker([coords.lat, coords.lon], { icon: itinisereDivIcon(point) });
-      marker.bindPopup(`<strong>${escapeHtml(icon)} ${escapeHtml(point.title || 'Évènement circulation Isère')}</strong><br/><span class="badge neutral">${escapeHtml(sourceLabel)} · ${escapeHtml(bisonTrafficTypeLabel(trafficType))} · ${escapeHtml(point.severity || 'jaune')}</span><br/>${escapeHtml(point.description || '')}<br/>Localisation: ${escapeHtml(locations || 'Commune Isère')} (${escapeHtml(point.precision || 'estimée')})<br/>${roadsText}<a href="${escapeHtml(point.link || '#')}" target="_blank" rel="noreferrer">Détail Itinisère / Bison Futé</a>`);
+      const markerIcon = sourceLabel === 'Bison Futé' ? bisonDivIcon(point) : itinisereDivIcon(point);
+      const marker = window.L.marker([coords.lat, coords.lon], { icon: markerIcon });
+      marker.bindPopup(trafficPopupDetails(point, sourceLabel, bisonTrafficTypeLabel(trafficType)));
       marker.addTo(bisonLayer);
+      mapStats.traffic += 1;
     });
   }
 
