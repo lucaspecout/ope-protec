@@ -2467,6 +2467,7 @@ function spreadOverlappingTrafficPoints(points = []) {
 async function buildItinisereMapPoints(events = []) {
   const points = [];
   for (const event of events.slice(0, 80)) {
+    const isBisonEvent = String(event.source || '').toLowerCase().includes('bison');
     const fullText = `${event.title || ''} ${event.description || ''}`;
     const roads = (Array.isArray(event.roads) && event.roads.length ? event.roads : detectRoadCodes(fullText))
       .map((road) => normalizeRoadCode(road))
@@ -2487,6 +2488,7 @@ async function buildItinisereMapPoints(events = []) {
     let communeAnchor = null;
 
     const providedCoords = normalizeMapCoordinates(event.lat, event.lon);
+    if (isBisonEvent && !providedCoords) continue;
     if (providedCoords && !roads.length) {
       position = providedCoords;
       anchor = locations[0] || roads[0] || 'Itinisère';
@@ -3067,7 +3069,13 @@ function renderElectricityStatus(electricity = {}) {
 
 function renderBisonFuteSummary(bison = {}) {
   cachedBisonFute = bison || {};
-  cachedBisonLiveEvents = filterCurrentTrafficEvents(Array.isArray(bison.live?.events) ? bison.live.events : []);
+  cachedBisonLiveEvents = filterCurrentTrafficEvents(Array.isArray(bison.live?.events) ? bison.live.events : [])
+    .map((event) => {
+      const coords = normalizeMapCoordinates(event.lat, event.lon);
+      if (!coords) return null;
+      return { ...event, lat: coords.lat, lon: coords.lon };
+    })
+    .filter(Boolean);
   const today = bison.today || {};
   const tomorrow = bison.tomorrow || {};
   const isereToday = today.isere || {};
