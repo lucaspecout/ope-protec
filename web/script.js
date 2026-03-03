@@ -4,6 +4,8 @@ const STORAGE_KEYS = {
   appSidebarCollapsed: 'appSidebarCollapsed',
   mapPointsCache: 'mapPointsCache',
   municipalitiesCache: 'municipalitiesCache',
+  logsSnapshot: 'logsSnapshot',
+  usersSnapshot: 'usersSnapshot',
   dashboardSnapshot: 'dashboardSnapshot',
   externalRisksSnapshot: 'externalRisksSnapshot',
   apiInterconnectionsSnapshot: 'apiInterconnectionsSnapshot',
@@ -13,7 +15,7 @@ const EVENTS_LIVE_REFRESH_MS = 60000;
 const HOME_LIVE_REFRESH_MS = 300000;
 const API_CACHE_TTL_MS = 300000;
 const API_PANEL_REFRESH_MS = 300000;
-const API_MAX_CONCURRENT_REQUESTS = 3;
+const API_MAX_CONCURRENT_REQUESTS = 1;
 const API_REQUEST_TIMEOUT_MS = 15000;
 const API_RETRY_BASE_DELAY_MS = 400;
 const API_MAX_RETRIES_GET = 2;
@@ -694,6 +696,38 @@ function readSnapshot(key) {
     return raw.payload;
   } catch (_) {
     return null;
+  }
+}
+
+function hydrateUiFromLocalCache() {
+  const cachedDashboard = readSnapshot(STORAGE_KEYS.dashboardSnapshot);
+  if (cachedDashboard) renderDashboard(cachedDashboard);
+
+  const cachedRisks = readSnapshot(STORAGE_KEYS.externalRisksSnapshot);
+  if (cachedRisks) {
+    renderExternalRisks(cachedRisks);
+    renderApiInterconnections(cachedRisks);
+  }
+
+  try {
+    const cachedMunicipalities = JSON.parse(localStorage.getItem(STORAGE_KEYS.municipalitiesCache) || '[]');
+    if (Array.isArray(cachedMunicipalities) && cachedMunicipalities.length) {
+      loadMunicipalities(cachedMunicipalities);
+    }
+  } catch (_) {
+    // ignore malformed cache
+  }
+
+  const cachedLogsSnapshot = readSnapshot(STORAGE_KEYS.logsSnapshot);
+  if (Array.isArray(cachedLogsSnapshot) && cachedLogsSnapshot.length) {
+    cachedLogs = cachedLogsSnapshot;
+    renderLogsList();
+    renderSituationOverview();
+  }
+
+  const cachedUsersSnapshot = readSnapshot(STORAGE_KEYS.usersSnapshot);
+  if (Array.isArray(cachedUsersSnapshot) && cachedUsersSnapshot.length && canManageUsers()) {
+    loadUsers(cachedUsersSnapshot);
   }
 }
 
@@ -4282,6 +4316,7 @@ function renderLogsList() {
 async function loadLogs(preloaded = null) {
   const logs = Array.isArray(preloaded) ? preloaded : await api('/logs');
   cachedLogs = Array.isArray(logs) ? logs : [];
+  saveSnapshot(STORAGE_KEYS.logsSnapshot, cachedLogs);
   renderLogsList();
   renderSituationOverview();
 }
@@ -4301,6 +4336,7 @@ async function exportLogsCsv() {
 async function loadUsers(preloaded = null) {
   if (!canManageUsers()) return;
   const users = Array.isArray(preloaded) ? preloaded : await api('/auth/users');
+  saveSnapshot(STORAGE_KEYS.usersSnapshot, users);
   const isAdmin = currentUser?.role === 'admin';
   setHtml('users-table', users.map((u) => {
     const actionButtons = isAdmin
@@ -5188,6 +5224,28 @@ function startHomeLiveRefresh() {
   homeLiveTimer = setInterval(loadHomeLiveStatus, HOME_LIVE_REFRESH_MS);
 }
 
+async function initializeAuthenticatedSession({ runRefreshInBackground = false } = {}) {
+  document.getElementById('current-role').textContent = roleLabel(currentUser.role);
+  document.getElementById('current-commune').textContent = currentUser.municipality_name || 'Toutes';
+  applyRoleVisibility();
+  showApp();
+  setActivePanel(localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel');
+  hydrateUiFromLocalCache();
+  await loadIsereBoundary();
+  syncLogScopeFields();
+  syncLogOtherFields();
+
+  const refreshPromise = refreshAll().catch((error) => {
+    document.getElementById('dashboard-error').textContent = `Actualisation différée: ${sanitizeErrorMessage(error.message)}`;
+  });
+
+  if (!runRefreshInBackground) await refreshPromise;
+
+  startAutoRefresh();
+  startLiveEventsRefresh();
+  startMapAnnotationsSync();
+}
+
 loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   setLoginError('');
@@ -5209,18 +5267,7 @@ loginForm.addEventListener('submit', async (event) => {
     }
 
     currentUser = await api('/auth/me');
-    document.getElementById('current-role').textContent = roleLabel(currentUser.role);
-    document.getElementById('current-commune').textContent = currentUser.municipality_name || 'Toutes';
-    applyRoleVisibility();
-    showApp();
-    setActivePanel(localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel');
-    await loadIsereBoundary();
-    syncLogScopeFields();
-    syncLogOtherFields();
-    await refreshAll();
-    startAutoRefresh();
-    startLiveEventsRefresh();
-    startMapAnnotationsSync();
+    await initializeAuthenticatedSession({ runRefreshInBackground: true });
   } catch (error) {
     setLoginError(error.message, buildLoginDebugDetails(error, username));
   }
@@ -5340,17 +5387,7 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
   if (!token) return showHome();
   try {
     currentUser = await api('/auth/me');
-    document.getElementById('current-role').textContent = roleLabel(currentUser.role);
-    document.getElementById('current-commune').textContent = currentUser.municipality_name || 'Toutes';
-    applyRoleVisibility();
-    showApp();
-    setActivePanel(localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel');
-    await loadIsereBoundary();
-    syncLogScopeFields();
-    await refreshAll();
-    startAutoRefresh();
-    startLiveEventsRefresh();
-    startMapAnnotationsSync();
+    await initializeAuthenticatedSession({ runRefreshInBackground: true });
   } catch (error) {
     if (Number(error?.status) === 401) {
       logout();
