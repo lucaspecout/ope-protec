@@ -372,6 +372,7 @@ _RTE_ELECTRICITY_CACHE_TTL_SECONDS = 300
 _FINESS_ISERE_CACHE_TTL_SECONDS = 43200
 _ANFR_ISERE_CACHE_TTL_SECONDS = 43200
 _ARCEP_ISERE_CACHE_TTL_SECONDS = 900
+_ISERE_BOUNDARY_CACHE_TTL_SECONDS = 21600
 
 _vigicrues_cache_lock = Lock()
 _vigicrues_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
@@ -379,6 +380,8 @@ _itinisere_cache_lock = Lock()
 _itinisere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _bison_cache_lock = Lock()
 _bison_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_isere_boundary_cache_lock = Lock()
+_isere_boundary_cache: dict[str, Any] = {"geometry": None, "expires_at": datetime.min}
 _georisques_cache_lock = Lock()
 _georisques_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _prefecture_cache_lock = Lock()
@@ -2704,8 +2707,77 @@ def _parse_bison_segment(segment: str) -> dict[str, str]:
     }
 
 
+def _cached_isere_boundary_geometry() -> dict[str, Any] | None:
+    now = datetime.utcnow()
+    with _isere_boundary_cache_lock:
+        cached_geometry = _isere_boundary_cache.get("geometry")
+        expires_at = _isere_boundary_cache.get("expires_at") or datetime.min
+        if cached_geometry and now < expires_at:
+            return deepcopy(cached_geometry)
+
+    payload = fetch_isere_boundary_geojson()
+    geometry = payload.get("geometry") if isinstance(payload, dict) else None
+    if not isinstance(geometry, dict) or geometry.get("type") not in {"Polygon", "MultiPolygon"}:
+        return None
+
+    with _isere_boundary_cache_lock:
+        _isere_boundary_cache["geometry"] = deepcopy(geometry)
+        _isere_boundary_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_ISERE_BOUNDARY_CACHE_TTL_SECONDS)
+    return geometry
+
+
+def _point_in_ring(lat: float, lon: float, ring: list[list[float]]) -> bool:
+    if len(ring) < 3:
+        return False
+
+    inside = False
+    j = len(ring) - 1
+    for i in range(len(ring)):
+        if len(ring[i]) < 2 or len(ring[j]) < 2:
+            j = i
+            continue
+        xi, yi = ring[i][0], ring[i][1]
+        xj, yj = ring[j][0], ring[j][1]
+        intersects = ((yi > lat) != (yj > lat)) and (lon < ((xj - xi) * (lat - yi)) / ((yj - yi) or 1e-12) + xi)
+        if intersects:
+            inside = not inside
+        j = i
+    return inside
+
+
+def _point_in_polygon(lat: float, lon: float, polygon: list[list[list[float]]]) -> bool:
+    if not polygon:
+        return False
+    outer_ring = polygon[0]
+    if not isinstance(outer_ring, list) or not _point_in_ring(lat, lon, outer_ring):
+        return False
+
+    for hole in polygon[1:]:
+        if isinstance(hole, list) and hole and _point_in_ring(lat, lon, hole):
+            return False
+    return True
+
+
+def _point_in_geometry(lat: float, lon: float, geometry: dict[str, Any]) -> bool:
+    geometry_type = geometry.get("type")
+    coordinates = geometry.get("coordinates")
+    if not isinstance(coordinates, list):
+        return False
+    if geometry_type == "Polygon":
+        return _point_in_polygon(lat, lon, coordinates)
+    if geometry_type == "MultiPolygon":
+        return any(_point_in_polygon(lat, lon, polygon) for polygon in coordinates if isinstance(polygon, list))
+    return False
+
+
 def _is_isere_coordinate(lat: float, lon: float) -> bool:
-    return 44.6 <= lat <= 46.0 and 4.2 <= lon <= 6.8
+    if not (44.6 <= lat <= 46.0 and 4.2 <= lon <= 6.8):
+        return False
+
+    geometry = _cached_isere_boundary_geometry()
+    if not geometry:
+        return True
+    return _point_in_geometry(lat=lat, lon=lon, geometry=geometry)
 
 
 def _bison_event_category(value: str) -> str:
