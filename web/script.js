@@ -2089,19 +2089,13 @@ function itinisereRoadBadge(point = {}) {
   return String(road || '').toUpperCase().replace(/\s+/g, '');
 }
 
-function itinisereStyleType(point = {}) {
-  const blob = `${point.category || ''} ${point.title || ''} ${point.description || ''}`.toLowerCase();
-  if (/col\b/.test(blob)) return 'pass';
-  if (/ferm|barr|interdit|coup/.test(blob)) return 'closure';
-  if (/travaux|chantier/.test(blob)) return 'works';
-  return 'warning';
-}
-
 function bisonIsereTrafficType(point = {}) {
   const blob = `${point.category || ''} ${point.title || ''} ${point.description || ''}`.toLowerCase();
+  if (/r[eé]duction|voie(?:s)?\s+(?:neutralis|ferm|coup)|alternat|basculement/.test(blob)) return 'reduction_voie';
   if (/ralent|bouchon|embouteill|dense|congestion/.test(blob)) return 'ralentissement';
-  if (/travaux|chantier|alternat|neutralis/.test(blob) || point.category === 'travaux') return 'travaux';
-  if (/accident|collision|panne|obstacle|incident/.test(blob) || point.category === 'incident') return 'incident';
+  if (/travaux|chantier/.test(blob) || point.category === 'travaux') return 'travaux';
+  if (/accident|collision|carambolage/.test(blob) || point.category === 'accident') return 'accident';
+  if (/panne|obstacle|incident/.test(blob) || point.category === 'incident') return 'incident';
   if (/danger|verglas|neige|intemp|crue|inond|ébou|ebou|chute|risque/.test(blob) || ['orange', 'rouge'].includes(normalizeTrafficSeverity(point.severity))) return 'danger';
   return 'info';
 }
@@ -2109,7 +2103,9 @@ function bisonIsereTrafficType(point = {}) {
 function bisonTrafficTypeLabel(type = '') {
   return ({
     ralentissement: 'Ralentissement',
+    reduction_voie: 'Réduction de voie',
     travaux: 'Travaux',
+    accident: 'Accident',
     incident: 'Incident',
     danger: 'Danger',
     info: 'Info circulation',
@@ -2118,41 +2114,72 @@ function bisonTrafficTypeLabel(type = '') {
 
 function selectedBisonTrafficTypes() {
   const selected = document.getElementById('filter-bison-type')?.value || 'all';
-  if (selected === 'all') return ['ralentissement', 'travaux', 'incident', 'danger', 'info'];
+  if (selected === 'all') return ['ralentissement', 'reduction_voie', 'travaux', 'accident', 'incident', 'danger', 'info'];
   return [selected];
 }
 
-function itinisereDivIcon(point = {}) {
-  const styleType = itinisereStyleType(point);
-  const roadBadge = itinisereRoadBadge(point);
-  const road = roadBadge || '?';
-  const warning = styleType === 'works' ? '🚧' : '⚠️';
-  if (styleType === 'closure') {
-    return window.L.divIcon({
-      className: 'itinisere-icon-wrap',
-      html: '<span class="itinisere-icon itinisere-icon--closure">ROUTE<br/>BARRÉE</span>',
-      iconSize: [52, 30],
-      iconAnchor: [26, 22],
-      popupAnchor: [0, -18],
-    });
-  }
+function parseTrafficDate(value = '') {
+  const text = String(value || '').trim();
+  if (!text) return null;
+  const iso = Date.parse(text);
+  if (Number.isFinite(iso)) return iso;
+  const fr = text.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:\s*(?:a|à|-)?\s*(\d{1,2})(?::(\d{2}))?)?/i);
+  if (!fr) return null;
+  const day = Number(fr[1]);
+  const month = Number(fr[2]);
+  let year = Number(fr[3]);
+  if (year < 100) year += 2000;
+  const hours = Number(fr[4] || 0);
+  const minutes = Number(fr[5] || 0);
+  return new Date(year, month - 1, day, hours, minutes).getTime();
+}
 
-  if (styleType === 'pass') {
-    return window.L.divIcon({
-      className: 'itinisere-icon-wrap',
-      html: `<span class="itinisere-icon itinisere-icon--pass">Col</span><span class="itinisere-pass-state">${escapeHtml(road)}</span>`,
-      iconSize: [64, 32],
-      iconAnchor: [32, 22],
-      popupAnchor: [0, -19],
-    });
-  }
+function isTrafficEventCurrent(event = {}) {
+  const now = Date.now();
+  const end = parseTrafficDate(event.period_end || event.end_at || event.validity_end);
+  if (Number.isFinite(end) && end < now) return false;
+  const start = parseTrafficDate(event.period_start || event.start_at || event.validity_start);
+  if (Number.isFinite(start) && start > now) return false;
+  return true;
+}
+
+function filterCurrentTrafficEvents(events = []) {
+  return (Array.isArray(events) ? events : []).filter((event) => isTrafficEventCurrent(event));
+}
+
+function trafficMarkerSpec(point = {}) {
+  const type = bisonIsereTrafficType(point);
+  const isBison = String(point.source || '').toLowerCase().includes('bison');
+  const sourceBadge = isBison ? 'B' : 'I';
+  const sourceClass = isBison ? 'traffic-source--bison' : 'traffic-source--itinisere';
+  const config = {
+    ralentissement: { emoji: '🐢', className: 'traffic-type--slowdown' },
+    reduction_voie: { emoji: '↘️', className: 'traffic-type--lane' },
+    travaux: { emoji: '🚧', className: 'traffic-type--works' },
+    accident: { emoji: '💥', className: 'traffic-type--accident' },
+    incident: { emoji: '⚠️', className: 'traffic-type--incident' },
+    danger: { emoji: '⛔', className: 'traffic-type--danger' },
+    info: { emoji: 'ℹ️', className: 'traffic-type--info' },
+  };
+  return {
+    type,
+    sourceBadge,
+    sourceClass,
+    ...(config[type] || config.info),
+  };
+}
+
+function itinisereDivIcon(point = {}) {
+  const roadBadge = itinisereRoadBadge(point);
+  const road = roadBadge || '';
+  const markerSpec = trafficMarkerSpec(point);
 
   return window.L.divIcon({
     className: 'itinisere-icon-wrap',
-    html: `<span class="itinisere-icon itinisere-icon--warning">${warning}</span><span class="itinisere-road-dot">${escapeHtml(road)}</span>`,
-    iconSize: [42, 42],
-    iconAnchor: [21, 30],
-    popupAnchor: [0, -26],
+    html: `<span class="itinisere-icon ${markerSpec.className}">${markerSpec.emoji}<span class="itinisere-source-badge ${markerSpec.sourceClass}">${markerSpec.sourceBadge}</span></span>${road ? `<span class="itinisere-road-dot">${escapeHtml(road)}</span>` : ''}`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 22],
+    popupAnchor: [0, -20],
   });
 }
 
@@ -2434,21 +2461,7 @@ function extractClosureCommuneHints(event = {}, fullText = '') {
 }
 
 function spreadOverlappingTrafficPoints(points = []) {
-  const overlapCounters = new Map();
-  return points.map((point) => {
-    const key = `${Number(point.lat).toFixed(4)},${Number(point.lon).toFixed(4)}`;
-    const count = overlapCounters.get(key) || 0;
-    overlapCounters.set(key, count + 1);
-    if (count === 0) return point;
-    const angle = (count * 42) * (Math.PI / 180);
-    const radius = 0.0015 + (Math.floor(count / 8) * 0.0006);
-    return {
-      ...point,
-      lat: Number((point.lat + (Math.sin(angle) * radius)).toFixed(6)),
-      lon: Number((point.lon + (Math.cos(angle) * radius)).toFixed(6)),
-      precision: `${point.precision || 'estimée'} · ajustée`,
-    };
-  });
+  return points;
 }
 
 async function buildItinisereMapPoints(events = []) {
@@ -2583,7 +2596,10 @@ async function renderTrafficOnMap() {
   const showTrafficIncidents = document.getElementById('filter-traffic-incidents')?.checked ?? true;
   if (showTrafficIncidents) {
     const selectedTypes = selectedBisonTrafficTypes();
-    const trafficEvents = [...(cachedItinisereEvents || []), ...(cachedBisonLiveEvents || [])];
+    const trafficEvents = [
+      ...filterCurrentTrafficEvents(cachedItinisereEvents).map((event) => ({ ...event, source: 'itinisere' })),
+      ...filterCurrentTrafficEvents(cachedBisonLiveEvents).map((event) => ({ ...event, source: 'bison_fute' })),
+    ];
     const points = await buildItinisereMapPoints(trafficEvents);
     if (renderSequence !== trafficRenderSequence) return;
     const filteredPoints = points.filter((point) => selectedTypes.includes(bisonIsereTrafficType(point)));
@@ -2593,8 +2609,9 @@ async function renderTrafficOnMap() {
       const locations = Array.isArray(point.locations) && point.locations.length ? point.locations.join(', ') : point.anchor;
       const icon = trafficMarkerIcon('itinisere', point.category, `${point.title || ''} ${point.description || ''}`);
       const trafficType = bisonIsereTrafficType(point);
+      const sourceLabel = String(point.source || '').includes('bison') ? 'Bison Futé' : 'Itinisère';
       const marker = window.L.marker([point.lat, point.lon], { icon: itinisereDivIcon(point) });
-      marker.bindPopup(`<strong>${escapeHtml(icon)} ${escapeHtml(point.title || 'Évènement circulation Isère')}</strong><br/><span class="badge neutral">${escapeHtml(bisonTrafficTypeLabel(trafficType))} · ${escapeHtml(point.severity || 'jaune')}</span><br/>${escapeHtml(point.description || '')}<br/>Localisation: ${escapeHtml(locations || 'Commune Isère')} (${escapeHtml(point.precision || 'estimée')})<br/>${roadsText}<a href="${escapeHtml(point.link || '#')}" target="_blank" rel="noreferrer">Détail Itinisère / Bison Futé</a>`);
+      marker.bindPopup(`<strong>${escapeHtml(icon)} ${escapeHtml(point.title || 'Évènement circulation Isère')}</strong><br/><span class="badge neutral">${escapeHtml(sourceLabel)} · ${escapeHtml(bisonTrafficTypeLabel(trafficType))} · ${escapeHtml(point.severity || 'jaune')}</span><br/>${escapeHtml(point.description || '')}<br/>Localisation: ${escapeHtml(locations || 'Commune Isère')} (${escapeHtml(point.precision || 'estimée')})<br/>${roadsText}<a href="${escapeHtml(point.link || '#')}" target="_blank" rel="noreferrer">Détail Itinisère / Bison Futé</a>`);
       marker.addTo(bisonLayer);
     });
   }
@@ -2878,10 +2895,10 @@ function renderMeteoAlerts(meteo = {}) {
 }
 
 function renderItinisereEvents(events = [], targetId = 'itinerary-list') {
-  cachedItinisereEvents = Array.isArray(events) ? events : [];
+  cachedItinisereEvents = filterCurrentTrafficEvents(events);
   const target = document.getElementById(targetId);
   if (!target) return;
-  setHtml(targetId, events.slice(0, 20).map((e) => {
+  setHtml(targetId, cachedItinisereEvents.slice(0, 20).map((e) => {
     const title = escapeHtml(e.title || 'Évènement');
     const description = escapeHtml(e.description || '');
     const safeLink = String(e.link || '').startsWith('http') ? e.link : '#';
@@ -3045,7 +3062,7 @@ function renderElectricityStatus(electricity = {}) {
 
 function renderBisonFuteSummary(bison = {}) {
   cachedBisonFute = bison || {};
-  cachedBisonLiveEvents = Array.isArray(bison.live?.events) ? bison.live.events : [];
+  cachedBisonLiveEvents = filterCurrentTrafficEvents(Array.isArray(bison.live?.events) ? bison.live.events : []);
   const today = bison.today || {};
   const tomorrow = bison.tomorrow || {};
   const isereToday = today.isere || {};
@@ -3054,7 +3071,7 @@ function renderBisonFuteSummary(bison = {}) {
   const nationalTomorrow = tomorrow.national || {};
   setText('bison-status', `${bison.status || 'inconnu'} · Isère départ ${isereToday.departure || 'inconnu'} / retour ${isereToday.return || 'inconnu'}`);
   const lastUpdate = bison.updated_at ? new Date(bison.updated_at).toLocaleTimeString() : 'non précisée';
-  const liveCount = Number(bison.live?.events_total || 0);
+  const liveCount = cachedBisonLiveEvents.length;
   setText('bison-info', `National J0: ${nationalToday.departure || 'inconnu'} / ${nationalToday.return || 'inconnu'} · J1: ${nationalTomorrow.departure || 'inconnu'} / ${nationalTomorrow.return || 'inconnu'} · Événements trafic Isère: ${liveCount} · MAJ ${lastUpdate}`);
   setText('map-bison-isere', `${isereToday.departure || 'inconnu'} (retour ${isereToday.return || 'inconnu'})`);
   setText('home-feature-bison-isere', `${isereToday.departure || 'inconnu'} / ${isereToday.return || 'inconnu'}`);
