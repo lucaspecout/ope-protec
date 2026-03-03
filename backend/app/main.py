@@ -1,5 +1,4 @@
 from datetime import datetime, timedelta
-from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from pathlib import Path
 import re
@@ -792,13 +791,8 @@ def build_external_risks_payload(refresh: bool = False, db: Session | None = Non
     }
 
     results: dict[str, dict] = {}
-    with ThreadPoolExecutor(max_workers=len(fetch_jobs)) as executor:
-        future_map = {
-            key: executor.submit(safe_fetch, key, fetcher, fallback)
-            for key, (fetcher, fallback) in fetch_jobs.items()
-        }
-        for key, future in future_map.items():
-            results[key] = future.result()
+    for key, (fetcher, fallback) in fetch_jobs.items():
+        results[key] = safe_fetch(key, fetcher, fallback)
 
     payload = {
         "updated_at": utc_timestamp(),
