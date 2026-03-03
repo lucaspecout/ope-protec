@@ -13,6 +13,11 @@ const EVENTS_LIVE_REFRESH_MS = 60000;
 const HOME_LIVE_REFRESH_MS = 300000;
 const API_CACHE_TTL_MS = 300000;
 const API_PANEL_REFRESH_MS = 300000;
+const API_MAX_CONCURRENT_REQUESTS = 3;
+const API_REQUEST_TIMEOUT_MS = 15000;
+const API_RETRY_BASE_DELAY_MS = 400;
+const API_MAX_RETRIES_GET = 2;
+const API_MAX_RETRIES_NON_GET = 1;
 const PANEL_TITLES = {
   'situation-panel': 'Situation opérationnelle',
   'services-panel': 'Services connectés',
@@ -108,6 +113,8 @@ let photoCameraRefreshTimer = null;
 let lastApiResyncAt = null;
 const apiGetCache = new Map();
 const apiInFlight = new Map();
+const apiRequestQueue = [];
+let apiActiveRequests = 0;
 
 let leafletMap = null;
 let boundaryLayer = null;
@@ -673,6 +680,94 @@ function getRequestCacheKey(path, fetchOptions = {}) {
   return `${method} ${path}`;
 }
 
+function wait(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function runNextQueuedApiRequest() {
+  if (!apiRequestQueue.length || apiActiveRequests >= API_MAX_CONCURRENT_REQUESTS) return;
+  const nextRequest = apiRequestQueue.shift();
+  apiActiveRequests += 1;
+  Promise.resolve()
+    .then(nextRequest)
+    .finally(() => {
+      apiActiveRequests = Math.max(0, apiActiveRequests - 1);
+      runNextQueuedApiRequest();
+    });
+}
+
+function queueApiRequest(task) {
+  return new Promise((resolve, reject) => {
+    apiRequestQueue.push(async () => {
+      try {
+        resolve(await task());
+      } catch (error) {
+        reject(error);
+      }
+    });
+    runNextQueuedApiRequest();
+  });
+}
+
+async function fetchWithTimeout(url, options = {}) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), API_REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw createApiError('Délai dépassé, veuillez vérifier votre réseau.', null, { isTimeout: true });
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function canRetryRequest(error, attempt, method) {
+  const maxRetries = method === 'GET' ? API_MAX_RETRIES_GET : API_MAX_RETRIES_NON_GET;
+  if (attempt >= maxRetries) return false;
+  if (error?.status !== undefined && error?.status !== null) return false;
+  return Boolean(error?.isTimeout || isNetworkFetchError(error) || String(error?.message || '').includes('Réponse non-JSON'));
+}
+
+async function requestApiAcrossOrigins(path, fetchOptions = {}, { logoutOn401 = true } = {}) {
+  const headers = { ...(fetchOptions.headers || {}) };
+  const method = String(fetchOptions.method || 'GET').toUpperCase();
+  if (token && !fetchOptions.omitAuth) headers.Authorization = `Bearer ${token}`;
+
+  let lastError = null;
+  const origins = apiOrigins();
+  const maxRetries = method === 'GET' ? API_MAX_RETRIES_GET : API_MAX_RETRIES_NON_GET;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    for (const origin of origins) {
+      const url = buildApiUrl(path, origin);
+      try {
+        const response = await queueApiRequest(() => fetchWithTimeout(url, { ...fetchOptions, headers }));
+        const payload = await parseJsonResponse(response, path);
+        if (!response.ok) {
+          const message = normalizeApiErrorMessage(payload, response.status);
+          if (response.status === 401 && logoutOn401) logout();
+          throw createApiError(message, response.status);
+        }
+        return payload;
+      } catch (error) {
+        if (error?.status !== undefined && error?.status !== null) throw error;
+        lastError = error;
+      }
+    }
+
+    if (!canRetryRequest(lastError, attempt, method)) break;
+    const backoffMs = API_RETRY_BASE_DELAY_MS * (2 ** attempt);
+    await wait(backoffMs);
+  }
+
+  throw createApiError(sanitizeErrorMessage(lastError?.message || 'API indisponible'), lastError?.status, { cause: lastError, triedOrigins: origins });
+}
+
 async function api(path, options = {}) {
   const {
     logoutOn401 = true,
@@ -694,31 +789,7 @@ async function api(path, options = {}) {
     }
   }
 
-  const headers = { ...(fetchOptions.headers || {}) };
-  if (token && !omitAuth) headers.Authorization = `Bearer ${token}`;
-
-  const requestPromise = (async () => {
-    let lastError = null;
-    for (const origin of apiOrigins()) {
-      const url = buildApiUrl(path, origin);
-      try {
-        const response = await fetch(url, { ...fetchOptions, headers });
-        const payload = await parseJsonResponse(response, path);
-        if (!response.ok) {
-          const message = normalizeApiErrorMessage(payload, response.status);
-          if (response.status === 401 && logoutOn401) logout();
-          throw createApiError(message, response.status);
-        }
-        return payload;
-      } catch (error) {
-        if (error?.status !== undefined && error?.status !== null) throw error;
-        lastError = error;
-        if (!String(error.message || '').includes('Réponse non-JSON') && !isNetworkFetchError(error)) break;
-      }
-    }
-
-    throw createApiError(sanitizeErrorMessage(lastError?.message || 'API indisponible'), lastError?.status, { cause: lastError, triedOrigins: apiOrigins() });
-  })();
+  const requestPromise = requestApiAcrossOrigins(path, { ...fetchOptions, omitAuth }, { logoutOn401 });
 
   if (!cacheable) {
     const responsePayload = await requestPromise;
@@ -757,7 +828,7 @@ async function apiFile(path) {
   for (const origin of apiOrigins()) {
     const url = buildApiUrl(path, origin);
     try {
-      const response = await fetch(url, { headers });
+      const response = await queueApiRequest(() => fetchWithTimeout(url, { headers }));
       if (!response.ok) {
         if (response.status === 401) logout();
         const detailText = await response.text();
