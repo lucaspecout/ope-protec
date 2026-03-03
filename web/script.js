@@ -115,6 +115,7 @@ const apiGetCache = new Map();
 const apiInFlight = new Map();
 const apiRequestQueue = [];
 let apiActiveRequests = 0;
+const startupQueueState = { total: 0, completed: 0, current: '' };
 
 let leafletMap = null;
 let boundaryLayer = null;
@@ -174,6 +175,51 @@ let iserePopulationPointsCache = [];
 let iserePopulationLoaded = false;
 let telecomPointsCache = [];
 let telecomLoaded = false;
+
+function updateApiQueueVisual() {
+  const summaryNode = document.getElementById('api-queue-summary');
+  const progressNode = document.getElementById('api-queue-progress-bar');
+  const currentNode = document.getElementById('api-queue-current');
+  const progressWrap = document.querySelector('.api-queue-progress');
+  if (!summaryNode || !progressNode || !currentNode || !progressWrap) return;
+
+  const pending = apiRequestQueue.length;
+  const active = apiActiveRequests;
+  const total = startupQueueState.total;
+  const completed = startupQueueState.completed;
+  const percent = total > 0 ? Math.min(100, Math.round((completed / total) * 100)) : 0;
+
+  summaryNode.textContent = total > 0
+    ? `${completed}/${total} modules · ${active} requête(s) active(s) · ${pending} en attente`
+    : `${active} requête(s) active(s) · ${pending} en attente`;
+  progressNode.style.width = `${percent}%`;
+  progressWrap.setAttribute('aria-valuenow', String(percent));
+  currentNode.textContent = startupQueueState.current || 'Aucune tâche en cours.';
+}
+
+function startStartupQueue(total = 0) {
+  startupQueueState.total = Math.max(0, Number(total) || 0);
+  startupQueueState.completed = 0;
+  startupQueueState.current = startupQueueState.total ? 'Préparation des données…' : '';
+  updateApiQueueVisual();
+}
+
+function advanceStartupQueue(label = '') {
+  startupQueueState.completed = Math.min(startupQueueState.total, startupQueueState.completed + 1);
+  startupQueueState.current = label ? `Terminé: ${label}` : startupQueueState.current;
+  updateApiQueueVisual();
+}
+
+function setStartupQueueCurrent(label = '') {
+  startupQueueState.current = label;
+  updateApiQueueVisual();
+}
+
+function finishStartupQueue() {
+  startupQueueState.completed = startupQueueState.total;
+  startupQueueState.current = 'Chargement initial terminé.';
+  updateApiQueueVisual();
+}
 
 const SCHOOL_RESOURCE_TYPES = new Set(['ecole_primaire', 'college', 'lycee', 'universite', 'creche']);
 const SECURITY_RESOURCE_TYPES = new Set(['gendarmerie', 'commissariat_police_nationale', 'police_municipale']);
@@ -690,10 +736,12 @@ function runNextQueuedApiRequest() {
   if (!apiRequestQueue.length || apiActiveRequests >= API_MAX_CONCURRENT_REQUESTS) return;
   const nextRequest = apiRequestQueue.shift();
   apiActiveRequests += 1;
+  updateApiQueueVisual();
   Promise.resolve()
     .then(nextRequest)
     .finally(() => {
       apiActiveRequests = Math.max(0, apiActiveRequests - 1);
+      updateApiQueueVisual();
       runNextQueuedApiRequest();
     });
 }
@@ -707,6 +755,7 @@ function queueApiRequest(task) {
         reject(error);
       }
     });
+    updateApiQueueVisual();
     runNextQueuedApiRequest();
   });
 }
@@ -1311,7 +1360,7 @@ async function geocodeMunicipality(municipality) {
       : [`https://geo.api.gouv.fr/communes?nom=${encodeURIComponent(municipality.name)}&fields=centre&limit=1`];
 
     for (const url of queries) {
-      const response = await fetch(url);
+      const response = await queueApiRequest(() => fetchWithTimeout(url));
       const payload = await parseJsonResponse(response, url);
       const center = payload?.[0]?.centre?.coordinates;
       if (!Array.isArray(center) || center.length !== 2) continue;
@@ -1340,7 +1389,7 @@ async function fetchMunicipalityContour(municipality) {
       : [`https://geo.api.gouv.fr/communes?nom=${encodeURIComponent(municipality.name)}&fields=contour&format=geojson&geometry=contour&limit=1`];
 
     for (const url of queries) {
-      const response = await fetch(url);
+      const response = await queueApiRequest(() => fetchWithTimeout(url));
       const payload = await parseJsonResponse(response, url);
       const geometry = payload?.features?.[0]?.geometry;
       if (!geometry) continue;
@@ -1544,7 +1593,8 @@ async function loadFinessIsereResources() {
 async function loadIserePopulationPoints() {
   if (iserePopulationLoaded) return iserePopulationPointsCache;
   try {
-    const payload = await fetch('https://geo.api.gouv.fr/departements/38/communes?fields=nom,population,centre&format=json').then((r) => r.json());
+    const response = await queueApiRequest(() => fetchWithTimeout('https://geo.api.gouv.fr/departements/38/communes?fields=nom,population,centre&format=json'));
+    const payload = await parseJsonResponse(response, 'geo-api-population');
     const rows = Array.isArray(payload) ? payload : [];
     iserePopulationPointsCache = rows
       .map((row) => {
@@ -1614,11 +1664,11 @@ area["boundary"="administrative"]["admin_level"="6"]["name"="Isère"]->.searchAr
 );
 out center tags;`;
   try {
-    const response = await fetch('https://overpass-api.de/api/interpreter', {
+    const response = await queueApiRequest(() => fetchWithTimeout('https://overpass-api.de/api/interpreter', {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
       body: query,
-    });
+    }));
     const payload = await parseJsonResponse(response, 'overpass-institutions');
     const elements = Array.isArray(payload?.elements) ? payload.elements : [];
     institutionPointsCache = elements
@@ -1835,7 +1885,7 @@ async function handleMapSearch() {
     return;
   }
   try {
-    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query + ', Isère, France')}`);
+    const response = await queueApiRequest(() => fetchWithTimeout(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query + ', Isère, France')}`));
     const payload = await parseJsonResponse(response, 'nominatim');
     if (!payload?.length) {
       const localResult = tryLocalMapSearch(query);
@@ -2136,7 +2186,7 @@ async function geocodeTrafficLabel(label) {
   if (trafficGeocodeCache.has(key)) return trafficGeocodeCache.get(key);
   try {
     const communeUrl = `https://geo.api.gouv.fr/communes?nom=${encodeURIComponent(label)}&fields=centre,codeDepartement&codeDepartement=38&limit=1`;
-    const communeResponse = await fetch(communeUrl);
+    const communeResponse = await queueApiRequest(() => fetchWithTimeout(communeUrl));
     const communePayload = await parseJsonResponse(communeResponse, communeUrl);
     const center = communePayload?.[0]?.centre?.coordinates;
     if (Array.isArray(center) && center.length === 2) {
@@ -2152,7 +2202,7 @@ async function geocodeTrafficLabel(label) {
 
   try {
     const nominatimUrl = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(`${label}, Isère, France`)}`;
-    const response = await fetch(nominatimUrl, { headers: { Accept: 'application/json' } });
+    const response = await queueApiRequest(() => fetchWithTimeout(nominatimUrl, { headers: { Accept: 'application/json' } }));
     const payload = await parseJsonResponse(response, nominatimUrl);
     const first = payload?.[0];
     const point = first ? { lat: Number(first.lat), lon: Number(first.lon), precision: 'adresse' } : null;
@@ -2176,7 +2226,7 @@ async function geocodeClosureCommune(label) {
   if (trafficGeocodeCache.has(key)) return trafficGeocodeCache.get(key);
   try {
     const communeUrl = `https://geo.api.gouv.fr/communes?nom=${encodeURIComponent(normalizedLabel)}&fields=nom,centre,codeDepartement&codeDepartement=38&boost=population&limit=1`;
-    const communeResponse = await fetch(communeUrl);
+    const communeResponse = await queueApiRequest(() => fetchWithTimeout(communeUrl));
     const communePayload = await parseJsonResponse(communeResponse, communeUrl);
     const commune = Array.isArray(communePayload) ? communePayload[0] : null;
     const center = commune?.centre?.coordinates;
@@ -4237,7 +4287,7 @@ async function loadLogs(preloaded = null) {
 }
 
 async function exportLogsCsv() {
-  const response = await fetch('/logs/export/csv', { headers: { Authorization: `Bearer ${token}` } });
+  const response = await queueApiRequest(() => fetchWithTimeout('/logs/export/csv', { headers: { Authorization: `Bearer ${token}` } }));
   if (!response.ok) throw new Error(`Export impossible (${response.status})`);
   const blob = await response.blob();
   const url = window.URL.createObjectURL(blob);
@@ -4290,13 +4340,17 @@ async function loadOperationsBootstrap(forceRefresh = false) {
 
 async function refreshAll(forceRefresh = false) {
   return withPreservedScroll(async () => {
+    startStartupQueue(1);
+    setStartupQueueCurrent('Chargement du bootstrap opérationnel…');
     try {
       await loadOperationsBootstrap(forceRefresh);
+      advanceStartupQueue('bootstrap opérationnel');
       await loadMapPoints();
       await loadMapAnnotations();
       await renderTrafficOnMap();
       renderResources();
       document.getElementById('dashboard-error').textContent = '';
+      finishStartupQueue();
       return;
     } catch (bootstrapError) {
       setText('operations-perf', 'Perf: mode dégradé (chargement par modules)');
@@ -4310,8 +4364,19 @@ async function refreshAll(forceRefresh = false) {
         { label: 'points cartographiques', loader: loadMapPoints, optional: true },
         { label: 'annotations tactiques', loader: loadMapAnnotations, optional: true },
       ];
-
-      const results = await Promise.allSettled(loaders.map(({ loader }) => loader()));
+      startStartupQueue(loaders.length);
+      const results = [];
+      for (const { label, loader } of loaders) {
+        setStartupQueueCurrent(`Chargement: ${label}…`);
+        try {
+          const value = await loader();
+          results.push({ status: 'fulfilled', value });
+        } catch (error) {
+          results.push({ status: 'rejected', reason: error });
+        } finally {
+          advanceStartupQueue(label);
+        }
+      }
       const failures = results
         .map((result, index) => ({ result, config: loaders[index] }))
         .filter(({ result }) => result.status === 'rejected');
@@ -4322,6 +4387,7 @@ async function refreshAll(forceRefresh = false) {
       renderResources();
 
       if (!blockingFailures.length) {
+        finishStartupQueue();
         const errorTarget = document.getElementById('dashboard-error');
         if (errorTarget && !errorTarget.textContent.trim()) {
           const warning = optionalFailures.length
@@ -4335,6 +4401,7 @@ async function refreshAll(forceRefresh = false) {
       const message = blockingFailures.map(({ config, result }) => `${config.label}: ${sanitizeErrorMessage(result.reason?.message || 'erreur')}`).join(' · ');
       document.getElementById('dashboard-error').textContent = `Bootstrap: ${sanitizeErrorMessage(bootstrapError.message)} · ${message}`;
       setMapFeedback(message, true);
+      finishStartupQueue();
     }
   });
 }
@@ -5008,6 +5075,7 @@ function logout() {
   if (apiResyncTimer) clearInterval(apiResyncTimer);
   if (photoCameraRefreshTimer) clearInterval(photoCameraRefreshTimer);
   stopMapAnnotationsSync();
+  finishStartupQueue();
   showHome();
 }
 
@@ -5244,6 +5312,7 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
 });
 
 (async function bootstrap() {
+  updateApiQueueVisual();
   bindHomeInteractions();
   bindAppInteractions();
   startHomeLiveRefresh();

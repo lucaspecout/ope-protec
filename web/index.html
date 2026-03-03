@@ -56,6 +56,13 @@
           <ul id="home-meteo-situation" class="list compact"></ul>
           <p class="muted" id="home-live-updated">Dernière mise à jour: -</p>
           <p class="error" id="home-live-error"></p>
+          <div id="api-queue-visual" class="api-queue-visual" aria-live="polite">
+            <p class="muted"><strong>File d’attente API</strong> · <span id="api-queue-summary">En attente d'initialisation…</span></p>
+            <div class="api-queue-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <span id="api-queue-progress-bar"></span>
+            </div>
+            <p class="muted" id="api-queue-current">Aucune tâche en cours.</p>
+          </div>
         </article>
       </section>
 
