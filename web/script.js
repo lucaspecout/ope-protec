@@ -168,6 +168,21 @@ let cachedDashboardSnapshot = {};
 let cachedExternalRisksSnapshot = {};
 let isereBoundaryGeometry = null;
 let trafficRenderSequence = 0;
+
+function trafficIconZoomClass(zoom = 9) {
+  if (zoom <= 7) return 'traffic-zoom-xs';
+  if (zoom <= 8) return 'traffic-zoom-sm';
+  if (zoom >= 12) return 'traffic-zoom-lg';
+  return 'traffic-zoom-md';
+}
+
+function updateTrafficZoomClass() {
+  if (!leafletMap) return;
+  const pane = leafletMap.getPanes?.().markerPane;
+  if (!pane) return;
+  pane.classList.remove('traffic-zoom-xs', 'traffic-zoom-sm', 'traffic-zoom-md', 'traffic-zoom-lg');
+  pane.classList.add(trafficIconZoomClass(leafletMap.getZoom()));
+}
 let currentMunicipalityPreviewUrl = null;
 let institutionPointsCache = [];
 let institutionsLoaded = false;
@@ -1103,6 +1118,8 @@ function initMap() {
   populationLayer = window.L.layerGroup().addTo(leafletMap);
   leafletMap.on('click', onMapClickAddPoint);
   leafletMap.on('popupopen', refreshPhotoCameraImages);
+  leafletMap.on('zoomend', updateTrafficZoomClass);
+  updateTrafficZoomClass();
   startPhotoCameraAutoRefresh();
 }
 
@@ -2456,20 +2473,8 @@ async function buildItinisereMapPoints(events = []) {
     let precision = 'estimée';
     let communeAnchor = null;
 
-    if (isClosureEvent) {
-      const closureCommuneHints = extractClosureCommuneHints(event, fullText);
-      for (const commune of closureCommuneHints) {
-        const communePoint = await geocodeClosureCommune(commune) || await geocodeTrafficLabel(commune);
-        if (!communePoint) continue;
-        position = { lat: communePoint.lat, lon: communePoint.lon };
-        anchor = `Mairie de ${communePoint.communeName || commune}`;
-        precision = 'mairie';
-        break;
-      }
-    }
-
     const providedCoords = normalizeMapCoordinates(event.lat, event.lon);
-    if (!isClosureEvent && providedCoords && !roads.length) {
+    if (providedCoords && !roads.length) {
       position = providedCoords;
       anchor = locations[0] || roads[0] || 'Itinisère';
       precision = 'source';
@@ -2487,6 +2492,18 @@ async function buildItinisereMapPoints(events = []) {
           precision = position.precision === 'commune' ? 'commune' : (position.precision || 'localité');
           break;
         }
+      }
+    }
+
+    if (!position && isClosureEvent) {
+      const closureCommuneHints = extractClosureCommuneHints(event, fullText);
+      for (const commune of closureCommuneHints) {
+        const communePoint = await geocodeClosureCommune(commune) || await geocodeTrafficLabel(commune);
+        if (!communePoint) continue;
+        position = { lat: communePoint.lat, lon: communePoint.lon };
+        anchor = `Mairie de ${communePoint.communeName || commune}`;
+        precision = 'mairie';
+        break;
       }
     }
 
