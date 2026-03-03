@@ -2181,6 +2181,20 @@ def _atmo_level_from_index(index_value: float | int | None) -> str:
     return "rouge"
 
 
+def _atmo_label_from_index(index_value: float | int | None) -> str:
+    if index_value is None:
+        return "inconnu"
+    if index_value < 3:
+        return "bon"
+    if index_value < 4:
+        return "modéré"
+    if index_value < 5:
+        return "dégradé"
+    if index_value < 6:
+        return "mauvais"
+    return "très mauvais"
+
+
 def _fetch_atmo_aura_isere_air_quality_live() -> dict[str, Any]:
     source = "https://www.atmo-auvergnerhonealpes.fr/air-commune/grenoble/38185/indice-atmo"
     try:
@@ -2212,6 +2226,7 @@ def _fetch_atmo_aura_isere_air_quality_live() -> dict[str, Any]:
                 "date": today_date,
                 "index": today_index,
                 "level": _atmo_level_from_index(today_index),
+                "label": _atmo_label_from_index(today_index),
                 "comment": comments.get(today_date, ""),
                 "sub_indices": today_payload.get("sous_indices") or [],
             },
@@ -2219,6 +2234,7 @@ def _fetch_atmo_aura_isere_air_quality_live() -> dict[str, Any]:
                 "date": tomorrow_date,
                 "index": tomorrow_index,
                 "level": _atmo_level_from_index(tomorrow_index),
+                "label": _atmo_label_from_index(tomorrow_index),
                 "comment": comments.get(tomorrow_date, ""),
                 "sub_indices": tomorrow_payload.get("sous_indices") or [],
             },

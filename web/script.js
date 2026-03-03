@@ -3622,13 +3622,14 @@ function renderSituationOverview() {
   const bisonCombinedLevel = riskRank(bisonReturn) > riskRank(bisonDeparture) ? bisonReturn : bisonDeparture;
   const vigieauAlertsCount = Number((externalRisks?.vigieau?.alerts || []).length);
   const atmoLevel = normalizeLevel(externalRisks?.atmo_aura?.today?.level || 'inconnu');
+  const atmoLabel = String(externalRisks?.atmo_aura?.today?.label || atmoLevel || 'inconnu').toLowerCase();
   const sncfIncidentsCount = Number(externalRisks?.sncf_isere?.alerts_total ?? (externalRisks?.sncf_isere?.alerts || []).length);
   const arcepOutages = Number(externalRisks?.arcep_isere?.outages_total ?? 0);
   const anfrSupports = Number(externalRisks?.anfr_isere?.supports_total ?? 0);
   const mobilityCards = [
     { label: 'Bison Futé (38) · Départ / Arrivée', value: `${bisonDeparture} / ${bisonReturn}`, info: 'Tendance Isère départ / arrivée', css: bisonCombinedLevel },
     { label: 'Vigieau', value: `${vigieauAlertsCount}`, info: "Restriction(s) d'eau active(s)", css: vigieauAlertsCount > 0 ? 'jaune' : 'vert' },
-    { label: "Qualité de l'air", value: atmoLevel, info: 'Source Atmo AURA', css: atmoLevel },
+    { label: "Qualité de l'air", value: atmoLabel, info: 'Source Atmo AURA', css: atmoLevel },
     { label: 'Incidents SNCF', value: `${sncfIncidentsCount}`, info: 'Accidents / travaux Isère', css: sncfIncidentsCount > 0 ? 'orange' : 'vert' },
     { label: 'ARCEP · sites indisponibles', value: `${arcepOutages}`, info: 'Pannes mobiles Isère', css: arcepOutages > 0 ? 'jaune' : 'vert' },
     { label: 'ANFR · supports antennes', value: `${anfrSupports}`, info: 'Implantations recensées Isère', css: anfrSupports > 0 ? 'vert' : 'jaune' },
@@ -3864,7 +3865,7 @@ function buildSitrepHtml() {
       <p><strong>Vigicrues :</strong> ${escapeHtml(normalizeLevel(vigicrues.water_alert_level || 'inconnu'))}</p>
       <ul>${toSitrepBulletItems(vigicruesItems)}</ul>
       <p><strong>Bison Futé (38)</strong> · Départs: ${escapeHtml(normalizeLevel(bison.departure || 'inconnu'))} · Retours: ${escapeHtml(normalizeLevel(bison.return || 'inconnu'))}</p>
-      <p><strong>Qualité de l'air:</strong> ${escapeHtml(normalizeLevel(atmo?.today?.level || 'inconnu'))}</p>
+      <p><strong>Qualité de l'air:</strong> ${escapeHtml(String(atmo?.today?.label || normalizeLevel(atmo?.today?.level || 'inconnu')).toLowerCase())}</p>
     </div>
     <div>
       <h2>Infos institutionnelles</h2>
@@ -4062,8 +4063,9 @@ function renderExternalRisks(data = {}) {
   renderElectricityStatus(electricity);
   const atmoToday = atmo?.today || {};
   const atmoLevel = normalizeLevel(atmoToday.level || 'inconnu');
+  const atmoLabel = String(atmoToday.label || atmoLevel || 'inconnu').toLowerCase();
   setRiskText('atmo-status', `${atmo.status || 'inconnu'} · indice ${atmoToday.index ?? '-'}`, atmoToday.level || 'vert');
-  setText('atmo-info', `${atmoToday.date || 'date inconnue'} · niveau ${atmoLevel}${atmo.has_pollution_episode ? ' · épisode en cours' : ''}`);
+  setText('atmo-info', `${atmoToday.date || 'date inconnue'} · niveau ${atmoLabel}${atmo.has_pollution_episode ? ' · épisode en cours' : ''}`);
   setRiskText('anfr-status', `${anfr.status || 'inconnu'} · ${anfr.supports_total ?? 0} support(s)`, anfr.status === 'online' ? 'vert' : 'jaune');
   setText('anfr-info', `${anfr.stations_total ?? 0} station(s) · hauteur moyenne ${anfr.average_support_height_m ?? '-'} m`);
   setHtml('anfr-list', [
