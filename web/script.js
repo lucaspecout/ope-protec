@@ -113,6 +113,11 @@ let apiPanelTimer = null;
 let apiResyncTimer = null;
 let photoCameraRefreshTimer = null;
 let lastApiResyncAt = null;
+let mapSearchInProgress = false;
+let pendingMapSearchQuery = '';
+let refreshInFlightPromise = null;
+let refreshQueued = false;
+let refreshQueuedForce = false;
 const apiGetCache = new Map();
 const apiInFlight = new Map();
 const apiRequestQueue = [];
@@ -1913,11 +1918,27 @@ function placeSearchResult(lat, lon, label) {
 
 async function handleMapSearch() {
   const query = (document.getElementById('map-search')?.value || '').trim();
+  if (mapSearchInProgress) {
+    pendingMapSearchQuery = query;
+    setMapFeedback('Recherche déjà en cours… la nouvelle requête sera lancée ensuite.');
+    return;
+  }
+
+  const searchButton = document.getElementById('map-search-btn');
+  const searchInput = document.getElementById('map-search');
   renderResources();
   if (!query || !leafletMap) {
     setMapFeedback('Saisissez un lieu ou une commune pour lancer la recherche.');
     return;
   }
+  mapSearchInProgress = true;
+  if (searchButton) {
+    searchButton.disabled = true;
+    searchButton.textContent = 'Recherche…';
+  }
+  if (searchInput) searchInput.setAttribute('aria-busy', 'true');
+  setMapFeedback(`Recherche en cours pour « ${query} »…`);
+
   try {
     const response = await queueApiRequest(() => fetchWithTimeout(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query + ', Isère, France')}`));
     const payload = await parseJsonResponse(response, 'nominatim');
@@ -1943,6 +1964,20 @@ async function handleMapSearch() {
     }
     placeSearchResult(localResult.lat, localResult.lon, localResult.label);
     setMapFeedback(`Service externe indisponible, résultat local: ${localResult.label}`);
+  } finally {
+    mapSearchInProgress = false;
+    if (searchButton) {
+      searchButton.disabled = false;
+      searchButton.textContent = 'Rechercher';
+    }
+    if (searchInput) searchInput.removeAttribute('aria-busy');
+
+    const queuedQuery = pendingMapSearchQuery.trim();
+    pendingMapSearchQuery = '';
+    if (queuedQuery && queuedQuery !== query) {
+      if (searchInput) searchInput.value = queuedQuery;
+      handleMapSearch();
+    }
   }
 }
 
@@ -4374,7 +4409,7 @@ async function loadOperationsBootstrap(forceRefresh = false) {
   return payload;
 }
 
-async function refreshAll(forceRefresh = false) {
+async function runRefreshAll(forceRefresh = false) {
   return withPreservedScroll(async () => {
     startStartupQueue(1);
     setStartupQueueCurrent('Chargement du bootstrap opérationnel…');
@@ -4440,6 +4475,27 @@ async function refreshAll(forceRefresh = false) {
       finishStartupQueue();
     }
   });
+}
+
+async function refreshAll(forceRefresh = false) {
+  if (refreshInFlightPromise) {
+    refreshQueued = true;
+    refreshQueuedForce = refreshQueuedForce || forceRefresh;
+    setStartupQueueCurrent('Actualisation déjà en cours… prochaine rotation planifiée.');
+    return refreshInFlightPromise;
+  }
+
+  refreshInFlightPromise = runRefreshAll(forceRefresh)
+    .finally(async () => {
+      refreshInFlightPromise = null;
+      if (!refreshQueued) return;
+      const runForcedRefresh = refreshQueuedForce;
+      refreshQueued = false;
+      refreshQueuedForce = false;
+      await refreshAll(runForcedRefresh);
+    });
+
+  return refreshInFlightPromise;
 }
 
 function applyRoleVisibility() {
