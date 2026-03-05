@@ -1706,49 +1706,63 @@ async function renderPopulationByCityLayer() {
 
 async function loadIsereInstitutions() {
   if (institutionsLoaded) return institutionPointsCache;
-  const query = `[out:json][timeout:40];
-area["boundary"="administrative"]["admin_level"="6"]["name"="Isère"]->.searchArea;
+  const areaNames = ['Isère', 'Isere'];
+  const overpassEndpoints = [
+    'https://overpass-api.de/api/interpreter',
+    'https://overpass.kumi.systems/api/interpreter',
+  ];
+  const buildQuery = (areaName) => `[out:json][timeout:40];
+area["boundary"="administrative"]["admin_level"="6"]["name"="${areaName}"]->.searchArea;
 (
   nwr["amenity"~"school|college|university|kindergarten|police|fire_station|bus_station"](area.searchArea);
   nwr["railway"="station"](area.searchArea);
   nwr["aeroway"~"aerodrome|airport"](area.searchArea);
 );
 out center tags;`;
-  try {
-    const response = await queueApiRequest(() => fetchWithTimeout('https://overpass-api.de/api/interpreter', {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
-      body: query,
-    }));
-    const payload = await parseJsonResponse(response, 'overpass-institutions');
-    const elements = Array.isArray(payload?.elements) ? payload.elements : [];
-    institutionPointsCache = elements
-      .map((element) => {
-        const type = classifyInstitutionPoint(element);
-        if (!type) return null;
-        const lat = Number(element.lat ?? element.center?.lat);
-        const lon = Number(element.lon ?? element.center?.lon);
-        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-        const name = String(element.tags?.name || '').trim() || 'Établissement';
-        const address = [element.tags?.['addr:housenumber'], element.tags?.['addr:street'], element.tags?.['addr:city']].filter(Boolean).join(' ') || 'Adresse non renseignée';
-        return {
-          id: `osm-${element.type}-${element.id}`,
-          name,
-          type,
-          lat,
-          lon,
-          active: true,
-          address,
-          priority: 'standard',
-          info: `Source OSM · amenity=${String(element.tags?.amenity || '-')}`,
-          source: `https://www.openstreetmap.org/${element.type}/${element.id}`,
-          dynamic: true,
-        };
-      })
-      .filter(Boolean);
-  } catch {
-    institutionPointsCache = [];
+
+  let points = [];
+  for (const endpoint of overpassEndpoints) {
+    for (const areaName of areaNames) {
+      try {
+        const response = await queueApiRequest(() => fetchWithTimeout(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+          body: buildQuery(areaName),
+        }));
+        const payload = await parseJsonResponse(response, `overpass-institutions-${areaName}`);
+        const elements = Array.isArray(payload?.elements) ? payload.elements : [];
+        points = elements
+          .map((element) => {
+            const type = classifyInstitutionPoint(element);
+            if (!type) return null;
+            const lat = Number(element.lat ?? element.center?.lat);
+            const lon = Number(element.lon ?? element.center?.lon);
+            if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+            const name = String(element.tags?.name || '').trim() || 'Établissement';
+            const address = [element.tags?.['addr:housenumber'], element.tags?.['addr:street'], element.tags?.['addr:city']].filter(Boolean).join(' ') || 'Adresse non renseignée';
+            return {
+              id: `osm-${element.type}-${element.id}`,
+              name,
+              type,
+              lat,
+              lon,
+              active: true,
+              address,
+              priority: 'standard',
+              info: `Source OSM · amenity=${String(element.tags?.amenity || '-')}`,
+              source: `https://www.openstreetmap.org/${element.type}/${element.id}`,
+              dynamic: true,
+            };
+          })
+          .filter(Boolean);
+        if (points.length) break;
+      } catch {
+        points = [];
+      }
+    }
+    if (points.length) break;
   }
+  institutionPointsCache = points;
   institutionsLoaded = true;
   return institutionPointsCache;
 }
