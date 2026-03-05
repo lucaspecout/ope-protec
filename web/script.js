@@ -20,6 +20,7 @@ const API_REQUEST_TIMEOUT_MS = 15000;
 const API_RETRY_BASE_DELAY_MS = 400;
 const API_MAX_RETRIES_GET = 2;
 const API_MAX_RETRIES_NON_GET = 1;
+const API_ORIGIN_COOLDOWN_MS = 120000;
 const PANEL_TITLES = {
   'situation-panel': 'Situation opérationnelle',
   'services-panel': 'Services connectés',
@@ -117,6 +118,8 @@ const apiGetCache = new Map();
 const apiInFlight = new Map();
 const apiRequestQueue = [];
 let apiActiveRequests = 0;
+let preferredApiOrigin = window.location.origin;
+const apiOriginFailures = new Map();
 const startupQueueState = { total: 0, completed: 0, current: '' };
 
 let leafletMap = null;
@@ -585,6 +588,24 @@ function apiOrigins() {
   return Array.from(new Set(origins));
 }
 
+function prioritizedApiOrigins() {
+  const now = Date.now();
+  const origins = apiOrigins();
+  const withoutCooldown = origins.filter((origin) => {
+    if (origin === preferredApiOrigin || origin === window.location.origin) return true;
+    const failedAt = apiOriginFailures.get(origin);
+    return !failedAt || (now - failedAt) >= API_ORIGIN_COOLDOWN_MS;
+  });
+  const candidates = withoutCooldown.length ? withoutCooldown : origins;
+  return candidates.sort((a, b) => {
+    if (a === preferredApiOrigin) return -1;
+    if (b === preferredApiOrigin) return 1;
+    if (a === window.location.origin) return -1;
+    if (b === window.location.origin) return 1;
+    return 0;
+  });
+}
+
 function buildApiUrl(path, origin) {
   if (origin === window.location.origin) return path;
   return `${origin}${path}`;
@@ -837,7 +858,7 @@ async function requestApiAcrossOrigins(path, fetchOptions = {}, { logoutOn401 = 
   if (token && !fetchOptions.omitAuth) headers.Authorization = `Bearer ${token}`;
 
   let lastError = null;
-  const origins = apiOrigins();
+  const origins = prioritizedApiOrigins();
   const maxRetries = method === 'GET' ? API_MAX_RETRIES_GET : API_MAX_RETRIES_NON_GET;
 
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
@@ -851,8 +872,11 @@ async function requestApiAcrossOrigins(path, fetchOptions = {}, { logoutOn401 = 
           if (response.status === 401 && logoutOn401) logout();
           throw createApiError(message, response.status);
         }
+        preferredApiOrigin = origin;
+        apiOriginFailures.delete(origin);
         return payload;
       } catch (error) {
+        apiOriginFailures.set(origin, Date.now());
         if (error?.status !== undefined && error?.status !== null) throw error;
         lastError = error;
       }
@@ -4465,69 +4489,55 @@ async function loadOperationsBootstrap(forceRefresh = false) {
 
 async function refreshAll(forceRefresh = false) {
   return withPreservedScroll(async () => {
-    startStartupQueue(1);
-    setStartupQueueCurrent('Chargement du bootstrap opérationnel…');
-    try {
-      await loadOperationsBootstrap(forceRefresh);
-      advanceStartupQueue('bootstrap opérationnel');
-      await loadMapPoints();
-      await loadMapAnnotations();
-      await renderTrafficOnMap();
-      renderResources();
-      document.getElementById('dashboard-error').textContent = '';
-      finishStartupQueue();
-      return;
-    } catch (bootstrapError) {
-      setText('operations-perf', 'Perf: mode dégradé (chargement par modules)');
-      const loaders = [
-        { label: 'tableau de bord', loader: loadDashboard, optional: true },
-        { label: 'risques externes', loader: loadExternalRisks, optional: false },
-        { label: 'communes', loader: loadMunicipalities, optional: false },
-        { label: 'main courante', loader: loadLogs, optional: false },
-        { label: 'utilisateurs', loader: loadUsers, optional: true },
-        { label: 'interconnexions API', loader: loadApiInterconnections, optional: true },
-        { label: 'points cartographiques', loader: loadMapPoints, optional: true },
-        { label: 'annotations tactiques', loader: loadMapAnnotations, optional: true },
-      ];
-      startStartupQueue(loaders.length);
-      const results = [];
-      for (const { label, loader } of loaders) {
-        setStartupQueueCurrent(`Chargement: ${label}…`);
-        try {
-          const value = await loader();
-          results.push({ status: 'fulfilled', value });
-        } catch (error) {
-          results.push({ status: 'rejected', reason: error });
-        } finally {
-          advanceStartupQueue(label);
-        }
+    const loaders = [
+      { label: 'tableau de bord', loader: () => loadDashboard(forceRefresh), optional: true },
+      { label: 'flux API (Météo / Vigicrues / Itinisère / Bison / Géorisques)', loader: () => loadExternalRisks(forceRefresh), optional: false },
+      { label: 'interconnexions API', loader: () => loadApiInterconnections(forceRefresh), optional: true },
+      { label: 'communes', loader: loadMunicipalities, optional: false },
+      { label: 'main courante', loader: loadLogs, optional: false },
+      { label: 'utilisateurs', loader: loadUsers, optional: true },
+      { label: 'points cartographiques', loader: loadMapPoints, optional: true },
+      { label: 'annotations tactiques', loader: loadMapAnnotations, optional: true },
+      { label: 'trafic cartographique', loader: renderTrafficOnMap, optional: true },
+    ];
+    startStartupQueue(loaders.length);
+    const results = [];
+    for (const { label, loader } of loaders) {
+      setStartupQueueCurrent(`Chargement: ${label}…`);
+      try {
+        const value = await loader();
+        results.push({ status: 'fulfilled', value });
+      } catch (error) {
+        results.push({ status: 'rejected', reason: error });
+      } finally {
+        advanceStartupQueue(label);
       }
-      const failures = results
-        .map((result, index) => ({ result, config: loaders[index] }))
-        .filter(({ result }) => result.status === 'rejected');
-
-      const blockingFailures = failures.filter(({ config }) => !config.optional);
-      const optionalFailures = failures.filter(({ config }) => config.optional);
-
-      renderResources();
-
-      if (!blockingFailures.length) {
-        finishStartupQueue();
-        const errorTarget = document.getElementById('dashboard-error');
-        if (errorTarget && !errorTarget.textContent.trim()) {
-          const warning = optionalFailures.length
-            ? `Modules secondaires indisponibles: ${optionalFailures.map(({ config, result }) => `${config.label}: ${sanitizeErrorMessage(result.reason?.message || 'erreur')}`).join(' · ')}`
-            : '';
-          errorTarget.textContent = warning || `Bootstrap indisponible: ${sanitizeErrorMessage(bootstrapError.message)}`;
-        }
-        return;
-      }
-
-      const message = blockingFailures.map(({ config, result }) => `${config.label}: ${sanitizeErrorMessage(result.reason?.message || 'erreur')}`).join(' · ');
-      document.getElementById('dashboard-error').textContent = `Bootstrap: ${sanitizeErrorMessage(bootstrapError.message)} · ${message}`;
-      setMapFeedback(message, true);
-      finishStartupQueue();
     }
+    const failures = results
+      .map((result, index) => ({ result, config: loaders[index] }))
+      .filter(({ result }) => result.status === 'rejected');
+
+    const blockingFailures = failures.filter(({ config }) => !config.optional);
+    const optionalFailures = failures.filter(({ config }) => config.optional);
+
+    renderResources();
+
+    if (!blockingFailures.length) {
+      finishStartupQueue();
+      const errorTarget = document.getElementById('dashboard-error');
+      if (errorTarget && !errorTarget.textContent.trim()) {
+        const warning = optionalFailures.length
+          ? `Modules secondaires indisponibles: ${optionalFailures.map(({ config, result }) => `${config.label}: ${sanitizeErrorMessage(result.reason?.message || 'erreur')}`).join(' · ')}`
+          : '';
+        errorTarget.textContent = warning;
+      }
+      return;
+    }
+
+    const message = blockingFailures.map(({ config, result }) => `${config.label}: ${sanitizeErrorMessage(result.reason?.message || 'erreur')}`).join(' · ');
+    document.getElementById('dashboard-error').textContent = message;
+    setMapFeedback(message, true);
+    finishStartupQueue();
   });
 }
 

@@ -20,7 +20,7 @@ from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .database import Base, engine, get_db
+from .database import Base, SessionLocal, engine, get_db
 from .models import MapAnnotation, MapPoint, Municipality, MunicipalityDocument, OperationalLog, PublicShare, RiverStation, User, WeatherAlert
 from .schemas import (
     MapAnnotationCreate,
@@ -170,6 +170,8 @@ _external_risks_snapshot: dict = {
         "arcep_isere": {},
     },
 }
+_external_risks_refresh_lock = Lock()
+_external_risks_refresh_in_progress = False
 ALLOWED_DOC_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
 
 _map_annotations_revision_lock = Lock()
@@ -751,7 +753,47 @@ def build_dashboard_payload(db: Session, user: User, external_risks: dict | None
     }
 
 
-def build_external_risks_payload(refresh: bool = False, db: Session | None = None) -> dict:
+def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str]) -> dict[str, tuple[Callable[[], dict], dict]]:
+    return {
+        "meteo_france": (lambda: fetch_meteo_france_isere(force_refresh=refresh), {"status": "pending", "level": "vert", "title": "Météo-France en attente"}),
+        "vigicrues": (lambda: fetch_vigicrues_isere(force_refresh=refresh), {"status": "pending", "level": "vert", "stations": [], "alerts": []}),
+        "itinisere": (lambda: fetch_itinisere_disruptions(force_refresh=refresh), {"status": "pending", "events": [], "events_total": 0}),
+        "bison_fute": (lambda: fetch_bison_fute_traffic(force_refresh=refresh), {"status": "pending", "alerts": []}),
+        "georisques": (lambda: fetch_georisques_isere_summary(force_refresh=refresh, commune_names=pcs_commune_names), {"status": "pending", "details": []}),
+        "prefecture_isere": (lambda: fetch_prefecture_isere_news(force_refresh=refresh), {"status": "pending", "articles": []}),
+        "dauphine_isere": (lambda: fetch_dauphine_isere_news(force_refresh=refresh), {"status": "pending", "articles": []}),
+        "sncf_isere": (lambda: fetch_sncf_isere_alerts(force_refresh=refresh), {"status": "pending", "alerts": [], "alerts_total": 0}),
+        "vigieau": (lambda: fetch_vigieau_restrictions(force_refresh=refresh), {"status": "pending", "alerts": [], "max_level": "vert"}),
+        "atmo_aura": (lambda: fetch_atmo_aura_isere_air_quality(force_refresh=refresh), {"status": "pending", "today": {}, "tomorrow": {}}),
+        "anfr_isere": (lambda: fetch_anfr_isere_antennas(force_refresh=refresh), {"status": "pending", "supports_total": 0}),
+        "arcep_isere": (lambda: fetch_arcep_isere_mobile_outages(force_refresh=refresh), {"status": "pending", "outages_total": 0, "communes": []}),
+        "electricity_isere": (lambda: fetch_rte_isere_electricity_status(force_refresh=refresh), {"status": "pending", "level": "inconnu"}),
+        "finess_isere": (lambda: fetch_finess_isere_resources(force_refresh=refresh), {"status": "pending", "resources": [], "resources_total": 0}),
+    }
+
+
+def build_external_risks_pending_payload(db: Session | None = None, refresh: bool = False) -> dict:
+    pcs_commune_names: list[str] = []
+    if db is not None:
+        pcs_commune_names = [
+            str(name)
+            for (name,) in db.query(Municipality.name).filter(Municipality.pcs_active.is_(True)).all()
+            if name
+        ]
+    jobs = build_external_risks_fetch_jobs(refresh=refresh, pcs_commune_names=pcs_commune_names)
+    payload = {"updated_at": utc_timestamp()}
+    for key, (_, fallback) in jobs.items():
+        payload[key] = dict(fallback)
+    payload["refresh"] = {
+        "in_progress": True,
+        "completed": 0,
+        "total": len(jobs),
+        "current": "Préparation des flux externes",
+    }
+    return payload
+
+
+def build_external_risks_payload(refresh: bool = False, db: Session | None = None, progress_callback: Callable[[str, dict, int, int], None] | None = None) -> dict:
     errors: dict[str, str] = {}
     errors_lock = Lock()
     pcs_commune_names: list[str] = []
@@ -769,67 +811,94 @@ def build_external_risks_payload(refresh: bool = False, db: Session | None = Non
             with errors_lock:
                 errors[key] = str(exc)
             payload = dict(fallback)
-            payload.setdefault("status", "unavailable")
+            payload["status"] = "unavailable"
             payload.setdefault("error", str(exc))
             payload.setdefault("updated_at", utc_timestamp())
             return payload
 
-    fetch_jobs: dict[str, tuple[Callable[[], dict], dict]] = {
-        "meteo_france": (lambda: fetch_meteo_france_isere(force_refresh=refresh), {"level": "vert", "title": "Météo-France indisponible"}),
-        "vigicrues": (lambda: fetch_vigicrues_isere(force_refresh=refresh), {"level": "vert", "stations": [], "alerts": []}),
-        "itinisere": (lambda: fetch_itinisere_disruptions(force_refresh=refresh), {"status": "degraded", "events": [], "events_total": 0}),
-        "bison_fute": (lambda: fetch_bison_fute_traffic(force_refresh=refresh), {"status": "degraded", "alerts": []}),
-        "georisques": (lambda: fetch_georisques_isere_summary(force_refresh=refresh, commune_names=pcs_commune_names), {"status": "degraded", "details": []}),
-        "prefecture_isere": (lambda: fetch_prefecture_isere_news(force_refresh=refresh), {"status": "degraded", "articles": []}),
-        "dauphine_isere": (lambda: fetch_dauphine_isere_news(force_refresh=refresh), {"status": "degraded", "articles": []}),
-        "sncf_isere": (lambda: fetch_sncf_isere_alerts(force_refresh=refresh), {"status": "degraded", "alerts": [], "alerts_total": 0}),
-        "vigieau": (lambda: fetch_vigieau_restrictions(force_refresh=refresh), {"status": "degraded", "alerts": [], "max_level": "vert"}),
-        "atmo_aura": (lambda: fetch_atmo_aura_isere_air_quality(force_refresh=refresh), {"status": "degraded", "today": {}, "tomorrow": {}}),
-        "anfr_isere": (lambda: fetch_anfr_isere_antennas(force_refresh=refresh), {"status": "degraded", "supports_total": 0}),
-        "arcep_isere": (lambda: fetch_arcep_isere_mobile_outages(force_refresh=refresh), {"status": "degraded", "outages_total": 0, "communes": []}),
-        "electricity_isere": (lambda: fetch_rte_isere_electricity_status(force_refresh=refresh), {"status": "degraded", "level": "inconnu"}),
-        "finess_isere": (lambda: fetch_finess_isere_resources(force_refresh=refresh), {"status": "degraded", "resources": [], "resources_total": 0}),
-    }
+    fetch_jobs = build_external_risks_fetch_jobs(refresh=refresh, pcs_commune_names=pcs_commune_names)
 
     results: dict[str, dict] = {}
-    for key, (fetcher, fallback) in fetch_jobs.items():
+    total_jobs = len(fetch_jobs)
+    for idx, (key, (fetcher, fallback)) in enumerate(fetch_jobs.items(), start=1):
         results[key] = safe_fetch(key, fetcher, fallback)
+        if progress_callback is not None:
+            progress_callback(key, results[key], idx, total_jobs)
 
-    payload = {
-        "updated_at": utc_timestamp(),
-        "meteo_france": results["meteo_france"],
-        "vigicrues": results["vigicrues"],
-        "itinisere": results["itinisere"],
-        "bison_fute": results["bison_fute"],
-        "georisques": results["georisques"],
-        "prefecture_isere": results["prefecture_isere"],
-        "dauphine_isere": results["dauphine_isere"],
-        "sncf_isere": results["sncf_isere"],
-        "vigieau": results["vigieau"],
-        "atmo_aura": results["atmo_aura"],
-        "anfr_isere": results["anfr_isere"],
-        "arcep_isere": results["arcep_isere"],
-        "electricity_isere": results["electricity_isere"],
-        "finess_isere": results["finess_isere"],
+    payload = {"updated_at": utc_timestamp(), **results}
+    payload["refresh"] = {
+        "in_progress": False,
+        "completed": total_jobs,
+        "total": total_jobs,
+        "current": "Terminé",
     }
     if errors:
         payload["errors"] = errors
     return payload
 
 
-def get_external_risks_payload(refresh: bool = False, db: Session | None = None) -> dict:
-    if refresh:
-        payload = build_external_risks_payload(refresh=True, db=db)
-        _set_external_risks_snapshot(payload)
-        return payload
+def trigger_external_risks_refresh(db: Session | None = None) -> None:
+    global _external_risks_refresh_in_progress
 
+    with _external_risks_refresh_lock:
+        if _external_risks_refresh_in_progress:
+            return
+        _external_risks_refresh_in_progress = True
+
+    _set_external_risks_snapshot(build_external_risks_pending_payload(db=db, refresh=True))
+
+    def run_refresh() -> None:
+        global _external_risks_refresh_in_progress
+        local_db: Session | None = None
+        try:
+            local_db = SessionLocal()
+            incremental_payload = build_external_risks_pending_payload(db=local_db, refresh=True)
+            jobs = list(build_external_risks_fetch_jobs(refresh=True, pcs_commune_names=[]).keys())
+
+            def progress_callback(key: str, data: dict, completed: int, total: int) -> None:
+                incremental_payload[key] = data
+                incremental_payload["refresh"] = {
+                    "in_progress": True,
+                    "completed": completed,
+                    "total": total,
+                    "current": key,
+                }
+                _set_external_risks_snapshot(incremental_payload)
+
+            final_payload = build_external_risks_payload(refresh=True, db=local_db, progress_callback=progress_callback)
+            _set_external_risks_snapshot(final_payload)
+        except Exception as exc:
+            error_payload = _get_external_risks_snapshot() or build_external_risks_pending_payload(db=None, refresh=True)
+            error_payload["refresh"] = {
+                "in_progress": False,
+                "completed": 0,
+                "total": len(jobs) if 'jobs' in locals() else 14,
+                "current": "Erreur",
+            }
+            error_payload.setdefault("errors", {})["refresh"] = str(exc)
+            _set_external_risks_snapshot(error_payload)
+        finally:
+            if local_db is not None:
+                local_db.close()
+            with _external_risks_refresh_lock:
+                _external_risks_refresh_in_progress = False
+
+    Thread(target=run_refresh, daemon=True).start()
+
+
+def get_external_risks_payload(refresh: bool = False, db: Session | None = None) -> dict:
     snapshot = _get_external_risks_snapshot()
-    if snapshot and any(snapshot.get(key) for key in ("meteo_france", "vigicrues", "itinisere", "bison_fute", "georisques", "prefecture_isere", "dauphine_isere", "sncf_isere", "vigieau", "atmo_aura", "anfr_isere", "arcep_isere", "electricity_isere", "finess_isere")):
+    has_snapshot = bool(snapshot and any(snapshot.get(key) for key in ("meteo_france", "vigicrues", "itinisere", "bison_fute", "georisques", "prefecture_isere", "dauphine_isere", "sncf_isere", "vigieau", "atmo_aura", "anfr_isere", "arcep_isere", "electricity_isere", "finess_isere")))
+
+    if refresh:
+        trigger_external_risks_refresh(db=db)
+        return snapshot or build_external_risks_pending_payload(db=db, refresh=True)
+
+    if has_snapshot:
         return snapshot
 
-    payload = build_external_risks_payload(refresh=True, db=db)
-    _set_external_risks_snapshot(payload)
-    return payload
+    trigger_external_risks_refresh(db=db)
+    return build_external_risks_pending_payload(db=db, refresh=True)
 
 
 @app.get("/external/isere/risks")
