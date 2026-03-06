@@ -9,6 +9,8 @@ const STORAGE_KEYS = {
   dashboardSnapshot: 'dashboardSnapshot',
   externalRisksSnapshot: 'externalRisksSnapshot',
   apiInterconnectionsSnapshot: 'apiInterconnectionsSnapshot',
+  staticInstitutionsCache: 'staticInstitutionsCache',
+  staticFinessCache: 'staticFinessCache',
 };
 const AUTO_REFRESH_MS = 60000;
 const EVENTS_LIVE_REFRESH_MS = 60000;
@@ -21,6 +23,7 @@ const API_RETRY_BASE_DELAY_MS = 400;
 const API_MAX_RETRIES_GET = 2;
 const API_MAX_RETRIES_NON_GET = 1;
 const API_ORIGIN_COOLDOWN_MS = 120000;
+const STATIC_POINTS_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const PANEL_TITLES = {
   'situation-panel': 'Situation opérationnelle',
   'services-panel': 'Services connectés',
@@ -733,6 +736,25 @@ function readSnapshot(key) {
   } catch (_) {
     return null;
   }
+}
+
+function readSnapshotWithMetadata(key) {
+  try {
+    const raw = JSON.parse(localStorage.getItem(key) || 'null');
+    if (!raw || typeof raw !== 'object') return null;
+    return raw;
+  } catch (_) {
+    return null;
+  }
+}
+
+function readFreshSnapshot(key, ttlMs) {
+  const snapshot = readSnapshotWithMetadata(key);
+  if (!snapshot) return null;
+  const savedAt = Number(snapshot.savedAt || 0);
+  if (!Number.isFinite(savedAt) || savedAt <= 0) return null;
+  if ((Date.now() - savedAt) > ttlMs) return null;
+  return snapshot.payload;
 }
 
 function hydrateUiFromLocalCache() {
@@ -1634,8 +1656,14 @@ function shouldDisplayBaseResourceType(type = '') {
 
 async function loadFinessIsereResources() {
   if (finessLoaded) return finessPointsCache;
+  const cached = readFreshSnapshot(STORAGE_KEYS.staticFinessCache, STATIC_POINTS_CACHE_TTL_MS);
+  if (Array.isArray(cached)) {
+    finessPointsCache = cached;
+    finessLoaded = true;
+    return finessPointsCache;
+  }
   try {
-    const payload = await api('/api/finess/isere/resources', { cacheTtlMs: 12 * 60 * 60 * 1000 });
+    const payload = await api('/api/finess/isere/resources', { cacheTtlMs: STATIC_POINTS_CACHE_TTL_MS });
     const resources = Array.isArray(payload?.resources) ? payload.resources : [];
     finessPointsCache = resources
       .map((resource) => {
@@ -1658,8 +1686,10 @@ async function loadFinessIsereResources() {
         };
       })
       .filter(Boolean);
+    saveSnapshot(STORAGE_KEYS.staticFinessCache, finessPointsCache);
   } catch {
-    finessPointsCache = [];
+    const staleCached = readSnapshot(STORAGE_KEYS.staticFinessCache);
+    finessPointsCache = Array.isArray(staleCached) ? staleCached : [];
   }
   finessLoaded = true;
   return finessPointsCache;
@@ -1730,6 +1760,12 @@ async function renderPopulationByCityLayer() {
 
 async function loadIsereInstitutions() {
   if (institutionsLoaded) return institutionPointsCache;
+  const cached = readFreshSnapshot(STORAGE_KEYS.staticInstitutionsCache, STATIC_POINTS_CACHE_TTL_MS);
+  if (Array.isArray(cached)) {
+    institutionPointsCache = cached;
+    institutionsLoaded = true;
+    return institutionPointsCache;
+  }
   const areaNames = ['Isère', 'Isere'];
   const overpassEndpoints = [
     'https://overpass-api.de/api/interpreter',
@@ -1787,6 +1823,12 @@ out center tags;`;
     if (points.length) break;
   }
   institutionPointsCache = points;
+  if (institutionPointsCache.length) {
+    saveSnapshot(STORAGE_KEYS.staticInstitutionsCache, institutionPointsCache);
+  } else {
+    const staleCached = readSnapshot(STORAGE_KEYS.staticInstitutionsCache);
+    if (Array.isArray(staleCached)) institutionPointsCache = staleCached;
+  }
   institutionsLoaded = true;
   return institutionPointsCache;
 }
