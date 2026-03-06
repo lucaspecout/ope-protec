@@ -9,6 +9,7 @@ const STORAGE_KEYS = {
   dashboardSnapshot: 'dashboardSnapshot',
   externalRisksSnapshot: 'externalRisksSnapshot',
   apiInterconnectionsSnapshot: 'apiInterconnectionsSnapshot',
+  homeLiveSnapshot: 'homeLiveSnapshot',
   staticInstitutionsCache: 'staticInstitutionsCache',
   staticFinessCache: 'staticFinessCache',
 };
@@ -198,6 +199,79 @@ let iserePopulationPointsCache = [];
 let iserePopulationLoaded = false;
 let telecomPointsCache = [];
 let telecomLoaded = false;
+let cachedHomeLiveSnapshot = {};
+
+function keepPreviousValue(previousValue, nextValue) {
+  if (nextValue === undefined || nextValue === null) return previousValue;
+  if (typeof nextValue === 'string' && nextValue.trim() === '') return previousValue;
+  if (Array.isArray(nextValue) && nextValue.length === 0) return Array.isArray(previousValue) ? previousValue : nextValue;
+  return nextValue;
+}
+
+function mergeHomeLiveSnapshot(previous = {}, next = {}) {
+  const prevDashboard = previous.dashboard || {};
+  const nextDashboard = next.dashboard || {};
+  const prevGeorisques = previous.georisques || {};
+  const nextGeorisques = next.georisques || {};
+  const prevVigicrues = previous.vigicrues || {};
+  const nextVigicrues = next.vigicrues || {};
+  const prevItinisere = previous.itinisere || {};
+  const nextItinisere = next.itinisere || {};
+  const prevBison = previous.bison_fute || {};
+  const nextBison = next.bison_fute || {};
+  const prevMeteo = previous.meteo_france || {};
+  const nextMeteo = next.meteo_france || {};
+
+  return {
+    ...previous,
+    ...next,
+    updated_at: keepPreviousValue(previous.updated_at, next.updated_at),
+    dashboard: {
+      ...prevDashboard,
+      ...nextDashboard,
+      vigilance: keepPreviousValue(prevDashboard.vigilance, nextDashboard.vigilance),
+      crues: keepPreviousValue(prevDashboard.crues, nextDashboard.crues),
+      global_risk: keepPreviousValue(prevDashboard.global_risk, nextDashboard.global_risk),
+      communes_crise: keepPreviousValue(prevDashboard.communes_crise, nextDashboard.communes_crise),
+    },
+    georisques: {
+      ...prevGeorisques,
+      ...nextGeorisques,
+      highest_seismic_zone_label: keepPreviousValue(prevGeorisques.highest_seismic_zone_label, nextGeorisques.highest_seismic_zone_label),
+      flood_documents_total: keepPreviousValue(prevGeorisques.flood_documents_total, nextGeorisques.flood_documents_total),
+    },
+    vigicrues: {
+      ...prevVigicrues,
+      ...nextVigicrues,
+      water_alert_level: keepPreviousValue(prevVigicrues.water_alert_level, nextVigicrues.water_alert_level),
+    },
+    itinisere: {
+      ...prevItinisere,
+      ...nextItinisere,
+      status: keepPreviousValue(prevItinisere.status, nextItinisere.status),
+      events_count: keepPreviousValue(prevItinisere.events_count, nextItinisere.events_count),
+    },
+    bison_fute: {
+      ...prevBison,
+      ...nextBison,
+      today: {
+        ...(prevBison.today || {}),
+        ...(nextBison.today || {}),
+        isere: {
+          ...((prevBison.today || {}).isere || {}),
+          ...((nextBison.today || {}).isere || {}),
+          departure: keepPreviousValue((prevBison.today || {}).isere?.departure, (nextBison.today || {}).isere?.departure),
+          return: keepPreviousValue((prevBison.today || {}).isere?.return, (nextBison.today || {}).isere?.return),
+        },
+      },
+    },
+    meteo_france: {
+      ...prevMeteo,
+      ...nextMeteo,
+      current_situation: keepPreviousValue(prevMeteo.current_situation, nextMeteo.current_situation),
+    },
+  };
+}
 
 function updateApiQueueVisual() {
   const summaryNode = document.getElementById('api-queue-summary');
@@ -786,6 +860,12 @@ function hydrateUiFromLocalCache() {
   const cachedUsersSnapshot = readSnapshot(STORAGE_KEYS.usersSnapshot);
   if (Array.isArray(cachedUsersSnapshot) && cachedUsersSnapshot.length && canManageUsers()) {
     loadUsers(cachedUsersSnapshot);
+  }
+
+  const homeLiveSnapshot = readSnapshot(STORAGE_KEYS.homeLiveSnapshot);
+  if (homeLiveSnapshot && typeof homeLiveSnapshot === 'object') {
+    cachedHomeLiveSnapshot = homeLiveSnapshot;
+    renderHomeLiveStatus(cachedHomeLiveSnapshot);
   }
 }
 
@@ -5321,37 +5401,53 @@ function startApiPanelAutoRefresh() {
   }, API_PANEL_REFRESH_MS);
 }
 
+function renderHomeLiveStatus(data = {}) {
+  const dashboard = data?.dashboard || {};
+  setRiskText('home-meteo-state', normalizeLevel(dashboard.vigilance || '-'), dashboard.vigilance || 'vert');
+  setRiskText('home-river-state', normalizeLevel(dashboard.crues || '-'), dashboard.crues || 'vert');
+  setRiskText('home-global-risk', normalizeLevel(dashboard.global_risk || '-'), dashboard.global_risk || 'vert');
+  document.getElementById('home-crisis-count').textContent = String(dashboard.communes_crise ?? 0);
+  document.getElementById('home-seismic-state').textContent = data.georisques?.highest_seismic_zone_label || 'inconnue';
+  document.getElementById('home-flood-docs').textContent = String(data.georisques?.flood_documents_total ?? 0);
+
+  document.getElementById('home-feature-global-risk').textContent = normalizeLevel(dashboard.global_risk || '-');
+  document.getElementById('home-feature-river-risk').textContent = normalizeLevel(dashboard.crues || '-');
+  document.getElementById('home-feature-seismic-risk').textContent = data.georisques?.highest_seismic_zone_label || 'inconnue';
+
+  setRiskText('home-feature-meteo', normalizeLevel(dashboard.vigilance || '-'), dashboard.vigilance || 'vert');
+  setRiskText('home-feature-vigicrues', normalizeLevel(data.vigicrues?.water_alert_level || '-'), data.vigicrues?.water_alert_level || 'vert');
+  document.getElementById('home-feature-crisis-count').textContent = String(dashboard.communes_crise ?? 0);
+
+  document.getElementById('home-feature-itinisere-status').textContent = data.itinisere?.status || 'inconnu';
+  document.getElementById('home-feature-itinisere-events').textContent = String(data.itinisere?.events_count ?? 0);
+  document.getElementById('home-feature-bison-isere').textContent = `${data.bison_fute?.today?.isere?.departure || 'inconnu'} / ${data.bison_fute?.today?.isere?.return || 'inconnu'}`;
+  renderHomeMeteoSituation(data.meteo_france?.current_situation || []);
+
+  const updatedLabel = data?.updated_at ? new Date(data.updated_at).toLocaleString() : 'inconnue';
+  document.getElementById('home-live-updated').textContent = `Dernière mise à jour: ${updatedLabel}`;
+}
+
 async function loadHomeLiveStatus() {
   return withPreservedScroll(async () => {
     try {
+      if (!Object.keys(cachedHomeLiveSnapshot).length) {
+        const snapshot = readSnapshot(STORAGE_KEYS.homeLiveSnapshot);
+        if (snapshot && typeof snapshot === 'object') {
+          cachedHomeLiveSnapshot = snapshot;
+          renderHomeLiveStatus(cachedHomeLiveSnapshot);
+        }
+      }
+
       const data = await api('/public/live', {
         logoutOn401: false,
         omitAuth: true,
         cacheTtlMs: 0,
         bypassCache: true,
       });
-      const dashboard = data?.dashboard || {};
-      setRiskText('home-meteo-state', normalizeLevel(dashboard.vigilance || '-'), dashboard.vigilance || 'vert');
-      setRiskText('home-river-state', normalizeLevel(dashboard.crues || '-'), dashboard.crues || 'vert');
-      setRiskText('home-global-risk', normalizeLevel(dashboard.global_risk || '-'), dashboard.global_risk || 'vert');
-      document.getElementById('home-crisis-count').textContent = String(dashboard.communes_crise ?? 0);
-      document.getElementById('home-seismic-state').textContent = data.georisques?.highest_seismic_zone_label || 'inconnue';
-      document.getElementById('home-flood-docs').textContent = String(data.georisques?.flood_documents_total ?? 0);
 
-      document.getElementById('home-feature-global-risk').textContent = normalizeLevel(dashboard.global_risk || '-');
-      document.getElementById('home-feature-river-risk').textContent = normalizeLevel(dashboard.crues || '-');
-      document.getElementById('home-feature-seismic-risk').textContent = data.georisques?.highest_seismic_zone_label || 'inconnue';
-
-      setRiskText('home-feature-meteo', normalizeLevel(dashboard.vigilance || '-'), dashboard.vigilance || 'vert');
-      setRiskText('home-feature-vigicrues', normalizeLevel(data.vigicrues?.water_alert_level || '-'), data.vigicrues?.water_alert_level || 'vert');
-      document.getElementById('home-feature-crisis-count').textContent = String(dashboard.communes_crise ?? 0);
-
-      document.getElementById('home-feature-itinisere-status').textContent = data.itinisere?.status || 'inconnu';
-      document.getElementById('home-feature-itinisere-events').textContent = String(data.itinisere?.events_count ?? 0);
-      document.getElementById('home-feature-bison-isere').textContent = `${data.bison_fute?.today?.isere?.departure || 'inconnu'} / ${data.bison_fute?.today?.isere?.return || 'inconnu'}`;
-      renderHomeMeteoSituation(data.meteo_france?.current_situation || []);
-      const updatedLabel = data?.updated_at ? new Date(data.updated_at).toLocaleString() : 'inconnue';
-      document.getElementById('home-live-updated').textContent = `Dernière mise à jour: ${updatedLabel}`;
+      cachedHomeLiveSnapshot = mergeHomeLiveSnapshot(cachedHomeLiveSnapshot, data);
+      renderHomeLiveStatus(cachedHomeLiveSnapshot);
+      saveSnapshot(STORAGE_KEYS.homeLiveSnapshot, cachedHomeLiveSnapshot);
       document.getElementById('home-live-error').textContent = '';
     } catch (error) {
       document.getElementById('home-live-error').textContent = error.message;
