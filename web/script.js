@@ -118,6 +118,7 @@ let apiPanelTimer = null;
 let apiResyncTimer = null;
 let photoCameraRefreshTimer = null;
 let lastApiResyncAt = null;
+let isLoginSubmitting = false;
 const apiGetCache = new Map();
 const apiInFlight = new Map();
 const apiRequestQueue = [];
@@ -954,7 +955,7 @@ function canRetryRequest(error, attempt, method) {
   return Boolean(error?.isTimeout || isNetworkFetchError(error) || String(error?.message || '').includes('Réponse non-JSON'));
 }
 
-async function requestApiAcrossOrigins(path, fetchOptions = {}, { logoutOn401 = true } = {}) {
+async function requestApiAcrossOrigins(path, fetchOptions = {}, { logoutOn401 = true, highPriority = false } = {}) {
   const headers = { ...(fetchOptions.headers || {}) };
   const method = String(fetchOptions.method || 'GET').toUpperCase();
   if (token && !fetchOptions.omitAuth) headers.Authorization = `Bearer ${token}`;
@@ -967,7 +968,8 @@ async function requestApiAcrossOrigins(path, fetchOptions = {}, { logoutOn401 = 
     for (const origin of origins) {
       const url = buildApiUrl(path, origin);
       try {
-        const response = await queueApiRequest(() => fetchWithTimeout(url, { ...fetchOptions, headers }));
+        const runFetch = () => fetchWithTimeout(url, { ...fetchOptions, headers });
+        const response = await (highPriority ? runFetch() : queueApiRequest(runFetch));
         const payload = await parseJsonResponse(response, path);
         if (!response.ok) {
           const message = normalizeApiErrorMessage(payload, response.status);
@@ -998,6 +1000,7 @@ async function api(path, options = {}) {
     omitAuth = false,
     cacheTtlMs = API_CACHE_TTL_MS,
     bypassCache = false,
+    highPriority = false,
     ...fetchOptions
   } = options;
   const cacheable = !bypassCache && isCacheableRequest(path, fetchOptions);
@@ -1013,7 +1016,7 @@ async function api(path, options = {}) {
     }
   }
 
-  const requestPromise = requestApiAcrossOrigins(path, { ...fetchOptions, omitAuth }, { logoutOn401 });
+  const requestPromise = requestApiAcrossOrigins(path, { ...fetchOptions, omitAuth }, { logoutOn401, highPriority });
 
   if (!cacheable) {
     const responsePayload = await requestPromise;
@@ -5421,6 +5424,16 @@ function renderHomeLiveStatus(data = {}) {
   document.getElementById('home-feature-itinisere-status').textContent = data.itinisere?.status || 'inconnu';
   document.getElementById('home-feature-itinisere-events').textContent = String(data.itinisere?.events_count ?? 0);
   document.getElementById('home-feature-bison-isere').textContent = `${data.bison_fute?.today?.isere?.departure || 'inconnu'} / ${data.bison_fute?.today?.isere?.return || 'inconnu'}`;
+
+  setRiskText('home-indication-meteo', normalizeLevel(dashboard.vigilance || '-'), dashboard.vigilance || 'vert');
+  setRiskText('home-indication-crues', normalizeLevel(dashboard.crues || '-'), dashboard.crues || 'vert');
+  setRiskText('home-indication-global', normalizeLevel(dashboard.global_risk || '-'), dashboard.global_risk || 'vert');
+  document.getElementById('home-indication-crisis').textContent = String(dashboard.communes_crise ?? 0);
+  document.getElementById('home-indication-seismic').textContent = data.georisques?.highest_seismic_zone_label || 'inconnue';
+  document.getElementById('home-indication-traffic').textContent = String(data.itinisere?.events_count ?? 0);
+  document.getElementById('home-indication-flood-docs').textContent = String(data.georisques?.flood_documents_total ?? 0);
+  document.getElementById('home-indication-bison').textContent = `${data.bison_fute?.today?.isere?.departure || 'inconnu'} / ${data.bison_fute?.today?.isere?.return || 'inconnu'}`;
+
   renderHomeMeteoSituation(data.meteo_france?.current_situation || []);
 
   const updatedLabel = data?.updated_at ? new Date(data.updated_at).toLocaleString() : 'inconnue';
@@ -5485,14 +5498,25 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
 
 loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
+  if (isLoginSubmitting) return;
+  isLoginSubmitting = true;
   setLoginError('');
+  const submitBtn = loginForm.querySelector('button[type="submit"]');
+  if (submitBtn) submitBtn.disabled = true;
   const form = new FormData(loginForm);
   const username = String(form.get('username') || '');
   const password = String(form.get('password') || '');
 
   try {
     const payload = new URLSearchParams({ username, password });
-    const result = await api('/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: payload, logoutOn401: false, omitAuth: true });
+    const result = await api('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: payload,
+      logoutOn401: false,
+      omitAuth: true,
+      highPriority: true,
+    });
     token = result.access_token;
     localStorage.setItem(STORAGE_KEYS.token, token);
     pendingCurrentPassword = password;
@@ -5507,6 +5531,9 @@ loginForm.addEventListener('submit', async (event) => {
     await initializeAuthenticatedSession({ runRefreshInBackground: true });
   } catch (error) {
     setLoginError(error.message, buildLoginDebugDetails(error, username));
+  } finally {
+    isLoginSubmitting = false;
+    if (submitBtn) submitBtn.disabled = false;
   }
 });
 
