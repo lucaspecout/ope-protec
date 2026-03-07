@@ -12,6 +12,7 @@ const STORAGE_KEYS = {
   homeLiveSnapshot: 'homeLiveSnapshot',
   staticInstitutionsCache: 'staticInstitutionsCache',
   staticFinessCache: 'staticFinessCache',
+  serviceStatusHistory: 'serviceStatusHistory',
 };
 const AUTO_REFRESH_MS = 60000;
 const EVENTS_LIVE_REFRESH_MS = 60000;
@@ -207,6 +208,40 @@ function keepPreviousValue(previousValue, nextValue) {
   if (typeof nextValue === 'string' && nextValue.trim() === '') return previousValue;
   if (Array.isArray(nextValue) && nextValue.length === 0) return Array.isArray(previousValue) ? previousValue : nextValue;
   return nextValue;
+}
+
+function isUnknownStatusValue(value) {
+  if (value === undefined || value === null) return true;
+  const text = String(value).trim().toLowerCase();
+  return !text || text === '-' || text === 'inconnu' || text === 'inconnue' || text === 'unknown';
+}
+
+function readStatusHistory() {
+  const history = readSnapshot(STORAGE_KEYS.serviceStatusHistory);
+  return history && typeof history === 'object' ? history : {};
+}
+
+function rememberStatusValue(key, value) {
+  const history = readStatusHistory();
+  const nextHistory = {
+    ...history,
+    [key]: {
+      value,
+      updatedAt: Date.now(),
+    },
+  };
+  saveSnapshot(STORAGE_KEYS.serviceStatusHistory, nextHistory);
+}
+
+function keepLastKnownStatus(key, candidateValue) {
+  const history = readStatusHistory();
+  const known = history[key]?.value;
+  if (!isUnknownStatusValue(candidateValue)) {
+    rememberStatusValue(key, candidateValue);
+    return candidateValue;
+  }
+  if (!isUnknownStatusValue(known)) return known;
+  return candidateValue;
 }
 
 function mergeHomeLiveSnapshot(previous = {}, next = {}) {
@@ -3270,22 +3305,28 @@ function renderBisonFuteSummary(bison = {}) {
   const isereTomorrow = tomorrow.isere || {};
   const nationalToday = today.national || {};
   const nationalTomorrow = tomorrow.national || {};
-  setText('bison-status', `${bison.status || 'inconnu'} · Isère départ ${isereToday.departure || 'inconnu'} / retour ${isereToday.return || 'inconnu'}`);
+  const isereDeparture = keepLastKnownStatus('bison_isere_departure', isereToday.departure || 'inconnu');
+  const isereReturn = keepLastKnownStatus('bison_isere_return', isereToday.return || 'inconnu');
+  const nationalDeparture = keepLastKnownStatus('bison_national_departure', nationalToday.departure || 'inconnu');
+  const nationalReturn = keepLastKnownStatus('bison_national_return', nationalToday.return || 'inconnu');
+  const nationalTomorrowDeparture = keepLastKnownStatus('bison_national_tomorrow_departure', nationalTomorrow.departure || 'inconnu');
+  const nationalTomorrowReturn = keepLastKnownStatus('bison_national_tomorrow_return', nationalTomorrow.return || 'inconnu');
+  setText('bison-status', `${bison.status || 'inconnu'} · Isère départ ${isereDeparture} / retour ${isereReturn}`);
   const lastUpdate = bison.updated_at ? new Date(bison.updated_at).toLocaleTimeString() : 'non précisée';
   const liveCount = cachedBisonLiveEvents.length;
-  setText('bison-info', `National J0: ${nationalToday.departure || 'inconnu'} / ${nationalToday.return || 'inconnu'} · J1: ${nationalTomorrow.departure || 'inconnu'} / ${nationalTomorrow.return || 'inconnu'} · Événements trafic Isère: ${liveCount} · MAJ ${lastUpdate}`);
-  setText('map-bison-isere', `${isereToday.departure || 'inconnu'} (retour ${isereToday.return || 'inconnu'})`);
-  setText('home-feature-bison-isere', `${isereToday.departure || 'inconnu'} / ${isereToday.return || 'inconnu'}`);
-  setHtml('bison-isere-square', bisonTrafficSplitBar(isereToday.departure || 'inconnu', isereToday.return || 'inconnu'));
+  setText('bison-info', `National J0: ${nationalDeparture} / ${nationalReturn} · J1: ${nationalTomorrowDeparture} / ${nationalTomorrowReturn} · Événements trafic Isère: ${liveCount} · MAJ ${lastUpdate}`);
+  setText('map-bison-isere', `${isereDeparture} (retour ${isereReturn})`);
+  setText('home-feature-bison-isere', `${isereDeparture} / ${isereReturn}`);
+  setHtml('bison-isere-square', bisonTrafficSplitBar(isereDeparture, isereReturn));
 
   const bisonMarkup = [
-    `<li><strong>Aujourd'hui (${today.date || '-'})</strong><br>Isère départ: ${isereToday.departure || 'inconnu'} · Isère retour: ${isereToday.return || 'inconnu'}<br>National départ: ${nationalToday.departure || 'inconnu'} · National retour: ${nationalToday.return || 'inconnu'}<br><a href="https://www.bison-fute.gouv.fr" target="_blank" rel="noreferrer">Voir la carte Bison Futé</a></li>`,
+    `<li><strong>Aujourd'hui (${today.date || '-'})</strong><br>Isère départ: ${isereDeparture} · Isère retour: ${isereReturn}<br>National départ: ${nationalDeparture} · National retour: ${nationalReturn}<br><a href="https://www.bison-fute.gouv.fr" target="_blank" rel="noreferrer">Voir la carte Bison Futé</a></li>`,
     `<li><strong>Demain (${tomorrow.date || '-'})</strong><br>Isère départ: ${isereTomorrow.departure || 'inconnu'} · Isère retour: ${isereTomorrow.return || 'inconnu'}<br>National départ: ${nationalTomorrow.departure || 'inconnu'} · National retour: ${nationalTomorrow.return || 'inconnu'}</li>`,
   ].join('');
   setHtml('bison-list', bisonMarkup);
 
   const communiqueMarkup = [
-    `<li><strong>Communiqué du jour (${today.date || '-'})</strong><br>Isère: départ <strong>${escapeHtml(isereToday.departure || 'inconnu')}</strong> · retour <strong>${escapeHtml(isereToday.return || 'inconnu')}</strong><br>National: départ ${escapeHtml(nationalToday.departure || 'inconnu')} · retour ${escapeHtml(nationalToday.return || 'inconnu')}<br><span class="muted">Dernière mise à jour: ${escapeHtml(lastUpdate)}</span><br><a href="https://www.bison-fute.gouv.fr/previsions.html" target="_blank" rel="noreferrer">Lire le communiqué Bison Futé</a></li>`,
+    `<li><strong>Communiqué du jour (${today.date || '-'})</strong><br>Isère: départ <strong>${escapeHtml(isereDeparture)}</strong> · retour <strong>${escapeHtml(isereReturn)}</strong><br>National: départ ${escapeHtml(nationalDeparture)} · retour ${escapeHtml(nationalReturn)}<br><span class="muted">Dernière mise à jour: ${escapeHtml(lastUpdate)}</span><br><a href="https://www.bison-fute.gouv.fr/previsions.html" target="_blank" rel="noreferrer">Lire le communiqué Bison Futé</a></li>`,
     `<li><strong>Communiqué de demain (${tomorrow.date || '-'})</strong><br>Isère: départ <strong>${escapeHtml(isereTomorrow.departure || 'inconnu')}</strong> · retour <strong>${escapeHtml(isereTomorrow.return || 'inconnu')}</strong><br>National: départ ${escapeHtml(nationalTomorrow.departure || 'inconnu')} · retour ${escapeHtml(nationalTomorrow.return || 'inconnu')}<br><a href="https://www.bison-fute.gouv.fr/previsions.html" target="_blank" rel="noreferrer">Voir les prévisions J+1</a></li>`,
   ].join('');
   setHtml('bison-communique-list', communiqueMarkup);
@@ -4298,8 +4339,10 @@ function renderExternalRisks(data = {}) {
   renderElectricityStatus(electricity);
   const atmoToday = atmo?.today || {};
   const atmoLevel = normalizeLevel(atmoToday.level || 'inconnu');
-  const atmoLabel = String(atmoToday.label || atmoLevel || 'inconnu').toLowerCase();
-  setRiskText('atmo-status', `${atmo.status || 'inconnu'} · indice ${atmoToday.index ?? '-'}`, atmoToday.level || 'vert');
+  const atmoLabelRaw = String(atmoToday.label || atmoLevel || 'inconnu').toLowerCase();
+  const atmoLabel = keepLastKnownStatus('atmo_label', atmoLabelRaw);
+  const atmoIndex = keepLastKnownStatus('atmo_index', atmoToday.index ?? '-');
+  setRiskText('atmo-status', `${atmo.status || 'inconnu'} · indice ${atmoIndex}`, atmoToday.level || 'vert');
   setText('atmo-info', `${atmoToday.date || 'date inconnue'} · niveau ${atmoLabel}${atmo.has_pollution_episode ? ' · épisode en cours' : ''}`);
   setRiskText('anfr-status', `${anfr.status || 'inconnu'} · ${anfr.supports_total ?? 0} support(s)`, anfr.status === 'online' ? 'vert' : 'jaune');
   setText('anfr-info', `${anfr.stations_total ?? 0} station(s) · hauteur moyenne ${anfr.average_support_height_m ?? '-'} m`);
@@ -5413,17 +5456,13 @@ function renderHomeLiveStatus(data = {}) {
   document.getElementById('home-seismic-state').textContent = data.georisques?.highest_seismic_zone_label || 'inconnue';
   document.getElementById('home-flood-docs').textContent = String(data.georisques?.flood_documents_total ?? 0);
 
-  document.getElementById('home-feature-global-risk').textContent = normalizeLevel(dashboard.global_risk || '-');
-  document.getElementById('home-feature-river-risk').textContent = normalizeLevel(dashboard.crues || '-');
-  document.getElementById('home-feature-seismic-risk').textContent = data.georisques?.highest_seismic_zone_label || 'inconnue';
-
-  setRiskText('home-feature-meteo', normalizeLevel(dashboard.vigilance || '-'), dashboard.vigilance || 'vert');
-  setRiskText('home-feature-vigicrues', normalizeLevel(data.vigicrues?.water_alert_level || '-'), data.vigicrues?.water_alert_level || 'vert');
-  document.getElementById('home-feature-crisis-count').textContent = String(dashboard.communes_crise ?? 0);
+  const isereBisonDeparture = keepLastKnownStatus('home_bison_departure', data.bison_fute?.today?.isere?.departure || 'inconnu');
+  const isereBisonReturn = keepLastKnownStatus('home_bison_return', data.bison_fute?.today?.isere?.return || 'inconnu');
+  const homeAtmoLabel = keepLastKnownStatus('home_atmo_label', String(data.atmo_aura?.today?.label || normalizeLevel(data.atmo_aura?.today?.level || 'inconnu')).toLowerCase());
 
   document.getElementById('home-feature-itinisere-status').textContent = data.itinisere?.status || 'inconnu';
   document.getElementById('home-feature-itinisere-events').textContent = String(data.itinisere?.events_count ?? 0);
-  document.getElementById('home-feature-bison-isere').textContent = `${data.bison_fute?.today?.isere?.departure || 'inconnu'} / ${data.bison_fute?.today?.isere?.return || 'inconnu'}`;
+  document.getElementById('home-feature-bison-isere').textContent = `${isereBisonDeparture} / ${isereBisonReturn}`;
 
   setRiskText('home-indication-meteo', normalizeLevel(dashboard.vigilance || '-'), dashboard.vigilance || 'vert');
   setRiskText('home-indication-crues', normalizeLevel(dashboard.crues || '-'), dashboard.crues || 'vert');
@@ -5432,7 +5471,9 @@ function renderHomeLiveStatus(data = {}) {
   document.getElementById('home-indication-seismic').textContent = data.georisques?.highest_seismic_zone_label || 'inconnue';
   document.getElementById('home-indication-traffic').textContent = String(data.itinisere?.events_count ?? 0);
   document.getElementById('home-indication-flood-docs').textContent = String(data.georisques?.flood_documents_total ?? 0);
-  document.getElementById('home-indication-bison').textContent = `${data.bison_fute?.today?.isere?.departure || 'inconnu'} / ${data.bison_fute?.today?.isere?.return || 'inconnu'}`;
+  document.getElementById('home-indication-bison').textContent = `${isereBisonDeparture} / ${isereBisonReturn}`;
+  document.getElementById('home-indication-atmo').textContent = homeAtmoLabel;
+  document.getElementById('home-indication-itinisere').textContent = `${data.itinisere?.status || 'inconnu'} · ${data.itinisere?.events_count ?? 0} évén.`;
 
   renderHomeMeteoSituation(data.meteo_france?.current_situation || []);
 
