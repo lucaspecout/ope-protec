@@ -122,6 +122,27 @@ label { display: block; margin-bottom: .8rem; }
 .feature-card h3 { margin-bottom: .7rem; }
 .feature-card p { margin-bottom: .5rem; display: flex; justify-content: space-between; gap: .4rem; }
 .feature-card p strong { color: #123b85; }
+
+.home-situation-window { grid-column: 1 / -1; }
+.home-situation-window .muted { margin: 0 0 .65rem; }
+.home-situation-values {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: .5rem;
+}
+.home-situation-values p {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: .5rem .6rem;
+  background: #f7faff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+}
+.home-situation-values span { color: var(--muted); font-size: .9rem; }
+.home-situation-values strong { color: #123b85; }
 .connectors, .quick-actions { padding: 1rem; }
 .connector-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: .65rem; }
 .connector-grid article { border: 1px solid var(--line); border-radius: 12px; padding: .75rem; background: #f7faff; }
