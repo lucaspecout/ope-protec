@@ -66,10 +66,16 @@
         </article>
       </section>
 
-      <section id="home-features" class="home-grid">
-        <article class="panel feature-card home-situation-window">
-          <h3>Indication de situation (mode non connecté)</h3>
-          <p class="muted">Vue simplifiée des principales valeurs par thématique.</p>
+      <section id="home-features" class="home-guest-layout">
+        <article class="panel home-guest-overview">
+          <div class="home-guest-overview__head">
+            <div>
+              <p class="tag">Mode non connecté</p>
+              <h3>Vue synthèse Isère</h3>
+              <p class="muted">Un seul écran clair pour suivre l'essentiel sans doublons.</p>
+            </div>
+            <span class="home-guest-pill">Live public</span>
+          </div>
           <div class="home-situation-values">
             <p><span>Météo</span><strong id="home-indication-meteo">-</strong></p>
             <p><span>Crues</span><strong id="home-indication-crues">-</strong></p>
@@ -79,26 +85,17 @@
             <p><span>Événements voirie</span><strong id="home-indication-traffic">0</strong></p>
             <p><span>Inondation (docs)</span><strong id="home-indication-flood-docs">0</strong></p>
             <p><span>Bison Futé (38)</span><strong id="home-indication-bison">-</strong></p>
+            <p><span>Qualité de l'air</span><strong id="home-indication-atmo">-</strong></p>
+            <p><span>Itinisère</span><strong id="home-indication-itinisere">-</strong></p>
           </div>
         </article>
-        <article class="panel feature-card">
-          <h3>Risques départementaux</h3>
-          <p>Risque global <strong id="home-feature-global-risk">-</strong></p>
-          <p>Crues <strong id="home-feature-river-risk">-</strong></p>
-          <p>Sismicité max <strong id="home-feature-seismic-risk">-</strong></p>
-        </article>
-        <article class="panel feature-card">
-          <h3>Vigilance actuelle</h3>
-          <p>Météo-France <strong id="home-feature-meteo">-</strong></p>
-          <p>Vigicrues <strong id="home-feature-vigicrues">-</strong></p>
-          <p>Communes en crise <strong id="home-feature-crisis-count">0</strong></p>
-        </article>
-        <article class="panel feature-card">
-          <h3>Mobilité & voirie</h3>
+
+        <article class="panel home-guest-focus">
+          <h3>Mobilité du jour</h3>
+          <p>Bison Futé départ/arrivée <strong id="home-feature-bison-isere">-</strong></p>
           <p>Statut Itinisère <strong id="home-feature-itinisere-status">-</strong></p>
           <p>Événements en cours <strong id="home-feature-itinisere-events">0</strong></p>
-          <p>Bison Futé (38) <strong id="home-feature-bison-isere">-</strong></p>
-          <p class="muted">Vue consolidée des perturbations routières et tendances trafic en Isère.</p>
+          <p class="muted">Les valeurs restent stables même si un flux remonte temporairement « inconnu ».</p>
         </article>
       </section>
 
