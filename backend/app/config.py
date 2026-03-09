@@ -15,6 +15,11 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("GEORISQUES_API_TOKEN", "GEORISQUE_API_TOKEN"),
     )
+    db_pool_size: int = 12
+    db_max_overflow: int = 24
+    db_pool_timeout_seconds: int = 30
+    db_pool_recycle_seconds: int = 1800
+    external_fetch_workers: int = 6
 
     class Config:
         env_file = ".env"
