@@ -210,6 +210,13 @@ function keepPreviousValue(previousValue, nextValue) {
   return nextValue;
 }
 
+function keepPreviousArray(previousValue, nextValue) {
+  if (Array.isArray(nextValue) && nextValue.length > 0) return nextValue;
+  if (Array.isArray(previousValue) && previousValue.length > 0) return previousValue;
+  if (Array.isArray(nextValue)) return nextValue;
+  return Array.isArray(previousValue) ? previousValue : [];
+}
+
 function isUnknownStatusValue(value) {
   if (value === undefined || value === null) return true;
   const text = String(value).trim().toLowerCase();
@@ -3016,10 +3023,11 @@ function startMapAnnotationsSync() {
 async function loadMapPoints() {
   let loadedPoints = [];
   let usedCacheFallback = false;
+  const previousPoints = Array.isArray(mapPoints) ? mapPoints : [];
 
   try {
     const response = await api('/map/points');
-    loadedPoints = Array.isArray(response) ? response : [];
+    loadedPoints = keepPreviousArray(previousPoints, response);
     localStorage.setItem(STORAGE_KEYS.mapPointsCache, JSON.stringify(loadedPoints));
   } catch (error) {
     usedCacheFallback = true;
@@ -4523,14 +4531,15 @@ function applyMunicipalityFilters() {
 }
 
 async function loadMunicipalities(preloaded = null) {
+  const previousMunicipalities = Array.isArray(cachedMunicipalityRecords) ? cachedMunicipalityRecords : [];
   let municipalities = [];
   if (Array.isArray(preloaded)) {
-    municipalities = preloaded;
+    municipalities = keepPreviousArray(previousMunicipalities, preloaded);
     localStorage.setItem(STORAGE_KEYS.municipalitiesCache, JSON.stringify(municipalities));
   } else {
     try {
       const payload = await api('/municipalities');
-      municipalities = Array.isArray(payload) ? payload : [];
+      municipalities = keepPreviousArray(previousMunicipalities, payload);
       localStorage.setItem(STORAGE_KEYS.municipalitiesCache, JSON.stringify(municipalities));
     } catch (error) {
       try {
@@ -4603,8 +4612,9 @@ function renderLogsList() {
 }
 
 async function loadLogs(preloaded = null) {
+  const previousLogs = Array.isArray(cachedLogs) ? cachedLogs : [];
   const logs = Array.isArray(preloaded) ? preloaded : await api('/logs');
-  cachedLogs = Array.isArray(logs) ? logs : [];
+  cachedLogs = keepPreviousArray(previousLogs, logs);
   saveSnapshot(STORAGE_KEYS.logsSnapshot, cachedLogs);
   renderLogsList();
   renderSituationOverview();
@@ -4624,7 +4634,8 @@ async function exportLogsCsv() {
 
 async function loadUsers(preloaded = null) {
   if (!canManageUsers()) return;
-  const users = Array.isArray(preloaded) ? preloaded : await api('/auth/users');
+  const usersSnapshot = readSnapshot(STORAGE_KEYS.usersSnapshot);
+  const users = keepPreviousArray(Array.isArray(usersSnapshot) ? usersSnapshot : [], Array.isArray(preloaded) ? preloaded : await api('/auth/users'));
   saveSnapshot(STORAGE_KEYS.usersSnapshot, users);
   const isAdmin = currentUser?.role === 'admin';
   setHtml('users-table', users.map((u) => {
@@ -5405,7 +5416,7 @@ async function refreshLiveEvents() {
         api('/dashboard', { cacheTtlMs: 0, bypassCache: true }),
       ]);
 
-      cachedLogs = Array.isArray(logs) ? logs : [];
+      cachedLogs = keepPreviousArray(cachedLogs, logs);
       renderLogsList();
 
       cachedDashboardSnapshot = dashboard && typeof dashboard === 'object'
