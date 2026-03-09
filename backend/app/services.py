@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 import re
 import unicodedata
+from random import uniform
 from time import sleep
 from threading import Lock
 from typing import Any
@@ -142,12 +143,13 @@ def _http_get_with_retries(request: Request, timeout: int = 10, retries: int = 2
             last_error = exc
             if attempt >= retries or not _is_retryable_network_error(exc):
                 raise
-            sleep(retry_delay_seconds * (attempt + 1))
+            backoff = retry_delay_seconds * (2 ** attempt)
+            sleep(backoff + uniform(0, 0.35))
     raise last_error or RuntimeError("Échec HTTP inattendu")
 
 
 def _http_get_json(url: str, timeout: int = 12, headers: dict[str, str] | None = None) -> Any:
-    request_headers = {"User-Agent": "ope-protec/1.0"}
+    request_headers = {"User-Agent": "ope-protec/1.0", "Connection": "keep-alive"}
     if headers:
         request_headers.update(headers)
     request = Request(url, headers=request_headers)
@@ -156,7 +158,7 @@ def _http_get_json(url: str, timeout: int = 12, headers: dict[str, str] | None =
 
 
 def _http_get_text(url: str, timeout: int = 12) -> str:
-    request = Request(url, headers={"User-Agent": "ope-protec/1.0"})
+    request = Request(url, headers={"User-Agent": "ope-protec/1.0", "Connection": "keep-alive"})
     payload = _http_get_with_retries(request=request, timeout=timeout)
     return payload.decode("utf-8", errors="ignore")
 
