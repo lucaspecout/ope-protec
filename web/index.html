@@ -693,14 +693,9 @@
                   </label>
                   <label><input id="filter-traffic-incidents" type="checkbox" checked /> Bison Futé Isère (données trafic)
                     <select id="filter-bison-type" aria-label="Filtrer les événements Bison Futé Isère">
-                      <option value="all">Tous les événements</option>
-                      <option value="ralentissement">Ralentissements</option>
-                      <option value="reduction_voie">Réductions de voie</option>
-                      <option value="travaux">Travaux</option>
+                      <option value="alea" selected>Aléas routiers (accidents + dangers)</option>
                       <option value="accident">Accidents</option>
-                      <option value="incident">Incidents</option>
                       <option value="danger">Dangers</option>
-                      <option value="info">Infos circulation</option>
                     </select>
                   </label>
                   <label><input id="filter-cameras" type="checkbox" checked /> Camera</label>
@@ -723,7 +718,6 @@
               <p>Niveau météo <strong id="meteo-level">-</strong></p>
               <p>Risques météo concernés <strong id="meteo-hazards">-</strong></p>
               <p>Niveau hydrologique <strong id="river-level">-</strong></p>
-              <p>Bison Futé Isère (départs) <strong id="map-bison-isere">-</strong></p>
               <p class="muted" id="map-source">Source carte: chargement…</p>
               <h4>Points opérationnels personnalisés</h4>
               <ul id="custom-points-list" class="list practical"></ul>
@@ -743,8 +737,6 @@
               <ul id="pcs-list" class="list practical"></ul>
               <h4>Alertes mobilité Itinisère</h4>
               <ul id="itinerary-list" class="list practical"></ul>
-              <h4>Tendance Bison Futé</h4>
-              <ul id="bison-list" class="list practical"></ul>
             </div>
           </div>
         </section>
