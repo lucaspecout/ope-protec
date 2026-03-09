@@ -685,18 +685,26 @@ function apiOrigins() {
   const origins = [window.location.origin];
   const { protocol, hostname, port } = window.location;
   const isDefaultWebPort = (protocol === 'https:' && (port === '' || port === '443')) || (protocol === 'http:' && (port === '' || port === '80'));
+  const lowerHostname = String(hostname || '').toLowerCase();
+  const isLocalHostname = ['localhost', '127.0.0.1', '::1'].includes(lowerHostname);
+  const isPrivateNetworkHostname = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(lowerHostname);
+  const canProbeDirectPort = isLocalHostname || isPrivateNetworkHostname;
 
   if (hostname) {
     const preferredProtocol = protocol === 'https:' ? 'https:' : 'http:';
-    origins.push(`${preferredProtocol}//${hostname}:1182`);
-    if (preferredProtocol === 'https:') origins.push(`http://${hostname}:1182`);
+    if (canProbeDirectPort) {
+      origins.push(`${preferredProtocol}//${hostname}:1182`);
+      if (preferredProtocol === 'https:') origins.push(`http://${hostname}:1182`);
+    }
     if (isDefaultWebPort) origins.push(`${preferredProtocol}//${hostname}`);
   }
 
-  origins.push(
-    'http://localhost:1182',
-    'http://127.0.0.1:1182',
-  );
+  if (canProbeDirectPort) {
+    origins.push(
+      'http://localhost:1182',
+      'http://127.0.0.1:1182',
+    );
+  }
 
   return Array.from(new Set(origins));
 }
