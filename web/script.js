@@ -754,7 +754,7 @@ function showLogin() { setVisibility(homeView, false); setVisibility(loginView, 
 function showApp() { setVisibility(homeView, false); setVisibility(loginView, false); setVisibility(appView, true); }
 
 function apiOrigins() {
-  const origins = [window.location.origin];
+  const origins = [];
   const { protocol, hostname, port } = window.location;
   const isDefaultWebPort = (protocol === 'https:' && (port === '' || port === '443')) || (protocol === 'http:' && (port === '' || port === '80'));
   const lowerHostname = String(hostname || '').toLowerCase();
@@ -765,9 +765,11 @@ function apiOrigins() {
   if (hostname) {
     const preferredProtocol = protocol === 'https:' ? 'https:' : 'http:';
     origins.push(`${preferredProtocol}//${hostname}:1182`);
-    if (canProbeDirectPort && preferredProtocol === 'https:') origins.push(`http://${hostname}:1182`);
+    if (preferredProtocol === 'https:') origins.push(`http://${hostname}:1182`);
     if (isDefaultWebPort) origins.push(`${preferredProtocol}//${hostname}`);
   }
+
+  origins.push(window.location.origin);
 
   if (canProbeDirectPort) {
     origins.push(
