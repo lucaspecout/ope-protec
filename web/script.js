@@ -2982,7 +2982,7 @@ async function renderTrafficOnMap() {
       const markerIcon = sourceLabel === 'Bison Futé' ? bisonDivIcon(point) : itinisereDivIcon(point);
       const marker = window.L.marker([coords.lat, coords.lon], { icon: markerIcon });
       marker.bindPopup(trafficPopupDetails(point, sourceLabel, bisonTrafficTypeLabel(trafficType)));
-      marker.addTo(bisonLayer);
+      marker.addTo(sourceLabel === 'Bison Futé' ? bisonLayer : itinisereLayer);
       mapStats.traffic += 1;
     });
   }
