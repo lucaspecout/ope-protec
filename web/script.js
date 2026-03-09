@@ -19,7 +19,7 @@ const EVENTS_LIVE_REFRESH_MS = 60000;
 const HOME_LIVE_REFRESH_MS = 300000;
 const API_CACHE_TTL_MS = 300000;
 const API_PANEL_REFRESH_MS = 60000;
-const API_MAX_CONCURRENT_REQUESTS = 1;
+const API_MAX_CONCURRENT_REQUESTS = 3;
 const API_REQUEST_TIMEOUT_MS = 15000;
 const LOGIN_REQUEST_TIMEOUT_MS = 4000;
 const API_RETRY_BASE_DELAY_MS = 400;
@@ -178,6 +178,7 @@ let cachedDashboardSnapshot = {};
 let cachedExternalRisksSnapshot = {};
 let isereBoundaryGeometry = null;
 let trafficRenderSequence = 0;
+let mapSearchController = null;
 
 function trafficIconZoomClass(zoom = 9) {
   if (zoom <= 7) return 'traffic-zoom-xs';
@@ -762,14 +763,16 @@ function apiOrigins() {
   const isPrivateNetworkHostname = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(lowerHostname);
   const canProbeDirectPort = isLocalHostname || isPrivateNetworkHostname;
 
+  origins.push(window.location.origin);
+
   if (hostname) {
     const preferredProtocol = protocol === 'https:' ? 'https:' : 'http:';
-    origins.push(`${preferredProtocol}//${hostname}:1182`);
-    if (preferredProtocol === 'https:') origins.push(`http://${hostname}:1182`);
     if (isDefaultWebPort) origins.push(`${preferredProtocol}//${hostname}`);
+    if (canProbeDirectPort) {
+      origins.push(`${preferredProtocol}//${hostname}:1182`);
+      if (preferredProtocol === 'https:') origins.push(`http://${hostname}:1182`);
+    }
   }
-
-  origins.push(window.location.origin);
 
   if (canProbeDirectPort) {
     origins.push(
@@ -2243,8 +2246,33 @@ async function handleMapSearch() {
     setMapFeedback('Saisissez un lieu ou une commune pour lancer la recherche.');
     return;
   }
+
+  if (query.length < 3) {
+    const localResult = tryLocalMapSearch(query);
+    if (!localResult) {
+      setMapFeedback('Ajoutez au moins 3 caractères pour une recherche externe.', true);
+      return;
+    }
+    placeSearchResult(localResult.lat, localResult.lon, localResult.label);
+    setMapFeedback(`Résultat local: ${localResult.label}`);
+    return;
+  }
+
+  if (mapSearchController) mapSearchController.abort();
+  mapSearchController = new AbortController();
+
   try {
-    const response = await queueApiRequest(() => fetchWithTimeout(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query + ', Isère, France')}`));
+    const response = await fetchWithTimeout(
+      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query + ', Isère, France')}`,
+      {
+        signal: mapSearchController.signal,
+        headers: {
+          Accept: 'application/json',
+          'Accept-Language': 'fr',
+        },
+      },
+      7000,
+    );
     const payload = await parseJsonResponse(response, 'nominatim');
     if (!payload?.length) {
       const localResult = tryLocalMapSearch(query);
@@ -2260,7 +2288,8 @@ async function handleMapSearch() {
     const lon = Number(payload[0].lon);
     placeSearchResult(lat, lon, payload[0].display_name);
     setMapFeedback(`Recherche OK: ${payload[0].display_name}`);
-  } catch {
+  } catch (error) {
+    if (error?.name === 'AbortError' || error?.cause?.name === 'AbortError') return;
     const localResult = tryLocalMapSearch(query);
     if (!localResult) {
       setMapFeedback('Service de recherche temporairement indisponible.', true);
@@ -2268,6 +2297,8 @@ async function handleMapSearch() {
     }
     placeSearchResult(localResult.lat, localResult.lon, localResult.label);
     setMapFeedback(`Service externe indisponible, résultat local: ${localResult.label}`);
+  } finally {
+    mapSearchController = null;
   }
 }
 
