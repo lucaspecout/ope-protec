@@ -21,6 +21,7 @@ const API_CACHE_TTL_MS = 300000;
 const API_PANEL_REFRESH_MS = 60000;
 const API_MAX_CONCURRENT_REQUESTS = 1;
 const API_REQUEST_TIMEOUT_MS = 15000;
+const LOGIN_REQUEST_TIMEOUT_MS = 4000;
 const API_RETRY_BASE_DELAY_MS = 400;
 const API_MAX_RETRIES_GET = 2;
 const API_MAX_RETRIES_NON_GET = 1;
@@ -1063,9 +1064,9 @@ function queueApiRequest(task) {
   });
 }
 
-async function fetchWithTimeout(url, options = {}) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = API_REQUEST_TIMEOUT_MS) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), API_REQUEST_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, { ...options, signal: controller.signal });
   } catch (error) {
@@ -1085,20 +1086,27 @@ function canRetryRequest(error, attempt, method) {
   return Boolean(error?.isTimeout || isNetworkFetchError(error) || String(error?.message || '').includes('Réponse non-JSON'));
 }
 
-async function requestApiAcrossOrigins(path, fetchOptions = {}, { logoutOn401 = true, highPriority = false } = {}) {
+async function requestApiAcrossOrigins(path, fetchOptions = {}, {
+  logoutOn401 = true,
+  highPriority = false,
+  maxRetries,
+  timeoutMs = API_REQUEST_TIMEOUT_MS,
+} = {}) {
   const headers = { ...(fetchOptions.headers || {}) };
   const method = String(fetchOptions.method || 'GET').toUpperCase();
   if (token && !fetchOptions.omitAuth) headers.Authorization = `Bearer ${token}`;
 
   let lastError = null;
   const origins = prioritizedApiOrigins();
-  const maxRetries = method === 'GET' ? API_MAX_RETRIES_GET : API_MAX_RETRIES_NON_GET;
+  const resolvedMaxRetries = Number.isInteger(maxRetries) && maxRetries >= 0
+    ? maxRetries
+    : (method === 'GET' ? API_MAX_RETRIES_GET : API_MAX_RETRIES_NON_GET);
 
-  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+  for (let attempt = 0; attempt <= resolvedMaxRetries; attempt += 1) {
     for (const origin of origins) {
       const url = buildApiUrl(path, origin);
       try {
-        const runFetch = () => fetchWithTimeout(url, { ...fetchOptions, headers });
+        const runFetch = () => fetchWithTimeout(url, { ...fetchOptions, headers }, timeoutMs);
         const response = await (highPriority ? runFetch() : queueApiRequest(runFetch));
         const payload = await parseJsonResponse(response, path);
         if (!response.ok) {
@@ -1116,7 +1124,7 @@ async function requestApiAcrossOrigins(path, fetchOptions = {}, { logoutOn401 = 
       }
     }
 
-    if (!canRetryRequest(lastError, attempt, method)) break;
+    if (!canRetryRequest(lastError, attempt, method) || attempt >= resolvedMaxRetries) break;
     const backoffMs = API_RETRY_BASE_DELAY_MS * (2 ** attempt);
     await wait(backoffMs);
   }
@@ -1131,6 +1139,8 @@ async function api(path, options = {}) {
     cacheTtlMs = API_CACHE_TTL_MS,
     bypassCache = false,
     highPriority = false,
+    timeoutMs = API_REQUEST_TIMEOUT_MS,
+    maxRetries,
     ...fetchOptions
   } = options;
   const cacheable = !bypassCache && isCacheableRequest(path, fetchOptions);
@@ -1146,7 +1156,12 @@ async function api(path, options = {}) {
     }
   }
 
-  const requestPromise = requestApiAcrossOrigins(path, { ...fetchOptions, omitAuth }, { logoutOn401, highPriority });
+  const requestPromise = requestApiAcrossOrigins(path, { ...fetchOptions, omitAuth }, {
+    logoutOn401,
+    highPriority,
+    timeoutMs,
+    maxRetries,
+  });
 
   if (!cacheable) {
     const responsePayload = await requestPromise;
@@ -5672,6 +5687,8 @@ loginForm.addEventListener('submit', async (event) => {
       logoutOn401: false,
       omitAuth: true,
       highPriority: true,
+      timeoutMs: LOGIN_REQUEST_TIMEOUT_MS,
+      maxRetries: 0,
     });
     token = result.access_token;
     localStorage.setItem(STORAGE_KEYS.token, token);
