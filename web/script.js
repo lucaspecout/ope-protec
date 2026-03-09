@@ -202,6 +202,8 @@ let iserePopulationLoaded = false;
 let telecomPointsCache = [];
 let telecomLoaded = false;
 let cachedHomeLiveSnapshot = {};
+let lastRenderedExternalRisksSignature = null;
+let lastRenderedApiInterconnectionsSignature = null;
 
 function keepPreviousValue(previousValue, nextValue) {
   if (nextValue === undefined || nextValue === null) return previousValue;
@@ -985,6 +987,22 @@ function hydrateUiFromLocalCache() {
 function clonePayload(payload) {
   if (payload == null) return payload;
   return JSON.parse(JSON.stringify(payload));
+}
+
+function createComparablePayload(value, ignoredKeys = new Set()) {
+  if (Array.isArray(value)) return value.map((item) => createComparablePayload(item, ignoredKeys));
+  if (!value || typeof value !== 'object') return value;
+  const output = {};
+  Object.keys(value).sort().forEach((key) => {
+    if (ignoredKeys.has(key)) return;
+    output[key] = createComparablePayload(value[key], ignoredKeys);
+  });
+  return output;
+}
+
+function createPayloadSignature(payload, ignoredKeys = []) {
+  const ignored = new Set(Array.isArray(ignoredKeys) ? ignoredKeys : []);
+  return JSON.stringify(createComparablePayload(payload, ignored));
 }
 
 function isCacheableRequest(path, fetchOptions = {}) {
@@ -4371,6 +4389,10 @@ async function loadDashboard() {
 }
 
 function renderExternalRisks(data = {}) {
+  const signature = createPayloadSignature(data, ['updated_at', 'fetched_at', 'retrieved_at']);
+  if (signature === lastRenderedExternalRisksSignature) return false;
+
+  lastRenderedExternalRisksSignature = signature;
   cachedExternalRisksSnapshot = data && typeof data === 'object' ? data : {};
   const meteo = data?.meteo_france || {};
   const vigicrues = data?.vigicrues || {};
@@ -4453,6 +4475,7 @@ function renderExternalRisks(data = {}) {
   setText('map-flood-docs', String(georisques.flood_documents_total ?? 0));
   renderStations(cachedVigicruesPayload);
   renderSituationOverview();
+  return true;
 }
 
 async function loadExternalRisks() {
@@ -4471,6 +4494,10 @@ async function loadExternalRisks() {
 }
 
 function renderApiInterconnections(data = {}) {
+  const signature = createPayloadSignature(data, ['updated_at', 'fetched_at', 'retrieved_at']);
+  if (signature === lastRenderedApiInterconnectionsSignature) return false;
+
+  lastRenderedApiInterconnectionsSignature = signature;
   const services = [
     { key: 'meteo_france', label: 'Météo-France', level: normalizeLevel(data.meteo_france?.level || 'inconnu'), details: data.meteo_france?.info_state || data.meteo_france?.bulletin_title || '-' },
     { key: 'vigicrues', label: 'Vigicrues', level: normalizeLevel(data.vigicrues?.water_alert_level || 'inconnu'), details: `${(data.vigicrues?.stations || []).length} station(s)` },
@@ -4512,6 +4539,7 @@ function renderApiInterconnections(data = {}) {
   setText('api-error-banner', activeErrors.join(' · ') || 'Aucune erreur active sur les interconnexions.');
   setHtml('api-service-grid', cards || '<p>Aucun service disponible.</p>');
   setHtml('api-raw-list', rawBlocks || '<p>Aucun retour JSON disponible.</p>');
+  return true;
 }
 
 async function loadApiInterconnections(forceRefresh = false) {
