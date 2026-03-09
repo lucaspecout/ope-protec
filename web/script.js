@@ -2319,8 +2319,8 @@ function bisonTrafficTypeLabel(type = '') {
 }
 
 function selectedBisonTrafficTypes() {
-  const selected = document.getElementById('filter-bison-type')?.value || 'all';
-  if (selected === 'all') return ['ralentissement', 'reduction_voie', 'travaux', 'accident', 'incident', 'danger', 'info'];
+  const selected = document.getElementById('filter-bison-type')?.value || 'alea';
+  if (selected === 'alea' || selected === 'all') return ['accident', 'danger'];
   return [selected];
 }
 
