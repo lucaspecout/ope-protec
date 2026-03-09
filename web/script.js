@@ -2451,10 +2451,12 @@ function bisonTrafficTypeLabel(type = '') {
   }[type] || 'Info circulation');
 }
 
-function selectedBisonTrafficTypes() {
-  const selected = document.getElementById('filter-bison-type')?.value || 'alea';
-  if (selected === 'alea' || selected === 'all') return ['accident', 'danger'];
-  return [selected];
+function selectedTrafficFilter() {
+  const selected = document.getElementById('filter-bison-type')?.value || 'all';
+  if (selected === 'all') return { source: 'all', types: null };
+  if (selected === 'itinisere') return { source: 'itinisere', types: null };
+  if (selected === 'alea') return { source: 'all', types: ['accident', 'danger'] };
+  return { source: 'all', types: [selected] };
 }
 
 function parseTrafficDate(value = '') {
@@ -2965,14 +2967,18 @@ async function renderTrafficOnMap() {
 
   const showTrafficIncidents = document.getElementById('filter-traffic-incidents')?.checked ?? true;
   if (showTrafficIncidents) {
-    const selectedTypes = selectedBisonTrafficTypes();
+    const selectedFilter = selectedTrafficFilter();
     const trafficEvents = [
       ...filterCurrentTrafficEvents(cachedItinisereEvents).map((event) => ({ ...event, source: 'itinisere' })),
       ...filterCurrentTrafficEvents(cachedBisonLiveEvents).map((event) => ({ ...event, source: 'bison_fute' })),
     ];
     const points = await buildItinisereMapPoints(trafficEvents);
     if (renderSequence !== trafficRenderSequence) return;
-    const filteredPoints = points.filter((point) => selectedTypes.includes(bisonIsereTrafficType(point)));
+    const filteredPoints = points.filter((point) => {
+      if (selectedFilter.source === 'itinisere' && String(point.source || '') !== 'itinisere') return false;
+      if (!selectedFilter.types) return true;
+      return selectedFilter.types.includes(bisonIsereTrafficType(point));
+    });
     filteredPoints.forEach((point) => {
       const coords = normalizeMapCoordinates(point.lat, point.lon);
       if (!coords) return;
