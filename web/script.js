@@ -18,7 +18,7 @@ const AUTO_REFRESH_MS = 60000;
 const EVENTS_LIVE_REFRESH_MS = 60000;
 const HOME_LIVE_REFRESH_MS = 300000;
 const API_CACHE_TTL_MS = 300000;
-const API_PANEL_REFRESH_MS = 300000;
+const API_PANEL_REFRESH_MS = 60000;
 const API_MAX_CONCURRENT_REQUESTS = 1;
 const API_REQUEST_TIMEOUT_MS = 15000;
 const API_RETRY_BASE_DELAY_MS = 400;
@@ -312,6 +312,68 @@ function mergeHomeLiveSnapshot(previous = {}, next = {}) {
       ...prevMeteo,
       ...nextMeteo,
       current_situation: keepPreviousValue(prevMeteo.current_situation, nextMeteo.current_situation),
+    },
+  };
+}
+
+function mergeExternalRisksSnapshot(previous = {}, next = {}) {
+  const prevMeteo = previous.meteo_france || {};
+  const nextMeteo = next.meteo_france || {};
+  const prevVigicrues = previous.vigicrues || {};
+  const nextVigicrues = next.vigicrues || {};
+  const prevItinisere = previous.itinisere || {};
+  const nextItinisere = next.itinisere || {};
+  const prevBison = previous.bison_fute || {};
+  const nextBison = next.bison_fute || {};
+  const prevSncf = previous.sncf_isere || {};
+  const nextSncf = next.sncf_isere || {};
+
+  return {
+    ...previous,
+    ...next,
+    updated_at: keepPreviousValue(previous.updated_at, next.updated_at),
+    meteo_france: {
+      ...prevMeteo,
+      ...nextMeteo,
+      level: keepPreviousValue(prevMeteo.level, nextMeteo.level),
+      hazards: keepPreviousArray(prevMeteo.hazards, nextMeteo.hazards),
+      current_situation: keepPreviousArray(prevMeteo.current_situation, nextMeteo.current_situation),
+    },
+    vigicrues: {
+      ...prevVigicrues,
+      ...nextVigicrues,
+      water_alert_level: keepPreviousValue(prevVigicrues.water_alert_level, nextVigicrues.water_alert_level),
+      stations: keepPreviousArray(prevVigicrues.stations, nextVigicrues.stations),
+      troncons: keepPreviousArray(prevVigicrues.troncons, nextVigicrues.troncons),
+    },
+    itinisere: {
+      ...prevItinisere,
+      ...nextItinisere,
+      status: keepPreviousValue(prevItinisere.status, nextItinisere.status),
+      events_total: keepPreviousValue(prevItinisere.events_total, nextItinisere.events_total),
+      events: keepPreviousArray(prevItinisere.events, nextItinisere.events),
+    },
+    bison_fute: {
+      ...prevBison,
+      ...nextBison,
+      events: keepPreviousArray(prevBison.events, nextBison.events),
+      live_events: keepPreviousArray(prevBison.live_events, nextBison.live_events),
+      today: {
+        ...(prevBison.today || {}),
+        ...(nextBison.today || {}),
+        isere: {
+          ...((prevBison.today || {}).isere || {}),
+          ...((nextBison.today || {}).isere || {}),
+          departure: keepPreviousValue((prevBison.today || {}).isere?.departure, (nextBison.today || {}).isere?.departure),
+          return: keepPreviousValue((prevBison.today || {}).isere?.return, (nextBison.today || {}).isere?.return),
+        },
+      },
+    },
+    sncf_isere: {
+      ...prevSncf,
+      ...nextSncf,
+      alerts_total: keepPreviousValue(prevSncf.alerts_total, nextSncf.alerts_total),
+      alerts: keepPreviousArray(prevSncf.alerts, nextSncf.alerts),
     },
   };
 }
@@ -4396,13 +4458,15 @@ function renderExternalRisks(data = {}) {
 async function loadExternalRisks() {
   const cached = readSnapshot(STORAGE_KEYS.externalRisksSnapshot);
   if (cached) {
-    renderExternalRisks(cached);
+    cachedExternalRisksSnapshot = cached;
+    renderExternalRisks(cachedExternalRisksSnapshot);
     renderTrafficOnMap().catch(() => {});
   }
 
   const data = await api('/external/isere/risks?refresh=true', { bypassCache: true });
-  renderExternalRisks(data);
-  saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, data);
+  cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, data);
+  renderExternalRisks(cachedExternalRisksSnapshot);
+  saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
   await renderTrafficOnMap();
 }
 
@@ -4454,11 +4518,15 @@ async function loadApiInterconnections(forceRefresh = false) {
   const suffix = forceRefresh ? '?refresh=true' : '';
   if (!forceRefresh) {
     const cached = readSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot);
-    if (cached) renderApiInterconnections(cached);
+    if (cached) {
+      cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, cached);
+      renderApiInterconnections(cachedExternalRisksSnapshot);
+    }
   }
   const data = await api(`/external/isere/risks${suffix}`);
-  renderApiInterconnections(data);
-  saveSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot, data);
+  cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, data);
+  renderApiInterconnections(cachedExternalRisksSnapshot);
+  saveSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot, cachedExternalRisksSnapshot);
 }
 
 function renderMunicipalitiesList(municipalities = []) {
