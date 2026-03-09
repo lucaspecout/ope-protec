@@ -764,10 +764,8 @@ function apiOrigins() {
 
   if (hostname) {
     const preferredProtocol = protocol === 'https:' ? 'https:' : 'http:';
-    if (canProbeDirectPort) {
-      origins.push(`${preferredProtocol}//${hostname}:1182`);
-      if (preferredProtocol === 'https:') origins.push(`http://${hostname}:1182`);
-    }
+    origins.push(`${preferredProtocol}//${hostname}:1182`);
+    if (canProbeDirectPort && preferredProtocol === 'https:') origins.push(`http://${hostname}:1182`);
     if (isDefaultWebPort) origins.push(`${preferredProtocol}//${hostname}`);
   }
 
