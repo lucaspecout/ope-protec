@@ -2882,6 +2882,38 @@ def _bison_datex_severity(category: str, overall_severity: str) -> str:
     return mapped or _bison_event_severity(category)
 
 
+def _bison_datex_first_text(record: ET.Element, *paths: str) -> str:
+    for path in paths:
+        value = str(record.findtext(path) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _bison_datex_vehicle_restriction(record: ET.Element) -> str:
+    groups = []
+    for group in record.findall(".//{*}groupOfVehicles"):
+        labels = [
+            str(group.findtext("{*}vehicleType") or "").strip(),
+            str(group.findtext("{*}vehicleEquipment") or "").strip(),
+            str(group.findtext("{*}vehicleStatus") or "").strip(),
+        ]
+        text = ", ".join([label for label in labels if label])
+        if text:
+            groups.append(text)
+    return " · ".join(groups)
+
+
+def _bison_datex_location_summary(record: ET.Element) -> str:
+    details = [
+        _bison_datex_first_text(record, ".//{*}specificLocation"),
+        _bison_datex_first_text(record, ".//{*}fromLocation/{*}descriptor/{*}values/{*}value"),
+        _bison_datex_first_text(record, ".//{*}toLocation/{*}descriptor/{*}values/{*}value"),
+    ]
+    cleaned = [detail for detail in details if detail]
+    return " → ".join(cleaned)
+
+
 def _fetch_bison_fute_isere_live_events() -> dict[str, Any]:
     events_url = _bison_dataset_events_url()
     try:
@@ -2910,6 +2942,19 @@ def _fetch_bison_fute_isere_live_events() -> dict[str, Any]:
                 cause_type = str(record.findtext(".//{*}causeType") or "")
                 category = _bison_event_category(f"{xsi_type} {cause_type} {title} {description}")
                 event_id = str(record.attrib.get("id") or f"{situation_id}-{len(events)+1}" or f"bison-{len(events)+1}")
+                validity_start = _bison_datex_first_text(record, ".//{*}overallStartTime")
+                validity_end = _bison_datex_first_text(record, ".//{*}overallEndTime")
+                direction = _bison_datex_first_text(record, ".//{*}affectedDirection")
+                carriageway = _bison_datex_first_text(record, ".//{*}carriageway")
+                lane_status = _bison_datex_first_text(record, ".//{*}laneStatus")
+                mobility = _bison_datex_first_text(record, ".//{*}mobility")
+                road_name = road_label or _bison_datex_first_text(record, ".//{*}roadNumber")
+                location_summary = _bison_datex_location_summary(record)
+                vehicle_restriction = _bison_datex_vehicle_restriction(record)
+                mandatory = any((
+                    str(record.findtext(".//{*}complianceOption") or "").strip().lower() in {"mandatory", "obligatory"},
+                    str(record.findtext(".//{*}forVehiclesWithCharacteristicsOf/hazardousGoodsType") or "").strip(),
+                ))
 
                 events.append(
                     {
@@ -2921,6 +2966,16 @@ def _fetch_bison_fute_isere_live_events() -> dict[str, Any]:
                         "lat": coords[0],
                         "lon": coords[1],
                         "link": events_url,
+                        "road": road_name,
+                        "location_summary": location_summary,
+                        "validity_start": validity_start,
+                        "validity_end": validity_end,
+                        "direction": direction,
+                        "carriageway": carriageway,
+                        "lane_status": lane_status,
+                        "mobility": mobility,
+                        "vehicle_restriction": vehicle_restriction,
+                        "mandatory": mandatory,
                     }
                 )
 
