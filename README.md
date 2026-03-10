@@ -14,10 +14,64 @@ Ou via script:
 ./scripts/install.sh
 ```
 
+## Optimisation Docker / conteneurs (fluidité + stabilité)
+
+Pour améliorer la fluidité des requêtes et réduire les bugs en production, appliquez ces optimisations en priorité :
+
+1. **Séparer le backend API du frontend Nginx**
+   - Aujourd'hui, le service `web` mélange Nginx + backend Python.
+   - Créer un service `api` dédié (Uvicorn/Gunicorn) + un service `web` statique simplifie le debug, améliore l'isolation des pannes et permet de scaler uniquement l'API.
+
+2. **Utiliser une image Redis figée et plus sûre**
+   - Remplacer `redis:latest` par `redis:7-alpine` pour éviter les changements inattendus lors des mises à jour.
+   - Ajouter `--maxmemory` et une politique d’éviction (`allkeys-lru` par exemple) pour éviter les saturations mémoire.
+
+3. **Durcir les limites ressources + réservations**
+   - Conserver des limites (`mem_limit`) mais ajouter aussi des contraintes CPU et des réservations minimales.
+   - Objectif : éviter qu’un conteneur monopolise l’hôte et dégrade les temps de réponse des autres services.
+
+4. **Rendre les healthchecks plus applicatifs**
+   - DB/Redis : OK actuellement.
+   - API : ajouter un endpoint `/health` vérifiant DB + Redis + dépendances critiques.
+   - Nginx : healthcheck HTTP local (`curl -f http://localhost/`).
+
+5. **Optimiser le serveur Python pour la charge**
+   - Passer de `uvicorn` simple à `gunicorn` + workers `uvicorn` (ex: `2-4` workers selon CPU).
+   - Paramétrer `--timeout`, `--keep-alive`, et activer les logs d’accès pour identifier les lenteurs.
+
+6. **Activer un pool de connexions DB + timeouts SQL**
+   - Configurer SQLAlchemy (ou équivalent) avec `pool_size`, `max_overflow`, `pool_recycle`.
+   - Ajouter des timeouts de requêtes pour éviter les blocages qui se propagent à toute l’application.
+
+7. **Réduire la taille des images Docker**
+   - Multi-stage build pour éviter les dépendances de build en runtime.
+   - Installer uniquement les paquets système strictement nécessaires.
+   - Bénéfice : démarrage plus rapide, moins de surface de bug/sécurité.
+
+8. **Mettre en place observabilité minimale**
+   - Logs JSON structurés (API + Nginx), corrélation par `request_id`.
+   - Métriques techniques : latence p95/p99, taux d’erreur, saturation CPU/RAM, connexions DB.
+   - Sans métriques, difficile d’identifier la vraie cause des lenteurs.
+
+9. **Sécuriser la configuration runtime**
+   - Sortir les secrets (`SECRET_KEY`, tokens API) du `docker-compose.yml` vers `.env`/secrets.
+   - Éviter les clés codées en dur pour prévenir les incidents et comportements incohérents entre environnements.
+
+10. **Stabiliser le cycle de livraison**
+    - Versions d’images figées (`python:3.12-slim`, `postgres:16-alpine`, `redis:7-alpine`).
+    - Pipeline CI avec tests API, smoke test Docker Compose, et vérification de migration DB.
+    - Les régressions sont détectées avant la prod, donc moins de bugs visibles.
+
+### Plan d’action rapide (fort impact)
+
+- **Étape 1 (immédiat)** : figer les versions d’images, externaliser les secrets, ajouter healthcheck API.
+- **Étape 2** : séparer `api` et `web`, configurer Gunicorn + pool DB.
+- **Étape 3** : ajouter métriques/alertes et tests de charge (`k6` ou `locust`) sur endpoints critiques.
+
 ## Accès aux services
 
 - Interface web : `http://localhost:1182`
-- API backend (via le conteneur web) : `http://localhost:1182`
+- API backend (reverse-proxy via Nginx) : `http://localhost:1182`
 - PostgreSQL : `localhost:5432` (base `veille`, utilisateur `postgres`, mot de passe `postgres`)
 - Redis : `localhost:6379`
 
@@ -30,7 +84,8 @@ Ou via script:
 
 ## Architecture
 
-- `web` : interface dashboard + API FastAPI (Nginx + HTML/CSS/JS + Uvicorn)
+- `web` : frontend statique (Nginx + HTML/CSS/JS)
+- `api` : backend FastAPI exécuté via Gunicorn + workers Uvicorn
 - `db` : PostgreSQL 16 avec script d'initialisation
 - `redis` : Redis 7 avec persistance AOF
 

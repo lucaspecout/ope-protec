@@ -29,22 +29,32 @@ services:
       timeout: 5s
       retries: 5
 
-  web:
+  api:
     build:
-      context: .
-      dockerfile: web/Dockerfile
+      context: ./backend
+      dockerfile: Dockerfile
     restart: always
     mem_limit: 1g
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/veille
       REDIS_URL: redis://redis:6379/0
       SECRET_KEY: change-me-in-production
-      GEORISQUES_API_TOKEN: eyJhbGciOiJIUzI1NiJ9.eyJub20iOiJQRUNPVVQiLCJwcmVub20iOiJMdWNhcyBGZXJuYW5kIiwiZW1haWwiOiJsdWNhc3BlY291dEBnbWFpbC5jb20iLCJleHAiOjE4MDMxNjgwMDAsImlhdCI6MTc3MTcwMTg1OH0.0vvegNEtb8ZVbdepBJ2yxunLR_JycuPAtnV_ODsZWS0
+      GEORISQUES_API_TOKEN: ${GEORISQUES_API_TOKEN:-}
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    restart: always
+    mem_limit: 512m
+    depends_on:
+      api:
+        condition: service_started
     ports:
       - "1182:80"
 
