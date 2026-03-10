@@ -359,13 +359,8 @@ def serialize_document(document: MunicipalityDocument, db: Session) -> Municipal
 
 
 def _warmup_external_sources() -> None:
-    """Charge un premier snapshot partagé dès le démarrage du serveur."""
-    try:
-        payload = build_external_risks_payload(refresh=True)
-        _set_external_risks_snapshot(payload)
-    except Exception:
-        # Le warmup ne doit jamais empêcher le démarrage de l'API.
-        return
+    """Démarre un premier rafraîchissement partagé dès le démarrage du serveur."""
+    trigger_external_risks_refresh(db=None)
 
 
 def _set_external_risks_snapshot(payload: dict) -> None:
@@ -380,14 +375,9 @@ def _get_external_risks_snapshot() -> dict:
 
 
 def _continuous_external_refresh() -> None:
-    """Met à jour les caches de supervision même sans utilisateur connecté."""
+    """Planifie un rafraîchissement de supervision périodique sans chevauchement."""
     while True:
-        try:
-            payload = build_external_risks_payload(refresh=True)
-            _set_external_risks_snapshot(payload)
-        except Exception:
-            # La boucle continue même en cas d'erreur externe.
-            pass
+        trigger_external_risks_refresh(db=None)
         sleep(EXTERNAL_REFRESH_INTERVAL_SECONDS)
 
 
