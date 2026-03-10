@@ -772,7 +772,12 @@ def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str])
     }
 
 
-def build_external_risks_pending_payload(db: Session | None = None, refresh: bool = False) -> dict:
+def build_external_risks_pending_payload(
+    db: Session | None = None,
+    refresh: bool = False,
+    base_snapshot: dict | None = None,
+    current_key: str | None = None,
+) -> dict:
     pcs_commune_names: list[str] = []
     if db is not None:
         pcs_commune_names = [
@@ -783,17 +788,30 @@ def build_external_risks_pending_payload(db: Session | None = None, refresh: boo
     jobs = build_external_risks_fetch_jobs(refresh=refresh, pcs_commune_names=pcs_commune_names)
     payload = {"updated_at": utc_timestamp()}
     for key, (_, fallback) in jobs.items():
-        payload[key] = dict(fallback)
+        source_payload = base_snapshot.get(key) if isinstance(base_snapshot, dict) else None
+        service_payload = dict(source_payload) if isinstance(source_payload, dict) else dict(fallback)
+        if current_key:
+            if key == current_key:
+                service_payload["status"] = "pending"
+                service_payload.pop("error", None)
+            elif not isinstance(source_payload, dict) and service_payload.get("status") == "pending":
+                service_payload["status"] = "idle"
+        payload[key] = service_payload
     payload["refresh"] = {
         "in_progress": True,
         "completed": 0,
         "total": len(jobs),
-        "current": "Préparation des flux externes",
+        "current": current_key or "Préparation des flux externes",
     }
     return payload
 
 
-def build_external_risks_payload(refresh: bool = False, db: Session | None = None, progress_callback: Callable[[str, dict, int, int], None] | None = None) -> dict:
+def build_external_risks_payload(
+    refresh: bool = False,
+    db: Session | None = None,
+    progress_callback: Callable[[str, dict, int, int], None] | None = None,
+    pre_fetch_callback: Callable[[str, int, int], None] | None = None,
+) -> dict:
     errors: dict[str, str] = {}
     errors_lock = Lock()
     pcs_commune_names: list[str] = []
@@ -823,6 +841,8 @@ def build_external_risks_payload(refresh: bool = False, db: Session | None = Non
     total_jobs = len(fetch_jobs)
 
     for key, (fetcher, fallback) in fetch_jobs.items():
+        if pre_fetch_callback is not None:
+            pre_fetch_callback(key, completed, total_jobs)
         results[key] = safe_fetch(key, fetcher, fallback)
         completed += 1
         if progress_callback is not None:
@@ -848,15 +868,46 @@ def trigger_external_risks_refresh(db: Session | None = None) -> None:
             return
         _external_risks_refresh_in_progress = True
 
-    _set_external_risks_snapshot(build_external_risks_pending_payload(db=db, refresh=True))
+    jobs_order = list(build_external_risks_fetch_jobs(refresh=True, pcs_commune_names=[]).keys())
+    first_job = jobs_order[0] if jobs_order else None
+    _set_external_risks_snapshot(
+        build_external_risks_pending_payload(
+            db=db,
+            refresh=True,
+            base_snapshot=_get_external_risks_snapshot(),
+            current_key=first_job,
+        )
+    )
 
     def run_refresh() -> None:
         global _external_risks_refresh_in_progress
         local_db: Session | None = None
         try:
             local_db = SessionLocal()
-            incremental_payload = build_external_risks_pending_payload(db=local_db, refresh=True)
             jobs = list(build_external_risks_fetch_jobs(refresh=True, pcs_commune_names=[]).keys())
+            incremental_payload = build_external_risks_pending_payload(
+                db=local_db,
+                refresh=True,
+                base_snapshot=_get_external_risks_snapshot(),
+                current_key=jobs[0] if jobs else None,
+            )
+
+            def pre_fetch_callback(key: str, completed: int, total: int) -> None:
+                incremental_payload.update(
+                    build_external_risks_pending_payload(
+                        db=local_db,
+                        refresh=True,
+                        base_snapshot=incremental_payload,
+                        current_key=key,
+                    )
+                )
+                incremental_payload["refresh"] = {
+                    "in_progress": True,
+                    "completed": completed,
+                    "total": total,
+                    "current": key,
+                }
+                _set_external_risks_snapshot(incremental_payload)
 
             def progress_callback(key: str, data: dict, completed: int, total: int) -> None:
                 incremental_payload[key] = data
@@ -868,7 +919,12 @@ def trigger_external_risks_refresh(db: Session | None = None) -> None:
                 }
                 _set_external_risks_snapshot(incremental_payload)
 
-            final_payload = build_external_risks_payload(refresh=True, db=local_db, progress_callback=progress_callback)
+            final_payload = build_external_risks_payload(
+                refresh=True,
+                db=local_db,
+                progress_callback=progress_callback,
+                pre_fetch_callback=pre_fetch_callback,
+            )
             _set_external_risks_snapshot(final_payload)
         except Exception as exc:
             error_payload = _get_external_risks_snapshot() or build_external_risks_pending_payload(db=None, refresh=True)
@@ -895,13 +951,15 @@ def get_external_risks_payload(refresh: bool = False, db: Session | None = None)
 
     if refresh:
         trigger_external_risks_refresh(db=db)
-        return snapshot or build_external_risks_pending_payload(db=db, refresh=True)
+        jobs_order = list(build_external_risks_fetch_jobs(refresh=True, pcs_commune_names=[]).keys())
+        return snapshot or build_external_risks_pending_payload(db=db, refresh=True, current_key=jobs_order[0] if jobs_order else None)
 
     if has_snapshot:
         return snapshot
 
     trigger_external_risks_refresh(db=db)
-    return build_external_risks_pending_payload(db=db, refresh=True)
+    jobs_order = list(build_external_risks_fetch_jobs(refresh=True, pcs_commune_names=[]).keys())
+    return build_external_risks_pending_payload(db=db, refresh=True, current_key=jobs_order[0] if jobs_order else None)
 
 
 @app.get("/external/isere/risks")
