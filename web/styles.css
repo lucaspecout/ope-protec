@@ -823,27 +823,81 @@ svg text { font-size: 14px; fill: #17335f; }
 }
 
 
+.meteo-city-controls {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  margin: .8rem 0;
+}
+
+.meteo-city-controls select {
+  max-width: 320px;
+}
+
+.meteo-current-card,
+.meteo-day-detail {
+  border: 1px solid #d8e3f9;
+  border-radius: 12px;
+  padding: .9rem;
+  background: #f8fbff;
+  margin-bottom: .85rem;
+}
+
+.meteo-current-card h4,
+.meteo-day-detail h5 {
+  margin: 0 0 .45rem;
+  color: #173d88;
+}
+
+.meteo-current-card p,
+.meteo-day-detail p {
+  margin: .2rem 0;
+}
+
+.meteo-day-selector {
+  display: flex;
+  gap: .45rem;
+  overflow-x: auto;
+  padding-bottom: .4rem;
+  margin-bottom: .8rem;
+}
+
+.meteo-day-selector button {
+  border: 1px solid #c7d6f5;
+  background: #fff;
+  color: #173d88;
+  border-radius: 999px;
+  padding: .35rem .75rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.meteo-day-selector button.is-active {
+  background: #173d88;
+  color: #fff;
+  border-color: #173d88;
+}
+
 .meteo-kpi-grid { margin-bottom: .8rem; }
-.meteo-week-list,
-.meteo-cities-list {
+.meteo-week-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: .75rem;
   margin-bottom: 1rem;
 }
-.meteo-day-card,
-.city-card {
+
+.meteo-day-card {
   border: 1px solid #d8e3f9;
   border-radius: 12px;
   padding: .8rem;
   background: #f8fbff;
 }
-.meteo-day-card h5,
-.city-card h5 {
+
+.meteo-day-card h5 {
   margin: 0 0 .35rem;
   color: #173d88;
 }
-.meteo-day-card p,
-.city-card p {
+
+.meteo-day-card p {
   margin: .2rem 0;
 }

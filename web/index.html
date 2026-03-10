@@ -323,9 +323,23 @@
           <div class="panel-head">
             <div>
               <h3>Prévisions météo hebdomadaires · Isère</h3>
-              <p class="muted">Tendance sur 7 jours pour l'Isère et aperçu des principales villes du département.</p>
+              <p class="muted">Choisissez une ville pour voir la météo du jour en détail, puis naviguez dans la semaine.</p>
             </div>
           </div>
+          <div class="meteo-city-controls">
+            <label for="meteo-city-select">Ville</label>
+            <select id="meteo-city-select" aria-label="Sélectionner une ville"></select>
+          </div>
+
+          <article id="meteo-city-current" class="meteo-current-card">
+            <p class="muted">Chargement de la météo locale…</p>
+          </article>
+
+          <div id="meteo-day-selector" class="meteo-day-selector" role="tablist" aria-label="Sélection du jour"></div>
+          <article id="meteo-day-detail" class="meteo-day-detail">
+            <p class="muted">Sélectionnez un jour pour afficher le détail.</p>
+          </article>
+
           <div class="kpi-grid meteo-kpi-grid">
             <article class="tile"><h3>Niveau vigilance</h3><p id="meteo-week-vigilance">-</p></article>
             <article class="tile"><h3>Température max semaine</h3><p id="meteo-week-max">-</p></article>
@@ -333,11 +347,8 @@
             <article class="tile"><h3>Pluie probable (pic)</h3><p id="meteo-week-rain">-</p></article>
           </div>
 
-          <h4>Prévisions sur la semaine (Isère)</h4>
+          <h4>Vue semaine (emoji)</h4>
           <div id="meteo-week-list" class="meteo-week-list"></div>
-
-          <h4>Grandes villes de l'Isère</h4>
-          <div id="meteo-cities-list" class="meteo-cities-list"></div>
           <p id="meteo-week-updated" class="muted"></p>
         </section>
 
