@@ -344,6 +344,14 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
   const nextBison = next.bison_fute || {};
   const prevSncf = previous.sncf_isere || {};
   const nextSncf = next.sncf_isere || {};
+  const prevVigieau = previous.vigieau || {};
+  const nextVigieau = next.vigieau || {};
+  const prevAtmo = previous.atmo_aura || {};
+  const nextAtmo = next.atmo_aura || {};
+  const prevAnfr = previous.anfr_isere || {};
+  const nextAnfr = next.anfr_isere || {};
+  const prevArcep = previous.arcep_isere || {};
+  const nextArcep = next.arcep_isere || {};
 
   return {
     ...previous,
@@ -391,6 +399,39 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
       ...nextSncf,
       alerts_total: keepPreviousValue(prevSncf.alerts_total, nextSncf.alerts_total),
       alerts: keepPreviousArray(prevSncf.alerts, nextSncf.alerts),
+    },
+    vigieau: {
+      ...prevVigieau,
+      ...nextVigieau,
+      alerts: keepPreviousArray(prevVigieau.alerts, nextVigieau.alerts),
+      max_level: keepPreviousValue(prevVigieau.max_level, nextVigieau.max_level),
+    },
+    atmo_aura: {
+      ...prevAtmo,
+      ...nextAtmo,
+      today: {
+        ...(prevAtmo.today || {}),
+        ...(nextAtmo.today || {}),
+        level: keepPreviousValue((prevAtmo.today || {}).level, (nextAtmo.today || {}).level),
+        label: keepPreviousValue((prevAtmo.today || {}).label, (nextAtmo.today || {}).label),
+        index: keepPreviousValue((prevAtmo.today || {}).index, (nextAtmo.today || {}).index),
+      },
+    },
+    anfr_isere: {
+      ...prevAnfr,
+      ...nextAnfr,
+      supports_total: keepPreviousValue(prevAnfr.supports_total, nextAnfr.supports_total),
+      stations_total: keepPreviousValue(prevAnfr.stations_total, nextAnfr.stations_total),
+      average_support_height_m: keepPreviousValue(prevAnfr.average_support_height_m, nextAnfr.average_support_height_m),
+    },
+    arcep_isere: {
+      ...prevArcep,
+      ...nextArcep,
+      outages_total: keepPreviousValue(prevArcep.outages_total, nextArcep.outages_total),
+      communes_total: keepPreviousValue(prevArcep.communes_total, nextArcep.communes_total),
+      voice_impacted_total: keepPreviousValue(prevArcep.voice_impacted_total, nextArcep.voice_impacted_total),
+      data_impacted_total: keepPreviousValue(prevArcep.data_impacted_total, nextArcep.data_impacted_total),
+      top_operators: keepPreviousArray(prevArcep.top_operators, nextArcep.top_operators),
     },
   };
 }
@@ -4515,28 +4556,32 @@ async function loadDashboard() {
 }
 
 function renderExternalRisks(data = {}) {
-  const signature = createPayloadSignature(data, ['updated_at', 'fetched_at', 'retrieved_at']);
+  const mergedData = mergeExternalRisksSnapshot(
+    cachedExternalRisksSnapshot,
+    data && typeof data === 'object' ? data : {},
+  );
+  const signature = createPayloadSignature(mergedData, ['updated_at', 'fetched_at', 'retrieved_at']);
   if (signature === lastRenderedExternalRisksSignature) return false;
 
   lastRenderedExternalRisksSignature = signature;
-  cachedExternalRisksSnapshot = data && typeof data === 'object' ? data : {};
-  const meteo = data?.meteo_france || {};
-  const vigicrues = data?.vigicrues || {};
+  cachedExternalRisksSnapshot = mergedData;
+  const meteo = mergedData?.meteo_france || {};
+  const vigicrues = mergedData?.vigicrues || {};
   cachedVigicruesPayload = {
     stations: Array.isArray(vigicrues.stations) ? vigicrues.stations : [],
     troncons: Array.isArray(vigicrues.troncons) ? vigicrues.troncons : [],
   };
-  const itinisere = data?.itinisere || {};
-  const bisonFute = data?.bison_fute || {};
-  const prefecture = data?.prefecture_isere || {};
-  const dauphine = data?.dauphine_isere || {};
-  const sncf = data?.sncf_isere || {};
-  const vigieau = data?.vigieau || {};
-  const atmo = data?.atmo_aura || {};
-  const electricity = data?.electricity_isere || {};
-  const anfr = data?.anfr_isere || {};
-  const arcep = data?.arcep_isere || {};
-  const georisquesPayload = data?.georisques || {};
+  const itinisere = mergedData?.itinisere || {};
+  const bisonFute = mergedData?.bison_fute || {};
+  const prefecture = mergedData?.prefecture_isere || {};
+  const dauphine = mergedData?.dauphine_isere || {};
+  const sncf = mergedData?.sncf_isere || {};
+  const vigieau = mergedData?.vigieau || {};
+  const atmo = mergedData?.atmo_aura || {};
+  const electricity = mergedData?.electricity_isere || {};
+  const anfr = mergedData?.anfr_isere || {};
+  const arcep = mergedData?.arcep_isere || {};
+  const georisquesPayload = mergedData?.georisques || {};
   const georisques = georisquesPayload?.data && typeof georisquesPayload.data === 'object'
     ? { ...georisquesPayload.data, ...georisquesPayload }
     : georisquesPayload;
@@ -5655,8 +5700,8 @@ async function refreshLiveEvents() {
 
       renderExternalRisks(risks);
       renderSituationOverview();
-      saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, risks);
-      saveSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot, risks);
+      saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
+      saveSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot, cachedExternalRisksSnapshot);
       document.getElementById('dashboard-error').textContent = '';
     } catch (error) {
       document.getElementById('dashboard-error').textContent = `Actualisation live des évènements: ${sanitizeErrorMessage(error.message)}`;
