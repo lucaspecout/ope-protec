@@ -21,7 +21,7 @@ const API_CACHE_TTL_MS = 300000;
 const API_PANEL_REFRESH_MS = 60000;
 const API_MAX_CONCURRENT_REQUESTS = 3;
 const API_REQUEST_TIMEOUT_MS = 15000;
-const LOGIN_REQUEST_TIMEOUT_MS = 4000;
+const LOGIN_REQUEST_TIMEOUT_MS = 10000;
 const API_RETRY_BASE_DELAY_MS = 400;
 const API_MAX_RETRIES_GET = 2;
 const API_MAX_RETRIES_NON_GET = 1;
@@ -1097,7 +1097,8 @@ async function requestApiAcrossOrigins(path, fetchOptions = {}, {
   if (token && !fetchOptions.omitAuth) headers.Authorization = `Bearer ${token}`;
 
   let lastError = null;
-  const origins = prioritizedApiOrigins();
+  const isLoginRequest = String(path || '').startsWith('/auth/login');
+  const origins = isLoginRequest ? [window.location.origin] : prioritizedApiOrigins();
   const resolvedMaxRetries = Number.isInteger(maxRetries) && maxRetries >= 0
     ? maxRetries
     : (method === 'GET' ? API_MAX_RETRIES_GET : API_MAX_RETRIES_NON_GET);
