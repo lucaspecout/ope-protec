@@ -192,7 +192,6 @@ let cachedExternalRisksSnapshot = {};
 let cachedWeeklyMeteo = null;
 let weeklyMeteoInFlight = null;
 let selectedMeteoCityKey = ISERE_MAJOR_CITIES[0]?.key || 'grenoble';
-let selectedMeteoDayIndex = 0;
 let isereBoundaryGeometry = null;
 let trafficRenderSequence = 0;
 let mapSearchController = null;
@@ -4718,35 +4717,9 @@ function renderMeteoCitySelector() {
   if (select.dataset.bound === '1') return;
   select.addEventListener('change', async () => {
     selectedMeteoCityKey = select.value;
-    selectedMeteoDayIndex = 0;
     await renderWeeklyWeatherPanel(cachedExternalRisksSnapshot || {});
   });
   select.dataset.bound = '1';
-}
-
-function renderMeteoDaySelector(daily = []) {
-  const container = document.getElementById('meteo-day-selector');
-  if (!container) return;
-  if (!daily.length) {
-    container.innerHTML = '';
-    return;
-  }
-
-  selectedMeteoDayIndex = Math.min(Math.max(selectedMeteoDayIndex, 0), daily.length - 1);
-  container.innerHTML = daily.map((day, index) => {
-    const label = toFrenchDate(day.date);
-    const emoji = weatherCodeEmoji(day.weather_code);
-    const activeClass = index === selectedMeteoDayIndex ? 'is-active' : '';
-    return `<button type="button" class="${activeClass}" data-day-index="${index}" role="tab" aria-selected="${index === selectedMeteoDayIndex ? 'true' : 'false'}">${emoji} ${escapeHtml(label)}</button>`;
-  }).join('');
-
-  container.querySelectorAll('button[data-day-index]').forEach((button) => {
-    button.addEventListener('click', () => {
-      selectedMeteoDayIndex = Number(button.dataset.dayIndex || 0);
-      renderMeteoDaySelector(daily);
-      renderMeteoSelectedDayDetail(daily, getSelectedMeteoCity());
-    });
-  });
 }
 
 function renderMeteoCurrentCard(cityForecast, city) {
@@ -4769,27 +4742,6 @@ function renderMeteoCurrentCard(cityForecast, city) {
   `;
 }
 
-function renderMeteoSelectedDayDetail(daily, city) {
-  const container = document.getElementById('meteo-day-detail');
-  if (!container) return;
-  if (!daily.length) {
-    container.innerHTML = '<p class="muted">Prévisions indisponibles pour le moment.</p>';
-    return;
-  }
-  const day = daily[selectedMeteoDayIndex] || daily[0];
-  const emoji = weatherCodeEmoji(day.weather_code);
-  const label = weatherCodeLabel(day.weather_code);
-  const min = Number.isFinite(Number(day.temp_min_c)) ? `${Math.round(Number(day.temp_min_c))}°C` : 'n/d';
-  const max = Number.isFinite(Number(day.temp_max_c)) ? `${Math.round(Number(day.temp_max_c))}°C` : 'n/d';
-  const wind = Number.isFinite(Number(day.wind_speed_max_kmh)) ? `${Math.round(Number(day.wind_speed_max_kmh))} km/h` : 'n/d';
-  container.innerHTML = `
-    <h5>${emoji} ${escapeHtml(city.name)} · ${escapeHtml(toFrenchDate(day.date))}</h5>
-    <p><strong>${escapeHtml(label)}</strong></p>
-    <p>Min: <strong>${escapeHtml(min)}</strong> · Max: <strong>${escapeHtml(max)}</strong></p>
-    <p>Pluie: <strong>${escapeHtml(formatPrecipitationProbability(day.precip_probability_max))}</strong> · Vent max: <strong>${escapeHtml(wind)}</strong></p>
-  `;
-}
-
 async function renderWeeklyWeatherPanel(externalRisks = {}) {
   const meteo = externalRisks?.meteo_france || {};
   renderMeteoCitySelector();
@@ -4803,8 +4755,6 @@ async function renderWeeklyWeatherPanel(externalRisks = {}) {
 
   renderMeteoCurrentCard(cityForecast, selectedCity);
   renderMeteoHourlyForecast(cityForecast);
-  renderMeteoDaySelector(daily);
-  renderMeteoSelectedDayDetail(daily, selectedCity);
 
   if (weekList) {
     weekList.innerHTML = daily.map((day) => {
@@ -4812,8 +4762,9 @@ async function renderWeeklyWeatherPanel(externalRisks = {}) {
       const summary = weatherCodeLabel(day.weather_code);
       const min = Number.isFinite(Number(day.temp_min_c)) ? `${Math.round(Number(day.temp_min_c))}°C` : 'n/d';
       const max = Number.isFinite(Number(day.temp_max_c)) ? `${Math.round(Number(day.temp_max_c))}°C` : 'n/d';
+      const wind = Number.isFinite(Number(day.wind_speed_max_kmh)) ? `${Math.round(Number(day.wind_speed_max_kmh))} km/h` : 'n/d';
       const emoji = weatherCodeEmoji(day.weather_code);
-      return `<article class="meteo-day-card"><h5>${emoji} ${escapeHtml(dayLabel)}</h5><p>${escapeHtml(summary)}</p><p><strong>${min}</strong> · <strong>${max}</strong></p><p>Pluie: ${escapeHtml(formatPrecipitationProbability(day.precip_probability_max))}</p></article>`;
+      return `<article class="meteo-day-card"><h5>${emoji} ${escapeHtml(dayLabel)}</h5><p>${escapeHtml(summary)}</p><p><strong>${min}</strong> · <strong>${max}</strong></p><p>Pluie: ${escapeHtml(formatPrecipitationProbability(day.precip_probability_max))}</p><p>Vent max: ${escapeHtml(wind)}</p></article>`;
     }).join('') || '<p class="muted">Prévisions indisponibles pour le moment.</p>';
   }
 
