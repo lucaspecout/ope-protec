@@ -234,6 +234,7 @@ function readStatusHistory() {
 
 function rememberStatusValue(key, value) {
   const history = readStatusHistory();
+  if (history[key]?.value === value) return;
   const nextHistory = {
     ...history,
     [key]: {
@@ -253,6 +254,18 @@ function keepLastKnownStatus(key, candidateValue) {
   }
   if (!isUnknownStatusValue(known)) return known;
   return candidateValue;
+}
+
+function keepLastKnownCount(key, candidateValue, fallback = 0) {
+  const history = readStatusHistory();
+  const known = Number(history[key]?.value);
+  const candidate = Number(candidateValue);
+  if (Number.isFinite(candidate) && candidate >= 0) {
+    rememberStatusValue(key, candidate);
+    return candidate;
+  }
+  if (Number.isFinite(known) && known >= 0) return known;
+  return fallback;
 }
 
 function mergeHomeLiveSnapshot(previous = {}, next = {}) {
@@ -5676,28 +5689,34 @@ function renderHomeLiveStatus(data = {}) {
   setRiskText('home-meteo-state', normalizeLevel(dashboard.vigilance || '-'), dashboard.vigilance || 'vert');
   setRiskText('home-river-state', normalizeLevel(dashboard.crues || '-'), dashboard.crues || 'vert');
   setRiskText('home-global-risk', normalizeLevel(dashboard.global_risk || '-'), dashboard.global_risk || 'vert');
-  document.getElementById('home-crisis-count').textContent = String(dashboard.communes_crise ?? 0);
-  document.getElementById('home-seismic-state').textContent = data.georisques?.highest_seismic_zone_label || 'inconnue';
-  document.getElementById('home-flood-docs').textContent = String(data.georisques?.flood_documents_total ?? 0);
+  const crisisCount = keepLastKnownCount('home_crisis_count', dashboard.communes_crise, 0);
+  const seismicState = keepLastKnownStatus('home_seismic_state', data.georisques?.highest_seismic_zone_label || 'inconnue');
+  const floodDocs = keepLastKnownCount('home_flood_documents_total', data.georisques?.flood_documents_total, 0);
+  const itinisereStatus = keepLastKnownStatus('home_itinisere_status', data.itinisere?.status || 'inconnu');
+  const itinisereEvents = keepLastKnownCount('home_itinisere_events_count', data.itinisere?.events_count, 0);
+
+  document.getElementById('home-crisis-count').textContent = String(crisisCount);
+  document.getElementById('home-seismic-state').textContent = seismicState;
+  document.getElementById('home-flood-docs').textContent = String(floodDocs);
 
   const isereBisonDeparture = keepLastKnownStatus('home_bison_departure', data.bison_fute?.today?.isere?.departure || 'inconnu');
   const isereBisonReturn = keepLastKnownStatus('home_bison_return', data.bison_fute?.today?.isere?.return || 'inconnu');
   const homeAtmoLabel = keepLastKnownStatus('home_atmo_label', String(data.atmo_aura?.today?.label || normalizeLevel(data.atmo_aura?.today?.level || 'inconnu')).toLowerCase());
 
-  document.getElementById('home-feature-itinisere-status').textContent = data.itinisere?.status || 'inconnu';
-  document.getElementById('home-feature-itinisere-events').textContent = String(data.itinisere?.events_count ?? 0);
+  document.getElementById('home-feature-itinisere-status').textContent = itinisereStatus;
+  document.getElementById('home-feature-itinisere-events').textContent = String(itinisereEvents);
   document.getElementById('home-feature-bison-isere').textContent = `${isereBisonDeparture} / ${isereBisonReturn}`;
 
   setRiskText('home-indication-meteo', normalizeLevel(dashboard.vigilance || '-'), dashboard.vigilance || 'vert');
   setRiskText('home-indication-crues', normalizeLevel(dashboard.crues || '-'), dashboard.crues || 'vert');
   setRiskText('home-indication-global', normalizeLevel(dashboard.global_risk || '-'), dashboard.global_risk || 'vert');
-  document.getElementById('home-indication-crisis').textContent = String(dashboard.communes_crise ?? 0);
-  document.getElementById('home-indication-seismic').textContent = data.georisques?.highest_seismic_zone_label || 'inconnue';
-  document.getElementById('home-indication-traffic').textContent = String(data.itinisere?.events_count ?? 0);
-  document.getElementById('home-indication-flood-docs').textContent = String(data.georisques?.flood_documents_total ?? 0);
+  document.getElementById('home-indication-crisis').textContent = String(crisisCount);
+  document.getElementById('home-indication-seismic').textContent = seismicState;
+  document.getElementById('home-indication-traffic').textContent = String(itinisereEvents);
+  document.getElementById('home-indication-flood-docs').textContent = String(floodDocs);
   document.getElementById('home-indication-bison').textContent = `${isereBisonDeparture} / ${isereBisonReturn}`;
   document.getElementById('home-indication-atmo').textContent = homeAtmoLabel;
-  document.getElementById('home-indication-itinisere').textContent = `${data.itinisere?.status || 'inconnu'} · ${data.itinisere?.events_count ?? 0} évén.`;
+  document.getElementById('home-indication-itinisere').textContent = `${itinisereStatus} · ${itinisereEvents} évén.`;
 
   renderHomeMeteoSituation(data.meteo_france?.current_situation || []);
 
