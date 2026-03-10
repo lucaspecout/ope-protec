@@ -98,7 +98,7 @@ Pour améliorer la fluidité des requêtes et réduire les bugs en production, a
 - Gestion des communes (ajout, enrichissement contacts/informations, bascule mode crise, import ORSEC et conventions).
 - Main courante locale (ajout d’évènements horodatés).
 - Carte opérationnelle embarquée (OpenStreetMap).
-- Connexion aux flux externes Isère : Météo-France (état de disponibilité et infos vigilance), Vigicrues (stations du département + vigilances de tronçons + niveau d'alerte eau calculé), Atmo AURA (indice qualité de l'air Grenoble/Isère), RTE éCO2mix (proxy électrique régional ARA pour suivi Isère), ANFR (supports/antennes radioélectriques du 38) et ARCEP (sites mobiles indisponibles en Isère).
+- Connexion aux flux externes Isère : Météo-France (état de disponibilité et infos vigilance), Vigicrues (stations du département + vigilances de tronçons + niveau d'alerte eau calculé), Vigieau (restrictions d'eau), Hub'Eau (niveaux de nappes phréatiques), Atmo AURA (indice qualité de l'air Grenoble/Isère), RTE éCO2mix (proxy électrique régional ARA pour suivi Isère), ANFR (supports/antennes radioélectriques du 38) et ARCEP (sites mobiles indisponibles en Isère).
 
 
 ## Géorisques API v2 (clé annuelle)
@@ -143,6 +143,7 @@ Retourne un bloc consolidé :
 - `electricity_isere` : état électrique Isère via jeu officiel data.gouv RTE éCO2mix régional (consommation, production, marge de sécurité, échanges).
 - `anfr_isere` : synthèse ANFR Isère (supports recensés, stations ANFR associées, hauteur moyenne des supports).
 - `arcep_isere` : indisponibilités mobiles ARCEP sur l'Isère (volumétrie, communes touchées, opérateurs les plus impactés).
+- `groundwater_isere` : état des nappes phréatiques Hub'Eau (stations Isère, dernières mesures, tendance locale en hausse/baisse/stable).
 
 
 ## Alignement besoins métier
@@ -162,3 +163,4 @@ Retourne un bloc consolidé :
 - `GET /api/itinisere/events` : perturbations Itinisère en direct via le flux RSS officiel.
 - `GET /api/bison-fute/events` : évènements Bison Futé en direct filtrables par catégories (`accident`, `travaux`, `reduction_voie`, `danger`) avec `?categories=` et `?limit=`.
 - `GET /api/vigieau/alerts` : restrictions d'eau Vigieau pour l'Isère (actualisation optionnelle avec `?refresh=true`).
+- `GET /api/hubeau/isere/groundwater` : synthèse des nappes phréatiques Isère via Hub'Eau (actualisation avec `?refresh=true`, taille d'échantillon avec `?station_limit=`).
