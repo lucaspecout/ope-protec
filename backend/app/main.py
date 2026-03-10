@@ -127,6 +127,13 @@ with engine.begin() as conn:
         )
     """))
     conn.execute(text("ALTER TABLE map_points ADD COLUMN IF NOT EXISTS icon_url VARCHAR(512)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_weather_alerts_created_at ON weather_alerts(created_at DESC)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_river_stations_updated_at ON river_stations(updated_at DESC)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_operational_logs_created_at ON operational_logs(created_at DESC)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_operational_logs_municipality_created_at ON operational_logs(municipality_id, created_at DESC)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_municipality_documents_created_at ON municipality_documents(created_at DESC)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_municipalities_crisis_mode ON municipalities(crisis_mode)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_municipalities_pcs_active ON municipalities(pcs_active)"))
     conn.execute(text("""
         CREATE TABLE IF NOT EXISTS map_annotations (
             id SERIAL PRIMARY KEY,
@@ -176,6 +183,9 @@ ALLOWED_DOC_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
 
 _map_annotations_revision_lock = Lock()
 _map_annotations_revision = 0
+_weather_cleanup_lock = Lock()
+_last_weather_cleanup_at: datetime | None = None
+_WEATHER_CLEANUP_MIN_INTERVAL = timedelta(minutes=10)
 
 
 def bump_map_annotations_revision() -> int:
@@ -216,6 +226,21 @@ def sanitize_upload_filename(raw_filename: str | None) -> str:
 def ensure_allowed_extension(filename: str) -> None:
     if Path(filename).suffix.lower() not in ALLOWED_DOC_EXTENSIONS:
         raise HTTPException(400, "Type de fichier interdit")
+
+
+def run_weather_cleanup_if_due(db: Session) -> None:
+    global _last_weather_cleanup_at
+    now = datetime.utcnow()
+    with _weather_cleanup_lock:
+        if _last_weather_cleanup_at and (now - _last_weather_cleanup_at) < _WEATHER_CLEANUP_MIN_INTERVAL:
+            return
+        _last_weather_cleanup_at = now
+
+    try:
+        cleanup_old_weather_alerts(db)
+    except Exception:
+        # Ne jamais bloquer la réponse API pour une purge opportuniste.
+        pass
 
 
 def bootstrap_default_admin() -> None:
@@ -1105,13 +1130,13 @@ def create_weather_alert(alert: WeatherAlertCreate, db: Session = Depends(get_db
     db.add(entity)
     db.commit()
     db.refresh(entity)
-    cleanup_old_weather_alerts(db)
+    run_weather_cleanup_if_due(db)
     return entity
 
 
 @app.get("/weather/history", response_model=list[WeatherAlertOut])
 def list_weather_alerts(db: Session = Depends(get_db), _: User = Depends(require_roles(*READ_ROLES))):
-    cleanup_old_weather_alerts(db)
+    run_weather_cleanup_if_due(db)
     return db.query(WeatherAlert).order_by(WeatherAlert.created_at.desc()).all()
 
 
@@ -1288,7 +1313,24 @@ def list_municipality_files(
 ):
     ensure_municipality_scope(user, db, municipality_id)
     docs = db.query(MunicipalityDocument).filter(MunicipalityDocument.municipality_id == municipality_id).order_by(MunicipalityDocument.created_at.desc()).all()
-    return [serialize_document(doc, db) for doc in docs]
+    uploader_ids = {doc.uploaded_by_id for doc in docs}
+    uploaders = {
+        user_id: username
+        for user_id, username in db.query(User.id, User.username).filter(User.id.in_(uploader_ids)).all()
+    } if uploader_ids else {}
+
+    return [
+        MunicipalityDocumentOut(
+            id=doc.id,
+            municipality_id=doc.municipality_id,
+            doc_type=doc.doc_type,
+            title=doc.title,
+            filename=Path(doc.file_path).name,
+            uploaded_by=uploaders.get(doc.uploaded_by_id, "inconnu"),
+            created_at=doc.created_at,
+        )
+        for doc in docs
+    ]
 
 
 @app.post("/municipalities/{municipality_id}/files", response_model=MunicipalityDocumentOut)
