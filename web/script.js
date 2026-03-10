@@ -156,6 +156,7 @@ let itinisereLayer = null;
 let bisonLayer = null;
 let bisonCameraLayer = null;
 let photoCameraLayer = null;
+let auraAircraftLayer = null;
 let institutionLayer = null;
 let populationLayer = null;
 let mapTileLayer = null;
@@ -179,6 +180,7 @@ let cachedMunicipalityRecords = [];
 let cachedItinisereEvents = [];
 let cachedBisonFute = {};
 let cachedBisonLiveEvents = [];
+let cachedAuraAircraft = [];
 let geocodeCache = new Map();
 let municipalityContourCache = new Map();
 const municipalityDocumentsUiState = new Map();
@@ -1459,6 +1461,7 @@ function initMap() {
   bisonLayer = window.L.layerGroup().addTo(leafletMap);
   bisonCameraLayer = window.L.layerGroup().addTo(leafletMap);
   photoCameraLayer = window.L.layerGroup().addTo(leafletMap);
+  auraAircraftLayer = window.L.layerGroup().addTo(leafletMap);
   institutionLayer = window.L.layerGroup().addTo(leafletMap);
   populationLayer = window.L.layerGroup().addTo(leafletMap);
   leafletMap.on('click', onMapClickAddPoint);
@@ -1504,6 +1507,7 @@ async function resetMapFilters() {
   const trafficIncidents = document.getElementById('filter-traffic-incidents');
   const cameras = document.getElementById('filter-cameras');
   const googleFlow = document.getElementById('filter-google-traffic-flow');
+  const auraAircraft = document.getElementById('filter-aura-aircraft');
   const healthResources = document.getElementById('filter-resources-health');
   const commandResources = document.getElementById('filter-resources-command');
   const shelterResources = document.getElementById('filter-resources-shelter');
@@ -1523,6 +1527,7 @@ async function resetMapFilters() {
   if (shelterResources) shelterResources.checked = true;
   if (telecomResources) telecomResources.checked = false;
   if (googleFlow) googleFlow.checked = false;
+  if (auraAircraft) auraAircraft.checked = false;
   resourceVisibilityOverrides.clear();
   syncTelecomFilterState();
   if (searchLayer) searchLayer.clearLayers();
@@ -1564,7 +1569,7 @@ function toggleMapContrast() {
 
 function fitMapToData(showFeedback = false) {
   if (!leafletMap) return;
-  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsBoundaryLayer, pcsLayer, resourceLayer, institutionLayer, populationLayer, searchLayer, customPointsLayer, mapPointsLayer, itinisereLayer, bisonLayer, bisonCameraLayer, photoCameraLayer].filter(Boolean);
+  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsBoundaryLayer, pcsLayer, resourceLayer, institutionLayer, populationLayer, searchLayer, customPointsLayer, mapPointsLayer, itinisereLayer, bisonLayer, bisonCameraLayer, photoCameraLayer, auraAircraftLayer].filter(Boolean);
   const bounds = window.L.latLngBounds([]);
   layers.forEach((layer) => {
     if (layer?.getBounds) {
@@ -3030,12 +3035,13 @@ async function buildItinisereMapPoints(events = []) {
 }
 
 async function renderTrafficOnMap() {
-  if (!itinisereLayer || !bisonLayer || !bisonCameraLayer || !photoCameraLayer || typeof window.L === 'undefined') return;
+  if (!itinisereLayer || !bisonLayer || !bisonCameraLayer || !photoCameraLayer || !auraAircraftLayer || typeof window.L === 'undefined') return;
   const renderSequence = ++trafficRenderSequence;
   itinisereLayer.clearLayers();
   bisonLayer.clearLayers();
   bisonCameraLayer.clearLayers();
   photoCameraLayer.clearLayers();
+  auraAircraftLayer.clearLayers();
   mapStats.traffic = 0;
 
   const showTrafficIncidents = document.getElementById('filter-traffic-incidents')?.checked ?? true;
@@ -3085,6 +3091,24 @@ async function renderTrafficOnMap() {
       window.L.marker([coords.lat, coords.lon], { icon: pointIcon }).bindPopup(popupHtml).addTo(photoCameraLayer);
     });
     mapStats.traffic += ITINISERE_PHOTO_CAMERAS.length;
+  }
+
+
+  const showAuraAircraft = document.getElementById('filter-aura-aircraft')?.checked ?? false;
+  if (showAuraAircraft) {
+    cachedAuraAircraft.forEach((plane) => {
+      const coords = normalizeMapCoordinates(plane.lat, plane.lon);
+      if (!coords) return;
+      const callsign = escapeHtml(plane.callsign || plane.icao24 || 'Inconnu');
+      const altitude = Number.isFinite(Number(plane.geo_altitude_m)) ? `${Math.round(Number(plane.geo_altitude_m))} m` : 'inconnue';
+      const speed = Number.isFinite(Number(plane.velocity_ms)) ? `${Math.round(Number(plane.velocity_ms) * 3.6)} km/h` : 'inconnue';
+      const heading = Number.isFinite(Number(plane.heading_deg)) ? `${Math.round(Number(plane.heading_deg))}°` : 'n/a';
+      const icon = emojiDivIcon('✈️', { iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -11] });
+      window.L.marker([coords.lat, coords.lon], { icon })
+        .bindPopup(`<strong>${callsign}</strong><br>Cap: ${heading}<br>Altitude: ${altitude}<br>Vitesse: ${speed}<br>Pays: ${escapeHtml(plane.origin_country || 'n/a')}`)
+        .addTo(auraAircraftLayer);
+      mapStats.traffic += 1;
+    });
   }
 
   updateMapSummary();
@@ -4816,6 +4840,7 @@ function renderExternalRisks(data = {}) {
   };
   const itinisere = mergedData?.itinisere || {};
   const bisonFute = mergedData?.bison_fute || {};
+  const auraAircraft = mergedData?.aura_aircraft || {};
   const prefecture = mergedData?.prefecture_isere || {};
   const dauphine = mergedData?.dauphine_isere || {};
   const sncf = mergedData?.sncf_isere || {};
@@ -4846,6 +4871,13 @@ function renderExternalRisks(data = {}) {
   const itinisereTotal = Number(itinisere.events_total ?? itinisereEvents.length);
   setText('itinisere-status', `${itinisere.status || 'inconnu'} · ${itinisereTotal} événements`);
   renderBisonFuteSummary(bisonFute);
+  cachedAuraAircraft = Array.isArray(auraAircraft.aircraft)
+    ? auraAircraft.aircraft.map((aircraft) => {
+      const coords = normalizeMapCoordinates(aircraft.lat, aircraft.lon);
+      if (!coords) return null;
+      return { ...aircraft, lat: coords.lat, lon: coords.lon };
+    }).filter(Boolean)
+    : [];
   renderPrefectureNews(prefecture);
   renderDauphineNews(dauphine);
   renderSncfAlerts(sncf);
@@ -5897,7 +5929,7 @@ function bindAppInteractions() {
     }
   });
 
-  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-command', 'filter-resources-shelter', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-command', 'filter-resources-shelter', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras', 'filter-aura-aircraft'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       renderStations(cachedVigicruesPayload);
       await renderMunicipalitiesOnMap(cachedMunicipalities);
