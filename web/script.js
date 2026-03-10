@@ -15,6 +15,7 @@ const STORAGE_KEYS = {
   serviceStatusHistory: 'serviceStatusHistory',
 };
 const AUTO_REFRESH_MS = 60000;
+const AURA_AIRCRAFT_REFRESH_MS = 3000;
 const EVENTS_LIVE_REFRESH_MS = 60000;
 const HOME_LIVE_REFRESH_MS = 300000;
 const API_CACHE_TTL_MS = 300000;
@@ -121,6 +122,8 @@ let apiPanelTimer = null;
 let apiResyncTimer = null;
 let refreshAllInFlight = null;
 let photoCameraRefreshTimer = null;
+let auraAircraftRefreshTimer = null;
+let auraAircraftRefreshInFlight = null;
 let lastApiResyncAt = null;
 let isLoginSubmitting = false;
 const apiGetCache = new Map();
@@ -1538,6 +1541,7 @@ async function resetMapFilters() {
   await renderMunicipalitiesOnMap(cachedMunicipalities);
   await renderPopulationByCityLayer();
   await renderTrafficOnMap();
+  syncAuraAircraftAutoRefresh();
   renderMapChecks([]);
   setMapFeedback('Filtres carte réinitialisés.');
 }
@@ -3103,15 +3107,64 @@ async function renderTrafficOnMap() {
       const altitude = Number.isFinite(Number(plane.geo_altitude_m)) ? `${Math.round(Number(plane.geo_altitude_m))} m` : 'inconnue';
       const speed = Number.isFinite(Number(plane.velocity_ms)) ? `${Math.round(Number(plane.velocity_ms) * 3.6)} km/h` : 'inconnue';
       const heading = Number.isFinite(Number(plane.heading_deg)) ? `${Math.round(Number(plane.heading_deg))}°` : 'n/a';
+      const verticalRate = Number.isFinite(Number(plane.vertical_rate_ms)) ? `${Number(plane.vertical_rate_ms).toFixed(1)} m/s` : 'n/a';
+      const baroAltitude = Number.isFinite(Number(plane.baro_altitude_m)) ? `${Math.round(Number(plane.baro_altitude_m))} m` : 'inconnue';
+      const contactTime = Number.isFinite(Number(plane.last_contact))
+        ? new Date(Number(plane.last_contact) * 1000).toLocaleTimeString('fr-FR')
+        : 'n/a';
+      const icao24 = escapeHtml((plane.icao24 || '').toUpperCase() || 'n/a');
       const icon = emojiDivIcon('✈️', { iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -11] });
       window.L.marker([coords.lat, coords.lon], { icon })
-        .bindPopup(`<strong>${callsign}</strong><br>Cap: ${heading}<br>Altitude: ${altitude}<br>Vitesse: ${speed}<br>Pays: ${escapeHtml(plane.origin_country || 'n/a')}`)
+        .bindPopup(`<strong>${callsign}</strong><br>ICAO24: ${icao24}<br>Cap: ${heading}<br>Vitesse sol: ${speed}<br>Altitude géo: ${altitude}<br>Altitude baro: ${baroAltitude}<br>Taux vertical: ${verticalRate}<br>Position: ${coords.lat.toFixed(4)}, ${coords.lon.toFixed(4)}<br>Contact: ${contactTime}<br>État: ${plane.on_ground ? 'au sol' : 'en vol'}<br>Pays: ${escapeHtml(plane.origin_country || 'n/a')}`)
         .addTo(auraAircraftLayer);
       mapStats.traffic += 1;
     });
   }
 
   updateMapSummary();
+}
+
+async function refreshAuraAircraftLive() {
+  if (!token || document.hidden) return;
+  const showAuraAircraft = document.getElementById('filter-aura-aircraft')?.checked ?? false;
+  if (!showAuraAircraft) return;
+  if (auraAircraftRefreshInFlight) return auraAircraftRefreshInFlight;
+
+  auraAircraftRefreshInFlight = (async () => {
+    try {
+      const payload = await api('/aura/live-aircraft?refresh=true', { bypassCache: true, cacheTtlMs: 0 });
+      const aircraft = Array.isArray(payload?.aircraft) ? payload.aircraft : [];
+      cachedAuraAircraft = aircraft.map((entry) => {
+        const coords = normalizeMapCoordinates(entry.lat, entry.lon);
+        if (!coords) return null;
+        return { ...entry, lat: coords.lat, lon: coords.lon };
+      }).filter(Boolean);
+      await renderTrafficOnMap();
+    } catch (_error) {
+      // Ne pas spammer l'UI en cas d'échec transitoire sur le flux live avion.
+    } finally {
+      auraAircraftRefreshInFlight = null;
+    }
+  })();
+
+  return auraAircraftRefreshInFlight;
+}
+
+function syncAuraAircraftAutoRefresh() {
+  const showAuraAircraft = document.getElementById('filter-aura-aircraft')?.checked ?? false;
+  if (!showAuraAircraft || !token) {
+    if (auraAircraftRefreshTimer) {
+      clearInterval(auraAircraftRefreshTimer);
+      auraAircraftRefreshTimer = null;
+    }
+    return;
+  }
+
+  refreshAuraAircraftLive().catch(() => {});
+  if (auraAircraftRefreshTimer) return;
+  auraAircraftRefreshTimer = setInterval(() => {
+    refreshAuraAircraftLive().catch(() => {});
+  }, AURA_AIRCRAFT_REFRESH_MS);
 }
 
 function renderMapIconSuggestions(category = 'autre') {
@@ -5936,6 +5989,7 @@ function bindAppInteractions() {
       await renderResources();
       await renderPopulationByCityLayer();
       await renderTrafficOnMap();
+      syncAuraAircraftAutoRefresh();
     });
   });
 }
@@ -5951,6 +6005,9 @@ function logout() {
   if (apiPanelTimer) clearInterval(apiPanelTimer);
   if (apiResyncTimer) clearInterval(apiResyncTimer);
   if (photoCameraRefreshTimer) clearInterval(photoCameraRefreshTimer);
+  if (auraAircraftRefreshTimer) clearInterval(auraAircraftRefreshTimer);
+  auraAircraftRefreshTimer = null;
+  auraAircraftRefreshInFlight = null;
   stopMapAnnotationsSync();
   finishStartupQueue();
   showHome();
