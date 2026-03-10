@@ -4931,6 +4931,7 @@ function renderApiInterconnections(data = {}) {
     { key: 'atmo_aura', label: "Atmo AURA · Qualité de l'air", level: `indice ${data.atmo_aura?.today?.index ?? '-'}`, details: data.atmo_aura?.source || '-' },
     { key: 'anfr_isere', label: 'ANFR · Antennes mobiles Isère', level: `${data.anfr_isere?.supports_total ?? 0} support(s)`, details: data.anfr_isere?.data_release || '-' },
     { key: 'arcep_isere', label: 'ARCEP · Sites mobiles indisponibles', level: `${data.arcep_isere?.outages_total ?? 0} indisponibilité(s)`, details: data.arcep_isere?.resource_date || '-' },
+    { key: 'isere_opendata', label: 'Open Data Isère · Résilience territoriale', level: `${data.isere_opendata?.totals?.food_aid_points ?? 0} aides alimentaires`, details: `${data.isere_opendata?.totals?.health_centers ?? 0} maisons de santé · ${data.isere_opendata?.totals?.schools ?? 0} établissements scolaires` },
   ];
 
   const cards = services.map((service) => {
