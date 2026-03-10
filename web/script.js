@@ -30,6 +30,7 @@ const STATIC_POINTS_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const PANEL_TITLES = {
   'situation-panel': 'Situation opérationnelle',
   'services-panel': 'Services connectés',
+  'meteo-panel': 'Météo hebdomadaire Isère',
   'georisques-panel': 'Page Géorisques',
   'news-panel': 'Actualités Isère',
   'api-panel': 'Interconnexions API',
@@ -130,6 +131,17 @@ let preferredApiOrigin = window.location.origin;
 const apiOriginFailures = new Map();
 const startupQueueState = { total: 0, completed: 0, current: '' };
 
+const ISERE_MAJOR_CITIES = [
+  { name: 'Grenoble', lat: 45.1885, lon: 5.7245, population: 158180 },
+  { name: 'Saint-Martin-d’Hères', lat: 45.1656, lon: 5.7634, population: 38980 },
+  { name: 'Échirolles', lat: 45.146, lon: 5.7144, population: 36500 },
+  { name: 'Vienne', lat: 45.5257, lon: 4.8748, population: 31320 },
+  { name: 'Bourgoin-Jallieu', lat: 45.5861, lon: 5.2736, population: 28710 },
+  { name: 'Voiron', lat: 45.3659, lon: 5.5926, population: 20600 },
+  { name: 'L’Isle-d’Abeau', lat: 45.6256, lon: 5.226, population: 16840 },
+  { name: 'Meylan', lat: 45.2125, lon: 5.7773, population: 17790 },
+];
+
 let leafletMap = null;
 let boundaryLayer = null;
 let hydroLayer = null;
@@ -177,6 +189,8 @@ let cachedCrisisPoints = [];
 let cachedLogs = [];
 let cachedDashboardSnapshot = {};
 let cachedExternalRisksSnapshot = {};
+let cachedWeeklyMeteo = null;
+let weeklyMeteoInFlight = null;
 let isereBoundaryGeometry = null;
 let trafficRenderSequence = 0;
 let mapSearchController = null;
@@ -4539,6 +4553,128 @@ function renderSncfAlerts(sncf = {}) {
   }).join('') || '<li>Aucune alerte SNCF accidents/travaux en Isère pour le moment.</li>');
 }
 
+
+function formatPrecipitationProbability(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 'n/d';
+  return `${Math.max(0, Math.min(100, Math.round(numeric)))}%`;
+}
+
+function weatherCodeLabel(code) {
+  const numeric = Number(code);
+  if (!Number.isFinite(numeric)) return 'Condition non précisée';
+  const mapping = {
+    0: 'Ciel dégagé',
+    1: 'Peu nuageux',
+    2: 'Partiellement nuageux',
+    3: 'Couvert',
+    45: 'Brouillard',
+    48: 'Brouillard givrant',
+    51: 'Bruine légère',
+    53: 'Bruine',
+    55: 'Bruine dense',
+    61: 'Pluie faible',
+    63: 'Pluie modérée',
+    65: 'Pluie forte',
+    66: 'Pluie verglaçante faible',
+    67: 'Pluie verglaçante forte',
+    71: 'Neige faible',
+    73: 'Neige modérée',
+    75: 'Neige forte',
+    80: 'Averses faibles',
+    81: 'Averses modérées',
+    82: 'Averses fortes',
+    85: 'Averses de neige',
+    86: 'Fortes averses de neige',
+    95: 'Orages',
+    96: 'Orages et grêle',
+    99: 'Orages forts et grêle',
+  };
+  return mapping[numeric] || 'Condition variable';
+}
+
+function toFrenchDate(value) {
+  if (!value) return '-';
+  const date = new Date(`${value}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: '2-digit' });
+}
+
+async function fetchWeeklyIsereForecast() {
+  if (cachedWeeklyMeteo) return cachedWeeklyMeteo;
+  if (weeklyMeteoInFlight) return weeklyMeteoInFlight;
+  const url = 'https://api.open-meteo.com/v1/forecast?latitude=45.1885&longitude=5.7245&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Europe%2FParis&forecast_days=7';
+  weeklyMeteoInFlight = fetchWithTimeout(url, {}, 12000)
+    .then((response) => {
+      if (!response.ok) throw new Error(`open-meteo ${response.status}`);
+      return response.json();
+    })
+    .then((payload) => {
+      const daily = payload?.daily || {};
+      const entries = Array.isArray(daily.time) ? daily.time.map((date, index) => ({
+        date,
+        weather_code: daily.weathercode?.[index],
+        temp_max_c: daily.temperature_2m_max?.[index],
+        temp_min_c: daily.temperature_2m_min?.[index],
+        precip_probability_max: daily.precipitation_probability_max?.[index],
+      })) : [];
+      cachedWeeklyMeteo = {
+        source: 'open-meteo',
+        updated_at: new Date().toISOString(),
+        daily_forecast: entries,
+      };
+      return cachedWeeklyMeteo;
+    })
+    .catch(() => null)
+    .finally(() => {
+      weeklyMeteoInFlight = null;
+    });
+  return weeklyMeteoInFlight;
+}
+
+function renderWeeklyWeatherPanel(externalRisks = {}) {
+  const meteo = externalRisks?.meteo_france || {};
+  const dailySource = Array.isArray(meteo.daily_forecast) && meteo.daily_forecast.length ? meteo.daily_forecast : (Array.isArray(cachedWeeklyMeteo?.daily_forecast) ? cachedWeeklyMeteo.daily_forecast : []);
+  const daily = dailySource.slice(0, 7);
+  const weekList = document.getElementById('meteo-week-list');
+  const citiesList = document.getElementById('meteo-cities-list');
+
+  const maxValues = daily.map((item) => Number(item.temp_max_c)).filter(Number.isFinite);
+  const minValues = daily.map((item) => Number(item.temp_min_c)).filter(Number.isFinite);
+  const rainValues = daily.map((item) => Number(item.precip_probability_max)).filter(Number.isFinite);
+  const maxTemp = maxValues.length ? `${Math.round(Math.max(...maxValues))}°C` : 'n/d';
+  const minTemp = minValues.length ? `${Math.round(Math.min(...minValues))}°C` : 'n/d';
+  const peakRain = rainValues.length ? `${Math.round(Math.max(...rainValues))}%` : 'n/d';
+
+  setRiskText('meteo-week-vigilance', normalizeLevel(meteo.level || 'vert'), meteo.level || 'vert');
+  setText('meteo-week-max', maxTemp);
+  setText('meteo-week-min', minTemp);
+  setText('meteo-week-rain', peakRain);
+
+  if (weekList) {
+    weekList.innerHTML = daily.map((day) => {
+      const dayLabel = toFrenchDate(day.date);
+      const summary = weatherCodeLabel(day.weather_code);
+      const min = Number.isFinite(Number(day.temp_min_c)) ? `${Math.round(Number(day.temp_min_c))}°C` : 'n/d';
+      const max = Number.isFinite(Number(day.temp_max_c)) ? `${Math.round(Number(day.temp_max_c))}°C` : 'n/d';
+      return `<article class="meteo-day-card"><h5>${escapeHtml(dayLabel)}</h5><p>${escapeHtml(summary)}</p><p><strong>${min}</strong> · <strong>${max}</strong></p><p>Pluie: ${escapeHtml(formatPrecipitationProbability(day.precip_probability_max))}</p></article>`;
+    }).join('') || '<p class="muted">Prévisions indisponibles pour le moment.</p>';
+  }
+
+  if (citiesList) {
+    citiesList.innerHTML = ISERE_MAJOR_CITIES.map((city) => {
+      return `<article class="city-card"><h5>${escapeHtml(city.name)}</h5><p>Population: ${escapeHtml(city.population.toLocaleString('fr-FR'))} hab.</p><p>Coordonnées: ${escapeHtml(city.lat.toFixed(3))}, ${escapeHtml(city.lon.toFixed(3))}</p></article>`;
+    }).join('');
+  }
+
+  const updateText = cachedWeeklyMeteo?.updated_at || meteo.updated_at || externalRisks.updated_at || null;
+  const updateDate = updateText ? new Date(updateText) : null;
+  const label = updateDate && !Number.isNaN(updateDate.getTime())
+    ? `Dernière mise à jour météo: ${updateDate.toLocaleString('fr-FR')}`
+    : 'Dernière mise à jour météo: non disponible';
+  setText('meteo-week-updated', label);
+}
+
 async function loadDashboard(forceRefresh = false) {
   const cached = readSnapshot(STORAGE_KEYS.dashboardSnapshot);
   if (cached) renderDashboard(cached);
@@ -4636,6 +4772,10 @@ function renderExternalRisks(data = {}) {
   setText('georisques-info', `${georisques.flood_documents_total ?? 0} AZI · ${georisques.ppr_total ?? 0} PPR · ${georisques.ground_movements_total ?? 0} mouvements`);
   renderGeorisquesDetails(georisques);
   renderMeteoAlerts(meteo);
+  renderWeeklyWeatherPanel(mergedData);
+  fetchWeeklyIsereForecast().then((forecast) => {
+    if (forecast) renderWeeklyWeatherPanel(mergedData);
+  }).catch(() => {});
   renderItinisereEvents(itinisereEvents);
   setText('meteo-level', normalizeLevel(meteo.level || 'vert'));
   setText('meteo-hazards', (meteo.hazards || []).join(', ') || 'non précisé');

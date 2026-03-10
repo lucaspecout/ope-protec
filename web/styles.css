@@ -821,3 +821,29 @@ svg text { font-size: 14px; fill: #17335f; }
   background: linear-gradient(90deg, #30c67c 0%, #4da3ff 100%);
   transition: width 180ms ease;
 }
+
+
+.meteo-kpi-grid { margin-bottom: .8rem; }
+.meteo-week-list,
+.meteo-cities-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: .75rem;
+  margin-bottom: 1rem;
+}
+.meteo-day-card,
+.city-card {
+  border: 1px solid #d8e3f9;
+  border-radius: 12px;
+  padding: .8rem;
+  background: #f8fbff;
+}
+.meteo-day-card h5,
+.city-card h5 {
+  margin: 0 0 .35rem;
+  color: #173d88;
+}
+.meteo-day-card p,
+.city-card p {
+  margin: .2rem 0;
+}

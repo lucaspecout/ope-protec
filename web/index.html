@@ -136,6 +136,7 @@
         <nav class="side-nav" aria-label="Menu principal">
           <button class="menu-btn" data-target="situation-panel" data-icon="📊"><span class="menu-label">Situation</span></button>
           <button class="menu-btn" data-target="services-panel" data-icon="🔌"><span class="menu-label">Services connectés</span></button>
+          <button class="menu-btn" data-target="meteo-panel" data-icon="🌤️"><span class="menu-label">Météo semaine</span></button>
           <button class="menu-btn" data-target="georisques-panel" data-icon="🌍"><span class="menu-label">Page Géorisques</span></button>
           <button class="menu-btn" data-target="news-panel" data-icon="📰"><span class="menu-label">Actualités</span></button>
           <button class="menu-btn" data-target="municipalities-panel" data-icon="🏛️"><span class="menu-label">Communes</span></button>
@@ -316,6 +317,28 @@
               <ul id="arcep-list" class="list"></ul>
             </article>
           </div>
+        </section>
+
+        <section id="meteo-panel" class="panel view hidden" hidden>
+          <div class="panel-head">
+            <div>
+              <h3>Prévisions météo hebdomadaires · Isère</h3>
+              <p class="muted">Tendance sur 7 jours pour l'Isère et aperçu des principales villes du département.</p>
+            </div>
+          </div>
+          <div class="kpi-grid meteo-kpi-grid">
+            <article class="tile"><h3>Niveau vigilance</h3><p id="meteo-week-vigilance">-</p></article>
+            <article class="tile"><h3>Température max semaine</h3><p id="meteo-week-max">-</p></article>
+            <article class="tile"><h3>Température min semaine</h3><p id="meteo-week-min">-</p></article>
+            <article class="tile"><h3>Pluie probable (pic)</h3><p id="meteo-week-rain">-</p></article>
+          </div>
+
+          <h4>Prévisions sur la semaine (Isère)</h4>
+          <div id="meteo-week-list" class="meteo-week-list"></div>
+
+          <h4>Grandes villes de l'Isère</h4>
+          <div id="meteo-cities-list" class="meteo-cities-list"></div>
+          <p id="meteo-week-updated" class="muted"></p>
         </section>
 
         <section id="georisques-panel" class="panel view hidden" hidden>
