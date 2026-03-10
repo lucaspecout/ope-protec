@@ -4172,7 +4172,19 @@ function buildSitrepMapSvg(title, points = [], lines = [], options = {}) {
     <span style="background:#ecfdf3; color:#166534; border-radius:999px; padding:3px 8px;">Vue département 38</span>
   </div>`;
 
-  const background = 'https://staticmap.openstreetmap.de/staticmap.php?center=45.2,5.72&zoom=8&size=960x560&maptype=mapnik';
+  const terrainBands = [
+    '<path d="M0 210 L110 185 L190 220 L300 198 L392 226 L480 205 L480 280 L0 280 Z" fill="#d9f99d" opacity="0.45"/>',
+    '<path d="M0 150 L88 130 L176 158 L252 142 L344 164 L430 146 L480 158 L480 214 L0 214 Z" fill="#bfdbfe" opacity="0.55"/>',
+    '<path d="M0 88 L72 76 L170 102 L256 86 L340 110 L430 88 L480 98 L480 154 L0 154 Z" fill="#cbd5e1" opacity="0.50"/>',
+  ].join('');
+  const referenceGrid = Array.from({ length: 8 }).map((_, index) => {
+    const x = (index + 1) * 54;
+    return `<line x1="${x}" y1="0" x2="${x}" y2="${height}" stroke="#cbd5e1" stroke-width="0.8" opacity="0.38"/>`;
+  }).join('')
+    + Array.from({ length: 4 }).map((_, index) => {
+      const y = (index + 1) * 56;
+      return `<line x1="0" y1="${y}" x2="${width}" y2="${y}" stroke="#cbd5e1" stroke-width="0.8" opacity="0.38"/>`;
+    }).join('');
   return `<figure style="margin:10px 0 16px;">
     <figcaption style="font-weight:700; margin-bottom:6px;">${escapeHtml(title)} (centrée Isère)</figcaption>
     ${subtitle}
@@ -4183,7 +4195,9 @@ function buildSitrepMapSvg(title, points = [], lines = [], options = {}) {
           <stop offset="100%" stop-color="#bfdbfe" stop-opacity="0.06"/>
         </linearGradient>
       </defs>
-      <image href="${background}" x="0" y="0" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice" opacity="0.95"/>
+      <rect x="0" y="0" width="${width}" height="${height}" fill="#f8fafc"/>
+      ${referenceGrid}
+      ${terrainBands}
       <rect x="0" y="0" width="${width}" height="${height}" fill="url(#isere-gradient)" />
       ${frame}
       ${lineSvg}
