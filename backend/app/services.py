@@ -372,6 +372,7 @@ _ATMO_AURA_CACHE_TTL_SECONDS = 900
 _SNCF_ISERE_CACHE_TTL_SECONDS = 180
 _RTE_ELECTRICITY_CACHE_TTL_SECONDS = 300
 _FINESS_ISERE_CACHE_TTL_SECONDS = 43200
+_ISERE_OPENDATA_CACHE_TTL_SECONDS = 1800
 _ANFR_ISERE_CACHE_TTL_SECONDS = 43200
 _ARCEP_ISERE_CACHE_TTL_SECONDS = 900
 _HUBEAU_GROUNDWATER_CACHE_TTL_SECONDS = 10800
@@ -401,6 +402,8 @@ _rte_electricity_cache_lock = Lock()
 _rte_electricity_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _finess_isere_cache_lock = Lock()
 _finess_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_isere_opendata_cache_lock = Lock()
+_isere_opendata_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _anfr_isere_cache_lock = Lock()
 _anfr_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _arcep_isere_cache_lock = Lock()
@@ -2678,6 +2681,114 @@ def fetch_finess_isere_resources(force_refresh: bool = False, limit: int = 250) 
         cache=_finess_isere_cache,
         lock=_finess_isere_cache_lock,
         ttl_seconds=_FINESS_ISERE_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=loader,
+    )
+
+
+
+
+def _isere_opendata_fetch_dataset_records(dataset_id: str, select_fields: str, limit: int = 1) -> dict[str, Any]:
+    encoded_fields = quote_plus(select_fields)
+    url = (
+        f"https://opendata.isere.fr/api/explore/v2.1/catalog/datasets/{dataset_id}/records"
+        f"?select={encoded_fields}&limit={max(1, min(limit, 100))}"
+    )
+    payload = _http_get_json(url, timeout=15)
+    return payload if isinstance(payload, dict) else {}
+
+
+def _fetch_isere_opendata_resilience_live(limit: int = 80) -> dict[str, Any]:
+    safe_limit = max(20, min(limit, 200))
+
+    food = _isere_opendata_fetch_dataset_records(
+        "aide-alimentaire",
+        "commune,code_postal,structure,telephone,mail,manger_pas_cher_ou_gratuitement,distribution_de_colis_alimentaires_ou_pas_chers",
+        limit=safe_limit,
+    )
+    health = _isere_opendata_fetch_dataset_records(
+        "d38_sante_maisons_sante_pluriprofessionnelles",
+        "commune,code_postal,nom,type_structure,adresse",
+        limit=safe_limit,
+    )
+    schools = _isere_opendata_fetch_dataset_records(
+        "adresse-et-geolocalisation-des-etablissements-denseignement-du-premier-et-second",
+        "libelle_commune,code_postal_uai,appellation_officielle,denomination_principale,secteur_public_prive_libe",
+        limit=safe_limit,
+    )
+
+    food_results = food.get("results") if isinstance(food.get("results"), list) else []
+    health_results = health.get("results") if isinstance(health.get("results"), list) else []
+    school_results = schools.get("results") if isinstance(schools.get("results"), list) else []
+
+    structures_with_contacts = sum(
+        1
+        for item in food_results
+        if str(item.get("telephone") or "").strip() or str(item.get("mail") or "").strip()
+    )
+    food_distribution_points = sum(
+        1
+        for item in food_results
+        if str(item.get("distribution_de_colis_alimentaires_ou_pas_chers") or "").strip().lower() == "oui"
+    )
+
+    return {
+        "status": "online",
+        "source": "opendata.isere.fr",
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+        "datasets": [
+            {"id": "aide-alimentaire", "label": "Aide alimentaire", "total": int(food.get("total_count") or len(food_results))},
+            {"id": "d38_sante_maisons_sante_pluriprofessionnelles", "label": "Maisons de santé", "total": int(health.get("total_count") or len(health_results))},
+            {"id": "adresse-et-geolocalisation-des-etablissements-denseignement-du-premier-et-second", "label": "Établissements scolaires", "total": int(schools.get("total_count") or len(school_results))},
+        ],
+        "totals": {
+            "food_aid_points": int(food.get("total_count") or len(food_results)),
+            "health_centers": int(health.get("total_count") or len(health_results)),
+            "schools": int(schools.get("total_count") or len(school_results)),
+            "food_distribution_points_in_sample": food_distribution_points,
+            "food_points_with_contact_in_sample": structures_with_contacts,
+        },
+        "sample": {
+            "food_aid": food_results[:6],
+            "health_centers": health_results[:6],
+            "schools": school_results[:6],
+        },
+        "insights": [
+            f"{int(food.get('total_count') or len(food_results))} points d'aide alimentaire identifiés en Isère.",
+            f"{int(health.get('total_count') or len(health_results))} maisons/pôles de santé disponibles pour l'accès aux soins de proximité.",
+            f"{int(schools.get('total_count') or len(school_results))} établissements scolaires géolocalisés pour préparer des plans d'accueil/évacuation.",
+        ],
+    }
+
+
+def fetch_isere_opendata_resilience(force_refresh: bool = False, limit: int = 80) -> dict[str, Any]:
+    safe_limit = max(20, min(limit, 200))
+
+    def loader() -> dict[str, Any]:
+        try:
+            return _fetch_isere_opendata_resilience_live(limit=safe_limit)
+        except Exception as exc:
+            return {
+                "status": "degraded",
+                "source": "opendata.isere.fr",
+                "updated_at": datetime.utcnow().isoformat() + "Z",
+                "datasets": [],
+                "totals": {
+                    "food_aid_points": 0,
+                    "health_centers": 0,
+                    "schools": 0,
+                    "food_distribution_points_in_sample": 0,
+                    "food_points_with_contact_in_sample": 0,
+                },
+                "sample": {"food_aid": [], "health_centers": [], "schools": []},
+                "insights": [],
+                "error": str(exc),
+            }
+
+    return _cached_external_payload(
+        cache=_isere_opendata_cache,
+        lock=_isere_opendata_cache_lock,
+        ttl_seconds=_ISERE_OPENDATA_CACHE_TTL_SECONDS,
         force_refresh=force_refresh,
         loader=loader,
     )
