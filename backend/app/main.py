@@ -3,7 +3,6 @@ from copy import deepcopy
 from pathlib import Path
 import re
 import secrets
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock, Thread
 from time import sleep
 from typing import Callable
@@ -823,26 +822,11 @@ def build_external_risks_payload(refresh: bool = False, db: Session | None = Non
     completed = 0
     total_jobs = len(fetch_jobs)
 
-    with ThreadPoolExecutor(max_workers=min(settings.external_fetch_workers, total_jobs)) as executor:
-        future_map = {
-            executor.submit(safe_fetch, key, fetcher, fallback): (key, fallback)
-            for key, (fetcher, fallback) in fetch_jobs.items()
-        }
-        for future in as_completed(future_map):
-            key, fallback = future_map[future]
-            try:
-                results[key] = future.result()
-            except Exception as exc:
-                with errors_lock:
-                    errors[key] = str(exc)
-                payload = dict(fallback)
-                payload["status"] = "unavailable"
-                payload.setdefault("error", str(exc))
-                payload.setdefault("updated_at", utc_timestamp())
-                results[key] = payload
-            completed += 1
-            if progress_callback is not None:
-                progress_callback(key, results[key], completed, total_jobs)
+    for key, (fetcher, fallback) in fetch_jobs.items():
+        results[key] = safe_fetch(key, fetcher, fallback)
+        completed += 1
+        if progress_callback is not None:
+            progress_callback(key, results[key], completed, total_jobs)
 
     payload = {"updated_at": utc_timestamp(), **results}
     payload["refresh"] = {
