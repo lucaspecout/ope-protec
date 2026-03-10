@@ -118,6 +118,7 @@ let liveEventsTimer = null;
 let homeLiveTimer = null;
 let apiPanelTimer = null;
 let apiResyncTimer = null;
+let refreshAllInFlight = null;
 let photoCameraRefreshTimer = null;
 let lastApiResyncAt = null;
 let isLoginSubmitting = false;
@@ -4537,13 +4538,17 @@ function renderSncfAlerts(sncf = {}) {
   }).join('') || '<li>Aucune alerte SNCF accidents/travaux en Isère pour le moment.</li>');
 }
 
-async function loadDashboard() {
+async function loadDashboard(forceRefresh = false) {
   const cached = readSnapshot(STORAGE_KEYS.dashboardSnapshot);
   if (cached) renderDashboard(cached);
   else renderSituationOverview();
 
   try {
-    const dashboard = await api('/dashboard');
+    const suffix = forceRefresh ? '?refresh=true' : '';
+    const dashboard = await api(`/dashboard${suffix}`, {
+      bypassCache: forceRefresh,
+      cacheTtlMs: forceRefresh ? 0 : API_CACHE_TTL_MS,
+    });
     renderDashboard(dashboard);
     saveSnapshot(STORAGE_KEYS.dashboardSnapshot, dashboard);
   } catch (error) {
@@ -4649,15 +4654,19 @@ function renderExternalRisks(data = {}) {
   return true;
 }
 
-async function loadExternalRisks() {
+async function loadExternalRisks(forceRefresh = false) {
   const cached = readSnapshot(STORAGE_KEYS.externalRisksSnapshot);
   if (cached) {
-    cachedExternalRisksSnapshot = cached;
+    cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, cached);
     renderExternalRisks(cachedExternalRisksSnapshot);
     renderTrafficOnMap().catch(() => {});
   }
 
-  const data = await api('/external/isere/risks?refresh=true', { bypassCache: true });
+  const suffix = forceRefresh ? '?refresh=true' : '';
+  const data = await api(`/external/isere/risks${suffix}`, {
+    bypassCache: forceRefresh,
+    cacheTtlMs: forceRefresh ? 0 : API_CACHE_TTL_MS,
+  });
   cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, data);
   renderExternalRisks(cachedExternalRisksSnapshot);
   saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
@@ -4942,11 +4951,13 @@ async function loadOperationsBootstrap(forceRefresh = false) {
 }
 
 async function refreshAll(forceRefresh = false) {
-  return withPreservedScroll(async () => {
+  if (refreshAllInFlight) return refreshAllInFlight;
+
+  refreshAllInFlight = withPreservedScroll(async () => {
     const loaders = [
       { label: 'tableau de bord', loader: () => loadDashboard(forceRefresh), optional: true },
       { label: 'flux API (Météo / Vigicrues / Itinisère / Bison / Géorisques)', loader: () => loadExternalRisks(forceRefresh), optional: false },
-      { label: 'interconnexions API', loader: () => loadApiInterconnections(forceRefresh), optional: true },
+      { label: 'interconnexions API', loader: async () => renderApiInterconnections(cachedExternalRisksSnapshot), optional: true },
       { label: 'communes', loader: loadMunicipalities, optional: false },
       { label: 'main courante', loader: loadLogs, optional: false },
       { label: 'utilisateurs', loader: loadUsers, optional: true },
@@ -4955,18 +4966,17 @@ async function refreshAll(forceRefresh = false) {
       { label: 'trafic cartographique', loader: renderTrafficOnMap, optional: true },
     ];
     startStartupQueue(loaders.length);
-    const results = [];
-    for (const { label, loader } of loaders) {
+    const results = await Promise.all(loaders.map(async ({ label, loader }) => {
       setStartupQueueCurrent(`Chargement: ${label}…`);
       try {
         const value = await loader();
-        results.push({ status: 'fulfilled', value });
+        return { status: 'fulfilled', value };
       } catch (error) {
-        results.push({ status: 'rejected', reason: error });
+        return { status: 'rejected', reason: error };
       } finally {
         advanceStartupQueue(label);
       }
-    }
+    }));
     const failures = results
       .map((result, index) => ({ result, config: loaders[index] }))
       .filter(({ result }) => result.status === 'rejected');
@@ -4993,6 +5003,12 @@ async function refreshAll(forceRefresh = false) {
     setMapFeedback(message, true);
     finishStartupQueue();
   });
+
+  try {
+    await refreshAllInFlight;
+  } finally {
+    refreshAllInFlight = null;
+  }
 }
 
 function applyRoleVisibility() {
