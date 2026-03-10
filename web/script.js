@@ -2578,19 +2578,23 @@ function isPointInIsere(point = {}) {
 }
 
 function trafficPopupDetails(point = {}, sourceLabel = '', trafficType = '') {
-  const roads = Array.isArray(point.roads) && point.roads.length ? point.roads.join(', ') : 'Non précisé';
-  const locations = Array.isArray(point.locations) && point.locations.length ? point.locations.join(', ') : (point.anchor || 'Commune Isère');
+  const roads = Array.isArray(point.roads) && point.roads.length ? point.roads.join(', ') : (point.road || 'Non précisé');
+  const locations = Array.isArray(point.locations) && point.locations.length ? point.locations.join(', ') : (point.location_summary || point.anchor || 'Commune Isère');
   const level = normalizeTrafficSeverity(point.severity || 'jaune');
   const category = point.category || 'info';
   const publishedAt = point.published_at || point.updated_at || point.timestamp || point.start_time || '';
   const reference = point.id || point.event_id || point.uid || '';
   const coords = normalizeMapCoordinates(point.lat, point.lon);
+  const periodStart = point.period_start || point.start_at || point.validity_start || '';
+  const periodEnd = point.period_end || point.end_at || point.validity_end || '';
+  const scope = [point.direction, point.carriageway, point.lane_status].filter(Boolean).join(' · ');
+  const restriction = point.vehicle_restriction || point.mobility || '';
   return `<strong>${escapeHtml(point.title || 'Évènement circulation Isère')}</strong><br/>
     <span class="badge neutral">${escapeHtml(sourceLabel)} · ${escapeHtml(trafficType)} · ${escapeHtml(level)}</span><br/>
     ${escapeHtml(point.description || 'Aucun détail complémentaire fourni.')}<br/>
     Axe(s): ${escapeHtml(roads)}<br/>
     Localisation: ${escapeHtml(locations)} (${escapeHtml(point.precision || 'estimée')})<br/>
-    Catégorie: ${escapeHtml(category)}${reference ? `<br/>Référence: ${escapeHtml(String(reference))}` : ''}${publishedAt ? `<br/>Mis à jour: ${escapeHtml(safeDateToLocale(publishedAt))}` : ''}${coords ? `<br/>Coordonnées: ${coords.lat.toFixed(5)}, ${coords.lon.toFixed(5)}` : ''}<br/>
+    Catégorie: ${escapeHtml(category)}${reference ? `<br/>Référence: ${escapeHtml(String(reference))}` : ''}${periodStart || periodEnd ? `<br/>Période: ${escapeHtml(periodStart ? safeDateToLocale(periodStart) : '?')} → ${escapeHtml(periodEnd ? safeDateToLocale(periodEnd) : '?')}` : ''}${scope ? `<br/>Sens/voies: ${escapeHtml(scope)}` : ''}${restriction ? `<br/>Véhicules concernés: ${escapeHtml(restriction)}` : ''}${point.mandatory ? '<br/>Mesure obligatoire: oui' : ''}${publishedAt ? `<br/>Mis à jour: ${escapeHtml(safeDateToLocale(publishedAt))}` : ''}${coords ? `<br/>Coordonnées: ${coords.lat.toFixed(5)}, ${coords.lon.toFixed(5)}` : ''}<br/>
     <a href="${escapeHtml(point.link || '#')}" target="_blank" rel="noreferrer">Voir la source officielle</a>`;
 }
 
