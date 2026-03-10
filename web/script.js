@@ -1621,7 +1621,8 @@ async function loadIsereBoundary() {
   if (boundaryLayer) leafletMap.removeLayer(boundaryLayer);
   boundaryLayer = window.L.geoJSON({ type: 'Feature', geometry: data.geometry }, { style: ISERE_BOUNDARY_STYLE }).addTo(leafletMap);
   leafletMap.fitBounds(boundaryLayer.getBounds(), { padding: [16, 16] });
-  document.getElementById('map-source').textContent = `Source carte: ${data.source}`;
+  const mapSourceNode = document.getElementById('map-source');
+  if (mapSourceNode) mapSourceNode.textContent = `Source carte: ${data.source}`;
   setMapFeedback('Fond de carte et contour Isère chargés.');
 }
 
