@@ -59,6 +59,7 @@ from .services import (
     fetch_prefecture_isere_news,
     fetch_dauphine_isere_news,
     fetch_finess_isere_resources,
+    fetch_hubeau_isere_groundwater,
     fetch_sncf_isere_alerts,
     fetch_rte_isere_electricity_status,
     fetch_atmo_aura_isere_air_quality,
@@ -784,6 +785,7 @@ def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str])
         "arcep_isere": (lambda: fetch_arcep_isere_mobile_outages(force_refresh=refresh), {"status": "pending", "outages_total": 0, "communes": []}),
         "electricity_isere": (lambda: fetch_rte_isere_electricity_status(force_refresh=refresh), {"status": "pending", "level": "inconnu"}),
         "finess_isere": (lambda: fetch_finess_isere_resources(force_refresh=refresh), {"status": "pending", "resources": [], "resources_total": 0}),
+        "groundwater_isere": (lambda: fetch_hubeau_isere_groundwater(force_refresh=refresh), {"status": "pending", "stations": [], "stations_total": 0, "trend_summary": {"hausse": 0, "baisse": 0, "stable": 0}}),
     }
 
 
@@ -962,7 +964,7 @@ def trigger_external_risks_refresh(db: Session | None = None) -> None:
 
 def get_external_risks_payload(refresh: bool = False, db: Session | None = None) -> dict:
     snapshot = _get_external_risks_snapshot()
-    has_snapshot = bool(snapshot and any(snapshot.get(key) for key in ("meteo_france", "vigicrues", "itinisere", "bison_fute", "georisques", "prefecture_isere", "dauphine_isere", "sncf_isere", "vigieau", "atmo_aura", "anfr_isere", "arcep_isere", "electricity_isere", "finess_isere")))
+    has_snapshot = bool(snapshot and any(snapshot.get(key) for key in ("meteo_france", "vigicrues", "itinisere", "bison_fute", "georisques", "prefecture_isere", "dauphine_isere", "sncf_isere", "vigieau", "atmo_aura", "anfr_isere", "arcep_isere", "electricity_isere", "finess_isere", "groundwater_isere")))
 
     if refresh:
         trigger_external_risks_refresh(db=db)
@@ -1074,6 +1076,16 @@ def interactive_map_finess_isere_resources(
     return fetch_finess_isere_resources(force_refresh=refresh, limit=safe_limit)
 
 
+@app.get("/api/hubeau/isere/groundwater")
+def interactive_map_hubeau_groundwater(
+    refresh: bool = False,
+    station_limit: int = 8,
+    _: User = Depends(require_roles(*READ_ROLES)),
+):
+    safe_limit = max(3, min(station_limit, 20))
+    return fetch_hubeau_isere_groundwater(force_refresh=refresh, station_limit=safe_limit)
+
+
 @app.get("/supervision/overview")
 def supervision_overview(
     refresh: bool = False,
@@ -1104,6 +1116,7 @@ def supervision_overview(
             "anfr_isere": risks_payload.get("anfr_isere") or {},
             "arcep_isere": risks_payload.get("arcep_isere") or {},
             "electricity_isere": risks_payload.get("electricity_isere") or {},
+            "groundwater_isere": risks_payload.get("groundwater_isere") or {},
         },
         "crisis_municipalities": [MunicipalityOut.model_validate(c).model_dump() for c in crisis],
         "timeline": [OperationalLogOut.model_validate(log).model_dump() for log in latest_logs],

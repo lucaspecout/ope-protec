@@ -374,6 +374,7 @@ _RTE_ELECTRICITY_CACHE_TTL_SECONDS = 300
 _FINESS_ISERE_CACHE_TTL_SECONDS = 43200
 _ANFR_ISERE_CACHE_TTL_SECONDS = 43200
 _ARCEP_ISERE_CACHE_TTL_SECONDS = 900
+_HUBEAU_GROUNDWATER_CACHE_TTL_SECONDS = 10800
 _ISERE_BOUNDARY_CACHE_TTL_SECONDS = 21600
 
 _vigicrues_cache_lock = Lock()
@@ -404,6 +405,8 @@ _anfr_isere_cache_lock = Lock()
 _anfr_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _arcep_isere_cache_lock = Lock()
 _arcep_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_hubeau_groundwater_cache_lock = Lock()
+_hubeau_groundwater_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _isere_aval_polyline_cache_lock = Lock()
 _isere_aval_polyline_cache: dict[str, Any] = {"points": None, "expires_at": datetime.min}
 _ISERE_AVAL_GRENOBLE_CUTOFF_LON = 5.67526671768763
@@ -4129,6 +4132,112 @@ def fetch_arcep_isere_mobile_outages(force_refresh: bool = False) -> dict[str, A
         ttl_seconds=_ARCEP_ISERE_CACHE_TTL_SECONDS,
         force_refresh=force_refresh,
         loader=_fetch_arcep_isere_mobile_outages_live,
+    )
+
+
+def _groundwater_trend(current: dict[str, Any], previous: dict[str, Any] | None) -> str:
+    if not previous:
+        return "stable"
+    try:
+        current_level = float(current.get("niveau_nappe_eau"))
+        previous_level = float(previous.get("niveau_nappe_eau"))
+    except (TypeError, ValueError):
+        return "stable"
+
+    delta = current_level - previous_level
+    if delta > 0.03:
+        return "hausse"
+    if delta < -0.03:
+        return "baisse"
+    return "stable"
+
+
+def _fetch_hubeau_isere_groundwater_live(station_limit: int = 8) -> dict[str, Any]:
+    stations_url = f"https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/stations?code_departement=38&size={max(5, min(station_limit, 30))}"
+    stations_payload = _http_get_json(stations_url, timeout=18)
+    stations = stations_payload.get("data") if isinstance(stations_payload, dict) else []
+    if not isinstance(stations, list) or not stations:
+        return {
+            "status": "degraded",
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+            "source": stations_url,
+            "error": "Aucune station piézométrique renvoyée pour l'Isère",
+            "stations": [],
+            "stations_total": 0,
+            "trend_summary": {"hausse": 0, "baisse": 0, "stable": 0},
+        }
+
+    prioritized = sorted(
+        [row for row in stations if isinstance(row, dict)],
+        key=lambda row: str(row.get("date_fin_mesure") or ""),
+        reverse=True,
+    )
+
+    station_rows: list[dict[str, Any]] = []
+    trend_summary = {"hausse": 0, "baisse": 0, "stable": 0}
+    for station in prioritized[: max(3, min(station_limit, 20))]:
+        code_bss = str(station.get("code_bss") or "").strip()
+        if not code_bss:
+            continue
+
+        chronicles_url = f"https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/chroniques?code_bss={quote_plus(code_bss)}&size=2&sort=desc"
+        chronicles_payload = _http_get_json(chronicles_url, timeout=18)
+        chroniques = chronicles_payload.get("data") if isinstance(chronicles_payload, dict) else []
+        if not isinstance(chroniques, list) or not chroniques:
+            continue
+
+        current = chroniques[0] if isinstance(chroniques[0], dict) else {}
+        previous = chroniques[1] if len(chroniques) > 1 and isinstance(chroniques[1], dict) else None
+        trend = _groundwater_trend(current, previous)
+        trend_summary[trend] += 1
+
+        station_rows.append(
+            {
+                "code_bss": code_bss,
+                "name": station.get("libelle_pe") or station.get("nom_commune") or code_bss,
+                "commune": station.get("nom_commune"),
+                "insee_code": station.get("code_commune_insee"),
+                "date_measure": current.get("date_mesure"),
+                "groundwater_level_m_ngf": current.get("niveau_nappe_eau"),
+                "depth_m": current.get("profondeur_nappe"),
+                "trend": trend,
+                "source": chronicles_url,
+            }
+        )
+
+    if not station_rows:
+        return {
+            "status": "degraded",
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+            "source": stations_url,
+            "error": "Aucune chronique piézométrique exploitable pour les stations Isère",
+            "stations": [],
+            "stations_total": 0,
+            "trend_summary": trend_summary,
+        }
+
+    return {
+        "status": "online",
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+        "source": "https://hubeau.eaufrance.fr/api/v1/niveaux_nappes",
+        "stations_total": len(station_rows),
+        "trend_summary": trend_summary,
+        "stations": station_rows,
+    }
+
+
+def fetch_hubeau_isere_groundwater(force_refresh: bool = False, station_limit: int = 8) -> dict[str, Any]:
+    safe_limit = max(3, min(station_limit, 20))
+
+    def loader() -> dict[str, Any]:
+        return _fetch_hubeau_isere_groundwater_live(station_limit=safe_limit)
+
+    return _cached_external_payload(
+        cache=_hubeau_groundwater_cache,
+        lock=_hubeau_groundwater_cache_lock,
+        ttl_seconds=_HUBEAU_GROUNDWATER_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=loader,
     )
 
 
