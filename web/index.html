@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" crossorigin="" />
-  <link rel="stylesheet" href="/styles.css?v=20260218-ops4" />
+  <link rel="stylesheet" href="/styles.css?v=20260218-ops5" />
 </head>
 <body>
   <main class="shell">
@@ -340,11 +340,9 @@
             <p class="muted">Sélectionnez un jour pour afficher le détail.</p>
           </article>
 
-          <div class="kpi-grid meteo-kpi-grid">
-            <article class="tile"><h3>Niveau vigilance</h3><p id="meteo-week-vigilance">-</p></article>
-            <article class="tile"><h3>Température max semaine</h3><p id="meteo-week-max">-</p></article>
-            <article class="tile"><h3>Température min semaine</h3><p id="meteo-week-min">-</p></article>
-            <article class="tile"><h3>Pluie probable (pic)</h3><p id="meteo-week-rain">-</p></article>
+          <h4>Heure par heure · aujourd'hui</h4>
+          <div id="meteo-hourly-list" class="meteo-hourly-list">
+            <p class="muted">Prévisions horaires indisponibles pour le moment.</p>
           </div>
 
           <h4>Vue semaine (emoji)</h4>
@@ -841,6 +839,6 @@
   <svg aria-hidden="true" width="0" height="0" focusable="false" style="position:absolute">
     <path id="isere-shape" d="M0 0h1v1H0z"></path>
   </svg>
-  <script src="/script.js?v=20260218-ops3"></script>
+  <script src="/script.js?v=20260218-ops4"></script>
 </body>
 </html>

@@ -878,6 +878,29 @@ svg text { font-size: 14px; fill: #17335f; }
   border-color: #173d88;
 }
 
+.meteo-hourly-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: .65rem;
+  margin-bottom: .9rem;
+}
+
+.meteo-hour-card {
+  border: 1px solid #d8e3f9;
+  border-radius: 12px;
+  padding: .7rem;
+  background: #f8fbff;
+}
+
+.meteo-hour-card h5 {
+  margin: 0 0 .35rem;
+  color: #173d88;
+}
+
+.meteo-hour-card p {
+  margin: .2rem 0;
+}
+
 .meteo-kpi-grid { margin-bottom: .8rem; }
 .meteo-week-list {
   display: grid;
