@@ -4615,6 +4615,40 @@ function toFrenchDate(value) {
   return date.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: '2-digit' });
 }
 
+function formatHourLabel(value) {
+  if (!value) return '--:--';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '--:--';
+  return date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+}
+
+function renderMeteoHourlyForecast(cityForecast) {
+  const container = document.getElementById('meteo-hourly-list');
+  if (!container) return;
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+  const hours = Array.isArray(cityForecast?.hourly_forecast) ? cityForecast.hourly_forecast : [];
+  const todayHours = hours.filter((hour) => typeof hour?.date_time === 'string' && hour.date_time.startsWith(today));
+  const upcoming = todayHours.filter((hour) => {
+    const dt = new Date(hour.date_time);
+    return !Number.isNaN(dt.getTime()) && dt >= now;
+  }).slice(0, 12);
+
+  const hourlyToRender = upcoming.length ? upcoming : todayHours.slice(0, 12);
+  if (!hourlyToRender.length) {
+    container.innerHTML = "<p class=\"muted\">Prévisions horaires indisponibles pour aujourd'hui.</p>";
+    return;
+  }
+
+  container.innerHTML = hourlyToRender.map((hour) => {
+    const temp = Number.isFinite(Number(hour.temp_c)) ? `${Math.round(Number(hour.temp_c))}°C` : 'n/d';
+    const rain = formatPrecipitationProbability(hour.precip_probability);
+    const emoji = weatherCodeEmoji(hour.weather_code);
+    const summary = weatherCodeLabel(hour.weather_code);
+    return `<article class="meteo-hour-card"><h5>${escapeHtml(formatHourLabel(hour.date_time))}</h5><p>${emoji} ${escapeHtml(summary)}</p><p><strong>${escapeHtml(temp)}</strong> · Pluie: <strong>${escapeHtml(rain)}</strong></p></article>`;
+  }).join('');
+}
+
 function getSelectedMeteoCity() {
   return ISERE_MAJOR_CITIES.find((city) => city.key === selectedMeteoCityKey) || ISERE_MAJOR_CITIES[0];
 }
@@ -4628,7 +4662,7 @@ async function fetchWeeklyForecastForCity(city) {
   if (cachedWeeklyMeteo?.[key]) return cachedWeeklyMeteo[key];
   if (weeklyMeteoInFlight?.[key]) return weeklyMeteoInFlight[key];
 
-  const url = `https://api.open-meteo.com/v1/forecast?latitude=${encodeURIComponent(city.lat)}&longitude=${encodeURIComponent(city.lon)}&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max,wind_speed_10m_max&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weathercode&timezone=Europe%2FParis&forecast_days=7`;
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${encodeURIComponent(city.lat)}&longitude=${encodeURIComponent(city.lon)}&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max,wind_speed_10m_max&hourly=temperature_2m,precipitation_probability,weathercode&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weathercode&timezone=Europe%2FParis&forecast_days=7`;
 
   weeklyMeteoInFlight = weeklyMeteoInFlight && typeof weeklyMeteoInFlight === 'object' ? weeklyMeteoInFlight : {};
   weeklyMeteoInFlight[key] = fetchWithTimeout(url, {}, 12000)
@@ -4646,12 +4680,20 @@ async function fetchWeeklyForecastForCity(city) {
         precip_probability_max: daily.precipitation_probability_max?.[index],
         wind_speed_max_kmh: daily.wind_speed_10m_max?.[index],
       })) : [];
+      const hourly = payload?.hourly || {};
+      const hourlyEntries = Array.isArray(hourly.time) ? hourly.time.map((dateTime, index) => ({
+        date_time: dateTime,
+        weather_code: hourly.weathercode?.[index],
+        temp_c: hourly.temperature_2m?.[index],
+        precip_probability: hourly.precipitation_probability?.[index],
+      })) : [];
       const data = {
         source: 'open-meteo',
         city_name: city.name,
         updated_at: new Date().toISOString(),
         current: payload?.current || {},
         daily_forecast: entries,
+        hourly_forecast: hourlyEntries,
       };
       cachedWeeklyMeteo = cachedWeeklyMeteo && typeof cachedWeeklyMeteo === 'object' ? cachedWeeklyMeteo : {};
       cachedWeeklyMeteo[key] = data;
@@ -4759,19 +4801,8 @@ async function renderWeeklyWeatherPanel(externalRisks = {}) {
   const daily = dailySource.slice(0, 7);
   const weekList = document.getElementById('meteo-week-list');
 
-  const maxValues = daily.map((item) => Number(item.temp_max_c)).filter(Number.isFinite);
-  const minValues = daily.map((item) => Number(item.temp_min_c)).filter(Number.isFinite);
-  const rainValues = daily.map((item) => Number(item.precip_probability_max)).filter(Number.isFinite);
-  const maxTemp = maxValues.length ? `${Math.round(Math.max(...maxValues))}°C` : 'n/d';
-  const minTemp = minValues.length ? `${Math.round(Math.min(...minValues))}°C` : 'n/d';
-  const peakRain = rainValues.length ? `${Math.round(Math.max(...rainValues))}%` : 'n/d';
-
-  setRiskText('meteo-week-vigilance', normalizeLevel(meteo.level || 'vert'), meteo.level || 'vert');
-  setText('meteo-week-max', maxTemp);
-  setText('meteo-week-min', minTemp);
-  setText('meteo-week-rain', peakRain);
-
   renderMeteoCurrentCard(cityForecast, selectedCity);
+  renderMeteoHourlyForecast(cityForecast);
   renderMeteoDaySelector(daily);
   renderMeteoSelectedDayDetail(daily, selectedCity);
 
