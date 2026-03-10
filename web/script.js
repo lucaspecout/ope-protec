@@ -761,20 +761,17 @@ function apiOrigins() {
   const lowerHostname = String(hostname || '').toLowerCase();
   const isLocalHostname = ['localhost', '127.0.0.1', '::1'].includes(lowerHostname);
   const isPrivateNetworkHostname = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(lowerHostname);
-  const canProbeDirectPort = isLocalHostname || isPrivateNetworkHostname;
+  const canProbeLoopbackAliases = isLocalHostname || isPrivateNetworkHostname;
 
   origins.push(window.location.origin);
 
   if (hostname) {
     const preferredProtocol = protocol === 'https:' ? 'https:' : 'http:';
     if (isDefaultWebPort) origins.push(`${preferredProtocol}//${hostname}`);
-    if (canProbeDirectPort) {
-      origins.push(`${preferredProtocol}//${hostname}:1182`);
-      if (preferredProtocol === 'https:') origins.push(`http://${hostname}:1182`);
-    }
+    origins.push(`${preferredProtocol}//${hostname}:1182`);
   }
 
-  if (canProbeDirectPort) {
+  if (canProbeLoopbackAliases) {
     origins.push(
       'http://localhost:1182',
       'http://127.0.0.1:1182',
