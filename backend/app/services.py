@@ -377,6 +377,7 @@ _ANFR_ISERE_CACHE_TTL_SECONDS = 43200
 _ARCEP_ISERE_CACHE_TTL_SECONDS = 900
 _HUBEAU_GROUNDWATER_CACHE_TTL_SECONDS = 10800
 _ISERE_BOUNDARY_CACHE_TTL_SECONDS = 21600
+_AURA_AIRCRAFT_CACHE_TTL_SECONDS = 45
 
 _vigicrues_cache_lock = Lock()
 _vigicrues_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
@@ -410,6 +411,8 @@ _arcep_isere_cache_lock = Lock()
 _arcep_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _hubeau_groundwater_cache_lock = Lock()
 _hubeau_groundwater_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_aura_aircraft_cache_lock = Lock()
+_aura_aircraft_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _isere_aval_polyline_cache_lock = Lock()
 _isere_aval_polyline_cache: dict[str, Any] = {"points": None, "expires_at": datetime.min}
 _ISERE_AVAL_GRENOBLE_CUTOFF_LON = 5.67526671768763
@@ -3210,6 +3213,81 @@ def fetch_bison_fute_live_events(
 
     live["categories"] = sorted({str((event or {}).get("category") or "info") for event in events})
     return live
+
+
+def _fetch_aura_live_aircraft_raw() -> dict[str, Any]:
+    source_adsbexchange = "https://globe.adsbexchange.com/"
+    source_opensky = "https://opensky-network.org/api/states/all"
+    bbox = {"lamin": 44.0, "lomin": 3.0, "lamax": 46.7, "lomax": 7.3}
+    query = urlencode(bbox)
+
+    try:
+        payload = _http_get_json(f"{source_opensky}?{query}", timeout=14)
+        states = payload.get("states") if isinstance(payload, dict) else []
+        if not isinstance(states, list):
+            states = []
+
+        aircraft: list[dict[str, Any]] = []
+        for row in states:
+            if not isinstance(row, list) or len(row) < 14:
+                continue
+            lon = row[5]
+            lat = row[6]
+            if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
+                continue
+            aircraft.append(
+                {
+                    "icao24": str(row[0] or "").strip(),
+                    "callsign": str(row[1] or "").strip(),
+                    "origin_country": str(row[2] or "").strip(),
+                    "last_contact": row[4],
+                    "lon": float(lon),
+                    "lat": float(lat),
+                    "baro_altitude_m": row[7],
+                    "on_ground": bool(row[8]),
+                    "velocity_ms": row[9],
+                    "heading_deg": row[10],
+                    "vertical_rate_ms": row[11],
+                    "geo_altitude_m": row[13],
+                }
+            )
+
+        return {
+            "service": "Trafic aérien AURA",
+            "status": "online",
+            "source": source_adsbexchange,
+            "provider": "OpenSky Network",
+            "provider_source": source_opensky,
+            "region": "Auvergne-Rhône-Alpes",
+            "bbox": bbox,
+            "aircraft_total": len(aircraft),
+            "aircraft": aircraft,
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
+        return {
+            "service": "Trafic aérien AURA",
+            "status": "degraded",
+            "source": source_adsbexchange,
+            "provider": "OpenSky Network",
+            "provider_source": source_opensky,
+            "region": "Auvergne-Rhône-Alpes",
+            "bbox": bbox,
+            "aircraft_total": 0,
+            "aircraft": [],
+            "error": str(exc),
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+
+
+def fetch_aura_live_aircraft(force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_aura_aircraft_cache,
+        lock=_aura_aircraft_cache_lock,
+        ttl_seconds=_AURA_AIRCRAFT_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=_fetch_aura_live_aircraft_raw,
+    )
 
 
 def _vigieau_level_rank(level: str) -> int:

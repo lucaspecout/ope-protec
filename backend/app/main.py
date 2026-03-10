@@ -66,6 +66,7 @@ from .services import (
     fetch_atmo_aura_isere_air_quality,
     fetch_anfr_isere_antennas,
     fetch_arcep_isere_mobile_outages,
+    fetch_aura_live_aircraft,
     fetch_vigicrues_isere,
     fetch_vigieau_restrictions,
     generate_pdf_report,
@@ -177,6 +178,7 @@ _external_risks_snapshot: dict = {
         "atmo_aura": {},
         "anfr_isere": {},
         "arcep_isere": {},
+        "aura_aircraft": {},
     },
 }
 _external_risks_refresh_lock = Lock()
@@ -776,6 +778,7 @@ def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str])
         "vigicrues": (lambda: fetch_vigicrues_isere(force_refresh=refresh), {"status": "pending", "level": "vert", "stations": [], "alerts": []}),
         "itinisere": (lambda: fetch_itinisere_disruptions(force_refresh=refresh), {"status": "pending", "events": [], "events_total": 0}),
         "bison_fute": (lambda: fetch_bison_fute_traffic(force_refresh=refresh), {"status": "pending", "alerts": []}),
+        "aura_aircraft": (lambda: fetch_aura_live_aircraft(force_refresh=refresh), {"status": "pending", "aircraft": [], "aircraft_total": 0}),
         "georisques": (lambda: fetch_georisques_isere_summary(force_refresh=refresh, commune_names=pcs_commune_names), {"status": "pending", "details": []}),
         "prefecture_isere": (lambda: fetch_prefecture_isere_news(force_refresh=refresh), {"status": "pending", "articles": []}),
         "dauphine_isere": (lambda: fetch_dauphine_isere_news(force_refresh=refresh), {"status": "pending", "articles": []}),
@@ -966,7 +969,7 @@ def trigger_external_risks_refresh(db: Session | None = None) -> None:
 
 def get_external_risks_payload(refresh: bool = False, db: Session | None = None) -> dict:
     snapshot = _get_external_risks_snapshot()
-    has_snapshot = bool(snapshot and any(snapshot.get(key) for key in ("meteo_france", "vigicrues", "itinisere", "bison_fute", "georisques", "prefecture_isere", "dauphine_isere", "sncf_isere", "vigieau", "atmo_aura", "anfr_isere", "arcep_isere", "electricity_isere", "finess_isere", "groundwater_isere", "isere_opendata")))
+    has_snapshot = bool(snapshot and any(snapshot.get(key) for key in ("meteo_france", "vigicrues", "itinisere", "bison_fute", "georisques", "prefecture_isere", "dauphine_isere", "sncf_isere", "vigieau", "atmo_aura", "anfr_isere", "arcep_isere", "aura_aircraft", "electricity_isere", "finess_isere", "groundwater_isere", "isere_opendata")))
 
     if refresh:
         trigger_external_risks_refresh(db=db)
@@ -1059,6 +1062,13 @@ def interactive_map_bison_fute_events(
     safe_limit = max(1, min(limit, 250))
     normalized_categories = [str(item or "").strip().lower() for item in (categories or []) if str(item or "").strip()]
     return fetch_bison_fute_live_events(categories=normalized_categories, limit=safe_limit, force_refresh=refresh)
+
+@app.get("/api/aura/live-aircraft")
+def interactive_map_aura_live_aircraft(
+    refresh: bool = False,
+    _: User = Depends(require_roles(*READ_ROLES)),
+):
+    return fetch_aura_live_aircraft(force_refresh=refresh)
 
 @app.get("/api/vigieau/alerts")
 def interactive_map_vigieau_alerts(
