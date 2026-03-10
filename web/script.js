@@ -4133,10 +4133,10 @@ function projectToIsereMap(lat, lon, width = 480, height = 280, padding = 16) {
   };
 }
 
-function buildSitrepMapSvg(title, points = [], lines = []) {
+function buildSitrepMapSvg(title, points = [], lines = [], options = {}) {
   const width = 480;
   const height = 280;
-  const frame = '<path d="M90 26 L376 26 L450 82 L432 246 L120 258 L40 194 L36 88 Z" fill="rgba(255,255,255,0.25)" stroke="#163a87" stroke-width="2.4" />';
+  const frame = '<path d="M90 26 L376 26 L450 82 L432 246 L120 258 L40 194 L36 88 Z" fill="rgba(255,255,255,0.18)" stroke="#163a87" stroke-width="2.4" />';
   const lineSvg = lines.map((line) => {
     const coords = (line.points || [])
       .map((coord) => projectToIsereMap(coord.lat, coord.lon, width, height, 18))
@@ -4147,19 +4147,50 @@ function buildSitrepMapSvg(title, points = [], lines = []) {
   }).join('');
   const pointsSvg = points.map((point) => {
     const position = projectToIsereMap(point.lat, point.lon, width, height, 18);
-    return `<circle cx="${position.x.toFixed(1)}" cy="${position.y.toFixed(1)}" r="4.2" fill="${escapeHtml(point.color || '#0d4b8e')}" stroke="#ffffff" stroke-width="1.2" />`;
+    const radius = Number(point.radius || 4.2);
+    return `<circle cx="${position.x.toFixed(1)}" cy="${position.y.toFixed(1)}" r="${radius.toFixed(1)}" fill="${escapeHtml(point.color || '#0d4b8e')}" stroke="#ffffff" stroke-width="1.2" opacity="0.95" />`;
   }).join('');
+
+  const majorCities = [
+    { label: 'Grenoble', lat: 45.1885, lon: 5.7245 },
+    { label: 'Vienne', lat: 45.5256, lon: 4.8748 },
+    { label: 'Bourgoin-Jallieu', lat: 45.5868, lon: 5.2737 },
+    { label: 'Voiron', lat: 45.3653, lon: 5.5926 },
+  ];
+  const cityMarkers = majorCities.map((city) => {
+    const position = projectToIsereMap(city.lat, city.lon, width, height, 18);
+    return `<circle cx="${position.x.toFixed(1)}" cy="${position.y.toFixed(1)}" r="2.7" fill="#ffffff" stroke="#1e3a8a" stroke-width="1.1" />
+      <text x="${(position.x + 6).toFixed(1)}" y="${(position.y - 4).toFixed(1)}" fill="#0f172a" font-size="10" font-weight="600">${escapeHtml(city.label)}</text>`;
+  }).join('');
+
+  const subtitle = options.subtitle ? `<p style="margin:0 0 6px; color:#334155; font-size:12px;">${escapeHtml(options.subtitle)}</p>` : '';
+  const totalPoints = Number(options.totalPoints ?? points.length);
+  const totalLines = Number(options.totalLines ?? lines.length);
+  const mapSummary = `<div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:6px; font-size:11px;">
+    <span style="background:#e7f0ff; color:#0d4b8e; border-radius:999px; padding:3px 8px;">${totalPoints} point(s)</span>
+    <span style="background:#fff4e6; color:#b45309; border-radius:999px; padding:3px 8px;">${totalLines} corridor(s)</span>
+    <span style="background:#ecfdf3; color:#166534; border-radius:999px; padding:3px 8px;">Vue département 38</span>
+  </div>`;
 
   const background = 'https://staticmap.openstreetmap.de/staticmap.php?center=45.2,5.72&zoom=8&size=960x560&maptype=mapnik';
   return `<figure style="margin:10px 0 16px;">
     <figcaption style="font-weight:700; margin-bottom:6px;">${escapeHtml(title)} (centrée Isère)</figcaption>
+    ${subtitle}
     <svg viewBox="0 0 ${width} ${height}" width="100%" height="220" role="img" aria-label="${escapeHtml(title)}">
+      <defs>
+        <linearGradient id="isere-gradient" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#dbeafe" stop-opacity="0.18"/>
+          <stop offset="100%" stop-color="#bfdbfe" stop-opacity="0.06"/>
+        </linearGradient>
+      </defs>
       <image href="${background}" x="0" y="0" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice" opacity="0.95"/>
-      <rect x="0" y="0" width="${width}" height="${height}" fill="rgba(255,255,255,0.10)" />
+      <rect x="0" y="0" width="${width}" height="${height}" fill="url(#isere-gradient)" />
       ${frame}
       ${lineSvg}
       ${pointsSvg}
+      ${cityMarkers}
     </svg>
+    ${mapSummary}
   </figure>`;
 }
 
@@ -4241,6 +4272,14 @@ function buildSitrepHtml() {
     weight: 2.5,
     points: corridor.map((coord) => ({ lat: coord[0], lon: coord[1] })),
   }));
+  const operationalCards = [
+    { label: 'Alertes météo actives', value: Array.isArray(meteo.current_alerts) ? meteo.current_alerts.length : 0 },
+    { label: 'Stations Vigicrues suivies', value: waterStations.length },
+    { label: 'Restrictions eau', value: vigieau.length },
+    { label: 'Évènements trafic Isère', value: itinisereTrafficPoints.length },
+    { label: 'Alertes SNCF', value: sncf.length },
+    { label: 'Actualités Préfecture', value: prefecture.length },
+  ];
 
   return `<!doctype html>
 <html lang="fr">
@@ -4280,6 +4319,12 @@ function buildSitrepHtml() {
     <h2>Situation météo du jour</h2>
     <ul>${toSitrepBulletItems(meteoItems)}</ul>
   </section>
+  <section>
+    <h2>Indicateurs consolidés SITREP</h2>
+    <div class="kpi">
+      ${operationalCards.map((card) => `<article class="card"><p>${escapeHtml(card.label)}</p><strong>${escapeHtml(String(card.value))}</strong></article>`).join('')}
+    </div>
+  </section>
   <section class="grid">
     <div>
       <h2>Hydrologie & mobilité</h2>
@@ -4315,13 +4360,13 @@ function buildSitrepHtml() {
   <section>
     <h2>Communes en crise</h2>
     <p><strong>${escapeHtml(crisisMunicipalityLabel)}</strong></p>
-    ${buildSitrepMapSvg('Carte communes en crise', crisisPoints)}
+    ${buildSitrepMapSvg('Carte communes en crise', crisisPoints, [], { subtitle: 'Repérage rapide des communes avec PCS actif.', totalPoints: crisisPoints.length })}
   </section>
   <section>
     <h2>Cartographie opérationnelle</h2>
-    ${buildSitrepMapSvg('Carte Itinisère · routes barrées', itinisereTrafficPoints, itinisereRoadLines)}
-    ${buildSitrepMapSvg('Carte générale · tous les points', allPoints.map((point) => ({ lat: point.lat, lon: point.lon, color: '#0d4b8e' })))}
-    ${buildSitrepMapSvg('Carte générale · filtre trafic continu', itinisereTrafficPoints)}
+    ${buildSitrepMapSvg('Carte Itinisère · routes barrées', itinisereTrafficPoints.map((point) => ({ ...point, radius: 4.8 })), itinisereRoadLines, { subtitle: 'Trafic perturbé et corridors routiers sensibles.', totalPoints: itinisereTrafficPoints.length, totalLines: itinisereRoadLines.length })}
+    ${buildSitrepMapSvg('Carte générale · tous les points', allPoints.map((point) => ({ lat: point.lat, lon: point.lon, color: '#0d4b8e', radius: 3.8 })), [], { subtitle: 'Infrastructures et ressources opérationnelles géolocalisées.', totalPoints: allPoints.length })}
+    ${buildSitrepMapSvg('Carte générale · filtre trafic continu', itinisereTrafficPoints, [], { subtitle: 'Filtre trafic temps réel pour projection interservices.', totalPoints: itinisereTrafficPoints.length })}
   </section>
 </body>
 </html>`;
