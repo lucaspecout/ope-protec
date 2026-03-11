@@ -45,6 +45,7 @@ def generate_pdf_report(db: Session, report_name: str = "rapport_veille.pdf") ->
     latest_alert = db.query(WeatherAlert).order_by(WeatherAlert.created_at.desc()).first()
     crisis_count = db.query(Municipality).filter(Municipality.crisis_mode.is_(True)).count()
     logs = db.query(OperationalLog).order_by(OperationalLog.created_at.desc()).limit(20).all()
+    grenoble_weather = _fetch_grenoble_weather_snapshot()
 
     c.setTitle("Rapport opérationnel Isère")
     c.setFont("Helvetica-Bold", 17)
@@ -64,6 +65,18 @@ def generate_pdf_report(db: Session, report_name: str = "rapport_veille.pdf") ->
     c.drawString(390, y - 34, "Périmètre: Isère (38)")
 
     y -= 68
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(40, y, "Météo Grenoble (actuelle + heure par heure)")
+    y -= 12
+    c.setFont("Helvetica", 9)
+    weather_current = grenoble_weather.get("current") or "Données indisponibles"
+    c.drawString(44, y, weather_current)
+    y -= 14
+    for line in grenoble_weather.get("hourly_lines") or ["Prévision horaire indisponible"]:
+        c.drawString(50, y, f"• {line}")
+        y -= 12
+
+    y -= 8
     c.setFont("Helvetica-Bold", 11)
     c.drawString(40, y, "Chronologie principale")
     y -= 12
@@ -169,6 +182,87 @@ def _extract_html_title(raw_html: str) -> str:
         return ""
     title = _strip_html_tags(match.group(1))
     return re.sub(r"\s+", " ", title).strip()
+
+
+def _format_meteo_temperature(value: Any) -> str:
+    if value is None:
+        return "--"
+    try:
+        return f"{round(float(value))}°C"
+    except (TypeError, ValueError):
+        return "--"
+
+
+def _map_open_meteo_weather_code(code: Any) -> str:
+    labels = {
+        0: "ciel clair",
+        1: "peu nuageux",
+        2: "partiellement nuageux",
+        3: "couvert",
+        45: "brouillard",
+        48: "brouillard givrant",
+        51: "bruine légère",
+        53: "bruine",
+        55: "bruine forte",
+        61: "pluie faible",
+        63: "pluie",
+        65: "pluie forte",
+        66: "pluie verglaçante",
+        67: "pluie verglaçante forte",
+        71: "neige faible",
+        73: "neige",
+        75: "neige forte",
+        77: "grains de neige",
+        80: "averses faibles",
+        81: "averses",
+        82: "averses fortes",
+        85: "averses de neige",
+        86: "fortes averses de neige",
+        95: "orage",
+        96: "orage avec grêle",
+        99: "orage violent",
+    }
+    try:
+        return labels.get(int(code), "conditions variables")
+    except (TypeError, ValueError):
+        return "conditions variables"
+
+
+def _fetch_grenoble_weather_snapshot() -> dict[str, Any]:
+    api_url = (
+        "https://api.open-meteo.com/v1/forecast"
+        "?latitude=45.1885&longitude=5.7245"
+        "&current=temperature_2m,weather_code"
+        "&hourly=temperature_2m,weather_code"
+        "&forecast_days=1&timezone=Europe%2FParis"
+    )
+    try:
+        payload = _http_get_json(api_url, timeout=12)
+        current = payload.get("current") or {}
+        hourly = payload.get("hourly") or {}
+        hourly_times = hourly.get("time") or []
+        hourly_temps = hourly.get("temperature_2m") or []
+        hourly_codes = hourly.get("weather_code") or []
+
+        current_text = (
+            f"Maintenant: {_format_meteo_temperature(current.get('temperature_2m'))} · "
+            f"{_map_open_meteo_weather_code(current.get('weather_code'))}"
+        )
+
+        hourly_lines: list[str] = []
+        for when, temp, code in list(zip(hourly_times, hourly_temps, hourly_codes))[:8]:
+            label_hour = when[11:16] if len(when) >= 16 else when
+            hourly_lines.append(f"{label_hour}: {_format_meteo_temperature(temp)} · {_map_open_meteo_weather_code(code)}")
+
+        return {
+            "current": current_text,
+            "hourly_lines": hourly_lines,
+        }
+    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError, KeyError):
+        return {
+            "current": "Maintenant: indisponible",
+            "hourly_lines": ["Prévision horaire indisponible"],
+        }
 
 
 def _strip_html_tags(raw_html: str) -> str:
