@@ -3754,7 +3754,7 @@ function renderGeorisquesPcsDetail(commune) {
     : '<li>Risque GASPAR non détaillé</li>';
 
   const docsText = docs.length
-    ? docs.slice(0, 5).map((doc) => `<li>${escapeHtml(doc.title || doc.libelle_azi || 'Document inondation')}${doc.river_basin ? ` · Bassin ${escapeHtml(doc.river_basin)}` : ''}</li>`).join('')
+    ? docs.slice(0, 8).map((doc) => `<li>${escapeHtml(doc.title || doc.libelle_azi || 'Document inondation')}${doc.river_basin ? ` · Bassin ${escapeHtml(doc.river_basin)}` : ''}</li>`).join('')
     : '<li>Aucun document inondation détaillé.</li>';
 
   setHtml('georisques-pcs-detail', `
@@ -3784,31 +3784,33 @@ function renderGeorisquesPcsRisks(monitored = []) {
     selectedGeorisquesPcsCommuneKey = georisquesCommuneKey(pcsMonitored[0]);
   }
 
+  if (selectedGeorisquesPcsCommuneKey && !pcsMonitored.some((commune) => georisquesCommuneKey(commune) === selectedGeorisquesPcsCommuneKey)) {
+    selectedGeorisquesPcsCommuneKey = pcsMonitored.length ? georisquesCommuneKey(pcsMonitored[0]) : '';
+  }
+
+  const select = document.getElementById('georisques-pcs-select');
+  if (select) {
+    const options = pcsMonitored.map((commune) => {
+      const key = georisquesCommuneKey(commune);
+      return `<option value="${escapeHtml(key)}">${escapeHtml(commune.name || commune.commune || 'Commune inconnue')} (${escapeHtml(commune.code_insee || '-')})</option>`;
+    }).join('');
+    setHtml('georisques-pcs-select', `<option value="">Sélectionnez une commune PCS</option>${options}`);
+    if (selectedGeorisquesPcsCommuneKey) {
+      select.value = selectedGeorisquesPcsCommuneKey;
+    }
+  }
+
   const selectedCommune = pcsMonitored.find((commune) => georisquesCommuneKey(commune) === selectedGeorisquesPcsCommuneKey) || null;
+  const summaryMarkup = selectedCommune
+    ? (() => {
+      const danger = georisquesDangerLevel(selectedCommune);
+      const gasparRisks = Array.isArray(selectedCommune.gaspar_risks) ? selectedCommune.gaspar_risks : [];
+      return `<li><strong>${escapeHtml(selectedCommune.name || selectedCommune.commune || 'Commune inconnue')}</strong> <span class="danger-chip ${danger.css}">${escapeHtml(selectedCommune.gaspar_danger_level || danger.label)}</span><br>INSEE: <strong>${escapeHtml(selectedCommune.code_insee || '-')}</strong> · Sismicité: <strong>${escapeHtml(selectedCommune.seismic_zone || selectedCommune.zone_sismicite || 'inconnue')}</strong> · Inondation: <strong>${Number(selectedCommune.flood_documents || selectedCommune.nb_documents || 0)}</strong> · PPR: <strong>${Number(selectedCommune.ppr_total || 0)}</strong> · Mouvements: <strong>${Number(selectedCommune.ground_movements_total || 0)}</strong><br>Risques GASPAR: ${gasparRisks.length ? gasparRisks.slice(0, 8).map((risk) => escapeHtml(risk)).join(', ') : 'non détaillés'}</li>`;
+    })()
+    : '<li>Aucune commune PCS active avec détails Géorisques.</li>';
 
-  const markup = pcsMonitored.map((commune) => {
-    const danger = georisquesDangerLevel(commune);
-    const gasparRisks = Array.isArray(commune.gaspar_risks) ? commune.gaspar_risks : [];
-    const gasparDanger = commune.gaspar_danger_level || danger.label;
-    const key = georisquesCommuneKey(commune);
-    const isSelected = key === selectedGeorisquesPcsCommuneKey;
-    return `<li><button type="button" class="georisques-pcs-item${isSelected ? ' is-active' : ''}" data-georisques-pcs-key="${escapeHtml(key)}"><strong>${escapeHtml(commune.name || commune.commune || 'Commune inconnue')}</strong> <span class="danger-chip ${danger.css}">${escapeHtml(gasparDanger)}</span><br>INSEE: <strong>${escapeHtml(commune.code_insee || '-')}</strong> · Sismicité: <strong>${escapeHtml(commune.seismic_zone || commune.zone_sismicite || 'inconnue')}</strong> · Inondation: <strong>${Number(commune.flood_documents || commune.nb_documents || 0)}</strong> · PPR: <strong>${Number(commune.ppr_total || 0)}</strong> · Mouvements: <strong>${Number(commune.ground_movements_total || 0)}</strong><br>Risques GASPAR: ${gasparRisks.length ? gasparRisks.slice(0, 6).map((risk) => escapeHtml(risk)).join(', ') : 'non détaillés'}</button></li>`;
-  }).join('') || '<li>Aucune commune PCS active avec détails Géorisques.</li>';
-
-  setHtml('georisques-pcs-risks-list', markup);
+  setHtml('georisques-pcs-risks-list', summaryMarkup);
   renderGeorisquesPcsDetail(selectedCommune);
-}
-
-function switchGeorisquesTab(tab = 'overview') {
-  const isOverview = tab !== 'pcs';
-  document.getElementById('georisques-overview-section')?.toggleAttribute('hidden', !isOverview);
-  document.getElementById('georisques-overview-section')?.classList.toggle('hidden', !isOverview);
-  document.getElementById('georisques-pcs-section')?.toggleAttribute('hidden', isOverview);
-  document.getElementById('georisques-pcs-section')?.classList.toggle('hidden', isOverview);
-  document.getElementById('georisques-tab-overview')?.classList.toggle('is-active', isOverview);
-  document.getElementById('georisques-tab-pcs')?.classList.toggle('is-active', !isOverview);
-  document.getElementById('georisques-tab-overview')?.setAttribute('aria-selected', isOverview ? 'true' : 'false');
-  document.getElementById('georisques-tab-pcs')?.setAttribute('aria-selected', isOverview ? 'false' : 'true');
 }
 
 function renderGeorisquesDetails(georisques = {}) {
@@ -5633,19 +5635,14 @@ function bindAppInteractions() {
     appSidebar?.classList.remove('open');
     appMenuButton?.setAttribute('aria-expanded', 'false');
   }));
-  document.getElementById('georisques-tab-overview')?.addEventListener('click', () => switchGeorisquesTab('overview'));
-  document.getElementById('georisques-tab-pcs')?.addEventListener('click', () => switchGeorisquesTab('pcs'));
-  document.getElementById('georisques-pcs-risks-list')?.addEventListener('click', (event) => {
-    const button = event.target?.closest?.('[data-georisques-pcs-key]');
-    if (!button) return;
-    selectedGeorisquesPcsCommuneKey = String(button.dataset.georisquesPcsKey || '').trim().toLowerCase();
+  document.getElementById('georisques-pcs-select')?.addEventListener('change', (event) => {
+    selectedGeorisquesPcsCommuneKey = String(event.target?.value || '').trim().toLowerCase();
     const georisquesPayload = cachedExternalRisksSnapshot?.georisques || {};
     const georisquesData = georisquesPayload?.data && typeof georisquesPayload.data === 'object'
       ? { ...georisquesPayload.data, ...georisquesPayload }
       : georisquesPayload;
     renderGeorisquesPcsRisks(georisquesData.monitored_communes || georisquesData.monitored_municipalities || georisquesData.communes || []);
   });
-  switchGeorisquesTab('overview');
   appMenuButton?.addEventListener('click', () => {
     const isOpen = appSidebar?.classList.toggle('open');
     appMenuButton.setAttribute('aria-expanded', String(Boolean(isOpen)));

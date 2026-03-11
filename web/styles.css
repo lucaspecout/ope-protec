@@ -332,10 +332,19 @@ label { display: block; margin-bottom: .8rem; }
   padding: .7rem;
 }
 .georisques-hero__meta p { margin: .22rem 0; }
-.georisques-tabs { display: flex; gap: .55rem; margin: .8rem 0; flex-wrap: wrap; }
-.georisques-tab { border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: .45rem .85rem; font-weight: 600; cursor: pointer; }
-.georisques-tab.is-active { background: #0b4daa; color: #fff; border-color: #0b4daa; }
 .georisques-lists { display: grid; gap: .7rem; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.georisques-pcs-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  align-items: center;
+  margin: .45rem 0 .65rem;
+}
+.georisques-pcs-toolbar label { font-weight: 600; }
+.georisques-pcs-toolbar select {
+  min-width: min(420px, 100%);
+  max-width: 100%;
+}
 .georisques-isere-layout { display: grid; grid-template-columns: 1.25fr .95fr; gap: .7rem; margin-bottom: .7rem; }
 .georisques-isere-territories li { line-height: 1.36; }
 .danger-chip { display: inline-flex; align-items: center; border-radius: 999px; padding: .1rem .55rem; font-weight: 700; font-size: .82rem; margin-left: .35rem; }

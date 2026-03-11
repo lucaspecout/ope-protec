@@ -385,43 +385,42 @@
             </article>
           </div>
 
-          <div class="georisques-tabs" role="tablist" aria-label="Vues Géorisques">
-            <button id="georisques-tab-overview" class="georisques-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="georisques-overview-section">Situation récente</button>
-            <button id="georisques-tab-pcs" class="georisques-tab" type="button" role="tab" aria-selected="false" aria-controls="georisques-pcs-section">Communes PCS prioritaires</button>
+          <div class="georisques-lists">
+            <article class="tile">
+              <h4>Événements récents (terrain)</h4>
+              <ul id="georisques-recent-movements-list" class="list"></ul>
+            </article>
+            <article class="tile">
+              <h4>Communes prioritaires (score multi-risques)</h4>
+              <ul id="georisques-priority-communes-list" class="list"></ul>
+            </article>
           </div>
 
-          <div id="georisques-overview-section" role="tabpanel" aria-labelledby="georisques-tab-overview">
-            <div class="georisques-lists">
-              <article class="tile">
-                <h4>Événements récents (terrain)</h4>
-                <ul id="georisques-recent-movements-list" class="list"></ul>
-              </article>
-              <article class="tile">
-                <h4>Communes prioritaires (score multi-risques)</h4>
-                <ul id="georisques-priority-communes-list" class="list"></ul>
-              </article>
+          <article class="tile">
+            <h4>Communes PCS · sélection directe</h4>
+            <p class="muted">Choisissez une commune PCS pour voir immédiatement ses risques et toutes les informations associées.</p>
+            <div class="georisques-pcs-toolbar">
+              <label for="georisques-pcs-select">Commune PCS</label>
+              <select id="georisques-pcs-select" aria-label="Sélectionner une commune PCS">
+                <option value="">Sélectionnez une commune PCS</option>
+              </select>
             </div>
-            <article class="tile">
-              <h4>Suivi détaillé des communes</h4>
-              <ul id="georisques-communes-list" class="list"></ul>
-            </article>
-            <article class="tile">
-              <h4>Documents inondation détaillés (AZI)</h4>
-              <ul id="georisques-documents-list" class="list"></ul>
-            </article>
-          </div>
+            <ul id="georisques-pcs-risks-list" class="list compact"></ul>
+          </article>
 
-          <div id="georisques-pcs-section" class="hidden" hidden role="tabpanel" aria-labelledby="georisques-tab-pcs">
-            <article class="tile">
-              <h4>Communes PCS · risques existants et niveau de danger</h4>
-              <p class="muted">Cliquez sur une commune pour afficher ses risques connus et les liens Géorisques associés.</p>
-              <ul id="georisques-pcs-risks-list" class="list"></ul>
-            </article>
-            <article class="tile">
-              <h4>Détail de la commune sélectionnée</h4>
-              <div id="georisques-pcs-detail" class="georisques-pcs-detail muted">Sélectionnez une commune PCS pour afficher ses informations.</div>
-            </article>
-          </div>
+          <article class="tile">
+            <h4>Détail complet de la commune sélectionnée</h4>
+            <div id="georisques-pcs-detail" class="georisques-pcs-detail muted">Sélectionnez une commune PCS pour afficher ses informations.</div>
+          </article>
+
+          <article class="tile">
+            <h4>Suivi détaillé des communes</h4>
+            <ul id="georisques-communes-list" class="list"></ul>
+          </article>
+          <article class="tile">
+            <h4>Documents inondation détaillés (AZI)</h4>
+            <ul id="georisques-documents-list" class="list"></ul>
+          </article>
         </section>
 
         <section id="api-panel" class="panel view hidden" hidden>
