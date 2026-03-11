@@ -377,6 +377,10 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
   const nextAnfr = next.anfr_isere || {};
   const prevArcep = previous.arcep_isere || {};
   const nextArcep = next.arcep_isere || {};
+  const prevApic = previous.apic_isere || {};
+  const nextApic = next.apic_isere || {};
+  const prevVigicruesFlash = previous.vigicrues_flash_isere || {};
+  const nextVigicruesFlash = next.vigicrues_flash_isere || {};
 
   return {
     ...previous,
@@ -457,6 +461,20 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
       voice_impacted_total: keepPreviousValue(prevArcep.voice_impacted_total, nextArcep.voice_impacted_total),
       data_impacted_total: keepPreviousValue(prevArcep.data_impacted_total, nextArcep.data_impacted_total),
       top_operators: keepPreviousArray(prevArcep.top_operators, nextArcep.top_operators),
+    },
+    apic_isere: {
+      ...prevApic,
+      ...nextApic,
+      level: keepPreviousValue(prevApic.level, nextApic.level),
+      alerts_total: keepPreviousValue(prevApic.alerts_total, nextApic.alerts_total),
+      alerts: keepPreviousArray(prevApic.alerts, nextApic.alerts),
+    },
+    vigicrues_flash_isere: {
+      ...prevVigicruesFlash,
+      ...nextVigicruesFlash,
+      level: keepPreviousValue(prevVigicruesFlash.level, nextVigicruesFlash.level),
+      alerts_total: keepPreviousValue(prevVigicruesFlash.alerts_total, nextVigicruesFlash.alerts_total),
+      alerts: keepPreviousArray(prevVigicruesFlash.alerts, nextVigicruesFlash.alerts),
     },
   };
 }
@@ -4272,6 +4290,14 @@ function buildCriticalRisksMarkup(dashboard = {}, externalRisks = {}) {
     : (externalRisks?.georisques || {});
 
   risks.push(`<li><strong>Itinisère</strong> · ${(itinisereEvents || []).length} événement(s) actif(s) · Statut ${escapeHtml(externalRisks?.itinisere?.status || 'inconnu')}</li>`);
+  const apicAlerts = Number(externalRisks?.apic_isere?.alerts_total ?? (externalRisks?.apic_isere?.alerts || []).length || 0);
+  const vfAlerts = Number(externalRisks?.vigicrues_flash_isere?.alerts_total ?? (externalRisks?.vigicrues_flash_isere?.alerts || []).length || 0);
+  if (apicAlerts > 0) {
+    risks.push(`<li><strong>APIC Isère</strong> · <span class="risk-jaune">${apicAlerts} alerte(s)</span> pluie intense / ruissellement.</li>`);
+  }
+  if (vfAlerts > 0) {
+    risks.push(`<li><strong>Vigicrues Flash Isère</strong> · <span class="risk-jaune">${vfAlerts} alerte(s)</span> crues rapides.</li>`);
+  }
   risks.push(`<li><strong>Géorisques</strong> · Sismicité ${escapeHtml(georisques.highest_seismic_zone_label || 'inconnue')} · ${Number(georisques.flood_documents_total ?? 0)} document(s) inondation</li>`);
 
   const fromDashboard = Array.isArray(dashboard?.latest_logs) ? dashboard.latest_logs : [];
@@ -4326,6 +4352,8 @@ function renderSituationOverview() {
   const sncfIncidentsCount = Number(externalRisks?.sncf_isere?.alerts_total ?? (externalRisks?.sncf_isere?.alerts || []).length);
   const arcepOutages = Number(externalRisks?.arcep_isere?.outages_total ?? 0);
   const anfrSupports = Number(externalRisks?.anfr_isere?.supports_total ?? 0);
+  const apicAlerts = Number(externalRisks?.apic_isere?.alerts_total ?? (externalRisks?.apic_isere?.alerts || []).length);
+  const vigicruesFlashAlerts = Number(externalRisks?.vigicrues_flash_isere?.alerts_total ?? (externalRisks?.vigicrues_flash_isere?.alerts || []).length);
   const mobilityCards = [
     { label: 'Bison Futé (38) · Départ / Arrivée', value: `${bisonDeparture} / ${bisonReturn}`, info: 'Tendance Isère départ / arrivée', css: bisonCombinedLevel },
     { label: 'Vigieau', value: `${vigieauAlertsCount}`, info: "Restriction(s) d'eau active(s)", css: vigieauAlertsCount > 0 ? 'jaune' : 'vert' },
@@ -4333,6 +4361,8 @@ function renderSituationOverview() {
     { label: 'Incidents SNCF', value: `${sncfIncidentsCount}`, info: 'Accidents / travaux Isère', css: sncfIncidentsCount > 0 ? 'orange' : 'vert' },
     { label: 'ARCEP · sites indisponibles', value: `${arcepOutages}`, info: 'Pannes mobiles Isère', css: arcepOutages > 0 ? 'jaune' : 'vert' },
     { label: 'ANFR · supports antennes', value: `${anfrSupports}`, info: 'Implantations recensées Isère', css: anfrSupports > 0 ? 'vert' : 'jaune' },
+    { label: 'APIC · alertes Isère', value: `${apicAlerts}`, info: 'Pluie intense à l’échelle communale', css: apicAlerts > 0 ? 'orange' : 'vert' },
+    { label: 'Vigicrues Flash · alertes Isère', value: `${vigicruesFlashAlerts}`, info: 'Avertissements crues rapides', css: vigicruesFlashAlerts > 0 ? 'orange' : 'vert' },
   ];
   const generatedAt = safeDateToLocale(Date.now());
 
@@ -4757,6 +4787,34 @@ function renderSncfAlerts(sncf = {}) {
   }).join('') || '<li>Aucune alerte SNCF accidents/travaux en Isère pour le moment.</li>');
 }
 
+function renderApicAlerts(apic = {}) {
+  const alerts = Array.isArray(apic?.alerts) ? apic.alerts : [];
+  const total = Number(apic?.alerts_total ?? alerts.length);
+  const level = normalizeLevel(apic?.level || (total > 0 ? 'jaune' : 'vert'));
+  setRiskText('apic-status', `${apic.status || 'inconnu'} · ${total} alerte(s)`, level);
+  setText('apic-info', `Département 38 · source ${apic.source_data || apic.source || '-'}`);
+  setHtml('apic-list', alerts.slice(0, 10).map((alert) => {
+    const zone = escapeHtml(alert.zone || 'Isère');
+    const alertLevel = normalizeLevel(alert.level || 'jaune');
+    const firstAlert = alert.first_alert_at ? ` · 1ère alerte ${escapeHtml(alert.first_alert_at)}` : '';
+    const lastChange = alert.last_change_at ? ` · maj ${escapeHtml(alert.last_change_at)}` : '';
+    return `<li><strong>${zone}</strong> · <span style="color:${levelColor(alertLevel)}">${escapeHtml(alertLevel)}</span>${firstAlert}${lastChange}</li>`;
+  }).join('') || '<li>Aucune alerte APIC en cours sur l’Isère.</li>');
+}
+
+function renderVigicruesFlashAlerts(vigicruesFlash = {}) {
+  const alerts = Array.isArray(vigicruesFlash?.alerts) ? vigicruesFlash.alerts : [];
+  const total = Number(vigicruesFlash?.alerts_total ?? alerts.length);
+  const level = normalizeLevel(vigicruesFlash?.level || (total > 0 ? 'jaune' : 'vert'));
+  setRiskText('vigicrues-flash-status', `${vigicruesFlash.status || 'inconnu'} · ${total} alerte(s)`, level);
+  setText('vigicrues-flash-info', `Département 38 · source ${vigicruesFlash.source_data || vigicruesFlash.source || '-'}`);
+  setHtml('vigicrues-flash-list', alerts.slice(0, 10).map((alert) => {
+    const zone = escapeHtml(alert.zone || 'Isère');
+    const alertLevel = normalizeLevel(alert.level || 'jaune');
+    return `<li><strong>${zone}</strong> · <span style="color:${levelColor(alertLevel)}">${escapeHtml(alertLevel)}</span></li>`;
+  }).join('') || '<li>Aucune alerte Vigicrues Flash en cours sur l’Isère.</li>');
+}
+
 
 function formatPrecipitationProbability(value) {
   const numeric = Number(value);
@@ -5027,6 +5085,8 @@ function renderExternalRisks(data = {}) {
   const electricity = mergedData?.electricity_isere || {};
   const anfr = mergedData?.anfr_isere || {};
   const arcep = mergedData?.arcep_isere || {};
+  const apic = mergedData?.apic_isere || {};
+  const vigicruesFlash = mergedData?.vigicrues_flash_isere || {};
   const georisquesPayload = mergedData?.georisques || {};
   const georisques = georisquesPayload?.data && typeof georisquesPayload.data === 'object'
     ? { ...georisquesPayload.data, ...georisquesPayload }
@@ -5052,6 +5112,8 @@ function renderExternalRisks(data = {}) {
   renderPrefectureNews(prefecture);
   renderDauphineNews(dauphine);
   renderSncfAlerts(sncf);
+  renderApicAlerts(apic);
+  renderVigicruesFlashAlerts(vigicruesFlash);
   renderVigieauAlerts(vigieau);
   renderElectricityStatus(electricity);
   const atmoToday = atmo?.today || {};
@@ -5134,6 +5196,8 @@ function renderApiInterconnections(data = {}) {
     { key: 'atmo_aura', label: "Atmo AURA · Qualité de l'air", level: `indice ${data.atmo_aura?.today?.index ?? '-'}`, details: data.atmo_aura?.source || '-' },
     { key: 'anfr_isere', label: 'ANFR · Antennes mobiles Isère', level: `${data.anfr_isere?.supports_total ?? 0} support(s)`, details: data.anfr_isere?.data_release || '-' },
     { key: 'arcep_isere', label: 'ARCEP · Sites mobiles indisponibles', level: `${data.arcep_isere?.outages_total ?? 0} indisponibilité(s)`, details: data.arcep_isere?.resource_date || '-' },
+    { key: 'apic_isere', label: 'APIC · Avertissements pluie intense Isère', level: `${data.apic_isere?.alerts_total ?? 0} alerte(s)`, details: data.apic_isere?.source_data || data.apic_isere?.source || '-' },
+    { key: 'vigicrues_flash_isere', label: 'Vigicrues Flash · Crues rapides Isère', level: `${data.vigicrues_flash_isere?.alerts_total ?? 0} alerte(s)`, details: data.vigicrues_flash_isere?.source_data || data.vigicrues_flash_isere?.source || '-' },
     { key: 'isere_opendata', label: 'Open Data Isère · Résilience territoriale', level: `${data.isere_opendata?.totals?.food_aid_points ?? 0} aides alimentaires`, details: `${data.isere_opendata?.totals?.health_centers ?? 0} maisons de santé · ${data.isere_opendata?.totals?.schools ?? 0} établissements scolaires` },
   ];
 

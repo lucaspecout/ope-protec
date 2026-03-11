@@ -376,6 +376,8 @@ _ISERE_OPENDATA_CACHE_TTL_SECONDS = 1800
 _ANFR_ISERE_CACHE_TTL_SECONDS = 43200
 _ARCEP_ISERE_CACHE_TTL_SECONDS = 900
 _HUBEAU_GROUNDWATER_CACHE_TTL_SECONDS = 10800
+_APIC_ISERE_CACHE_TTL_SECONDS = 300
+_VIGICRUES_FLASH_ISERE_CACHE_TTL_SECONDS = 300
 _ISERE_BOUNDARY_CACHE_TTL_SECONDS = 21600
 _AURA_AIRCRAFT_CACHE_TTL_SECONDS = 45
 
@@ -411,6 +413,10 @@ _arcep_isere_cache_lock = Lock()
 _arcep_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _hubeau_groundwater_cache_lock = Lock()
 _hubeau_groundwater_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_apic_isere_cache_lock = Lock()
+_apic_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_vigicrues_flash_isere_cache_lock = Lock()
+_vigicrues_flash_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _aura_aircraft_cache_lock = Lock()
 _aura_aircraft_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _isere_aval_polyline_cache_lock = Lock()
@@ -3510,6 +3516,136 @@ def fetch_vigieau_restrictions(force_refresh: bool = False) -> dict[str, Any]:
         ttl_seconds=_VIGIEAU_CACHE_TTL_SECONDS,
         force_refresh=force_refresh,
         loader=_fetch_vigieau_restrictions_live,
+    )
+
+
+def _apic_level_from_raw(value: Any) -> str:
+    try:
+        numeric = int(value)
+    except (TypeError, ValueError):
+        return "inconnu"
+    if numeric <= 0:
+        return "vert"
+    if numeric == 1:
+        return "jaune"
+    if numeric >= 2:
+        return "orange"
+    return "inconnu"
+
+
+def _fetch_apic_family_isere_live(mode: str, service_label: str) -> dict[str, Any]:
+    base_url = f"https://apic.meteofrance.fr/static/carto/{mode}/fr"
+    reseaux_url = f"{base_url}/{mode}_fr_reseaux.json"
+    source_page = "https://apic.meteofrance.fr"
+    try:
+        reseaux_payload = _http_get_json(reseaux_url, timeout=16)
+        reseaux = reseaux_payload.get("reseaux") if isinstance(reseaux_payload, dict) else []
+        latest = reseaux[0] if isinstance(reseaux, list) and reseaux else {}
+        latest_date = str(latest.get("date") or "").strip()
+        if not latest_date:
+            raise ValueError("Date réseau APIC/Vigicrues Flash introuvable")
+
+        data_url = f"{base_url}/{mode}_fr_{latest_date}.json"
+        payload = _http_get_json(data_url, timeout=16)
+        deps = payload.get("deps") if isinstance(payload, dict) else {}
+        grains = payload.get("grains") if isinstance(payload, dict) else {}
+        troncons = payload.get("troncons") if isinstance(payload, dict) else {}
+
+        dep38 = deps.get("38") if isinstance(deps, dict) else None
+        dep38_level = _apic_level_from_raw((dep38 or {}).get("alert_level")) if isinstance(dep38, dict) else "vert"
+
+        alerts: list[dict[str, Any]] = []
+        if isinstance(dep38, dict) and dep38_level in {"jaune", "orange", "rouge"}:
+            alerts.append(
+                {
+                    "zone": "Département Isère (38)",
+                    "level": dep38_level,
+                    "new_alerts": int(dep38.get("nb_new_alerts") or 0),
+                }
+            )
+
+        if isinstance(grains, dict):
+            for code, grain in grains.items():
+                if not str(code).startswith("38") or not isinstance(grain, dict):
+                    continue
+                grain_level = _apic_level_from_raw(grain.get("alert_level"))
+                if grain_level not in {"jaune", "orange", "rouge"}:
+                    continue
+                alerts.append(
+                    {
+                        "zone": f"Commune INSEE {code}",
+                        "level": grain_level,
+                        "first_alert_at": grain.get("date_frst_alrt") or "",
+                        "last_change_at": grain.get("date_alrt_inc") or "",
+                    }
+                )
+
+        if isinstance(troncons, dict):
+            for code, troncon in troncons.items():
+                if not isinstance(troncon, dict):
+                    continue
+                depts = str(troncon.get("depts") or troncon.get("dep") or "")
+                if "38" not in depts:
+                    continue
+                troncon_level = _apic_level_from_raw(troncon.get("alert_level"))
+                if troncon_level not in {"jaune", "orange", "rouge"}:
+                    continue
+                alerts.append(
+                    {
+                        "zone": str(troncon.get("name") or troncon.get("nom") or code),
+                        "level": troncon_level,
+                        "new_alerts": int(troncon.get("nb_new_alerts") or 0),
+                    }
+                )
+
+        levels = [normalize_level(item.get("level") or "vert") for item in alerts]
+        max_level = "rouge" if "rouge" in levels else "orange" if "orange" in levels else "jaune" if "jaune" in levels else "vert"
+
+        return {
+            "service": service_label,
+            "department": "Isère (38)",
+            "status": "online",
+            "source": source_page,
+            "source_reseaux": reseaux_url,
+            "source_data": data_url,
+            "network_date": latest_date,
+            "network_date_label": latest.get("date_str") or "",
+            "level": max_level,
+            "alerts_total": len(alerts),
+            "alerts": alerts[:20],
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError, TypeError) as exc:
+        return {
+            "service": service_label,
+            "department": "Isère (38)",
+            "status": "degraded",
+            "source": source_page,
+            "level": "inconnu",
+            "alerts_total": 0,
+            "alerts": [],
+            "error": str(exc),
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+
+
+def fetch_apic_isere_alerts(force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_apic_isere_cache,
+        lock=_apic_isere_cache_lock,
+        ttl_seconds=_APIC_ISERE_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=lambda: _fetch_apic_family_isere_live("apic", "APIC"),
+    )
+
+
+def fetch_vigicrues_flash_isere_alerts(force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_vigicrues_flash_isere_cache,
+        lock=_vigicrues_flash_isere_cache_lock,
+        ttl_seconds=_VIGICRUES_FLASH_ISERE_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=lambda: _fetch_apic_family_isere_live("vf", "Vigicrues Flash"),
     )
 
 
