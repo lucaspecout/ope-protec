@@ -1891,6 +1891,9 @@ function toggleSelectedPoiVisibility() {
 function classifyInstitutionPoint(element = {}) {
   const tags = element.tags || {};
   const amenity = String(tags.amenity || '').toLowerCase();
+  const leisure = String(tags.leisure || '').toLowerCase();
+  const building = String(tags.building || '').toLowerCase();
+  const socialFacility = String(tags['social_facility'] || '').toLowerCase();
   const name = String(tags.name || '').toLowerCase();
   const policeType = String(tags.police || '').toLowerCase();
   const railway = String(tags.railway || '').toLowerCase();
@@ -1899,6 +1902,7 @@ function classifyInstitutionPoint(element = {}) {
   if (amenity === 'kindergarten') return 'creche';
   if (amenity === 'community_centre' || amenity === 'arts_centre') return 'centre_culturel';
   if (amenity === 'theatre') return 'salle_spectacle_public';
+  if (amenity === 'social_facility' || socialFacility.includes('shelter') || socialFacility.includes('group_home')) return 'salle_fetes';
   if (amenity === 'university') return 'universite';
   if (amenity === 'college') return 'college';
   if (amenity === 'school') {
@@ -1915,8 +1919,10 @@ function classifyInstitutionPoint(element = {}) {
   if (amenity === 'bus_station') return 'transport_gare_routiere';
   if (railway === 'station') return 'transport_gare_sncf';
   if (aeroway === 'aerodrome' || aeroway === 'airport') return 'transport_aeroport';
-  if (name.includes('gymnase')) return 'gymnase';
-  if (name.includes('salle des fêtes') || name.includes('salle des fetes')) return 'salle_fetes';
+  if (leisure === 'sports_hall' || building === 'sports_hall') return 'gymnase';
+  if (name.includes('gymnase') || name.includes('complexe sportif')) return 'gymnase';
+  if (name.includes('maison des associations') || name.includes('centre social') || name.includes('maison de quartier')) return 'centre_culturel';
+  if (name.includes('salle des fêtes') || name.includes('salle des fetes') || name.includes('salle polyvalente')) return 'salle_fetes';
   return null;
 }
 
@@ -2082,31 +2088,39 @@ async function loadIsereInstitutions() {
     institutionsLoaded = true;
     return institutionPointsCache;
   }
-  const areaNames = ['Isère', 'Isere'];
+  const areaQueries = [
+    '["boundary"="administrative"]["admin_level"="6"]["ref:INSEE"="38"]',
+    '["boundary"="administrative"]["admin_level"="6"]["name"="Isère"]',
+    '["boundary"="administrative"]["admin_level"="6"]["name"="Isere"]',
+  ];
   const overpassEndpoints = [
     'https://overpass-api.de/api/interpreter',
     'https://overpass.kumi.systems/api/interpreter',
   ];
-  const buildQuery = (areaName) => `[out:json][timeout:40];
-area["boundary"="administrative"]["admin_level"="6"]["name"="${areaName}"]->.searchArea;
+  const buildQuery = (areaFilter) => `[out:json][timeout:70];
+area${areaFilter}->.searchArea;
 (
-  nwr["amenity"~"school|college|university|kindergarten|police|fire_station|bus_station"](area.searchArea);
+  nwr["amenity"~"school|college|university|kindergarten|police|fire_station|bus_station|community_centre|arts_centre|theatre|social_facility"](area.searchArea);
+  nwr["leisure"="sports_hall"](area.searchArea);
+  nwr["building"="sports_hall"](area.searchArea);
   nwr["railway"="station"](area.searchArea);
   nwr["aeroway"~"aerodrome|airport"](area.searchArea);
+  nwr["name"~"gymnase|salle des fetes|salle des fêtes|salle polyvalente|maison des associations|centre social", i](area.searchArea);
 );
 out center tags;`;
 
   let points = [];
   for (const endpoint of overpassEndpoints) {
-    for (const areaName of areaNames) {
+    for (const areaFilter of areaQueries) {
       try {
         const response = await queueApiRequest(() => fetchWithTimeout(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
-          body: buildQuery(areaName),
+          body: buildQuery(areaFilter),
         }));
-        const payload = await parseJsonResponse(response, `overpass-institutions-${areaName}`);
+        const payload = await parseJsonResponse(response, `overpass-institutions-${areaFilter}`);
         const elements = Array.isArray(payload?.elements) ? payload.elements : [];
+        const seenIds = new Set();
         points = elements
           .map((element) => {
             const type = classifyInstitutionPoint(element);
@@ -2114,10 +2128,13 @@ out center tags;`;
             const lat = Number(element.lat ?? element.center?.lat);
             const lon = Number(element.lon ?? element.center?.lon);
             if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+            const id = `osm-${element.type}-${element.id}`;
+            if (seenIds.has(id)) return null;
+            seenIds.add(id);
             const name = String(element.tags?.name || '').trim() || 'Établissement';
             const address = [element.tags?.['addr:housenumber'], element.tags?.['addr:street'], element.tags?.['addr:city']].filter(Boolean).join(' ') || 'Adresse non renseignée';
             return {
-              id: `osm-${element.type}-${element.id}`,
+              id,
               name,
               type,
               lat,
