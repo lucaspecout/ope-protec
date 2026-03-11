@@ -27,6 +27,7 @@ const API_MAX_RETRIES_GET = 2;
 const API_MAX_RETRIES_NON_GET = 1;
 const API_ORIGIN_COOLDOWN_MS = 120000;
 const STATIC_POINTS_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const OSM_DETAILS_MIN_ZOOM = 16;
 const PANEL_TITLES = {
   'situation-panel': 'Situation opérationnelle',
   'services-panel': 'Services connectés',
@@ -201,6 +202,8 @@ let selectedMeteoCityKey = ISERE_MAJOR_CITIES[0]?.key || 'grenoble';
 let isereBoundaryGeometry = null;
 let trafficRenderSequence = 0;
 let mapSearchController = null;
+let osmDetailsController = null;
+let osmDetailsMarker = null;
 
 function trafficIconZoomClass(zoom = 9) {
   if (zoom <= 7) return 'traffic-zoom-xs';
@@ -1468,10 +1471,77 @@ function initMap() {
   institutionLayer = window.L.layerGroup().addTo(leafletMap);
   populationLayer = window.L.layerGroup().addTo(leafletMap);
   leafletMap.on('click', onMapClickAddPoint);
+  leafletMap.on('click', handleOsmDetailsClick);
   leafletMap.on('popupopen', refreshPhotoCameraImages);
   leafletMap.on('zoomend', updateTrafficZoomClass);
   updateTrafficZoomClass();
   startPhotoCameraAutoRefresh();
+}
+
+function formatOsmDetailsPopup(payload = {}) {
+  const address = payload.address || {};
+  const labels = [];
+  if (address.road) labels.push(address.road);
+  if (address.suburb) labels.push(address.suburb);
+  if (address.city || address.town || address.village) labels.push(address.city || address.town || address.village);
+  if (address.postcode) labels.push(address.postcode);
+  const extras = payload.extratags || {};
+  const osmLink = payload.osm_type && payload.osm_id
+    ? `https://www.openstreetmap.org/${payload.osm_type}/${payload.osm_id}`
+    : '';
+  const name = payload.namedetails?.name || payload.name || payload.display_name?.split(',')?.[0] || 'Lieu OSM';
+  const category = [payload.category, payload.type].filter(Boolean).join(' · ') || 'Élément cartographique';
+
+  return `
+    <strong>🧭 ${escapeHtml(name)}</strong><br>
+    <span class="muted">${escapeHtml(category)}</span><br>
+    ${labels.length ? `📍 ${escapeHtml(labels.join(', '))}<br>` : ''}
+    ${extras.opening_hours ? `🕒 ${escapeHtml(extras.opening_hours)}<br>` : ''}
+    ${extras.phone ? `📞 ${escapeHtml(extras.phone)}<br>` : ''}
+    ${extras.website ? `🌐 <a href="${escapeHtml(extras.website)}" target="_blank" rel="noreferrer">Site web</a><br>` : ''}
+    ${extras.wikipedia ? `📚 ${escapeHtml(extras.wikipedia)}<br>` : ''}
+    ${osmLink ? `<a href="${escapeHtml(osmLink)}" target="_blank" rel="noreferrer">Voir sur OpenStreetMap</a>` : ''}
+  `;
+}
+
+async function handleOsmDetailsClick(event) {
+  if (!leafletMap || mapAddPointMode || typeof fetch !== 'function') return;
+  if (leafletMap.getZoom() < OSM_DETAILS_MIN_ZOOM) return;
+  const lat = Number(event?.latlng?.lat);
+  const lon = Number(event?.latlng?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+
+  if (osmDetailsController) osmDetailsController.abort();
+  osmDetailsController = new AbortController();
+
+  if (!osmDetailsMarker) {
+    osmDetailsMarker = window.L.circleMarker([lat, lon], {
+      radius: 6,
+      color: '#0f172a',
+      weight: 1,
+      fillColor: '#ffffff',
+      fillOpacity: 0.85,
+    }).addTo(leafletMap);
+  } else {
+    osmDetailsMarker.setLatLng([lat, lon]);
+  }
+  osmDetailsMarker.bindPopup('Recherche des informations OSM…').openPopup();
+
+  try {
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&zoom=18&addressdetails=1&extratags=1&namedetails=1`,
+      { signal: osmDetailsController.signal, headers: { 'Accept-Language': 'fr' } },
+    );
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    const popupContent = formatOsmDetailsPopup(payload);
+    osmDetailsMarker.bindPopup(popupContent).openPopup();
+    setMapFeedback('Informations OSM affichées pour le lieu sélectionné.');
+  } catch (error) {
+    if (error?.name === 'AbortError') return;
+    osmDetailsMarker.bindPopup('Impossible de récupérer les détails OSM pour ce point.').openPopup();
+    setMapFeedback('Impossible de récupérer les détails OSM pour ce point.', true);
+  }
 }
 
 function setMapFeedback(message = '', isError = false) {
