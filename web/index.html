@@ -668,7 +668,15 @@
                   <label><input id="filter-hydro" type="checkbox" checked /> Vigicrues</label>
                   <label><input id="filter-pcs" type="checkbox" checked /> Communes PCS</label>
                   <label><input id="filter-resources-command" type="checkbox" checked /> Centres de commandement</label>
-                  <label><input id="filter-resources-shelter" type="checkbox" checked /> Centres d'hébergement</label>
+                  <label><input id="filter-resources-hosting" type="checkbox" /> Lieux d'accueil hébergeables
+                    <select id="filter-resources-hosting-type" aria-label="Filtrer les lieux d'accueil hébergeables">
+                      <option value="all">Tous les types</option>
+                      <option value="gymnase">Gymnases</option>
+                      <option value="centre_culturel">Centres culturels</option>
+                      <option value="salle_spectacle_public">Salles de spectacle public</option>
+                      <option value="salle_fetes">Salles des fêtes</option>
+                    </select>
+                  </label>
                   <label><input id="filter-resources-schools" type="checkbox" /> Ecoles
                     <select id="filter-resources-schools-type" aria-label="Filtrer les établissements scolaires">
                       <option value="all">Tous les types</option>
