@@ -5195,7 +5195,6 @@ function renderApiInterconnections(data = {}) {
     { key: 'arcep_isere', label: 'ARCEP · Sites mobiles indisponibles', level: `${data.arcep_isere?.outages_total ?? 0} indisponibilité(s)`, details: data.arcep_isere?.resource_date || '-' },
     { key: 'apic_isere', label: 'APIC · Avertissements pluie intense Isère', level: `${data.apic_isere?.alerts_total ?? 0} alerte(s)`, details: data.apic_isere?.source_data || data.apic_isere?.source || '-' },
     { key: 'vigicrues_flash_isere', label: 'Vigicrues Flash · Crues rapides Isère', level: `${data.vigicrues_flash_isere?.alerts_total ?? 0} alerte(s)`, details: data.vigicrues_flash_isere?.source_data || data.vigicrues_flash_isere?.source || '-' },
-    { key: 'isere_opendata', label: 'Open Data Isère · Résilience territoriale', level: `${data.isere_opendata?.totals?.food_aid_points ?? 0} aides alimentaires`, details: `${data.isere_opendata?.totals?.health_centers ?? 0} maisons de santé · ${data.isere_opendata?.totals?.schools ?? 0} établissements scolaires` },
   ];
 
   const cards = services.map((service) => {
