@@ -4346,33 +4346,46 @@ function renderSituationOverview() {
   const vigieauAlertsCount = Number((externalRisks?.vigieau?.alerts || []).length);
   const atmoLevel = normalizeLevel(externalRisks?.atmo_aura?.today?.level || 'inconnu');
   const atmoLabel = String(externalRisks?.atmo_aura?.today?.label || atmoLevel || 'inconnu').toLowerCase();
-  const sncfIncidentsCount = Number(externalRisks?.sncf_isere?.alerts_total ?? (externalRisks?.sncf_isere?.alerts || []).length);
-  const arcepOutages = Number(externalRisks?.arcep_isere?.outages_total ?? 0);
-  const anfrSupports = Number(externalRisks?.anfr_isere?.supports_total ?? 0);
   const apicAlerts = Number(externalRisks?.apic_isere?.alerts_total ?? (externalRisks?.apic_isere?.alerts || []).length);
   const vigicruesFlashAlerts = Number(externalRisks?.vigicrues_flash_isere?.alerts_total ?? (externalRisks?.vigicrues_flash_isere?.alerts || []).length);
+  const orangeOrRedLogsCount = activeLogs.filter((log) => ['orange', 'rouge'].includes(normalizeLevel(log.danger_level))).length;
   const mobilityCards = [
     { label: 'Bison Futé (38) · Départ / Arrivée', value: `${bisonDeparture} / ${bisonReturn}`, info: 'Tendance Isère départ / arrivée', css: bisonCombinedLevel },
     { label: 'Vigieau', value: `${vigieauAlertsCount}`, info: "Restriction(s) d'eau active(s)", css: vigieauAlertsCount > 0 ? 'jaune' : 'vert' },
     { label: "Qualité de l'air", value: atmoLabel, info: 'Source Atmo AURA', css: atmoLevel },
-    { label: 'Incidents SNCF', value: `${sncfIncidentsCount}`, info: 'Accidents / travaux Isère', css: sncfIncidentsCount > 0 ? 'orange' : 'vert' },
-    { label: 'ARCEP · sites indisponibles', value: `${arcepOutages}`, info: 'Pannes mobiles Isère', css: arcepOutages > 0 ? 'jaune' : 'vert' },
-    { label: 'ANFR · supports antennes', value: `${anfrSupports}`, info: 'Implantations recensées Isère', css: anfrSupports > 0 ? 'vert' : 'jaune' },
     { label: 'APIC · alertes Isère', value: `${apicAlerts}`, info: 'Pluie intense à l’échelle communale', css: apicAlerts > 0 ? 'orange' : 'vert' },
     { label: 'Vigicrues Flash · alertes Isère', value: `${vigicruesFlashAlerts}`, info: 'Avertissements crues rapides', css: vigicruesFlashAlerts > 0 ? 'orange' : 'vert' },
+  ];
+  const operationalMessage = [
+    `Risque global <strong class="risk-${globalRisk}">${escapeHtml(globalRisk)}</strong> avec vigilance météo <strong class="risk-${vigilance}">${escapeHtml(vigilance)}</strong> et crues <strong class="risk-${crues}">${escapeHtml(crues)}</strong>.`,
+    `${crisisCount} commune(s) en crise et ${orangeOrRedLogsCount} évènement(s) terrain orange/rouge en cours de suivi.`,
+    `${apicAlerts} alerte(s) APIC et ${vigicruesFlashAlerts} alerte(s) Vigicrues Flash actives en Isère.`,
+  ];
+  const recommendedActions = [
+    'Maintenir une veille renforcée sur les secteurs déjà en suivi opérationnel.',
+    'Diffuser un point de vigilance aux équipes terrain et aux communes les plus exposées.',
+    'Recaler le prochain point de situation selon l’évolution des bulletins météo et crues.',
   ];
   const generatedAt = safeDateToLocale(Date.now());
 
   setHtml('situation-content', `
     <div class="situation-toolbar">
       <div>
-        <h3>SITREP journalier · Isère</h3>
-        <p class="muted">Synthèse météo, risques et signaux d'intérêt · mise à jour ${escapeHtml(generatedAt)}</p>
+        <h3>SITREP prêt à diffusion · Isère</h3>
+        <p class="muted">Version claire et moderne pour envoi immédiat · mise à jour ${escapeHtml(generatedAt)}</p>
       </div>
       <div class="situation-toolbar__actions">
         <button id="situation-export-pdf-btn" type="button">📄 Générer et télécharger le SITREP PDF</button>
       </div>
     </div>
+
+    <article class="tile situation-briefing">
+      <h3>Message opérationnel</h3>
+      <ul class="list compact">${operationalMessage.map((item) => `<li>${item}</li>`).join('')}</ul>
+      <div class="situation-briefing__actions">
+        ${recommendedActions.map((item) => `<p><strong>Action:</strong> ${item}</p>`).join('')}
+      </div>
+    </article>
 
     <div class="situation-top-grid">
       ${kpiCards.map((card) => `<article class="tile situation-tile"><h3>${card.label}</h3><p class="kpi-value ${card.css}">${escapeHtml(card.value)}</p><p class="muted">${card.info}</p></article>`).join('')}
@@ -4403,7 +4416,7 @@ function renderSituationOverview() {
     <h3>Fil de situation</h3>
     <div class="situation-log-columns">
       <div>
-        <h4>Nouveaux / En cours / Suivi</h4>
+        <h4>Nouveaux / En cours / Suivi (prioritaires)</h4>
         <ul class="list">${activeLogs.slice(0, 8).map((log) => buildSituationLogMarkup(log)).join('') || '<li>Aucune crise nouvelle / en cours / suivie.</li>'}</ul>
       </div>
     </div>

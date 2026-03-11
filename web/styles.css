@@ -287,6 +287,24 @@ label { display: block; margin-bottom: .8rem; }
 
 .situation-content { display: grid; gap: .95rem; }
 .situation-toolbar h3 { margin: 0 0 .2rem; }
+.situation-briefing {
+  border: 1px solid #d8e5ff;
+  background: linear-gradient(145deg, #eef4ff, #ffffff 52%, #f6faff);
+}
+.situation-briefing h3 { margin: 0; }
+.situation-briefing__actions {
+  margin-top: .55rem;
+  display: grid;
+  gap: .4rem;
+}
+.situation-briefing__actions p {
+  margin: 0;
+  border: 1px solid #dce7fb;
+  border-radius: 10px;
+  background: #f8fbff;
+  padding: .45rem .55rem;
+  font-size: .92rem;
+}
 
 .services-grid { display: grid; gap: .65rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
 .service-card { border: 1px solid var(--line); border-radius: 12px; padding: .8rem; background: linear-gradient(180deg, #fff, #f7faff); display: grid; gap: .35rem; align-content: flex-start; }
