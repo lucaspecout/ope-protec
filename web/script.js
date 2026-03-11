@@ -1491,16 +1491,21 @@ function formatOsmDetailsPopup(payload = {}) {
     : '';
   const name = payload.namedetails?.name || payload.name || payload.display_name?.split(',')?.[0] || 'Lieu OSM';
   const category = [payload.category, payload.type].filter(Boolean).join(' · ') || 'Élément cartographique';
+  const lat = Number(payload.lat);
+  const lon = Number(payload.lon);
+  const coordsLabel = formatCoordinates(lat, lon);
 
   return `
     <strong>🧭 ${escapeHtml(name)}</strong><br>
     <span class="muted">${escapeHtml(category)}</span><br>
     ${labels.length ? `📍 ${escapeHtml(labels.join(', '))}<br>` : ''}
+    ${coordsLabel !== '-' ? `🧮 Coordonnées: ${escapeHtml(coordsLabel)}<br>` : ''}
     ${extras.opening_hours ? `🕒 ${escapeHtml(extras.opening_hours)}<br>` : ''}
     ${extras.phone ? `📞 ${escapeHtml(extras.phone)}<br>` : ''}
     ${extras.website ? `🌐 <a href="${escapeHtml(extras.website)}" target="_blank" rel="noreferrer">Site web</a><br>` : ''}
     ${extras.wikipedia ? `📚 ${escapeHtml(extras.wikipedia)}<br>` : ''}
-    ${osmLink ? `<a href="${escapeHtml(osmLink)}" target="_blank" rel="noreferrer">Voir sur OpenStreetMap</a>` : ''}
+    ${osmLink ? `<a href="${escapeHtml(osmLink)}" target="_blank" rel="noreferrer">Voir sur OpenStreetMap</a><br>` : ''}
+    ${coordsLabel !== '-' ? `<a href="https://www.google.com/maps?q=${encodeURIComponent(`${lat},${lon}`)}" target="_blank" rel="noreferrer">Ouvrir dans Google Maps</a>` : ''}
   `;
 }
 
@@ -1510,6 +1515,7 @@ async function handleOsmDetailsClick(event) {
   const lat = Number(event?.latlng?.lat);
   const lon = Number(event?.latlng?.lng);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+  updateSelectedLocationPanel(lat, lon);
 
   if (osmDetailsController) osmDetailsController.abort();
   osmDetailsController = new AbortController();
@@ -1549,6 +1555,32 @@ function setMapFeedback(message = '', isError = false) {
   if (!target) return;
   target.textContent = message;
   target.className = isError ? 'error' : 'muted';
+}
+
+function formatCoordinates(lat, lon) {
+  const latNumber = Number(lat);
+  const lonNumber = Number(lon);
+  if (!Number.isFinite(latNumber) || !Number.isFinite(lonNumber)) return '-';
+  return `${latNumber.toFixed(6)}, ${lonNumber.toFixed(6)}`;
+}
+
+function updateSelectedLocationPanel(lat, lon) {
+  const panel = document.getElementById('map-selected-location');
+  const coordsNode = document.getElementById('map-selected-coords');
+  const googleLink = document.getElementById('map-open-google-maps');
+  if (!panel || !coordsNode || !googleLink) return;
+  const formattedCoords = formatCoordinates(lat, lon);
+  const hasCoords = formattedCoords !== '-';
+  coordsNode.textContent = formattedCoords;
+  if (hasCoords) {
+    const latNumber = Number(lat);
+    const lonNumber = Number(lon);
+    googleLink.href = `https://www.google.com/maps?q=${encodeURIComponent(`${latNumber},${lonNumber}`)}`;
+    panel.hidden = false;
+    return;
+  }
+  googleLink.href = '#';
+  panel.hidden = true;
 }
 
 
@@ -2406,8 +2438,10 @@ function placeSearchResult(lat, lon, label) {
   if (!leafletMap || !searchLayer) return;
   const coords = normalizeMapCoordinates(lat, lon);
   if (!coords) return;
+  const coordsLabel = formatCoordinates(coords.lat, coords.lon);
   searchLayer.clearLayers();
-  window.L.marker([coords.lat, coords.lon]).bindPopup(`Résultat: ${escapeHtml(label)}`).addTo(searchLayer).openPopup();
+  window.L.marker([coords.lat, coords.lon]).bindPopup(`Résultat: ${escapeHtml(label)}<br>Coordonnées: ${escapeHtml(coordsLabel)}`).addTo(searchLayer).openPopup();
+  updateSelectedLocationPanel(coords.lat, coords.lon);
   leafletMap.setView([coords.lat, coords.lon], 12);
 }
 
@@ -5610,6 +5644,7 @@ function bindAppInteractions() {
     const input = document.getElementById('map-search');
     if (input) input.value = '';
     if (searchLayer) searchLayer.clearLayers();
+    updateSelectedLocationPanel(null, null);
     renderResources();
     setMapFeedback('Recherche effacée, ressources remises à jour.');
   });
