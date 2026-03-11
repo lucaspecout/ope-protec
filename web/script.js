@@ -4356,16 +4356,6 @@ function renderSituationOverview() {
     { label: 'APIC · alertes Isère', value: `${apicAlerts}`, info: 'Pluie intense à l’échelle communale', css: apicAlerts > 0 ? 'orange' : 'vert' },
     { label: 'Vigicrues Flash · alertes Isère', value: `${vigicruesFlashAlerts}`, info: 'Avertissements crues rapides', css: vigicruesFlashAlerts > 0 ? 'orange' : 'vert' },
   ];
-  const operationalMessage = [
-    `Risque global <strong class="risk-${globalRisk}">${escapeHtml(globalRisk)}</strong> avec vigilance météo <strong class="risk-${vigilance}">${escapeHtml(vigilance)}</strong> et crues <strong class="risk-${crues}">${escapeHtml(crues)}</strong>.`,
-    `${crisisCount} commune(s) en crise et ${orangeOrRedLogsCount} évènement(s) terrain orange/rouge en cours de suivi.`,
-    `${apicAlerts} alerte(s) APIC et ${vigicruesFlashAlerts} alerte(s) Vigicrues Flash actives en Isère.`,
-  ];
-  const recommendedActions = [
-    'Maintenir une veille renforcée sur les secteurs déjà en suivi opérationnel.',
-    'Diffuser un point de vigilance aux équipes terrain et aux communes les plus exposées.',
-    'Recaler le prochain point de situation selon l’évolution des bulletins météo et crues.',
-  ];
   const generatedAt = safeDateToLocale(Date.now());
 
   setHtml('situation-content', `
@@ -4378,14 +4368,6 @@ function renderSituationOverview() {
         <button id="situation-export-pdf-btn" type="button">📄 Générer et télécharger le SITREP PDF</button>
       </div>
     </div>
-
-    <article class="tile situation-briefing">
-      <h3>Message opérationnel</h3>
-      <ul class="list compact">${operationalMessage.map((item) => `<li>${item}</li>`).join('')}</ul>
-      <div class="situation-briefing__actions">
-        ${recommendedActions.map((item) => `<p><strong>Action:</strong> ${item}</p>`).join('')}
-      </div>
-    </article>
 
     <div class="situation-top-grid">
       ${kpiCards.map((card) => `<article class="tile situation-tile"><h3>${card.label}</h3><p class="kpi-value ${card.css}">${escapeHtml(card.value)}</p><p class="muted">${card.info}</p></article>`).join('')}
@@ -4613,6 +4595,25 @@ function buildSitrepHtml() {
     { label: 'Alertes SNCF', value: sncf.length },
     { label: 'Actualités Préfecture', value: prefecture.length },
   ];
+  const vigilance = normalizeLevel(dashboard.vigilance || meteo.level || 'vert');
+  const crues = normalizeLevel(dashboard.crues || vigicrues.water_alert_level || 'vert');
+  const bisonDeparture = normalizeLevel(bison.departure || 'inconnu');
+  const bisonReturn = normalizeLevel(bison.return || 'inconnu');
+  const bisonCombinedLevel = riskRank(bisonReturn) > riskRank(bisonDeparture) ? bisonReturn : bisonDeparture;
+  const apicAlerts = Number(externalRisks?.apic_isere?.alerts_total ?? (externalRisks?.apic_isere?.alerts || []).length);
+  const vigicruesFlashAlerts = Number(externalRisks?.vigicrues_flash_isere?.alerts_total ?? (externalRisks?.vigicrues_flash_isere?.alerts || []).length);
+  const orangeOrRedLogsCount = logs.filter((log) => ['orange', 'rouge'].includes(normalizeLevel(log.danger_level))).length;
+  const overviewCards = [
+    { label: 'Vigilance météo', value: vigilance },
+    { label: 'Niveau crues', value: crues },
+    { label: 'Risque global', value: globalRisk },
+    { label: 'Communes en crise', value: String(crisisCount) },
+    { label: 'Bison Futé (départ / retour)', value: `${bisonDeparture} / ${bisonReturn}` },
+    { label: 'Alertes APIC', value: String(apicAlerts) },
+    { label: 'Alertes Vigicrues Flash', value: String(vigicruesFlashAlerts) },
+    { label: 'Main courante orange / rouge', value: String(orangeOrRedLogsCount) },
+  ];
+  const overviewRisks = buildCriticalRisksMarkup(dashboard, externalRisks);
 
   return `<!doctype html>
 <html lang="fr">
@@ -4648,6 +4649,14 @@ function buildSitrepHtml() {
       <article class="card"><p>Communes en crise</p><strong>${escapeHtml(String(crisisCount))}</strong></article>
     </div>
   </header>
+  <section>
+    <h2>Vue d'ensemble opérationnelle</h2>
+    <div class="kpi">
+      ${overviewCards.map((card) => `<article class="card"><p>${escapeHtml(card.label)}</p><strong>${escapeHtml(String(card.value))}</strong></article>`).join('')}
+    </div>
+    <p><strong>Risque mobilité dominant :</strong> ${escapeHtml(bisonCombinedLevel)}</p>
+    <ul>${overviewRisks}</ul>
+  </section>
   <section>
     <h2>Situation météo du jour</h2>
     <ul>${toSitrepBulletItems(meteoItems)}</ul>
