@@ -27,8 +27,7 @@ const API_MAX_RETRIES_GET = 2;
 const API_MAX_RETRIES_NON_GET = 1;
 const API_ORIGIN_COOLDOWN_MS = 120000;
 const STATIC_POINTS_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const OSM_DETAILS_MIN_ZOOM = 16;
-const OSM_DETAILS_SEARCH_RADIUS_METERS = 35;
+const OSM_DETAILS_MIN_ZOOM = 15;
 const PANEL_TITLES = {
   'situation-panel': 'Situation opérationnelle',
   'services-panel': 'Services connectés',
@@ -1382,11 +1381,11 @@ function applyBasemap(style = 'osm') {
   const layers = {
     osm: {
       url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-      options: { maxZoom: 18, attribution: '&copy; OpenStreetMap contributors' },
+      options: { maxZoom: 20, attribution: '&copy; OpenStreetMap contributors' },
     },
     topo: {
       url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
-      options: { maxZoom: 17, attribution: '&copy; OpenTopoMap contributors' },
+      options: { maxZoom: 19, attribution: '&copy; OpenTopoMap contributors' },
     },
     satellite: {
       url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
@@ -1510,102 +1509,6 @@ function formatOsmDetailsPopup(payload = {}) {
   `;
 }
 
-function buildOverpassOsmId(element = null) {
-  if (!element?.type || !element?.id) return '';
-  const typeMap = { node: 'N', way: 'W', relation: 'R' };
-  const prefix = typeMap[element.type];
-  if (!prefix) return '';
-  return `${prefix}${element.id}`;
-}
-
-function distanceMeters(lat1, lon1, lat2, lon2) {
-  const toRadians = (value) => (Number(value) * Math.PI) / 180;
-  const earthRadius = 6371000;
-  const dLat = toRadians(lat2 - lat1);
-  const dLon = toRadians(lon2 - lon1);
-  const a = Math.sin(dLat / 2) ** 2
-    + Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * Math.sin(dLon / 2) ** 2;
-  return 2 * earthRadius * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-function isPointInOverpassPolygon(point, geometry = []) {
-  if (!point || !Array.isArray(geometry) || geometry.length < 3) return false;
-  const ring = geometry.map((node) => [Number(node?.lon), Number(node?.lat)]).filter((node) => Number.isFinite(node[0]) && Number.isFinite(node[1]));
-  if (ring.length < 3) return false;
-  return isPointInRing(point, ring);
-}
-
-function chooseBestOverpassElement(elements = [], lat, lon) {
-  const clickPoint = { lat: Number(lat), lon: Number(lon) };
-  if (!Number.isFinite(clickPoint.lat) || !Number.isFinite(clickPoint.lon) || !elements.length) return null;
-  const scored = elements
-    .map((element) => {
-      const centerLat = Number(element?.lat ?? element?.center?.lat);
-      const centerLon = Number(element?.lon ?? element?.center?.lon);
-      const hasCenter = Number.isFinite(centerLat) && Number.isFinite(centerLon);
-      const containsClick = isPointInOverpassPolygon(clickPoint, element?.geometry || []);
-      const distance = hasCenter
-        ? distanceMeters(clickPoint.lat, clickPoint.lon, centerLat, centerLon)
-        : Number.POSITIVE_INFINITY;
-      const tags = element?.tags || {};
-      const hasName = Boolean(tags.name || tags.brand || tags.operator);
-      const semanticScore = (tags.shop ? 3 : 0) + (tags.amenity ? 2 : 0) + (tags.building ? 1 : 0);
-      return {
-        element,
-        containsClick,
-        distance,
-        hasName,
-        semanticScore,
-      };
-    })
-    .sort((a, b) => {
-      if (a.containsClick !== b.containsClick) return a.containsClick ? -1 : 1;
-      if (a.hasName !== b.hasName) return a.hasName ? -1 : 1;
-      if (a.semanticScore !== b.semanticScore) return b.semanticScore - a.semanticScore;
-      return a.distance - b.distance;
-    });
-  return scored[0]?.element || null;
-}
-
-async function fetchOsmElementFromOverpass(lat, lon, signal) {
-  const query = `
-    [out:json][timeout:20];
-    (
-      way(around:${OSM_DETAILS_SEARCH_RADIUS_METERS},${lat},${lon})["building"];
-      way(around:${OSM_DETAILS_SEARCH_RADIUS_METERS},${lat},${lon})["shop"];
-      way(around:${OSM_DETAILS_SEARCH_RADIUS_METERS},${lat},${lon})["amenity"];
-      relation(around:${OSM_DETAILS_SEARCH_RADIUS_METERS},${lat},${lon})["building"];
-      relation(around:${OSM_DETAILS_SEARCH_RADIUS_METERS},${lat},${lon})["shop"];
-      relation(around:${OSM_DETAILS_SEARCH_RADIUS_METERS},${lat},${lon})["amenity"];
-      node(around:12,${lat},${lon})["shop"];
-      node(around:12,${lat},${lon})["amenity"];
-    );
-    out body center tags geom qt;
-  `;
-  const response = await fetch('https://overpass-api.de/api/interpreter', {
-    method: 'POST',
-    body: query,
-    signal,
-    headers: {
-      'Content-Type': 'text/plain;charset=UTF-8',
-    },
-  });
-  if (!response.ok) throw new Error(`Overpass HTTP ${response.status}`);
-  const data = await response.json();
-  return chooseBestOverpassElement(Array.isArray(data?.elements) ? data.elements : [], lat, lon);
-}
-
-async function fetchOsmLookupDetails(osmId, signal) {
-  if (!osmId) return null;
-  const response = await fetch(
-    `https://nominatim.openstreetmap.org/lookup?format=jsonv2&osm_ids=${encodeURIComponent(osmId)}&addressdetails=1&extratags=1&namedetails=1`,
-    { signal, headers: { 'Accept-Language': 'fr' } },
-  );
-  if (!response.ok) throw new Error(`Lookup HTTP ${response.status}`);
-  const payload = await response.json();
-  return Array.isArray(payload) ? payload[0] : null;
-}
-
 async function handleOsmDetailsClick(event) {
   if (!leafletMap || mapAddPointMode || typeof fetch !== 'function') return;
   if (leafletMap.getZoom() < OSM_DETAILS_MIN_ZOOM) return;
@@ -1631,47 +1534,16 @@ async function handleOsmDetailsClick(event) {
   osmDetailsMarker.bindPopup('Recherche des informations OSM…').openPopup();
 
   try {
-    let payload = null;
-    let selectedByBuilding = false;
-    const overpassElement = await fetchOsmElementFromOverpass(lat, lon, osmDetailsController.signal);
-    if (overpassElement) {
-      const overpassOsmId = buildOverpassOsmId(overpassElement);
-      if (overpassOsmId) payload = await fetchOsmLookupDetails(overpassOsmId, osmDetailsController.signal);
-      if (!payload) {
-        payload = {
-          lat: overpassElement?.lat ?? overpassElement?.center?.lat ?? lat,
-          lon: overpassElement?.lon ?? overpassElement?.center?.lon ?? lon,
-          category: overpassElement?.tags?.shop ? 'shop' : (overpassElement?.tags?.amenity ? 'amenity' : 'building'),
-          type: overpassElement?.tags?.shop || overpassElement?.tags?.amenity || overpassElement?.tags?.building || overpassElement?.type,
-          name: overpassElement?.tags?.name || overpassElement?.tags?.brand || overpassElement?.tags?.operator || overpassElement?.tags?.official_name,
-          address: {
-            road: overpassElement?.tags?.['addr:street'],
-            city: overpassElement?.tags?.['addr:city'],
-            postcode: overpassElement?.tags?.['addr:postcode'],
-          },
-          extratags: overpassElement?.tags || {},
-          osm_type: overpassElement?.type,
-          osm_id: overpassElement?.id,
-          display_name: overpassElement?.tags?.name || '',
-        };
-      }
-      selectedByBuilding = true;
-    }
-
-    if (!payload) {
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&zoom=18&addressdetails=1&extratags=1&namedetails=1`,
-        { signal: osmDetailsController.signal, headers: { 'Accept-Language': 'fr' } },
-      );
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      payload = await response.json();
-    }
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&zoom=19&addressdetails=1&extratags=1&namedetails=1`,
+      { signal: osmDetailsController.signal, headers: { 'Accept-Language': 'fr' } },
+    );
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
 
     const popupContent = formatOsmDetailsPopup(payload);
     osmDetailsMarker.bindPopup(popupContent).openPopup();
-    setMapFeedback(selectedByBuilding
-      ? 'Informations OSM du bâtiment/commerce sélectionné affichées.'
-      : 'Informations OSM affichées pour le lieu sélectionné.');
+    setMapFeedback('Informations OSM affichées pour le lieu sélectionné.');
   } catch (error) {
     if (error?.name === 'AbortError') return;
     osmDetailsMarker.bindPopup('Impossible de récupérer les détails OSM pour ce point.').openPopup();
