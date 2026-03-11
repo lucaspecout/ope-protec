@@ -346,48 +346,71 @@
         </section>
 
         <section id="georisques-panel" class="panel view hidden" hidden>
-          <div class="panel-heading">
-            <h3>Page Géorisques</h3>
-            <p class="muted">Tableau d'aide à la décision : exposition sismique, inondation, mouvements de terrain, radon et PPR des communes suivies.</p>
+          <div class="georisques-hero tile">
+            <div>
+              <p class="tag">Géo-risque opérationnel</p>
+              <h3>Isère · relief, vallées exposées et événements récents</h3>
+              <p class="muted">Vue entièrement recentrée sur les enjeux du 38 : sismicité alpine, mouvements de terrain, inondation, radon et suivi communal.</p>
+            </div>
+            <div class="georisques-hero__meta">
+              <p id="georisques-page-source" class="muted">Source: -</p>
+              <p id="georisques-page-debug" class="muted"></p>
+            </div>
           </div>
+
           <div class="kpis georisques-kpis">
             <article class="tile"><h3>Statut service</h3><p id="georisques-page-status">-</p></article>
-            <article class="tile"><h3>Sismicité max</h3><p id="georisques-page-seismic">-</p></article>
-            <article class="tile"><h3>Docs inondation (AZI)</h3><p id="georisques-page-flood-docs">0</p></article>
+            <article class="tile"><h3>Sismicité max Isère</h3><p id="georisques-page-seismic">-</p></article>
+            <article class="tile"><h3>Communes exposées radon</h3><p id="georisques-page-radon-alert">0</p></article>
+            <article class="tile"><h3>Inondation (documents)</h3><p id="georisques-page-flood-docs">0</p></article>
             <article class="tile"><h3>PPR recensés</h3><p id="georisques-page-ppr-total">0</p></article>
-            <article class="tile"><h3>Mouvements de terrain</h3><p id="georisques-page-ground-movements">0</p></article>
-            <article class="tile"><h3>Cavités recensées</h3><p id="georisques-page-cavities">0</p></article>
-            <article class="tile"><h3>Communes radon ≥ moyen</h3><p id="georisques-page-radon-alert">0</p></article>
+            <article class="tile"><h3>Mouvements terrain</h3><p id="georisques-page-ground-movements">0</p></article>
+            <article class="tile"><h3>Cavités</h3><p id="georisques-page-cavities">0</p></article>
             <article class="tile"><h3>Mode API</h3><p id="georisques-page-api-mode">-</p></article>
           </div>
-          <article class="tile georisques-meta">
-            <p id="georisques-page-source" class="muted">Source: -</p>
-            <p id="georisques-page-debug" class="muted"></p>
-          </article>
-          <div class="georisques-tabs" role="tablist" aria-label="Vues Géorisques">
-            <button id="georisques-tab-overview" class="georisques-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="georisques-overview-section">Synthèse multi-risques</button>
-            <button id="georisques-tab-pcs" class="georisques-tab" type="button" role="tab" aria-selected="false" aria-controls="georisques-pcs-section">Risques existants des communes PCS</button>
-          </div>
-          <div id="georisques-overview-section" role="tabpanel" aria-labelledby="georisques-tab-overview">
-          <div class="georisques-lists">
+
+          <div class="georisques-isere-layout">
+            <article class="tile georisques-isere-territories">
+              <h4>Éléments essentiels en Isère</h4>
+              <ul class="list compact">
+                <li><strong>Vallée du Grésivaudan</strong> · risque combiné crue + mouvement de terrain.</li>
+                <li><strong>Agglomération grenobloise</strong> · concentration population, cavités et vulnérabilité urbaine.</li>
+                <li><strong>Oisans / Belledonne / Chartreuse</strong> · zones de pente sensibles (éboulis, glissements, chutes de blocs).</li>
+                <li><strong>Axes A48 / A49 / A41</strong> · impact direct sur mobilité de secours en cas d'aléa géologique.</li>
+              </ul>
+            </article>
             <article class="tile">
-              <h4>Répartition des mouvements de terrain (type)</h4>
+              <h4>Types de mouvements dominants</h4>
               <ul id="georisques-movement-types-list" class="list compact"></ul>
             </article>
+          </div>
+
+          <div class="georisques-tabs" role="tablist" aria-label="Vues Géorisques">
+            <button id="georisques-tab-overview" class="georisques-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="georisques-overview-section">Situation récente</button>
+            <button id="georisques-tab-pcs" class="georisques-tab" type="button" role="tab" aria-selected="false" aria-controls="georisques-pcs-section">Communes PCS prioritaires</button>
+          </div>
+
+          <div id="georisques-overview-section" role="tabpanel" aria-labelledby="georisques-tab-overview">
+            <div class="georisques-lists">
+              <article class="tile">
+                <h4>Événements récents (terrain)</h4>
+                <ul id="georisques-recent-movements-list" class="list"></ul>
+              </article>
+              <article class="tile">
+                <h4>Communes prioritaires (score multi-risques)</h4>
+                <ul id="georisques-priority-communes-list" class="list"></ul>
+              </article>
+            </div>
             <article class="tile">
-              <h4>Derniers mouvements de terrain signalés</h4>
-              <ul id="georisques-recent-movements-list" class="list"></ul>
+              <h4>Suivi détaillé des communes</h4>
+              <ul id="georisques-communes-list" class="list"></ul>
+            </article>
+            <article class="tile">
+              <h4>Documents inondation détaillés (AZI)</h4>
+              <ul id="georisques-documents-list" class="list"></ul>
             </article>
           </div>
-          <article class="tile">
-            <h4>Communes suivies · synthèse multi-risques</h4>
-            <ul id="georisques-communes-list" class="list"></ul>
-          </article>
-          <article class="tile">
-            <h4>Documents inondation détaillés (AZI)</h4>
-            <ul id="georisques-documents-list" class="list"></ul>
-          </article>
-          </div>
+
           <div id="georisques-pcs-section" class="hidden" hidden role="tabpanel" aria-labelledby="georisques-tab-pcs">
             <article class="tile">
               <h4>Communes PCS · risques existants et niveau de danger</h4>
