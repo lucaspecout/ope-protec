@@ -4351,9 +4351,11 @@ function renderSituationOverview() {
   const atmoLabel = String(externalRisks?.atmo_aura?.today?.label || atmoLevel || 'inconnu').toLowerCase();
   const apicAlerts = Number(externalRisks?.apic_isere?.alerts_total ?? (externalRisks?.apic_isere?.alerts || []).length);
   const vigicruesFlashAlerts = Number(externalRisks?.vigicrues_flash_isere?.alerts_total ?? (externalRisks?.vigicrues_flash_isere?.alerts || []).length);
+  const sncfAlerts = Number(externalRisks?.sncf_isere?.alerts_total ?? (externalRisks?.sncf_isere?.alerts || []).length);
   const orangeOrRedLogsCount = activeLogs.filter((log) => ['orange', 'rouge'].includes(normalizeLevel(log.danger_level))).length;
   const mobilityCards = [
     { label: 'Bison Futé (38) · Départ / Arrivée', value: `${bisonDeparture} / ${bisonReturn}`, info: 'Tendance Isère départ / arrivée', css: bisonCombinedLevel },
+    { label: 'SNCF · alertes Isère', value: `${sncfAlerts}`, info: 'Accidents / travaux de voie', css: sncfAlerts > 0 ? 'orange' : 'vert' },
     { label: 'Vigieau', value: `${vigieauAlertsCount}`, info: "Restriction(s) d'eau active(s)", css: vigieauAlertsCount > 0 ? 'jaune' : 'vert' },
     { label: "Qualité de l'air", value: atmoLabel, info: 'Source Atmo AURA', css: atmoLevel },
     { label: 'APIC · alertes Isère', value: `${apicAlerts}`, info: 'Pluie intense à l’échelle communale', css: apicAlerts > 0 ? 'orange' : 'vert' },
