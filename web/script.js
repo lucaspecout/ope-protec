@@ -3723,6 +3723,12 @@ function georisquesDangerLevel(commune = {}) {
   return { label: 'Faible', css: 'faible' };
 }
 
+function georisquesDangerRank(commune = {}) {
+  const level = georisquesDangerLevel(commune).label;
+  const rank = { 'Très élevé': 4, 'Élevé': 3, 'Modéré': 2, 'Faible': 1 };
+  return rank[level] || 0;
+}
+
 function renderGeorisquesPcsRisks(monitored = []) {
   const pcsByName = new Map(
     cachedMunicipalities
@@ -3732,12 +3738,7 @@ function renderGeorisquesPcsRisks(monitored = []) {
 
   const pcsMonitored = monitored
     .filter((commune) => pcsByName.has(String(commune.name || commune.commune || '').trim().toLowerCase()))
-    .sort((a, b) => {
-      const levelA = georisquesDangerLevel(a);
-      const levelB = georisquesDangerLevel(b);
-      const rank = { 'Très élevé': 4, 'Élevé': 3, 'Modéré': 2, 'Faible': 1 };
-      return rank[levelB.label] - rank[levelA.label];
-    });
+    .sort((a, b) => georisquesDangerRank(b) - georisquesDangerRank(a));
 
   const markup = pcsMonitored.map((commune) => {
     const danger = georisquesDangerLevel(commune);
@@ -3800,6 +3801,16 @@ function renderGeorisquesDetails(georisques = {}) {
     return `<li><strong>${escapeHtml(event.commune || 'Commune inconnue')}</strong> · ${escapeHtml(event.type || 'Mouvement de terrain')} · ${dateText}${reliability}${identifier}${location}</li>`;
   }).join('') || '<li>Aucun mouvement de terrain récent exploitable.</li>';
   setHtml('georisques-recent-movements-list', recentMovementsMarkup);
+
+  const priorityCommunesMarkup = [...monitored]
+    .sort((a, b) => georisquesDangerRank(b) - georisquesDangerRank(a))
+    .slice(0, 8)
+    .map((commune) => {
+      const danger = georisquesDangerLevel(commune);
+      const recentFlag = Number(commune.ground_movements_total || 0) > 0 ? ' · activité terrain récente' : '';
+      return `<li><strong>${escapeHtml(commune.name || commune.commune || 'Commune inconnue')}</strong> <span class="danger-chip ${danger.css}">${escapeHtml(danger.label)}</span><br>Sismicité: <strong>${escapeHtml(commune.seismic_zone || commune.zone_sismicite || 'inconnue')}</strong> · PPR: <strong>${Number(commune.ppr_total || 0)}</strong> · Inondation: <strong>${Number(commune.flood_documents || commune.nb_documents || 0)}</strong>${recentFlag}</li>`;
+    }).join('') || '<li>Aucune commune prioritaire calculable.</li>';
+  setHtml('georisques-priority-communes-list', priorityCommunesMarkup);
 
   const markup = monitored.map((commune) => {
     const docs = Array.isArray(commune.flood_documents_details) ? commune.flood_documents_details : [];
