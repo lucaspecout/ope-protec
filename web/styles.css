@@ -343,6 +343,18 @@ label { display: block; margin-bottom: .8rem; }
 .danger-chip.modere { background: #fff5d6; color: #8a6c00; }
 .danger-chip.eleve { background: #ffe8cc; color: #a65a00; }
 .danger-chip.tres-eleve { background: #ffe2e6; color: #b21e35; }
+.georisques-pcs-item {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  padding: .6rem .65rem;
+  cursor: pointer;
+}
+.georisques-pcs-item:hover { border-color: #2d62b5; }
+.georisques-pcs-item.is-active { border-color: #0b4daa; box-shadow: 0 0 0 2px rgba(11, 77, 170, .12); }
+.georisques-pcs-detail p { margin: .4rem 0; }
 
 .level-chip {
   display: inline-flex;
