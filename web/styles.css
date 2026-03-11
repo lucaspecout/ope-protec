@@ -602,6 +602,9 @@ svg text { font-size: 14px; fill: #17335f; }
 
 #map-source { font-size: .86rem; }
 #map-feedback { min-height: 1rem; margin: 0 0 .6rem; font-size: .9rem; }
+.map-selected-location { display: grid; gap: .4rem; margin: 0 0 .6rem; }
+.map-selected-location p { margin: 0; font-size: .84rem; }
+.map-selected-location .map-btn-lite { justify-self: start; text-decoration: none; }
 
 .leaflet-map { min-height: 720px; width: 100%; border-radius: 12px; border: 1px solid #ccdbf4; }
 .map-panel--high-contrast .leaflet-map { border-width: 2px; border-color: #10284f; }
