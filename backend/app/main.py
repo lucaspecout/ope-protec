@@ -66,7 +66,9 @@ from .services import (
     fetch_atmo_aura_isere_air_quality,
     fetch_anfr_isere_antennas,
     fetch_arcep_isere_mobile_outages,
+    fetch_apic_isere_alerts,
     fetch_vigicrues_isere,
+    fetch_vigicrues_flash_isere_alerts,
     fetch_vigieau_restrictions,
     generate_pdf_report,
     resolve_commune_insee_code,
@@ -177,6 +179,8 @@ _external_risks_snapshot: dict = {
         "atmo_aura": {},
         "anfr_isere": {},
         "arcep_isere": {},
+        "apic_isere": {},
+        "vigicrues_flash_isere": {},
     },
 }
 _external_risks_refresh_lock = Lock()
@@ -784,6 +788,8 @@ def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str])
         "atmo_aura": (lambda: fetch_atmo_aura_isere_air_quality(force_refresh=refresh), {"status": "pending", "today": {}, "tomorrow": {}}),
         "anfr_isere": (lambda: fetch_anfr_isere_antennas(force_refresh=refresh), {"status": "pending", "supports_total": 0}),
         "arcep_isere": (lambda: fetch_arcep_isere_mobile_outages(force_refresh=refresh), {"status": "pending", "outages_total": 0, "communes": []}),
+        "apic_isere": (lambda: fetch_apic_isere_alerts(force_refresh=refresh), {"status": "pending", "level": "vert", "alerts_total": 0, "alerts": []}),
+        "vigicrues_flash_isere": (lambda: fetch_vigicrues_flash_isere_alerts(force_refresh=refresh), {"status": "pending", "level": "vert", "alerts_total": 0, "alerts": []}),
         "electricity_isere": (lambda: fetch_rte_isere_electricity_status(force_refresh=refresh), {"status": "pending", "level": "inconnu"}),
         "finess_isere": (lambda: fetch_finess_isere_resources(force_refresh=refresh), {"status": "pending", "resources": [], "resources_total": 0}),
         "groundwater_isere": (lambda: fetch_hubeau_isere_groundwater(force_refresh=refresh), {"status": "pending", "stations": [], "stations_total": 0, "trend_summary": {"hausse": 0, "baisse": 0, "stable": 0}}),
@@ -966,7 +972,7 @@ def trigger_external_risks_refresh(db: Session | None = None) -> None:
 
 def get_external_risks_payload(refresh: bool = False, db: Session | None = None) -> dict:
     snapshot = _get_external_risks_snapshot()
-    has_snapshot = bool(snapshot and any(snapshot.get(key) for key in ("meteo_france", "vigicrues", "itinisere", "bison_fute", "georisques", "prefecture_isere", "dauphine_isere", "sncf_isere", "vigieau", "atmo_aura", "anfr_isere", "arcep_isere", "electricity_isere", "finess_isere", "groundwater_isere", "isere_opendata")))
+    has_snapshot = bool(snapshot and any(snapshot.get(key) for key in ("meteo_france", "vigicrues", "itinisere", "bison_fute", "georisques", "prefecture_isere", "dauphine_isere", "sncf_isere", "vigieau", "atmo_aura", "anfr_isere", "arcep_isere", "apic_isere", "vigicrues_flash_isere", "electricity_isere", "finess_isere", "groundwater_isere", "isere_opendata")))
 
     if refresh:
         trigger_external_risks_refresh(db=db)
