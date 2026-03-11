@@ -4702,13 +4702,6 @@ function buildSitrepHtml() {
   <section>
     <h2>Communes en crise</h2>
     <p><strong>${escapeHtml(crisisMunicipalityLabel)}</strong></p>
-    ${buildSitrepMapSvg('Carte communes en crise', crisisPoints, [], { subtitle: 'Repérage rapide des communes avec PCS actif.', totalPoints: crisisPoints.length })}
-  </section>
-  <section>
-    <h2>Cartographie opérationnelle</h2>
-    ${buildSitrepMapSvg('Carte Itinisère · routes barrées', itinisereTrafficPoints.map((point) => ({ ...point, radius: 4.8 })), itinisereRoadLines, { subtitle: 'Trafic perturbé et corridors routiers sensibles.', totalPoints: itinisereTrafficPoints.length, totalLines: itinisereRoadLines.length })}
-    ${buildSitrepMapSvg('Carte générale · tous les points', allPoints.map((point) => ({ lat: point.lat, lon: point.lon, color: '#0d4b8e', radius: 3.8 })), [], { subtitle: 'Infrastructures et ressources opérationnelles géolocalisées.', totalPoints: allPoints.length })}
-    ${buildSitrepMapSvg('Carte générale · filtre trafic continu', itinisereTrafficPoints, [], { subtitle: 'Filtre trafic temps réel pour projection interservices.', totalPoints: itinisereTrafficPoints.length })}
   </section>
 </body>
 </html>`;
