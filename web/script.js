@@ -42,7 +42,10 @@ const PANEL_TITLES = {
 
 const RESOURCE_TYPE_META = {
   poste_commandement: { label: 'Poste de commandement', icon: '🛰️' },
-  centre_hebergement: { label: 'Centre d\'hébergement', icon: '🏘️' },
+  gymnase: { label: 'Gymnase', icon: '🏟️' },
+  centre_culturel: { label: 'Centre culturel', icon: '🏛️' },
+  salle_spectacle_public: { label: 'Salle de spectacle public', icon: '🎭' },
+  salle_fetes: { label: 'Salle des fêtes', icon: '🎪' },
   hopital: { label: 'Hôpital', icon: '🏥' },
   ehpad: { label: 'EHPAD', icon: '🧓' },
   ecole_primaire: { label: 'École primaire', icon: '🧒' },
@@ -69,7 +72,7 @@ const RESOURCE_TYPE_META = {
 
 const RESOURCE_POINTS = [
   { id: 'pc-grenoble', name: 'Préfecture de l’Isère (PC départemental ORSEC)', type: 'poste_commandement', active: true, lat: 45.188179265241644, lon: 5.732620255019881, address: '12 Pl. de Verdun, 38000 Grenoble', priority: 'critical', info: 'Centre de commandement départemental activé en gestion de crise majeure.', source: 'https://www.isere.gouv.fr' },
-  { id: 'hebergement-voiron', name: 'Gymnase municipal de Voiron (site d’hébergement d’urgence)', type: 'centre_hebergement', active: true, lat: 45.36495, lon: 5.59244, address: 'Avenue Jules Ravat, 38500 Voiron', priority: 'vital', info: 'Structure mobilisable pour mise à l’abri temporaire et accueil évacués.', source: 'https://www.ville-voiron.fr' },
+  { id: 'hebergement-voiron', name: 'Gymnase municipal de Voiron (site d’hébergement d’urgence)', type: 'gymnase', active: true, lat: 45.36495, lon: 5.59244, address: 'Avenue Jules Ravat, 38500 Voiron', priority: 'vital', info: 'Structure mobilisable pour mise à l’abri temporaire et accueil évacués.', source: 'https://www.ville-voiron.fr' },
   { id: 'chu-grenoble', name: 'CHU Grenoble Alpes – Site Nord (Hôpital Michallon)', type: 'hopital', active: true, lat: 45.19890130472817, lon: 5.745337307337676, address: 'Bd de la Chantourne, 38700 La Tronche', priority: 'critical', info: 'Pôle sanitaire de référence (SAMU 38, urgences, réanimation, trauma center).', source: 'https://www.chu-grenoble.fr' },
   { id: 'chu-grenoble-sud', name: 'CHU Grenoble Alpes - Site SUD', type: 'hopital', active: true, lat: 45.14824137405201, lon: 5.732509610468402, address: 'Hôpital Michallon, Chu de Grenoble, 38043 Grenoble', priority: 'vital', info: 'Site hospitalier mobilisable pour la continuité de la réponse sanitaire en crise.', source: 'https://www.chu-grenoble.fr' },
   { id: 'ch-vienne', name: 'Centre hospitalier Lucien Hussel', type: 'hopital', active: true, lat: 45.533846044381946, lon: 4.880350896438764, address: 'Montee Dr Maurice Chapuis, 38200 Vienne', priority: 'vital', info: 'Hôpital pivot pour le sud-ouest du département et la vallée du Rhône.', source: 'https://www.ch-vienne.fr' },
@@ -83,7 +86,10 @@ const RESOURCE_POINTS = [
   { id: 'plateforme-chem-jarrie', name: 'Plateforme chimique de Jarrie', type: 'lieu_risque', active: true, lat: 45.08694132318529, lon: 5.736251871908567, address: 'N85 BP 16, 38560 Jarrie', priority: 'risk', info: 'Zone industrielle sensible en continuité du couloir chimique sud grenoblois.', source: 'https://www.jarrie.fr' },
   { id: 'centrale-barrage-grandmaison', name: 'STEP de Grand’Maison', type: 'energie', active: true, lat: 45.206053828393784, lon: 6.116978747872993, address: '38114 Vaujany', priority: 'risk', info: 'Infrastructure énergétique stratégique pour la stabilité du réseau.', source: 'https://www.edf.fr/hydraulique-isere' },
   { id: 'aeroport-grenoble', name: 'Aéroport Grenoble Alpes Isère', type: 'transport_aeroport', active: true, lat: 45.361, lon: 5.33056, address: '38590 Saint-Étienne-de-Saint-Geoirs', priority: 'vital', info: 'Plateforme aérienne de soutien logistique et d’évacuation sanitaire.', source: 'https://www.grenoble-airport.com' },
-  { id: 'palais-sports', name: 'Palais des Sports de Grenoble (centre d’accueil)', type: 'centre_hebergement', active: true, lat: 45.18565564489357, lon: 5.7408451908719655, address: '14 Bd Clemenceau, 38029 Grenoble', priority: 'vital', info: 'Site de regroupement mobilisable pour accueil population/renforts.', source: 'https://www.grenoble.fr' },
+  { id: 'palais-sports', name: 'Palais des Sports de Grenoble (centre d’accueil)', type: 'salle_spectacle_public', active: true, lat: 45.18565564489357, lon: 5.7408451908719655, address: '14 Bd Clemenceau, 38029 Grenoble', priority: 'vital', info: 'Site de regroupement mobilisable pour accueil population/renforts.', source: 'https://www.grenoble.fr' },
+  { id: 'summum-grenoble', name: 'Le Summum (Grenoble Alpes Métropole)', type: 'salle_spectacle_public', active: true, lat: 45.156988, lon: 5.716922, address: 'Rue Henri Barbusse, 38100 Grenoble', priority: 'vital', info: 'Salle événementielle mobilisable pour accueil temporaire en cas de crise.', source: 'https://www.summumgrenoble.com' },
+  { id: 'mc2-grenoble', name: 'MC2: Maison de la Culture de Grenoble', type: 'centre_culturel', active: true, lat: 45.166739, lon: 5.735104, address: '4 Rue Paul Claudel, 38100 Grenoble', priority: 'vital', info: 'Équipement culturel public pouvant soutenir un dispositif d’accueil exceptionnel.', source: 'https://www.mc2grenoble.fr' },
+  { id: 'halle-tonnelle-fontaine', name: 'Halle de la Tonnelle (Fontaine)', type: 'salle_fetes', active: true, lat: 45.192873, lon: 5.68872, address: 'Rue de la Liberté, 38600 Fontaine', priority: 'vital', info: 'Salle polyvalente mobilisable pour hébergement d’appoint.', source: 'https://www.ville-fontaine.fr' },
   { id: 'barrage-chambon', name: 'Barrage du Chambon', type: 'energie', active: true, lat: 45.04554730445581, lon: 6.137479156603567, address: '38860 Les Deux Alpes', priority: 'risk', info: 'Barrage alpin stratégique de la vallée de la Romanche.', source: 'https://fr.wikipedia.org/wiki/Barrage_du_Chambon' },
   { id: 'barrage-sautet', name: 'Barrage du Sautet', type: 'energie', active: true, lat: 44.81749004792632, lon: 5.908287667268233, address: '38970 Pellafol', priority: 'risk', info: 'Ouvrage hydroélectrique majeur entre Isère et Hautes-Alpes.', source: 'https://fr.wikipedia.org/wiki/Barrage_du_Sautet' },
   { id: 'barrage-saint-pierre-cognet', name: 'Barrage de Saint-Pierre-Cognet', type: 'energie', active: true, lat: 44.8766210455462, lon: 5.8038682262595644, address: '38350 Saint-Pierre-de-Méaroz', priority: 'risk', info: 'Barrage de la vallée du Drac intégré à la chaîne hydroélectrique locale.', source: 'https://fr.wikipedia.org/wiki/Barrage_de_Saint-Pierre-Cognet' },
@@ -504,7 +510,7 @@ const HEALTH_RESOURCE_TYPES = new Set(['hopital', 'ehpad']);
 const RISK_RESOURCE_TYPES = new Set(['lieu_risque', 'centrale_nucleaire', 'energie']);
 const TRANSPORT_RESOURCE_TYPES = new Set(['transport', 'transport_gare_sncf', 'transport_gare_routiere', 'transport_aeroport']);
 const COMMAND_RESOURCE_TYPES = new Set(['poste_commandement']);
-const SHELTER_RESOURCE_TYPES = new Set(['centre_hebergement']);
+const HOSTING_RESOURCE_TYPES = new Set(['gymnase', 'centre_culturel', 'salle_spectacle_public', 'salle_fetes']);
 const TELECOM_RESOURCE_TYPES = new Set(['anfr_antenna', 'arcep_mobile_outage']);
 
 const ISERE_BOUNDARY_STYLE = { color: '#163a87', weight: 2, fillColor: '#63c27d', fillOpacity: 0.2 };
@@ -1485,6 +1491,7 @@ async function resetMapFilters() {
     'filter-resources-risks-type': 'all',
     'filter-resources-transport-type': 'all',
     'filter-resources-health-type': 'all',
+    'filter-resources-hosting-type': 'all',
     'filter-resources-telecom-type': 'all',
     'map-basemap-select': 'osm',
   };
@@ -1506,7 +1513,7 @@ async function resetMapFilters() {
   const googleFlow = document.getElementById('filter-google-traffic-flow');
   const healthResources = document.getElementById('filter-resources-health');
   const commandResources = document.getElementById('filter-resources-command');
-  const shelterResources = document.getElementById('filter-resources-shelter');
+  const hostingResources = document.getElementById('filter-resources-hosting');
   const telecomResources = document.getElementById('filter-resources-telecom');
   if (hydro) hydro.checked = true;
   if (pcs) pcs.checked = true;
@@ -1520,7 +1527,7 @@ async function resetMapFilters() {
   if (cameras) cameras.checked = true;
   if (healthResources) healthResources.checked = false;
   if (commandResources) commandResources.checked = true;
-  if (shelterResources) shelterResources.checked = true;
+  if (hostingResources) hostingResources.checked = false;
   if (telecomResources) telecomResources.checked = false;
   if (googleFlow) googleFlow.checked = false;
   resourceVisibilityOverrides.clear();
@@ -1890,6 +1897,8 @@ function classifyInstitutionPoint(element = {}) {
   const aeroway = String(tags.aeroway || '').toLowerCase();
 
   if (amenity === 'kindergarten') return 'creche';
+  if (amenity === 'community_centre' || amenity === 'arts_centre') return 'centre_culturel';
+  if (amenity === 'theatre') return 'salle_spectacle_public';
   if (amenity === 'university') return 'universite';
   if (amenity === 'college') return 'college';
   if (amenity === 'school') {
@@ -1906,6 +1915,8 @@ function classifyInstitutionPoint(element = {}) {
   if (amenity === 'bus_station') return 'transport_gare_routiere';
   if (railway === 'station') return 'transport_gare_sncf';
   if (aeroway === 'aerodrome' || aeroway === 'airport') return 'transport_aeroport';
+  if (name.includes('gymnase')) return 'gymnase';
+  if (name.includes('salle des fêtes') || name.includes('salle des fetes')) return 'salle_fetes';
   return null;
 }
 
@@ -1950,7 +1961,12 @@ function shouldDisplayBaseResourceType(type = '') {
     return healthTypeFilter === 'all' || healthTypeFilter === type;
   }
   if (COMMAND_RESOURCE_TYPES.has(type)) return document.getElementById('filter-resources-command')?.checked ?? true;
-  if (SHELTER_RESOURCE_TYPES.has(type)) return document.getElementById('filter-resources-shelter')?.checked ?? true;
+  if (HOSTING_RESOURCE_TYPES.has(type)) {
+    const hostingEnabled = document.getElementById('filter-resources-hosting')?.checked ?? false;
+    const hostingTypeFilter = document.getElementById('filter-resources-hosting-type')?.value || 'all';
+    if (!hostingEnabled) return false;
+    return hostingTypeFilter === 'all' || hostingTypeFilter === type;
+  }
   return true;
 }
 
@@ -5900,7 +5916,7 @@ function bindAppInteractions() {
     }
   });
 
-  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-command', 'filter-resources-shelter', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       renderStations(cachedVigicruesPayload);
       await renderMunicipalitiesOnMap(cachedMunicipalities);
