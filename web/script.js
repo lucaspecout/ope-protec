@@ -4287,8 +4287,8 @@ function buildCriticalRisksMarkup(dashboard = {}, externalRisks = {}) {
     : (externalRisks?.georisques || {});
 
   risks.push(`<li><strong>Itinisère</strong> · ${(itinisereEvents || []).length} événement(s) actif(s) · Statut ${escapeHtml(externalRisks?.itinisere?.status || 'inconnu')}</li>`);
-  const apicAlerts = Number(externalRisks?.apic_isere?.alerts_total ?? (externalRisks?.apic_isere?.alerts || []).length || 0);
-  const vfAlerts = Number(externalRisks?.vigicrues_flash_isere?.alerts_total ?? (externalRisks?.vigicrues_flash_isere?.alerts || []).length || 0);
+  const apicAlerts = Number((externalRisks?.apic_isere?.alerts_total ?? (externalRisks?.apic_isere?.alerts || []).length) || 0);
+  const vfAlerts = Number((externalRisks?.vigicrues_flash_isere?.alerts_total ?? (externalRisks?.vigicrues_flash_isere?.alerts || []).length) || 0);
   if (apicAlerts > 0) {
     risks.push(`<li><strong>APIC Isère</strong> · <span class="risk-jaune">${apicAlerts} alerte(s)</span> pluie intense / ruissellement.</li>`);
   }
