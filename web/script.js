@@ -235,13 +235,10 @@ let lastRenderedApiInterconnectionsSignature = null;
 function keepPreviousValue(previousValue, nextValue) {
   if (nextValue === undefined || nextValue === null) return previousValue;
   if (typeof nextValue === 'string' && nextValue.trim() === '') return previousValue;
-  if (Array.isArray(nextValue) && nextValue.length === 0) return Array.isArray(previousValue) ? previousValue : nextValue;
   return nextValue;
 }
 
 function keepPreviousArray(previousValue, nextValue) {
-  if (Array.isArray(nextValue) && nextValue.length > 0) return nextValue;
-  if (Array.isArray(previousValue) && previousValue.length > 0) return previousValue;
   if (Array.isArray(nextValue)) return nextValue;
   return Array.isArray(previousValue) ? previousValue : [];
 }
