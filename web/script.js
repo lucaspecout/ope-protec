@@ -233,6 +233,8 @@ let iserePopulationPointsCache = [];
 let iserePopulationLoaded = false;
 let iserePopulationByInseeCache = new Map();
 let iserePopulationByInseeLoaded = false;
+let isereCommunesGeometryCache = [];
+let isereCommunesGeometryLoaded = false;
 let telecomPointsCache = [];
 let telecomLoaded = false;
 let cachedHomeLiveSnapshot = {};
@@ -1612,6 +1614,7 @@ async function computeZoneImpact() {
   const resources = getDisplayedResources();
   const municipalitiesInZone = municipalities;
   const inseePopulationMap = await loadIserePopulationByInsee();
+  const zonePopulationMetrics = await estimatePopulationInZoneByArea(geometry, municipalitiesInZone, inseePopulationMap);
 
   const resourcesInZone = resources.filter((resource) => {
     const coords = normalizeMapCoordinates(resource.lat, resource.lon);
@@ -1625,6 +1628,11 @@ async function computeZoneImpact() {
     const fallbackPopulation = Number(municipality.population || 0);
     return sum + (Number.isFinite(inseePopulation) && inseePopulation > 0 ? inseePopulation : fallbackPopulation);
   }, 0);
+  const areaBasedPopulation = Number(zonePopulationMetrics.estimatedPopulation || 0);
+  const zoneAreaM2 = Number(zonePopulationMetrics.zoneAreaM2 || 0);
+  const inhabitantsPerM2 = zoneAreaM2 > 0 ? areaBasedPopulation / zoneAreaM2 : 0;
+  const inhabitantsPerKm2 = inhabitantsPerM2 * 1_000_000;
+  const bestPopulationEstimate = areaBasedPopulation > 0 ? areaBasedPopulation : estimatedPopulation;
   const shelterCapacity = municipalitiesInZone.reduce((sum, municipality) => sum + Number(municipality.shelter_capacity || 0), 0);
   const schoolsCount = resourcesInZone.filter((resource) => SCHOOL_RESOURCE_TYPES.has(resource.type)).length;
   const ehpadCount = resourcesInZone.filter((resource) => resource.type === 'ehpad').length;
@@ -1632,13 +1640,21 @@ async function computeZoneImpact() {
   const roadCriticalPoints = resourcesInZone.filter((resource) => TRANSPORT_RESOURCE_TYPES.has(resource.type)).length;
   const vulnerabilityScore = municipalitiesInZone.reduce((sum, municipality) => sum + mapZoneImpactRiskScoreFromCommune(municipality), 0);
   const vulnerabilityLevel = mapZoneImpactExposureLevel(vulnerabilityScore);
-  const exposureRate = estimatedPopulation > 0 ? ((vulnerabilityScore / estimatedPopulation) * 10000) : 0;
+  const exposureRate = bestPopulationEstimate > 0 ? ((vulnerabilityScore / bestPopulationEstimate) * 10000) : 0;
   const streetInsights = await fetchZoneStreetInsights(geometry);
   if (runSeq !== mapZoneImpactComputationSeq) return;
 
   renderZoneImpactPanel([
     `🧭 <strong>Maillage départemental (Géorisques Isère):</strong> ${municipalitiesInZone.length} commune(s) intersectée(s) dans la zone tracée (pas uniquement PCS).`,
-    `👥 <strong>Population exposée (INSEE):</strong> <strong>${estimatedPopulation.toLocaleString('fr-FR')}</strong> habitant(s) (population légale des communes intersectées).`,
+    zoneAreaM2 > 0
+      ? `📐 <strong>Surface zone tracée:</strong> <strong>${Math.round(zoneAreaM2).toLocaleString('fr-FR')}</strong> m² (${(zoneAreaM2 / 1000000).toFixed(3).replace('.', ',')} km²).`
+      : '📐 <strong>Surface zone tracée:</strong> indisponible (géométrie incomplète).',
+    areaBasedPopulation > 0
+      ? `🧮 <strong>Densité réelle sur le carré (API geo.api.gouv.fr communes + contours):</strong> <strong>${inhabitantsPerM2.toFixed(6).replace('.', ',')}</strong> hab/m² (${Math.round(inhabitantsPerKm2).toLocaleString('fr-FR')} hab/km²).`
+      : '🧮 <strong>Densité réelle sur le carré:</strong> estimation surfacique indisponible (retour sur estimation par communes intersectées).',
+    areaBasedPopulation > 0
+      ? `👥 <strong>Population estimée dans la zone tracée (pondérée par surface):</strong> <strong>${Math.round(areaBasedPopulation).toLocaleString('fr-FR')}</strong> habitant(s).`
+      : `👥 <strong>Population exposée (INSEE):</strong> <strong>${estimatedPopulation.toLocaleString('fr-FR')}</strong> habitant(s) (population légale des communes intersectées).`,
     `🏫 <strong>Exposition sensible:</strong> ${schoolsCount} école(s) / établissement(s) scolaire(s), ${ehpadCount} EHPAD, ${roadCriticalPoints} axe(s) critique(s) de transport.`,
     `🏠 <strong>Capacité d'hébergement restante (estimée):</strong> ${shelterCapacity.toLocaleString('fr-FR')} place(s).`,
     `🌊 <strong>Vulnérabilité locale:</strong> ${vulnerabilityLevel} (score ${vulnerabilityScore}) · taux d'exposition: <strong>${exposureRate.toFixed(2)}</strong> points / 10 000 habitants · historique incidents + dépendance routière + zones inondables consolidés sur ${municipalitiesInZone.length} commune(s).`,
@@ -1649,6 +1665,76 @@ async function computeZoneImpact() {
       ? `🏘️ <strong>Quartiers détectés:</strong> ${streetInsights.districts.map((name) => escapeHtml(name)).join(', ')}.`
       : '🏘️ <strong>Quartiers détectés:</strong> non renseignés par les données OSM sur cette zone.',
   ]);
+}
+
+async function loadIsereCommunesGeometry() {
+  if (isereCommunesGeometryLoaded) return isereCommunesGeometryCache;
+  try {
+    const response = await queueApiRequest(() => fetchWithTimeout('https://geo.api.gouv.fr/departements/38/communes?fields=code,population,contour&format=geojson&geometry=contour'));
+    const payload = await parseJsonResponse(response, 'geo-api-communes-contours');
+    const features = Array.isArray(payload?.features) ? payload.features : [];
+    isereCommunesGeometryCache = features
+      .map((feature) => {
+        const code = String(feature?.properties?.code || '').trim();
+        const population = Number(feature?.properties?.population || 0);
+        const geometry = feature?.geometry || null;
+        if (!code || !geometry || !Number.isFinite(population) || population < 0) return null;
+        return { code, population, geometry };
+      })
+      .filter(Boolean);
+  } catch {
+    isereCommunesGeometryCache = [];
+  }
+  isereCommunesGeometryLoaded = true;
+  return isereCommunesGeometryCache;
+}
+
+async function estimatePopulationInZoneByArea(geometry, municipalitiesInZone = [], inseePopulationMap = new Map()) {
+  if (!geometry || typeof window.turf === 'undefined') {
+    return { zoneAreaM2: 0, estimatedPopulation: 0 };
+  }
+
+  try {
+    const zoneFeature = window.turf.feature(geometry);
+    const zoneAreaM2 = Number(window.turf.area(zoneFeature) || 0);
+    if (!Number.isFinite(zoneAreaM2) || zoneAreaM2 <= 0) return { zoneAreaM2: 0, estimatedPopulation: 0 };
+
+    const communesGeometry = await loadIsereCommunesGeometry();
+    const targetedInsee = new Set(
+      municipalitiesInZone
+        .map((municipality) => String(municipality.code_insee || municipality.insee || '').trim())
+        .filter(Boolean),
+    );
+    const source = targetedInsee.size
+      ? communesGeometry.filter((commune) => targetedInsee.has(commune.code))
+      : communesGeometry;
+
+    const estimatedPopulation = source.reduce((sum, commune) => {
+      try {
+        const communeFeature = window.turf.feature(commune.geometry);
+        const communeArea = Number(window.turf.area(communeFeature) || 0);
+        if (!Number.isFinite(communeArea) || communeArea <= 0) return sum;
+        const overlapFeature = window.turf.intersect(zoneFeature, communeFeature);
+        if (!overlapFeature) return sum;
+        const overlapArea = Number(window.turf.area(overlapFeature) || 0);
+        if (!Number.isFinite(overlapArea) || overlapArea <= 0) return sum;
+        const overlapRatio = Math.min(1, Math.max(0, overlapArea / communeArea));
+        const inseePopulation = Number(inseePopulationMap.get(commune.code) || 0);
+        const basePopulation = Number.isFinite(inseePopulation) && inseePopulation > 0 ? inseePopulation : Number(commune.population || 0);
+        if (!Number.isFinite(basePopulation) || basePopulation <= 0) return sum;
+        return sum + (basePopulation * overlapRatio);
+      } catch {
+        return sum;
+      }
+    }, 0);
+
+    return {
+      zoneAreaM2,
+      estimatedPopulation: Number.isFinite(estimatedPopulation) ? estimatedPopulation : 0,
+    };
+  } catch {
+    return { zoneAreaM2: 0, estimatedPopulation: 0 };
+  }
 }
 
 async function loadIserePopulationByInsee() {
