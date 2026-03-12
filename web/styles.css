@@ -956,3 +956,26 @@ svg text { font-size: 14px; fill: #17335f; }
 .meteo-day-card p {
   margin: .2rem 0;
 }
+
+.social-news-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: .9rem;
+  margin: .8rem 0;
+}
+
+.social-feed-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f8fbff;
+  padding: .65rem;
+}
+
+.social-feed-card h4 {
+  margin: 0 0 .5rem;
+}
+
+.social-feed-card .twitter-timeline {
+  display: block;
+  min-height: 440px;
+}
