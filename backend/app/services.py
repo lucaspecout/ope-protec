@@ -4149,10 +4149,15 @@ def _fetch_georisques_isere_summary_live(commune_names: list[str] | None = None)
         radon_class = radon_by_commune.get(code, "")
         docs = monitored_flood_documents.get(code) or []
         zone_label = zone_by_commune.get(code, "inconnue")
+        center = _commune_center(code)
+        latitude = center[0] if center else None
+        longitude = center[1] if center else None
         monitored.append(
             {
                 "name": name,
                 "code_insee": code,
+                "latitude": latitude,
+                "longitude": longitude,
                 "seismic_zone": zone_label,
                 "flood_documents": len(docs),
                 "flood_documents_details": docs,
