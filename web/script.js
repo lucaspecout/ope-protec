@@ -179,6 +179,7 @@ let mapAnnotationFeatureGroup = null;
 let mapZoneImpactLayer = null;
 let mapZoneImpactSelection = null;
 let mapZoneImpactDrawHandler = null;
+let mapZoneImpactComputationSeq = 0;
 const mapPointVisibilityOverrides = new Map();
 const resourceVisibilityOverrides = new Map();
 let pendingMapPointCoords = null;
@@ -1497,26 +1498,117 @@ function selectedZoneGeometry() {
   }
 }
 
+function zoneImpactGeometryCoordinates(geometry) {
+  if (!geometry || typeof geometry !== 'object') return [];
+  if (geometry.type === 'Polygon' && Array.isArray(geometry.coordinates?.[0])) return geometry.coordinates[0];
+  if (geometry.type === 'MultiPolygon' && Array.isArray(geometry.coordinates)) {
+    const largest = geometry.coordinates
+      .filter((poly) => Array.isArray(poly?.[0]))
+      .map((poly) => poly[0])
+      .sort((a, b) => b.length - a.length)[0];
+    return Array.isArray(largest) ? largest : [];
+  }
+  return [];
+}
+
+function zoneImpactOverpassPoly(geometry) {
+  const ring = zoneImpactGeometryCoordinates(geometry);
+  if (ring.length < 4) return '';
+  return ring
+    .map((coord) => {
+      const lon = Number(coord?.[0]);
+      const lat = Number(coord?.[1]);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+      return `${lat} ${lon}`;
+    })
+    .filter(Boolean)
+    .join(' ');
+}
+
+function zoneImpactMunicipalityPoint(commune = {}) {
+  const direct = normalizeMapCoordinates(commune.latitude, commune.longitude)
+    || normalizeMapCoordinates(commune.lat, commune.lon);
+  if (direct) return direct;
+
+  const insee = String(commune.code_insee || commune.insee || '').trim();
+  if (insee) {
+    const municipality = cachedMunicipalities.find((item) => String(item.insee_code || '').trim() === insee);
+    if (municipality) {
+      const cacheKey = `${municipality.name}|${municipality.postal_code || ''}`;
+      const point = geocodeCache.get(cacheKey);
+      if (point) return point;
+    }
+  }
+  return null;
+}
+
+function zoneImpactDepartmentCommunesInZone(geometry) {
+  const georisques = cachedExternalRisksSnapshot?.georisques || {};
+  const source = georisques.monitored_communes || georisques.monitored_municipalities || georisques.communes || [];
+  const seen = new Set();
+  return source.filter((commune) => {
+    const id = String(commune.code_insee || commune.insee || commune.name || commune.commune || '').trim().toLowerCase();
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    const point = zoneImpactMunicipalityPoint(commune);
+    if (!point) return false;
+    return isPointInsideGeometry(point, geometry);
+  });
+}
+
+async function fetchZoneStreetInsights(geometry) {
+  const poly = zoneImpactOverpassPoly(geometry);
+  if (!poly) return { streets: [], districts: [] };
+  const query = `[out:json][timeout:25];(
+    way["highway"]["name"](poly:"${poly}");
+    nwr["place"~"suburb|neighbourhood|quarter"]["name"](poly:"${poly}");
+  );out tags;`;
+
+  try {
+    const response = await queueApiRequest(() => fetchWithTimeout('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+      body: `data=${encodeURIComponent(query)}`,
+      timeoutMs: 26000,
+    }));
+    const payload = await parseJsonResponse(response, 'https://overpass-api.de/api/interpreter');
+    const elements = Array.isArray(payload?.elements) ? payload.elements : [];
+    const streets = new Set();
+    const districts = new Set();
+    elements.forEach((element) => {
+      const tags = element?.tags || {};
+      const name = String(tags.name || '').trim();
+      if (!name) return;
+      if (tags.highway) streets.add(name);
+      if (/(suburb|neighbourhood|quarter)/i.test(String(tags.place || ''))) districts.add(name);
+    });
+    return {
+      streets: Array.from(streets).sort((a, b) => a.localeCompare(b, 'fr')).slice(0, 14),
+      districts: Array.from(districts).sort((a, b) => a.localeCompare(b, 'fr')).slice(0, 8),
+    };
+  } catch {
+    return { streets: [], districts: [] };
+  }
+}
+
 function renderZoneImpactPanel(lines = []) {
   const markup = lines.length ? lines.map((line) => `<li>${line}</li>`).join('') : '<li>Aucune zone d&rsquo;analyse active.</li>' ;
   setHtml('map-zone-impact-list', markup);
 }
 
-function computeZoneImpact() {
+async function computeZoneImpact() {
+  const runSeq = ++mapZoneImpactComputationSeq;
   const geometry = selectedZoneGeometry();
   if (!geometry) {
     renderZoneImpactPanel();
     return;
   }
 
-  const municipalities = Array.isArray(cachedMunicipalities) ? cachedMunicipalities : [];
+  renderZoneImpactPanel(['⏳ Analyse en cours (données départementales + rues/quartiers en ligne)…']);
+
+  const municipalities = zoneImpactDepartmentCommunesInZone(geometry);
   const resources = getDisplayedResources();
-  const municipalitiesInZone = municipalities.filter((municipality) => {
-    const cacheKey = `${municipality.name}|${municipality.postal_code || ''}`;
-    const point = geocodeCache.get(cacheKey);
-    if (!point) return false;
-    return isPointInsideGeometry(point, geometry);
-  });
+  const municipalitiesInZone = municipalities;
 
   const resourcesInZone = resources.filter((resource) => {
     const coords = normalizeMapCoordinates(resource.lat, resource.lon);
@@ -1535,6 +1627,8 @@ function computeZoneImpact() {
   const radioMeans = municipalitiesInZone.filter((municipality) => String(municipality.radio_channel || '').trim()).length + resourcesInZone.filter((resource) => TELECOM_RESOURCE_TYPES.has(resource.type)).length;
   const vulnerabilityScore = municipalitiesInZone.reduce((sum, municipality) => sum + mapZoneImpactRiskScoreFromCommune(municipality), 0);
   const vulnerabilityLevel = mapZoneImpactExposureLevel(vulnerabilityScore);
+  const streetInsights = await fetchZoneStreetInsights(geometry);
+  if (runSeq !== mapZoneImpactComputationSeq) return;
 
   const topCommunes = municipalitiesInZone
     .map((municipality) => ({ municipality, score: mapZoneImpactRiskScoreFromCommune(municipality) }))
@@ -1544,12 +1638,19 @@ function computeZoneImpact() {
     .join(', ');
 
   renderZoneImpactPanel([
+    `🧭 <strong>Maillage départemental (Géorisques Isère):</strong> ${municipalitiesInZone.length} commune(s) intersectée(s) dans la zone tracée (pas uniquement PCS).`,
     `👥 <strong>Population exposée estimée:</strong> <strong>${estimatedPopulation.toLocaleString('fr-FR')}</strong> habitant(s).`,
     `🏫 <strong>Exposition sensible:</strong> ${schoolsCount} école(s) / établissement(s) scolaire(s), ${ehpadCount} EHPAD, ${roadCriticalPoints} axe(s) critique(s) de transport.`,
     `🏠 <strong>Capacité d'hébergement restante (estimée):</strong> ${shelterCapacity.toLocaleString('fr-FR')} place(s).`,
     `🚑 <strong>Ressources disponibles en temps réel (proxy):</strong> ${teamsAvailable} équipe(s), ${vehiclesAvailable} véhicule(s), ${radioMeans} moyen(s) radio.`,
     `🌊 <strong>Vulnérabilité locale:</strong> ${vulnerabilityLevel} (score ${vulnerabilityScore}) · historique incidents + dépendance routière + zones inondables consolidés sur ${municipalitiesInZone.length} commune(s).`,
     topCommunes ? `📍 <strong>Communes les plus vulnérables de la zone:</strong> ${topCommunes}.` : '📍 <strong>Communes les plus vulnérables de la zone:</strong> aucune commune géocodée dans la sélection.',
+    streetInsights.streets.length
+      ? `🛣️ <strong>Rues détectées dans la zone (OpenStreetMap):</strong> ${streetInsights.streets.slice(0, 10).map((name) => escapeHtml(name)).join(', ')}.`
+      : '🛣️ <strong>Rues détectées dans la zone:</strong> aucune donnée de rue exploitable remontée pour cette emprise.',
+    streetInsights.districts.length
+      ? `🏘️ <strong>Quartiers détectés:</strong> ${streetInsights.districts.map((name) => escapeHtml(name)).join(', ')}.`
+      : '🏘️ <strong>Quartiers détectés:</strong> non renseignés par les données OSM sur cette zone.',
   ]);
 }
 
