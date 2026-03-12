@@ -979,3 +979,7 @@ svg text { font-size: 14px; fill: #17335f; }
   display: block;
   min-height: 440px;
 }
+
+.social-feed-fallback {
+  margin: .55rem 0 0;
+}
