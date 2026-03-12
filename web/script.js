@@ -1611,7 +1611,7 @@ async function computeZoneImpact() {
   renderZoneImpactPanel(['⏳ Analyse en cours (données départementales + rues/quartiers en ligne)…']);
 
   const municipalities = zoneImpactDepartmentCommunesInZone(geometry);
-  const resources = getDisplayedResources();
+  const resources = getResourcesForZoneImpact();
   const municipalitiesInZone = municipalities;
   const inseePopulationMap = await loadIserePopulationByInsee();
   const zonePopulationMetrics = await estimatePopulationInZoneByArea(geometry, municipalitiesInZone, inseePopulationMap);
@@ -2753,6 +2753,14 @@ function getDisplayedResources() {
     .filter((r) => shouldDisplayBaseResourceType(r.type))
     .filter((r) => resourceVisibilityOverrides.get(r.id) !== false)
     .filter((r) => !query || `${r.name} ${r.address}`.toLowerCase().includes(query));
+  return [...staticResources, ...dynamicResources];
+}
+
+function getResourcesForZoneImpact() {
+  const staticResources = RESOURCE_POINTS
+    .filter((resource) => resource.active)
+    .map((resource) => ({ ...resource, dynamic: false }));
+  const dynamicResources = [...institutionPointsCache, ...finessPointsCache, ...telecomPointsCache];
   return [...staticResources, ...dynamicResources];
 }
 
