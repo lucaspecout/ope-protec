@@ -128,6 +128,7 @@ let apiPanelTimer = null;
 let apiResyncTimer = null;
 let refreshAllInFlight = null;
 let photoCameraRefreshTimer = null;
+let socialFeedsFallbackTimer = null;
 let lastApiResyncAt = null;
 let isLoginSubmitting = false;
 const apiGetCache = new Map();
@@ -1333,11 +1334,41 @@ function setActivePanel(panelId) {
     }, 100);
   }
   if (panelId === 'logs-panel') ensureLogMunicipalitiesLoaded();
+  if (panelId === 'news-panel') ensureSocialFeedsRendered();
   if (panelId === 'api-panel' && token) {
     loadApiInterconnections(false).catch((error) => {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
     });
   }
+}
+
+function ensureSocialFeedsRendered() {
+  const panel = document.getElementById('news-panel');
+  if (!panel) return;
+
+  panel.querySelectorAll('.twitter-timeline').forEach((timelineLink) => {
+    const card = timelineLink.closest('.social-feed-card');
+    if (!card || card.querySelector('.social-feed-fallback')) return;
+    const fallback = document.createElement('p');
+    fallback.className = 'muted social-feed-fallback hidden';
+    fallback.hidden = true;
+    fallback.textContent = 'Le flux intégré ne se charge pas sur ce navigateur. Utilisez le lien du profil ci-dessous.';
+    timelineLink.insertAdjacentElement('afterend', fallback);
+  });
+
+  if (window.twttr?.widgets?.load) {
+    window.twttr.widgets.load(panel);
+  }
+
+  if (socialFeedsFallbackTimer) window.clearTimeout(socialFeedsFallbackTimer);
+  socialFeedsFallbackTimer = window.setTimeout(() => {
+    panel.querySelectorAll('.social-feed-card').forEach((card) => {
+      const fallback = card.querySelector('.social-feed-fallback');
+      if (!fallback) return;
+      const hasEmbeddedTimeline = Boolean(card.querySelector('iframe.twitter-timeline, iframe[data-testid="twitter-timeline"]'));
+      setVisibility(fallback, !hasEmbeddedTimeline);
+    });
+  }, 4500);
 }
 
 function centerMapOnIsere() {
