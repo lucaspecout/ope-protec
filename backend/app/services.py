@@ -4195,11 +4195,17 @@ def _fetch_georisques_isere_summary_live(commune_names: list[str] | None = None)
 
     gaspar_payload = fetch_georisques_commune_risks(list(monitored_codes.keys()))
     gaspar_by_code = {item.get("code_insee"): item for item in gaspar_payload.get("communes") or []}
+    gaspar_error = str(gaspar_payload.get("error") or "").strip()
     for commune in monitored:
         details = gaspar_by_code.get(commune.get("code_insee")) or {}
         commune["gaspar_risks"] = details.get("risks", [])
         commune["gaspar_risk_total"] = details.get("risk_total", 0)
         commune["gaspar_danger_level"] = details.get("danger_level", "Faible")
+        detail_errors = details.get("errors") if isinstance(details, dict) else None
+        if isinstance(detail_errors, list):
+            commune["errors"].extend(str(err) for err in detail_errors if err)
+        if gaspar_error:
+            commune["errors"].append(f"GASPAR: {gaspar_error}")
 
     return {
         "service": "Géorisques",
