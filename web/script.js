@@ -3784,6 +3784,14 @@ function georisquesCommuneKey(commune = {}) {
   return String(commune.code_insee || commune.insee || commune.name || commune.commune || '').trim().toLowerCase();
 }
 
+function georisquesHazardTone(hazard = {}) {
+  const dangerText = String(hazard.knownDanger || '').toLowerCase();
+  if (/très élevé|eleve|élevé/.test(dangerText)) return 'tres-eleve';
+  if (/modéré|modere|présent|present|zone 3|zone 4|zone 5/.test(dangerText)) return 'eleve';
+  if (!hazard.applies) return 'faible';
+  return 'modere';
+}
+
 function renderGeorisquesPcsDetail(commune) {
   if (!commune) {
     setHtml('georisques-pcs-detail', '<p class="muted">Sélectionnez une commune PCS pour afficher ses informations.</p>');
@@ -3809,25 +3817,25 @@ function renderGeorisquesPcsDetail(commune) {
       detail: `Classe ${Number(commune.radon_class || 0) || 'non renseignée'}`,
     },
     {
-      label: 'Inondation (AZI)',
+      label: 'Inondation',
       knownDanger: Number(commune.flood_documents || commune.nb_documents || 0) > 0 ? 'Présent' : 'Faible',
       applies: Number(commune.flood_documents || commune.nb_documents || 0) > 0,
       detail: `${Number(commune.flood_documents || commune.nb_documents || 0)} document(s)`,
     },
     {
-      label: 'PPRN',
+      label: 'Plan de prévention des risques naturels',
       knownDanger: Number(commune.ppr_by_risk?.pprn || 0) > 0 ? 'Présent' : 'Faible',
       applies: Number(commune.ppr_by_risk?.pprn || 0) > 0,
       detail: `${Number(commune.ppr_by_risk?.pprn || 0)} plan(s)`,
     },
     {
-      label: 'PPRM',
+      label: 'Plan de prévention des risques miniers',
       knownDanger: Number(commune.ppr_by_risk?.pprm || 0) > 0 ? 'Présent' : 'Faible',
       applies: Number(commune.ppr_by_risk?.pprm || 0) > 0,
       detail: `${Number(commune.ppr_by_risk?.pprm || 0)} plan(s)`,
     },
     {
-      label: 'PPRT',
+      label: 'Plan de prévention des risques technologiques',
       knownDanger: Number(commune.ppr_by_risk?.pprt || 0) > 0 ? 'Présent' : 'Faible',
       applies: Number(commune.ppr_by_risk?.pprt || 0) > 0,
       detail: `${Number(commune.ppr_by_risk?.pprt || 0)} plan(s)`,
@@ -3845,7 +3853,7 @@ function renderGeorisquesPcsDetail(commune) {
       detail: `${Number(commune.cavities_total || 0)} occurrence(s)`,
     },
     {
-      label: 'Transport de matières (TIM)',
+      label: 'Transport de matières dangereuses',
       knownDanger: Number(commune.tim_total || 0) > 0 ? 'Présent' : 'Faible',
       applies: Number(commune.tim_total || 0) > 0,
       detail: `${Number(commune.tim_total || 0)} signalement(s)`,
@@ -3857,7 +3865,7 @@ function renderGeorisquesPcsDetail(commune) {
       detail: `${Number(commune.risques_information_total || 0)} élément(s)`,
     },
     {
-      label: 'DICRIM',
+      label: 'Document d\'information communal sur les risques majeurs',
       knownDanger: commune.dicrim_publication_year ? 'Disponible' : 'Non renseigné',
       applies: Boolean(commune.dicrim_publication_year),
       detail: commune.dicrim_publication_year ? `Publication ${escapeHtml(String(commune.dicrim_publication_year))}` : 'Aucune publication connue',
@@ -3880,15 +3888,19 @@ function renderGeorisquesPcsDetail(commune) {
 
   const allHazards = [...hazardCatalogue, ...gasparItems];
   const risksMarkup = allHazards
-    .map((hazard) => `<li><strong>${escapeHtml(String(hazard.label || 'Risque'))}</strong> · Danger connu: <strong>${escapeHtml(String(hazard.knownDanger || 'inconnu'))}</strong> · Applicabilité ville: <strong>${hazard.applies ? 'Oui' : 'Non confirmé'}</strong>${hazard.detail ? `<br><span class="muted">${escapeHtml(String(hazard.detail))}</span>` : ''}</li>`)
+    .map((hazard) => {
+      const tone = georisquesHazardTone(hazard);
+      return `<li><strong>${escapeHtml(String(hazard.label || 'Risque'))}</strong> · <span class="hazard-chip ${tone}">${escapeHtml(String(hazard.knownDanger || 'inconnu'))}</span> · Applicabilité ville: <strong>${hazard.applies ? 'Oui' : 'Non confirmé'}</strong>${hazard.detail ? `<br><span class="muted">${escapeHtml(String(hazard.detail))}</span>` : ''}</li>`;
+    })
     .join('');
 
   const docsText = docs.length
     ? docs.slice(0, 10).map((doc) => `<li>${escapeHtml(doc.title || doc.libelle_azi || 'Document inondation')}${doc.river_basin ? ` · Bassin ${escapeHtml(doc.river_basin)}` : ''}${doc.published_at ? ` · Diffusion ${escapeHtml(doc.published_at)}` : ''}</li>`).join('')
     : '<li>Aucun document inondation détaillé.</li>';
 
-  const query = encodeURIComponent(insee || communeName);
-  const georisquesSearchUrl = `https://www.georisques.gouv.fr/rechercher?query=${query}`;
+  const georisquesSearchParams = new URLSearchParams();
+  georisquesSearchParams.set('field_commune', insee || communeName);
+  const georisquesSearchUrl = `https://www.georisques.gouv.fr/recherche?${georisquesSearchParams.toString()}`;
   const georisquesMainUrl = 'https://www.georisques.gouv.fr/';
 
   setHtml('georisques-pcs-detail', `
@@ -3896,7 +3908,7 @@ function renderGeorisquesPcsDetail(commune) {
     <p>INSEE: <strong>${escapeHtml(insee || '-')}</strong> · Danger agrégé: <strong>${escapeHtml(commune.gaspar_danger_level || danger.label)}</strong> · Sismicité: <strong>${escapeHtml(commune.seismic_zone || commune.zone_sismicite || 'inconnue')}</strong> · Radon: <strong>${escapeHtml(commune.radon_label || 'inconnu')}</strong></p>
     <p><strong>Liste complète des risques et applicabilité pour la ville</strong></p>
     <ul class="list compact">${risksMarkup}</ul>
-    <p><strong>Documents inondation (AZI)</strong></p>
+    <p><strong>Documents inondation</strong></p>
     <ul class="list compact">${docsText}</ul>
     <p><a href="${georisquesSearchUrl}" target="_blank" rel="noreferrer">Rechercher cette commune sur Géorisques</a> · <a href="${georisquesMainUrl}" target="_blank" rel="noreferrer">Site Géorisques</a></p>
   `);
@@ -3983,7 +3995,7 @@ function renderGeorisquesDetails(georisques = {}) {
     .map((commune) => {
       const danger = georisquesDangerLevel(commune);
       const recentFlag = Number(commune.ground_movements_total || 0) > 0 ? ' · activité terrain récente' : '';
-      return `<li><strong>${escapeHtml(commune.name || commune.commune || 'Commune inconnue')}</strong> <span class="danger-chip ${danger.css}">${escapeHtml(danger.label)}</span><br>Sismicité: <strong>${escapeHtml(commune.seismic_zone || commune.zone_sismicite || 'inconnue')}</strong> · PPR: <strong>${Number(commune.ppr_total || 0)}</strong> · Inondation: <strong>${Number(commune.flood_documents || commune.nb_documents || 0)}</strong>${recentFlag}</li>`;
+      return `<li><strong>${escapeHtml(commune.name || commune.commune || 'Commune inconnue')}</strong> <span class="danger-chip ${danger.css}">${escapeHtml(danger.label)}</span><br>Sismicité: <strong>${escapeHtml(commune.seismic_zone || commune.zone_sismicite || 'inconnue')}</strong> · Plans de prévention: <strong>${Number(commune.ppr_total || 0)}</strong> · Inondation: <strong>${Number(commune.flood_documents || commune.nb_documents || 0)}</strong>${recentFlag}</li>`;
     }).join('') || '<li>Aucune commune prioritaire calculable.</li>';
   setHtml('georisques-priority-communes-list', priorityCommunesMarkup);
 
@@ -3998,7 +4010,7 @@ function renderGeorisquesDetails(georisques = {}) {
       : '<span class="muted">Aucun détail de document remonté.</span>';
 
     const gasparRisks = Array.isArray(commune.gaspar_risks) ? commune.gaspar_risks : [];
-    return `<li><strong>${escapeHtml(commune.name || commune.commune || 'Commune inconnue')}</strong> (${escapeHtml(commune.code_insee || commune.insee || '-')})<br>Sismicité: <strong>${escapeHtml(commune.seismic_zone || commune.zone_sismicite || 'inconnue')}</strong> · Radon: <strong>${escapeHtml(commune.radon_label || 'inconnu')}</strong><br>Inondation (AZI): <strong>${Number(commune.flood_documents || commune.nb_documents || 0)}</strong> · PPR: <strong>${Number(commune.ppr_total || 0)}</strong> · Mouvements: <strong>${Number(commune.ground_movements_total || 0)}</strong> · Cavités: <strong>${Number(commune.cavities_total || 0)}</strong><br>DICRIM: <strong>${escapeHtml(commune.dicrim_publication_year || 'non renseigné')}</strong> · TIM: <strong>${Number(commune.tim_total || 0)}</strong> · Info-risques: <strong>${Number(commune.risques_information_total || 0)}</strong><br>Risques GASPAR: <strong>${Number(commune.gaspar_risk_total || gasparRisks.length || 0)}</strong>${gasparRisks.length ? ` · ${gasparRisks.slice(0, 6).map((risk) => escapeHtml(risk)).join(', ')}` : ''}<br>PPR par risque: ${pprText}${communeErrors.length ? `<br><span class="muted">Anomalies commune: ${escapeHtml(communeErrors.join(' | '))}</span>` : ''}<br>${docsMarkup}</li>`;
+    return `<li><strong>${escapeHtml(commune.name || commune.commune || 'Commune inconnue')}</strong> (${escapeHtml(commune.code_insee || commune.insee || '-')})<br>Sismicité: <strong>${escapeHtml(commune.seismic_zone || commune.zone_sismicite || 'inconnue')}</strong> · Radon: <strong>${escapeHtml(commune.radon_label || 'inconnu')}</strong><br>Inondation: <strong>${Number(commune.flood_documents || commune.nb_documents || 0)}</strong> · Plans de prévention: <strong>${Number(commune.ppr_total || 0)}</strong> · Mouvements: <strong>${Number(commune.ground_movements_total || 0)}</strong> · Cavités: <strong>${Number(commune.cavities_total || 0)}</strong><br>Document d'information communal sur les risques majeurs: <strong>${escapeHtml(commune.dicrim_publication_year || 'non renseigné')}</strong> · Transport de matières dangereuses: <strong>${Number(commune.tim_total || 0)}</strong> · Information risques: <strong>${Number(commune.risques_information_total || 0)}</strong><br>Risques recensés: <strong>${Number(commune.gaspar_risk_total || gasparRisks.length || 0)}</strong>${gasparRisks.length ? ` · ${gasparRisks.slice(0, 6).map((risk) => escapeHtml(risk)).join(', ')}` : ''}<br>Plans de prévention par risque: ${pprText}${communeErrors.length ? `<br><span class="muted">Anomalies commune: ${escapeHtml(communeErrors.join(' | '))}</span>` : ''}<br>${docsMarkup}</li>`;
   }).join('') || '<li>Aucune commune remontée par Géorisques.</li>';
   setHtml('georisques-communes-list', markup);
   renderGeorisquesPcsRisks(monitored);
