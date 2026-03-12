@@ -382,6 +382,11 @@ label { display: block; margin-bottom: .8rem; }
 .georisques-pcs-item:hover { border-color: #2d62b5; }
 .georisques-pcs-item.is-active { border-color: #0b4daa; box-shadow: 0 0 0 2px rgba(11, 77, 170, .12); }
 .georisques-pcs-detail p { margin: .4rem 0; }
+.hazard-chip { display: inline-flex; align-items: center; border-radius: 999px; padding: .08rem .45rem; font-weight: 700; font-size: .78rem; border: 1px solid transparent; }
+.hazard-chip.faible { background: #e6f9eb; color: #24743b; border-color: #bde7cb; }
+.hazard-chip.modere { background: #fff5d6; color: #8a6c00; border-color: #f3da8f; }
+.hazard-chip.eleve { background: #ffe8cc; color: #a65a00; border-color: #ffc48b; }
+.hazard-chip.tres-eleve { background: #ffe2e6; color: #b21e35; border-color: #f1b1bb; }
 
 .level-chip {
   display: inline-flex;
