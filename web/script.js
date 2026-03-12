@@ -3947,14 +3947,38 @@ function renderGeorisquesPcsDetail(commune) {
     longitude: commune.longitude,
   });
   const georisquesMainUrl = 'https://www.georisques.gouv.fr/';
+  const cityDocuments = [];
+  if (commune.dicrim_publication_year) {
+    cityDocuments.push(`DICRIM · publication ${escapeHtml(String(commune.dicrim_publication_year))}`);
+  }
+  if (Number(commune.ppr_by_risk?.pprn || 0) > 0) {
+    cityDocuments.push(`PPRN · ${Number(commune.ppr_by_risk?.pprn || 0)} document(s)`);
+  }
+  if (Number(commune.ppr_by_risk?.pprm || 0) > 0) {
+    cityDocuments.push(`PPRM · ${Number(commune.ppr_by_risk?.pprm || 0)} document(s)`);
+  }
+  if (Number(commune.ppr_by_risk?.pprt || 0) > 0) {
+    cityDocuments.push(`PPRT · ${Number(commune.ppr_by_risk?.pprt || 0)} document(s)`);
+  }
+  if (Number(commune.tim_total || 0) > 0) {
+    cityDocuments.push(`TIM · ${Number(commune.tim_total || 0)} information(s)`);
+  }
+  if (Number(commune.risques_information_total || 0) > 0) {
+    cityDocuments.push(`Informations risques · ${Number(commune.risques_information_total || 0)} élément(s)`);
+  }
+  const cityDocumentsMarkup = cityDocuments.length
+    ? cityDocuments.map((doc) => `<li>${doc}</li>`).join('')
+    : '<li>Aucun document communal supplémentaire détecté.</li>';
 
   setHtml('georisques-pcs-detail', `
     <p><strong>${escapeHtml(communeName)}</strong> <span class="danger-chip ${danger.css}">${escapeHtml(commune.gaspar_danger_level || danger.label)}</span></p>
     <p>INSEE: <strong>${escapeHtml(insee || '-')}</strong> · Danger agrégé: <strong>${escapeHtml(commune.gaspar_danger_level || danger.label)}</strong> · Sismicité: <strong>${escapeHtml(commune.seismic_zone || commune.zone_sismicite || 'inconnue')}</strong> · Radon: <strong>${escapeHtml(commune.radon_label || 'inconnu')}</strong></p>
     <p><strong>Liste complète des risques et applicabilité pour la ville</strong></p>
     <ul class="list compact">${risksMarkup}</ul>
-    <p><strong>Documents inondation</strong></p>
+    <p><strong>Documents inondation (AZI)</strong></p>
     <ul class="list compact">${docsText}</ul>
+    <p><strong>Documents communaux disponibles (DICRIM, PPR, TIM…)</strong></p>
+    <ul class="list compact">${cityDocumentsMarkup}</ul>
     <p><a href="${georisquesSearchUrl}" target="_blank" rel="noreferrer">Rechercher cette commune sur Géorisques</a> · <a href="${georisquesMainUrl}" target="_blank" rel="noreferrer">Site Géorisques</a></p>
   `);
 }
@@ -4063,7 +4087,32 @@ function renderGeorisquesDetails(georisques = {}) {
   const allDocs = monitored.flatMap((commune) => {
     const docs = Array.isArray(commune.flood_documents_details) ? commune.flood_documents_details : [];
     const communeName = commune.name || commune.commune || 'Commune inconnue';
-    return docs.map((doc) => ({ communeName, doc }));
+    const extraDocs = [];
+    if (commune.dicrim_publication_year) {
+      extraDocs.push({
+        communeName,
+        doc: { title: 'DICRIM', code: commune.code_insee || commune.insee || '', published_at: String(commune.dicrim_publication_year) },
+      });
+    }
+    if (Number(commune.ppr_by_risk?.pprn || 0) > 0) {
+      extraDocs.push({ communeName, doc: { title: 'PPRN', code: `${Number(commune.ppr_by_risk?.pprn || 0)} doc(s)` } });
+    }
+    if (Number(commune.ppr_by_risk?.pprm || 0) > 0) {
+      extraDocs.push({ communeName, doc: { title: 'PPRM', code: `${Number(commune.ppr_by_risk?.pprm || 0)} doc(s)` } });
+    }
+    if (Number(commune.ppr_by_risk?.pprt || 0) > 0) {
+      extraDocs.push({ communeName, doc: { title: 'PPRT', code: `${Number(commune.ppr_by_risk?.pprt || 0)} doc(s)` } });
+    }
+    if (Number(commune.tim_total || 0) > 0) {
+      extraDocs.push({ communeName, doc: { title: 'TIM', code: `${Number(commune.tim_total || 0)} info(s)` } });
+    }
+    if (Number(commune.risques_information_total || 0) > 0) {
+      extraDocs.push({ communeName, doc: { title: 'Informations risques', code: `${Number(commune.risques_information_total || 0)} élément(s)` } });
+    }
+    return [
+      ...docs.map((doc) => ({ communeName, doc })),
+      ...extraDocs,
+    ];
   });
 
   const docsListMarkup = allDocs.map(({ communeName, doc }) => (`
