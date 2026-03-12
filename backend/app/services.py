@@ -3810,21 +3810,27 @@ def _fetch_georisques_v2_collection(
     if first_page is None or selected_query is None:
         raise last_error or ValueError(f"Réponse Géorisques vide pour {endpoint}")
 
-    content = list(first_page.get("content") or [])
+    content = list(first_page.get("content") or first_page.get("data") or [])
     total_pages = int(first_page.get("totalPages") or first_page.get("total_pages") or 1)
+    current_page = int(first_page.get("pageNumber") or first_page.get("page") or 0)
 
-    if page_config:
+    if page_config and total_pages > 1:
         _, page_key = page_config
-        for page_number in range(1, total_pages):
+        if current_page == 0:
+            page_numbers = range(1, total_pages)
+        else:
+            page_numbers = range(current_page + 1, total_pages + 1)
+
+        for page_number in page_numbers:
             selected_query[page_key] = page_number
             page_payload = _http_get_json(
                 f"https://www.georisques.gouv.fr/api/v2/{endpoint}?{urlencode(selected_query, doseq=True)}",
                 headers=headers,
             )
-            content.extend(page_payload.get("content") or [])
+            content.extend(page_payload.get("content") or page_payload.get("data") or [])
 
     return {
-        "total_elements": int(first_page.get("totalElements") or len(content)),
+        "total_elements": int(first_page.get("totalElements") or first_page.get("total_elements") or first_page.get("results") or len(content)),
         "content": content,
     }
 
@@ -4114,10 +4120,10 @@ def _fetch_georisques_isere_summary_live(commune_names: list[str] | None = None)
 
     dicrim_by_commune: dict[str, str] = {}
     for item in dicrim_payload["content"]:
-        code = str(item.get("codeInsee") or "")
+        code = str(item.get("codeInsee") or item.get("code_insee") or "")
         if not code:
             continue
-        year = str(item.get("anneePublication") or "").strip()
+        year = str(item.get("anneePublication") or item.get("annee_publication") or "").strip()
         if year:
             best = dicrim_by_commune.get(code)
             if not best or year > best:
