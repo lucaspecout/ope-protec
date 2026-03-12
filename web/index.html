@@ -683,6 +683,8 @@
                   <button id="map-fit-btn" type="button" class="ghost map-btn-lite">Tout voir</button>
                   <button id="map-locate-btn" type="button" class="ghost map-btn-lite">📍 Me localiser</button>
                   <button id="map-add-point-btn" type="button" class="ghost map-btn-lite" aria-pressed="false" data-requires-edit>➕ Créer un POI</button>
+                  <button id="map-zone-impact-start" type="button" class="ghost map-btn-lite">🧭 Analyser une zone</button>
+                  <button id="map-zone-impact-clear" type="button" class="ghost map-btn-lite">🧹 Effacer analyse</button>
                 </div>
                 <select id="map-basemap-select" aria-label="Choisir le fond de carte">
                   <option value="osm">Fond standard (OSM)</option>
@@ -809,6 +811,13 @@
                 <article><p>Ressources</p><strong id="map-summary-resources">0</strong></article>
                 <article><p>Points</p><strong id="map-summary-custom">0</strong></article>
                 <article><p>Trafic</p><strong id="map-summary-traffic">0</strong></article>
+              </div>
+              <div id="map-zone-impact-panel" class="map-zone-impact" aria-live="polite">
+                <h4>Impact terrain sur zone sélectionnée</h4>
+                <p class="muted">Tracez un rectangle ou un polygone pour estimer la population exposée, les ressources mobilisables et la vulnérabilité locale (sources État + données opérationnelles).</p>
+                <ul id="map-zone-impact-list" class="list compact">
+                  <li>Aucune zone d'analyse active.</li>
+                </ul>
               </div>
             </aside>
           </div>

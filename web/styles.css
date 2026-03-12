@@ -599,6 +599,10 @@ label { display: block; margin-bottom: .8rem; }
 .map-summary article { border: 1px solid #d5e2fb; border-radius: 9px; padding: .32rem .44rem; background: linear-gradient(180deg, #fff, #f4f8ff); }
 .map-summary p { margin: 0; color: #4f6388; font-size: .74rem; }
 .map-summary strong { font-size: .92rem; color: #163a87; }
+.map-zone-impact { margin-top: .45rem; border: 1px solid #d5e2fb; border-radius: 9px; padding: .45rem .55rem; background: linear-gradient(180deg, #fff, #f8faff); }
+.map-zone-impact h4 { margin: 0 0 .35rem; font-size: .88rem; }
+.map-zone-impact .list { margin: 0; }
+.map-zone-impact li { font-size: .78rem; }
 .map-checks-list { margin-top: .45rem; max-height: 150px; overflow: auto; }
 .map-checks-list li { font-size: .82rem; }
 .map-checks-list .ok { color: var(--ok); font-weight: 700; }
