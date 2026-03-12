@@ -1632,15 +1632,11 @@ async function computeZoneImpact() {
   const zoneAreaM2 = Number(zonePopulationMetrics.zoneAreaM2 || 0);
   const inhabitantsPerM2 = zoneAreaM2 > 0 ? areaBasedPopulation / zoneAreaM2 : 0;
   const inhabitantsPerKm2 = inhabitantsPerM2 * 1_000_000;
-  const bestPopulationEstimate = areaBasedPopulation > 0 ? areaBasedPopulation : estimatedPopulation;
-  const shelterCapacity = municipalitiesInZone.reduce((sum, municipality) => sum + Number(municipality.shelter_capacity || 0), 0);
   const schoolsCount = resourcesInZone.filter((resource) => SCHOOL_RESOURCE_TYPES.has(resource.type)).length;
+  const hospitalsCount = resourcesInZone.filter((resource) => resource.type === 'hopital').length;
+  const sensitivePlacesCount = resourcesInZone.filter((resource) => RISK_RESOURCE_TYPES.has(resource.type)).length;
   const ehpadCount = resourcesInZone.filter((resource) => resource.type === 'ehpad').length;
-  const commandCenters = resourcesInZone.filter((resource) => COMMAND_RESOURCE_TYPES.has(resource.type)).length;
-  const roadCriticalPoints = resourcesInZone.filter((resource) => TRANSPORT_RESOURCE_TYPES.has(resource.type)).length;
-  const vulnerabilityScore = municipalitiesInZone.reduce((sum, municipality) => sum + mapZoneImpactRiskScoreFromCommune(municipality), 0);
-  const vulnerabilityLevel = mapZoneImpactExposureLevel(vulnerabilityScore);
-  const exposureRate = bestPopulationEstimate > 0 ? ((vulnerabilityScore / bestPopulationEstimate) * 10000) : 0;
+  const hostingPlacesCount = resourcesInZone.filter((resource) => HOSTING_RESOURCE_TYPES.has(resource.type)).length;
   const streetInsights = await fetchZoneStreetInsights(geometry);
   if (runSeq !== mapZoneImpactComputationSeq) return;
 
@@ -1655,9 +1651,7 @@ async function computeZoneImpact() {
     areaBasedPopulation > 0
       ? `👥 <strong>Population estimée dans la zone tracée (pondérée par surface):</strong> <strong>${Math.round(areaBasedPopulation).toLocaleString('fr-FR')}</strong> habitant(s).`
       : `👥 <strong>Population exposée (INSEE):</strong> <strong>${estimatedPopulation.toLocaleString('fr-FR')}</strong> habitant(s) (population légale des communes intersectées).`,
-    `🏫 <strong>Exposition sensible:</strong> ${schoolsCount} école(s) / établissement(s) scolaire(s), ${ehpadCount} EHPAD, ${roadCriticalPoints} axe(s) critique(s) de transport.`,
-    `🏠 <strong>Capacité d'hébergement restante (estimée):</strong> ${shelterCapacity.toLocaleString('fr-FR')} place(s).`,
-    `🌊 <strong>Vulnérabilité locale:</strong> ${vulnerabilityLevel} (score ${vulnerabilityScore}) · taux d'exposition: <strong>${exposureRate.toFixed(2)}</strong> points / 10 000 habitants · historique incidents + dépendance routière + zones inondables consolidés sur ${municipalitiesInZone.length} commune(s).`,
+    `🏫 <strong>Exposition e:</strong> ${schoolsCount} école(s), ${hospitalsCount} hôpital(aux), ${sensitivePlacesCount} lieu(x) sensible(s), ${ehpadCount} EHPAD, ${hostingPlacesCount} lieu(x) d'accueil.`,
     streetInsights.streets.length
       ? `🛣️ <strong>Rues détectées dans la zone (OpenStreetMap):</strong> ${streetInsights.streets.slice(0, 10).map((name) => escapeHtml(name)).join(', ')}.`
       : '🛣️ <strong>Rues détectées dans la zone:</strong> aucune donnée de rue exploitable remontée pour cette emprise.',
