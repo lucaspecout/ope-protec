@@ -231,6 +231,8 @@ let finessPointsCache = [];
 let finessLoaded = false;
 let iserePopulationPointsCache = [];
 let iserePopulationLoaded = false;
+let iserePopulationByInseeCache = new Map();
+let iserePopulationByInseeLoaded = false;
 let telecomPointsCache = [];
 let telecomLoaded = false;
 let cachedHomeLiveSnapshot = {};
@@ -1609,6 +1611,7 @@ async function computeZoneImpact() {
   const municipalities = zoneImpactDepartmentCommunesInZone(geometry);
   const resources = getDisplayedResources();
   const municipalitiesInZone = municipalities;
+  const inseePopulationMap = await loadIserePopulationByInsee();
 
   const resourcesInZone = resources.filter((resource) => {
     const coords = normalizeMapCoordinates(resource.lat, resource.lon);
@@ -1616,35 +1619,29 @@ async function computeZoneImpact() {
     return isPointInsideGeometry(coords, geometry);
   });
 
-  const estimatedPopulation = municipalitiesInZone.reduce((sum, municipality) => sum + Number(municipality.population || 0), 0);
+  const estimatedPopulation = municipalitiesInZone.reduce((sum, municipality) => {
+    const inseeCode = String(municipality.code_insee || municipality.insee || '').trim();
+    const inseePopulation = inseeCode ? Number(inseePopulationMap.get(inseeCode) || 0) : 0;
+    const fallbackPopulation = Number(municipality.population || 0);
+    return sum + (Number.isFinite(inseePopulation) && inseePopulation > 0 ? inseePopulation : fallbackPopulation);
+  }, 0);
   const shelterCapacity = municipalitiesInZone.reduce((sum, municipality) => sum + Number(municipality.shelter_capacity || 0), 0);
   const schoolsCount = resourcesInZone.filter((resource) => SCHOOL_RESOURCE_TYPES.has(resource.type)).length;
   const ehpadCount = resourcesInZone.filter((resource) => resource.type === 'ehpad').length;
   const commandCenters = resourcesInZone.filter((resource) => COMMAND_RESOURCE_TYPES.has(resource.type)).length;
   const roadCriticalPoints = resourcesInZone.filter((resource) => TRANSPORT_RESOURCE_TYPES.has(resource.type)).length;
-  const teamsAvailable = commandCenters * 2;
-  const vehiclesAvailable = commandCenters + roadCriticalPoints;
-  const radioMeans = municipalitiesInZone.filter((municipality) => String(municipality.radio_channel || '').trim()).length + resourcesInZone.filter((resource) => TELECOM_RESOURCE_TYPES.has(resource.type)).length;
   const vulnerabilityScore = municipalitiesInZone.reduce((sum, municipality) => sum + mapZoneImpactRiskScoreFromCommune(municipality), 0);
   const vulnerabilityLevel = mapZoneImpactExposureLevel(vulnerabilityScore);
+  const exposureRate = estimatedPopulation > 0 ? ((vulnerabilityScore / estimatedPopulation) * 10000) : 0;
   const streetInsights = await fetchZoneStreetInsights(geometry);
   if (runSeq !== mapZoneImpactComputationSeq) return;
 
-  const topCommunes = municipalitiesInZone
-    .map((municipality) => ({ municipality, score: mapZoneImpactRiskScoreFromCommune(municipality) }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 3)
-    .map((item) => `${escapeHtml(item.municipality.name)} (${item.score})`)
-    .join(', ');
-
   renderZoneImpactPanel([
     `🧭 <strong>Maillage départemental (Géorisques Isère):</strong> ${municipalitiesInZone.length} commune(s) intersectée(s) dans la zone tracée (pas uniquement PCS).`,
-    `👥 <strong>Population exposée estimée:</strong> <strong>${estimatedPopulation.toLocaleString('fr-FR')}</strong> habitant(s).`,
+    `👥 <strong>Population exposée (INSEE):</strong> <strong>${estimatedPopulation.toLocaleString('fr-FR')}</strong> habitant(s) (population légale des communes intersectées).`,
     `🏫 <strong>Exposition sensible:</strong> ${schoolsCount} école(s) / établissement(s) scolaire(s), ${ehpadCount} EHPAD, ${roadCriticalPoints} axe(s) critique(s) de transport.`,
     `🏠 <strong>Capacité d'hébergement restante (estimée):</strong> ${shelterCapacity.toLocaleString('fr-FR')} place(s).`,
-    `🚑 <strong>Ressources disponibles en temps réel (proxy):</strong> ${teamsAvailable} équipe(s), ${vehiclesAvailable} véhicule(s), ${radioMeans} moyen(s) radio.`,
-    `🌊 <strong>Vulnérabilité locale:</strong> ${vulnerabilityLevel} (score ${vulnerabilityScore}) · historique incidents + dépendance routière + zones inondables consolidés sur ${municipalitiesInZone.length} commune(s).`,
-    topCommunes ? `📍 <strong>Communes les plus vulnérables de la zone:</strong> ${topCommunes}.` : '📍 <strong>Communes les plus vulnérables de la zone:</strong> aucune commune géocodée dans la sélection.',
+    `🌊 <strong>Vulnérabilité locale:</strong> ${vulnerabilityLevel} (score ${vulnerabilityScore}) · taux d'exposition: <strong>${exposureRate.toFixed(2)}</strong> points / 10 000 habitants · historique incidents + dépendance routière + zones inondables consolidés sur ${municipalitiesInZone.length} commune(s).`,
     streetInsights.streets.length
       ? `🛣️ <strong>Rues détectées dans la zone (OpenStreetMap):</strong> ${streetInsights.streets.slice(0, 10).map((name) => escapeHtml(name)).join(', ')}.`
       : '🛣️ <strong>Rues détectées dans la zone:</strong> aucune donnée de rue exploitable remontée pour cette emprise.',
@@ -1652,6 +1649,24 @@ async function computeZoneImpact() {
       ? `🏘️ <strong>Quartiers détectés:</strong> ${streetInsights.districts.map((name) => escapeHtml(name)).join(', ')}.`
       : '🏘️ <strong>Quartiers détectés:</strong> non renseignés par les données OSM sur cette zone.',
   ]);
+}
+
+async function loadIserePopulationByInsee() {
+  if (iserePopulationByInseeLoaded) return iserePopulationByInseeCache;
+  try {
+    const response = await queueApiRequest(() => fetchWithTimeout('https://geo.api.gouv.fr/departements/38/communes?fields=code,population&format=json'));
+    const payload = await parseJsonResponse(response, 'geo-api-population-insee');
+    const rows = Array.isArray(payload) ? payload : [];
+    iserePopulationByInseeCache = new Map(
+      rows
+        .map((row) => [String(row?.code || '').trim(), Number(row?.population || 0)])
+        .filter(([code, population]) => code && Number.isFinite(population) && population >= 0),
+    );
+  } catch {
+    iserePopulationByInseeCache = new Map();
+  }
+  iserePopulationByInseeLoaded = true;
+  return iserePopulationByInseeCache;
 }
 
 function clearZoneImpactSelection() {
