@@ -3792,6 +3792,46 @@ function georisquesHazardTone(hazard = {}) {
   return 'modere';
 }
 
+function georisquesSlugText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[’']/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function buildGeorisquesMunicipalityUrl({ communeName = '', insee = '', postalCode = '', latitude = null, longitude = null } = {}) {
+  const safeName = String(communeName || '').trim();
+  const city = georisquesSlugText(safeName) || safeName;
+  const code = String(insee || '').trim();
+  const cp = String(postalCode || '').trim();
+  const lat = Number(latitude);
+  const lon = Number(longitude);
+  const hasCoordinates = Number.isFinite(lat) && Number.isFinite(lon);
+
+  const params = new URLSearchParams();
+  params.set('form-adresse', 'true');
+  params.set('isCadastre', 'false');
+  params.set('city', city);
+  params.set('type', 'adresse');
+  params.set('typeForm', 'adresse');
+  if (code) params.set('codeInsee', code);
+  if (hasCoordinates) {
+    params.set('lon', String(lon));
+    params.set('lat', String(lat));
+  }
+  params.set('go_back', '/');
+  params.set('propertiesType', 'municipality');
+  params.set('adresse', cp ? `${safeName}, ${cp} ${safeName}` : safeName);
+  if (hasCoordinates) {
+    params.set('longitude', String(lon));
+    params.set('latitude', String(lat));
+  }
+  params.set('commune', city);
+  return `https://www.georisques.gouv.fr/mes-risques/connaitre-les-risques-pres-de-chez-moi/rapport2?${params.toString()}`;
+}
+
 function renderGeorisquesPcsDetail(commune) {
   if (!commune) {
     setHtml('georisques-pcs-detail', '<p class="muted">Sélectionnez une commune PCS pour afficher ses informations.</p>');
@@ -3898,9 +3938,14 @@ function renderGeorisquesPcsDetail(commune) {
     ? docs.slice(0, 10).map((doc) => `<li>${escapeHtml(doc.title || doc.libelle_azi || 'Document inondation')}${doc.river_basin ? ` · Bassin ${escapeHtml(doc.river_basin)}` : ''}${doc.published_at ? ` · Diffusion ${escapeHtml(doc.published_at)}` : ''}</li>`).join('')
     : '<li>Aucun document inondation détaillé.</li>';
 
-  const georisquesSearchParams = new URLSearchParams();
-  georisquesSearchParams.set('field_commune', insee || communeName);
-  const georisquesSearchUrl = `https://www.georisques.gouv.fr/recherche?${georisquesSearchParams.toString()}`;
+  const municipality = cachedMunicipalities.find((item) => String(item.insee_code || '').trim() === insee);
+  const georisquesSearchUrl = buildGeorisquesMunicipalityUrl({
+    communeName,
+    insee,
+    postalCode: municipality?.postal_code || '',
+    latitude: commune.latitude,
+    longitude: commune.longitude,
+  });
   const georisquesMainUrl = 'https://www.georisques.gouv.fr/';
 
   setHtml('georisques-pcs-detail', `
