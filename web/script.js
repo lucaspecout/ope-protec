@@ -859,7 +859,7 @@ function normalizeExternalUrl(value) {
 function buildGeorisquesCommuneUrl(commune) {
   const code = String(commune?.code_insee || commune?.insee || '').trim();
   if (!code) return null;
-  return `https://www.georisques.gouv.fr/resultats-de-recherche?typeForm=adresse&codeInsee=${encodeURIComponent(code)}`;
+  return `https://www.georisques.gouv.fr/minformer-sur-un-risque?insee=${encodeURIComponent(code)}`;
 }
 
 function buildGeorisquesApiSearchUrl(doc, commune) {
@@ -867,16 +867,16 @@ function buildGeorisquesApiSearchUrl(doc, commune) {
   if (!codeInsee) return null;
 
   const title = String(doc?.title || doc?.libelle_azi || '').trim().toUpperCase();
-  const code = String(doc?.code || doc?.idGaspar || '').trim();
+  const code = String(doc?.code || doc?.idGaspar || doc?.code_national_azi || '').trim();
   const params = new URLSearchParams({ code_insee: codeInsee });
 
   if (title === 'DICRIM') return `https://www.georisques.gouv.fr/api/v1/gaspar/dicrim?${params.toString()}`;
   if (title === 'TIM') return `https://www.georisques.gouv.fr/api/v1/gaspar/tim?${params.toString()}`;
   if (title.includes('RISQUE')) return `https://www.georisques.gouv.fr/api/v1/gaspar/risques?${params.toString()}`;
 
-  if (title === 'PPRN') return `https://www.georisques.gouv.fr/api/v1/gaspar/pprn?${params.toString()}`;
-  if (title === 'PPRM') return `https://www.georisques.gouv.fr/api/v1/gaspar/pprm?${params.toString()}`;
-  if (title === 'PPRT') return `https://www.georisques.gouv.fr/api/v1/gaspar/pprt?${params.toString()}`;
+  // Les endpoints pprn/pprm/pprt ne sont plus exposés en GET sur l'API publique v1.
+  // On bascule vers la fiche risque de la commune (plus stable) pour éviter les liens 404.
+  if (title === 'PPRN' || title === 'PPRM' || title === 'PPRT') return buildGeorisquesCommuneUrl(commune);
 
   if (code) params.set('code_national_azi', code);
   return `https://www.georisques.gouv.fr/api/v1/gaspar/azi?${params.toString()}`;
