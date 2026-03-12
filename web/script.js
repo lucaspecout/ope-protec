@@ -848,6 +848,34 @@ function escapeHtml(value) {
   return String(value || '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 }
 
+function normalizeExternalUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  if (raw.startsWith('https://') || raw.startsWith('http://')) return raw;
+  if (raw.startsWith('/')) return `https://www.georisques.gouv.fr${raw}`;
+  return null;
+}
+
+function buildGeorisquesCommuneUrl(commune) {
+  const code = String(commune?.code_insee || commune?.insee || '').trim();
+  if (!code) return null;
+  return `https://www.georisques.gouv.fr/commune/${encodeURIComponent(code)}`;
+}
+
+function georisquesDocumentUrl(doc, commune) {
+  const directUrl = normalizeExternalUrl(
+    doc?.url
+    || doc?.href
+    || doc?.link
+    || doc?.document_url
+    || doc?.documentUrl
+    || doc?.lien
+    || doc?.lien_document
+  );
+  if (directUrl) return directUrl;
+  return buildGeorisquesCommuneUrl(commune);
+}
+
 function showHome() { setVisibility(homeView, true); setVisibility(loginView, false); setVisibility(appView, false); }
 function showLogin() { setVisibility(homeView, false); setVisibility(loginView, true); setVisibility(appView, false); setVisibility(passwordForm, false); setVisibility(loginForm, true); }
 function showApp() { setVisibility(homeView, false); setVisibility(loginView, false); setVisibility(appView, true); }
@@ -4075,7 +4103,11 @@ function renderGeorisquesDetails(georisques = {}) {
     const communeErrors = Array.isArray(commune.errors) ? commune.errors.filter(Boolean) : [];
 
     const docsMarkup = docs.length
-      ? `<ul class="list compact">${docs.slice(0, 6).map((doc) => `<li><strong>${escapeHtml(doc.title || doc.libelle_azi || 'Document inondation')}</strong>${doc.code ? ` (${escapeHtml(doc.code)})` : ''}${doc.river_basin ? ` · Bassin: ${escapeHtml(doc.river_basin)}` : ''}${doc.published_at ? ` · Diffusion: ${escapeHtml(doc.published_at)}` : ''}</li>`).join('')}</ul>`
+      ? `<ul class="list compact">${docs.slice(0, 6).map((doc) => {
+        const docUrl = georisquesDocumentUrl(doc, commune);
+        const consultLink = docUrl ? ` · <a href="${escapeHtml(docUrl)}" target="_blank" rel="noreferrer">Consulter</a>` : '';
+        return `<li><strong>${escapeHtml(doc.title || doc.libelle_azi || 'Document inondation')}</strong>${doc.code ? ` (${escapeHtml(doc.code)})` : ''}${doc.river_basin ? ` · Bassin: ${escapeHtml(doc.river_basin)}` : ''}${doc.published_at ? ` · Diffusion: ${escapeHtml(doc.published_at)}` : ''}${consultLink}</li>`;
+      }).join('')}</ul>`
       : '<span class="muted">Aucun détail de document remonté.</span>';
 
     const gasparRisks = Array.isArray(commune.gaspar_risks) ? commune.gaspar_risks : [];
@@ -4091,33 +4123,38 @@ function renderGeorisquesDetails(georisques = {}) {
     if (commune.dicrim_publication_year) {
       extraDocs.push({
         communeName,
+        commune,
         doc: { title: 'DICRIM', code: commune.code_insee || commune.insee || '', published_at: String(commune.dicrim_publication_year) },
       });
     }
     if (Number(commune.ppr_by_risk?.pprn || 0) > 0) {
-      extraDocs.push({ communeName, doc: { title: 'PPRN', code: `${Number(commune.ppr_by_risk?.pprn || 0)} doc(s)` } });
+      extraDocs.push({ communeName, commune, doc: { title: 'PPRN', code: `${Number(commune.ppr_by_risk?.pprn || 0)} doc(s)` } });
     }
     if (Number(commune.ppr_by_risk?.pprm || 0) > 0) {
-      extraDocs.push({ communeName, doc: { title: 'PPRM', code: `${Number(commune.ppr_by_risk?.pprm || 0)} doc(s)` } });
+      extraDocs.push({ communeName, commune, doc: { title: 'PPRM', code: `${Number(commune.ppr_by_risk?.pprm || 0)} doc(s)` } });
     }
     if (Number(commune.ppr_by_risk?.pprt || 0) > 0) {
-      extraDocs.push({ communeName, doc: { title: 'PPRT', code: `${Number(commune.ppr_by_risk?.pprt || 0)} doc(s)` } });
+      extraDocs.push({ communeName, commune, doc: { title: 'PPRT', code: `${Number(commune.ppr_by_risk?.pprt || 0)} doc(s)` } });
     }
     if (Number(commune.tim_total || 0) > 0) {
-      extraDocs.push({ communeName, doc: { title: 'TIM', code: `${Number(commune.tim_total || 0)} info(s)` } });
+      extraDocs.push({ communeName, commune, doc: { title: 'TIM', code: `${Number(commune.tim_total || 0)} info(s)` } });
     }
     if (Number(commune.risques_information_total || 0) > 0) {
-      extraDocs.push({ communeName, doc: { title: 'Informations risques', code: `${Number(commune.risques_information_total || 0)} élément(s)` } });
+      extraDocs.push({ communeName, commune, doc: { title: 'Informations risques', code: `${Number(commune.risques_information_total || 0)} élément(s)` } });
     }
     return [
-      ...docs.map((doc) => ({ communeName, doc })),
+      ...docs.map((doc) => ({ communeName, doc, commune })),
       ...extraDocs,
     ];
   });
 
-  const docsListMarkup = allDocs.map(({ communeName, doc }) => (`
-    <li><strong>${escapeHtml(communeName)}</strong> · ${escapeHtml(doc.title || doc.libelle_azi || 'Document inondation')}${doc.code ? ` (${escapeHtml(doc.code)})` : ''}${doc.river_basin ? ` · Bassin: ${escapeHtml(doc.river_basin)}` : ''}${doc.published_at ? ` · Diffusion: ${escapeHtml(doc.published_at)}` : ''}</li>
-  `)).join('') || '<li>Aucun document Géorisques associé affichable.</li>';
+  const docsListMarkup = allDocs.map(({ communeName, doc, commune }) => {
+    const docUrl = georisquesDocumentUrl(doc, commune);
+    const consultLink = docUrl ? ` · <a href="${escapeHtml(docUrl)}" target="_blank" rel="noreferrer">Consulter</a>` : '';
+    return `
+    <li><strong>${escapeHtml(communeName)}</strong> · ${escapeHtml(doc.title || doc.libelle_azi || 'Document inondation')}${doc.code ? ` (${escapeHtml(doc.code)})` : ''}${doc.river_basin ? ` · Bassin: ${escapeHtml(doc.river_basin)}` : ''}${doc.published_at ? ` · Diffusion: ${escapeHtml(doc.published_at)}` : ''}${consultLink}</li>
+  `;
+  }).join('') || '<li>Aucun document Géorisques associé affichable.</li>';
   setHtml('georisques-documents-list', docsListMarkup);
 }
 
