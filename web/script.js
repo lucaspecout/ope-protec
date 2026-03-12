@@ -176,6 +176,9 @@ let mapAnnotations = [];
 let mapAnnotationsSync = null;
 let mapDrawControl = null;
 let mapAnnotationFeatureGroup = null;
+let mapZoneImpactLayer = null;
+let mapZoneImpactSelection = null;
+let mapZoneImpactDrawHandler = null;
 const mapPointVisibilityOverrides = new Map();
 const resourceVisibilityOverrides = new Map();
 let pendingMapPointCoords = null;
@@ -1469,6 +1472,101 @@ function updateMapSummary() {
   setText('map-summary-traffic', String(mapStats.traffic));
 }
 
+function mapZoneImpactExposureLevel(score = 0) {
+  if (score >= 12) return 'Très élevée';
+  if (score >= 8) return 'Élevée';
+  if (score >= 5) return 'Modérée';
+  return 'Faible';
+}
+
+function mapZoneImpactRiskScoreFromCommune(commune = {}) {
+  const dangerRank = georisquesDangerRank(commune);
+  const flood = Number(commune.flood_documents || commune.nb_documents || 0);
+  const movements = Number(commune.ground_movements_total || 0);
+  const roadDependency = Number(commune.tim_total || 0);
+  const incidentHistory = Number(commune.gaspar_risk_total || 0);
+  return (dangerRank * 2) + (flood > 0 ? 2 : 0) + (movements > 0 ? 2 : 0) + (roadDependency > 0 ? 1 : 0) + (incidentHistory >= 5 ? 2 : incidentHistory > 0 ? 1 : 0);
+}
+
+function selectedZoneGeometry() {
+  if (!mapZoneImpactSelection || typeof mapZoneImpactSelection.toGeoJSON !== 'function') return null;
+  try {
+    return mapZoneImpactSelection.toGeoJSON()?.geometry || null;
+  } catch {
+    return null;
+  }
+}
+
+function renderZoneImpactPanel(lines = []) {
+  const markup = lines.length ? lines.map((line) => `<li>${line}</li>`).join('') : '<li>Aucune zone d&rsquo;analyse active.</li>' ;
+  setHtml('map-zone-impact-list', markup);
+}
+
+function computeZoneImpact() {
+  const geometry = selectedZoneGeometry();
+  if (!geometry) {
+    renderZoneImpactPanel();
+    return;
+  }
+
+  const municipalities = Array.isArray(cachedMunicipalities) ? cachedMunicipalities : [];
+  const resources = getDisplayedResources();
+  const municipalitiesInZone = municipalities.filter((municipality) => {
+    const cacheKey = `${municipality.name}|${municipality.postal_code || ''}`;
+    const point = geocodeCache.get(cacheKey);
+    if (!point) return false;
+    return isPointInsideGeometry(point, geometry);
+  });
+
+  const resourcesInZone = resources.filter((resource) => {
+    const coords = normalizeMapCoordinates(resource.lat, resource.lon);
+    if (!coords) return false;
+    return isPointInsideGeometry(coords, geometry);
+  });
+
+  const estimatedPopulation = municipalitiesInZone.reduce((sum, municipality) => sum + Number(municipality.population || 0), 0);
+  const shelterCapacity = municipalitiesInZone.reduce((sum, municipality) => sum + Number(municipality.shelter_capacity || 0), 0);
+  const schoolsCount = resourcesInZone.filter((resource) => SCHOOL_RESOURCE_TYPES.has(resource.type)).length;
+  const ehpadCount = resourcesInZone.filter((resource) => resource.type === 'ehpad').length;
+  const commandCenters = resourcesInZone.filter((resource) => COMMAND_RESOURCE_TYPES.has(resource.type)).length;
+  const roadCriticalPoints = resourcesInZone.filter((resource) => TRANSPORT_RESOURCE_TYPES.has(resource.type)).length;
+  const teamsAvailable = commandCenters * 2;
+  const vehiclesAvailable = commandCenters + roadCriticalPoints;
+  const radioMeans = municipalitiesInZone.filter((municipality) => String(municipality.radio_channel || '').trim()).length + resourcesInZone.filter((resource) => TELECOM_RESOURCE_TYPES.has(resource.type)).length;
+  const vulnerabilityScore = municipalitiesInZone.reduce((sum, municipality) => sum + mapZoneImpactRiskScoreFromCommune(municipality), 0);
+  const vulnerabilityLevel = mapZoneImpactExposureLevel(vulnerabilityScore);
+
+  const topCommunes = municipalitiesInZone
+    .map((municipality) => ({ municipality, score: mapZoneImpactRiskScoreFromCommune(municipality) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3)
+    .map((item) => `${escapeHtml(item.municipality.name)} (${item.score})`)
+    .join(', ');
+
+  renderZoneImpactPanel([
+    `👥 <strong>Population exposée estimée:</strong> <strong>${estimatedPopulation.toLocaleString('fr-FR')}</strong> habitant(s).`,
+    `🏫 <strong>Exposition sensible:</strong> ${schoolsCount} école(s) / établissement(s) scolaire(s), ${ehpadCount} EHPAD, ${roadCriticalPoints} axe(s) critique(s) de transport.`,
+    `🏠 <strong>Capacité d'hébergement restante (estimée):</strong> ${shelterCapacity.toLocaleString('fr-FR')} place(s).`,
+    `🚑 <strong>Ressources disponibles en temps réel (proxy):</strong> ${teamsAvailable} équipe(s), ${vehiclesAvailable} véhicule(s), ${radioMeans} moyen(s) radio.`,
+    `🌊 <strong>Vulnérabilité locale:</strong> ${vulnerabilityLevel} (score ${vulnerabilityScore}) · historique incidents + dépendance routière + zones inondables consolidés sur ${municipalitiesInZone.length} commune(s).`,
+    topCommunes ? `📍 <strong>Communes les plus vulnérables de la zone:</strong> ${topCommunes}.` : '📍 <strong>Communes les plus vulnérables de la zone:</strong> aucune commune géocodée dans la sélection.',
+  ]);
+}
+
+function clearZoneImpactSelection() {
+  if (mapZoneImpactLayer) mapZoneImpactLayer.clearLayers();
+  mapZoneImpactSelection = null;
+  if (mapZoneImpactDrawHandler?.disable) mapZoneImpactDrawHandler.disable();
+  setMapFeedback('Analyse de zone effacée.');
+  renderZoneImpactPanel();
+}
+
+function startZoneImpactSelection() {
+  if (!leafletMap || typeof window.L === 'undefined') return;
+  if (mapZoneImpactDrawHandler?.enable) mapZoneImpactDrawHandler.enable();
+  setMapFeedback("Tracez un rectangle ou un polygone pour analyser l'impact terrain.");
+}
+
 function applyBasemap(style = 'osm') {
   if (!leafletMap || typeof window.L === 'undefined') return;
   if (mapTileLayer) leafletMap.removeLayer(mapTileLayer);
@@ -1562,6 +1660,7 @@ function initMap() {
   customPointsLayer = window.L.layerGroup().addTo(leafletMap);
   mapPointsLayer = window.L.layerGroup().addTo(leafletMap);
   mapAnnotationFeatureGroup = window.L.featureGroup().addTo(leafletMap);
+  mapZoneImpactLayer = window.L.layerGroup().addTo(leafletMap);
   initMapAnnotationModule();
   itinisereLayer = window.L.layerGroup().addTo(leafletMap);
   bisonLayer = window.L.layerGroup().addTo(leafletMap);
@@ -1743,6 +1842,7 @@ async function resetMapFilters() {
   await renderPopulationByCityLayer();
   await renderTrafficOnMap();
   renderMapChecks([]);
+  clearZoneImpactSelection();
   setMapFeedback('Filtres carte réinitialisés.');
 }
 
@@ -3355,6 +3455,12 @@ function mapTextAnnotationIcon(record = {}) {
 function initMapAnnotationModule() {
   if (!leafletMap || typeof window.L === 'undefined') return;
   if (!mapAnnotationFeatureGroup) mapAnnotationFeatureGroup = window.L.featureGroup().addTo(leafletMap);
+  if (!mapZoneImpactDrawHandler && window.L.Draw?.Polygon) {
+    mapZoneImpactDrawHandler = new window.L.Draw.Polygon(leafletMap, {
+      allowIntersection: false,
+      shapeOptions: { color: '#7c3aed', weight: 2, fillOpacity: 0.12 },
+    });
+  }
   if (mapDrawControl || !window.L.Control?.Draw || !canEdit()) return;
 
   mapDrawControl = new window.L.Control.Draw({
@@ -3372,6 +3478,18 @@ function initMapAnnotationModule() {
   leafletMap.addControl(mapDrawControl);
 
   leafletMap.on('draw:created', async (event) => {
+    if (event.layerType === 'polygon' && mapZoneImpactDrawHandler && mapZoneImpactDrawHandler.enabled && mapZoneImpactDrawHandler.enabled()) {
+      if (mapZoneImpactLayer) mapZoneImpactLayer.clearLayers();
+      mapZoneImpactSelection = event.layer;
+      if (typeof mapZoneImpactSelection.setStyle === 'function') {
+        mapZoneImpactSelection.setStyle({ color: '#7c3aed', weight: 2, fillOpacity: 0.12 });
+      }
+      mapZoneImpactSelection.addTo(mapZoneImpactLayer || leafletMap);
+      computeZoneImpact();
+      if (mapZoneImpactDrawHandler?.disable) mapZoneImpactDrawHandler.disable();
+      setMapFeedback('Zone analysée. Les indicateurs impact terrain ont été mis à jour.');
+      return;
+    }
     if (!canEdit()) return;
     const color = document.getElementById('map-annotation-color')?.value || '#d7263d';
     const weight = Number(document.getElementById('map-annotation-weight')?.value || 3);
@@ -6022,6 +6140,8 @@ function bindAppInteractions() {
   updateMapFullscreenButton();
   document.getElementById('map-fit-btn')?.addEventListener('click', () => fitMapToData(true));
   document.getElementById('map-locate-btn')?.addEventListener('click', locateUserOnMap);
+  document.getElementById('map-zone-impact-start')?.addEventListener('click', startZoneImpactSelection);
+  document.getElementById('map-zone-impact-clear')?.addEventListener('click', clearZoneImpactSelection);
   document.getElementById('map-add-point-btn')?.addEventListener('click', () => {
     if (!canEdit()) {
       setMapFeedback('Vous n\'avez pas le droit de créer un POI.', true);
