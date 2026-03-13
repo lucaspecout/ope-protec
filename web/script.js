@@ -811,15 +811,12 @@ function getLogById(logId) {
 function fillLogFormFromEntry(log = {}) {
   const form = document.getElementById('log-form');
   if (!form) return;
-  form.elements.event_id.value = String(log.event_id || selectedOperationalEventId || '');
-  form.elements.event_type.value = log.event_type || '';
   form.elements.danger_level.value = log.danger_level || 'vert';
   form.elements.target_scope.value = log.target_scope || 'departemental';
   form.elements.municipality_id.value = log.municipality_id ? String(log.municipality_id) : '';
   form.elements.location.value = log.location || '';
   form.elements.source.value = log.source || '';
   form.elements.assigned_to.value = log.assigned_to || '';
-  form.elements.tags.value = log.tags || '';
   form.elements.next_update_due.value = log.next_update_due ? toDatetimeLocal(log.next_update_due) : '';
   form.elements.description.value = log.description || '';
   form.elements.actions_taken.value = log.actions_taken || '';
@@ -897,8 +894,6 @@ function updateEventDetailPanel() {
     deleteButton.setAttribute('data-event-delete', String(selectedEvent.id));
   }
 
-  const eventSelect = document.getElementById('log-event-id');
-  if (eventSelect) eventSelect.value = String(selectedEvent.id);
   renderEventMcoSuggestions();
 }
 
@@ -911,16 +906,6 @@ function selectOperationalEvent(eventId) {
 
 function populateEventOptions(events = []) {
   const source = sortOperationalEvents(events);
-  const eventSelect = document.getElementById('log-event-id');
-  if (eventSelect) {
-    const current = eventSelect.value || (selectedOperationalEventId ? String(selectedOperationalEventId) : '');
-    const options = '<option value="">Sélectionnez un évènement</option>' + source
-      .map((event) => `<option value="${event.id}">${escapeHtml(event.title)} · ${escapeHtml(EVENT_STATUS_LABEL[event.status] || event.status || 'ouvert')}</option>`)
-      .join('');
-    setHtml('log-event-id', options);
-    if (current) eventSelect.value = current;
-  }
-
   const filterSelect = document.getElementById('logs-event-filter');
   if (filterSelect) {
     const current = filterSelect.value;
@@ -984,7 +969,7 @@ function syncLogScopeFields() {
   const scope = String(scopeSelect.value || 'departemental');
   const requiresMunicipality = scope === 'commune' || scope === 'pcs';
   municipalitySelect.disabled = !requiresMunicipality;
-  municipalitySelect.required = requiresMunicipality;
+  municipalitySelect.required = false;
   if (!requiresMunicipality) municipalitySelect.value = '';
 }
 
@@ -6902,9 +6887,6 @@ function bindAppInteractions() {
   document.getElementById('log-municipality-id')?.addEventListener('focus', () => {
     ensureLogMunicipalitiesLoaded();
   });
-  document.getElementById('log-event-id')?.addEventListener('focus', () => {
-    if (!cachedEvents.length) loadEvents();
-  });
   const debouncedLogsRender = debounce(renderLogsList, 180);
   ['logs-event-filter', 'logs-search', 'logs-municipality-filter', 'logs-scope-filter', 'logs-sort'].forEach((id) => {
     document.getElementById(id)?.addEventListener('input', debouncedLogsRender);
@@ -7332,9 +7314,9 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
   await ensureLogMunicipalitiesLoaded();
   try {
     const payload = {
-      event_id: Number(form.get('event_id')),
-      event_type: form.get('event_type'),
-      description: form.get('description'),
+      event_id: selectedOperationalEventId ? Number(selectedOperationalEventId) : null,
+      event_type: null,
+      description: form.get('description') || null,
       danger_level: form.get('danger_level') || 'vert',
       danger_emoji: LOG_LEVEL_EMOJI[form.get('danger_level') || 'vert'] || '🟢',
       status: 'nouveau',
@@ -7343,7 +7325,6 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
       location: form.get('location') || null,
       source: form.get('source') || null,
       assigned_to: form.get('assigned_to') || null,
-      tags: form.get('tags') || null,
       next_update_due: form.get('next_update_due') || null,
       actions_taken: form.get('actions_taken') || null,
     };
@@ -7363,8 +7344,6 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
     }
     event.target.reset();
     resetLogFormState();
-    const eventSelect = document.getElementById('log-event-id');
-    if (eventSelect && selectedOperationalEventId) eventSelect.value = String(selectedOperationalEventId);
     if (errorTarget) errorTarget.textContent = '';
     syncLogScopeFields();
     await refreshAll();

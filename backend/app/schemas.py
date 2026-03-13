@@ -264,9 +264,9 @@ class MunicipalityOut(BaseModel):
 
 
 class OperationalLogCreate(BaseModel):
-    event_id: int
-    event_type: str
-    description: str
+    event_id: int | None = None
+    event_type: str | None = None
+    description: str | None = None
     danger_level: str = "vert"
     danger_emoji: str = "🟢"
     target_scope: str = "departemental"
@@ -277,16 +277,15 @@ class OperationalLogCreate(BaseModel):
     actions_taken: str | None = None
     next_update_due: datetime | None = None
     assigned_to: str | None = None
-    tags: str | None = None
     municipality_id: int | None = None
 
     @field_validator("event_type", "description")
     @classmethod
-    def validate_required_text(cls, value: str) -> str:
+    def validate_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         sanitized = value.strip()
-        if not sanitized:
-            raise ValueError("Ce champ est obligatoire")
-        return sanitized
+        return sanitized or None
 
     @field_validator("danger_level")
     @classmethod
@@ -312,7 +311,7 @@ class OperationalLogCreate(BaseModel):
             raise ValueError("Statut invalide")
         return normalized
 
-    @field_validator("location", "source", "actions_taken", "assigned_to", "tags")
+    @field_validator("location", "source", "actions_taken", "assigned_to")
     @classmethod
     def strip_optional_fields(cls, value: str | None) -> str | None:
         if value is None:
@@ -336,7 +335,6 @@ class OperationalLogOut(BaseModel):
     actions_taken: str | None = None
     next_update_due: datetime | None = None
     assigned_to: str | None = None
-    tags: str | None = None
     municipality_id: int | None = None
     created_at: datetime
     created_by_id: int
@@ -358,8 +356,8 @@ class OperationalLogStatusUpdate(BaseModel):
 
 
 class OperationalLogUpdate(BaseModel):
-    event_type: str
-    description: str
+    event_type: str | None = None
+    description: str | None = None
     danger_level: str = "vert"
     danger_emoji: str = "🟢"
     target_scope: str = "departemental"
@@ -369,16 +367,15 @@ class OperationalLogUpdate(BaseModel):
     actions_taken: str | None = None
     next_update_due: datetime | None = None
     assigned_to: str | None = None
-    tags: str | None = None
     municipality_id: int | None = None
 
     @field_validator("event_type", "description")
     @classmethod
-    def validate_required_text(cls, value: str) -> str:
+    def validate_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         sanitized = value.strip()
-        if not sanitized:
-            raise ValueError("Ce champ est obligatoire")
-        return sanitized
+        return sanitized or None
 
     @field_validator("danger_level")
     @classmethod
@@ -404,7 +401,7 @@ class OperationalLogUpdate(BaseModel):
             raise ValueError("Statut invalide")
         return normalized
 
-    @field_validator("location", "source", "actions_taken", "assigned_to", "tags")
+    @field_validator("location", "source", "actions_taken", "assigned_to")
     @classmethod
     def strip_optional_fields(cls, value: str | None) -> str | None:
         if value is None:
