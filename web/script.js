@@ -737,7 +737,7 @@ function formatLogLine(log = {}) {
   const owner = log.assigned_to ? ` · 👤 ${escapeHtml(log.assigned_to)}` : '';
   const next = log.next_update_due ? ` · ⏱️ MAJ ${new Date(log.next_update_due).toLocaleString()}` : '';
   const actions = log.actions_taken ? `<div class="muted">Actions: ${escapeHtml(log.actions_taken)}</div>` : '';
-  const deleteAction = canEdit() ? `<div class="map-inline-actions"><button type="button" class="ghost inline-action" data-log-edit="${log.id}">Modifier</button><button type="button" class="ghost inline-action danger" data-log-delete="${log.id}">Supprimer</button></div>` : '';
+  const deleteAction = canEdit() ? `<div class="map-inline-actions"><button type="button" class="ghost inline-action" data-log-edit="${log.id}">Modifier</button><button type="button" class="ghost inline-action danger" data-log-delete="${log.id}">Supprimer MCO</button></div>` : '';
   return `<li><strong>${new Date(log.event_time || log.created_at).toLocaleString()}</strong> · <span class="badge neutral">${formatLogScope(log)}${municipality}</span> ${log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢'} <strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'MCO')}</strong> · <span class="muted">${escapeHtml(getEventTitle(log.event_id))}</span>${place}${owner}${source}${next}<div>${escapeHtml(log.description || '')}</div>${actions}${deleteAction}</li>`;
 }
 
@@ -844,7 +844,10 @@ function renderEventsList() {
     const municipality = event.municipality_id ? ` · ${escapeHtml(getMunicipalityName(event.municipality_id))}` : ' · Départemental';
     const status = EVENT_STATUS_LABEL[event.status] || event.status || 'Ouvert';
     const actionLabel = isSelected ? 'Fiche ouverte' : 'Ouvrir la fiche';
-    return `<li class="event-list-item${isSelected ? ' active' : ''}"><strong>${escapeHtml(event.title || 'Évènement')}</strong><br/><span class="muted">${escapeHtml(event.address || '-')}${municipality}</span><br/><span class="badge neutral">${escapeHtml(status)}</span> <button type="button" class="ghost inline-action" data-event-open="${event.id}">${actionLabel}</button></li>`;
+    const deleteAction = canEdit()
+      ? `<button type="button" class="ghost inline-action danger" data-event-delete="${event.id}">Supprimer</button>`
+      : '';
+    return `<li class="event-list-item${isSelected ? ' active' : ''}"><strong>${escapeHtml(event.title || 'Évènement')}</strong><br/><span class="muted">${escapeHtml(event.address || '-')}${municipality}</span><br/><span class="badge neutral">${escapeHtml(status)}</span> <button type="button" class="ghost inline-action" data-event-open="${event.id}">${actionLabel}</button> ${deleteAction}</li>`;
   }).join('');
 
   target.innerHTML = markup || '<li>Aucun évènement pour le moment.</li>';
@@ -902,6 +905,14 @@ function selectOperationalEvent(eventId) {
   updateEventDetailPanel();
   renderEventsList();
   renderLogsList();
+}
+
+function openOperationalEventMcoForm(eventId) {
+  if (!eventId) return;
+  setActivePanel('logs-panel');
+  selectOperationalEvent(eventId);
+  const form = document.getElementById('log-form');
+  form?.scrollIntoView({ behavior: 'smooth', block: 'end' });
 }
 
 function populateEventOptions(events = []) {
@@ -5096,8 +5107,8 @@ function buildCriticalRisksMarkup(dashboard = {}, externalRisks = {}) {
 }
 
 function buildOpenEventsSituationMarkup(events = []) {
-  const openEvents = sortOperationalEvents(events).filter((event) => isOpenOrActiveEvent(event));
-  if (!openEvents.length) return '<li>Aucun évènement ouvert ou en cours.</li>';
+  const openEvents = sortOperationalEvents(events).filter((event) => String(event.status || '').toLowerCase() === 'ouvert');
+  if (!openEvents.length) return '<li>Aucun évènement ouvert.</li>';
   return openEvents.slice(0, 10).map((event) => {
     const status = EVENT_STATUS_LABEL[event.status] || event.status || 'Ouvert';
     const locality = event.municipality_id ? getMunicipalityName(event.municipality_id) : 'Départemental';
@@ -5194,7 +5205,7 @@ function renderSituationOverview() {
       </article>
     </div>
 
-    <h3>Évènements ouverts / en cours</h3>
+    <h3>Évènements ouverts</h3>
     <article class="tile situation-risks">
       <ul class="list compact">${buildOpenEventsSituationMarkup(cachedEvents)}</ul>
     </article>
@@ -6170,7 +6181,7 @@ function buildLogTableRow(log = {}) {
   const owner = log.assigned_to ? `👤 ${escapeHtml(log.assigned_to)}` : '👤 Non assigné';
   const next = log.next_update_due ? `⏱️ MAJ ${new Date(log.next_update_due).toLocaleString()}` : '';
   const actions = canEdit()
-    ? `<div class="map-inline-actions"><button type="button" class="ghost inline-action" data-log-edit="${log.id}">Modifier</button><button type="button" class="ghost inline-action danger" data-log-delete="${log.id}">Supprimer</button></div>`
+    ? `<div class="map-inline-actions"><button type="button" class="ghost inline-action" data-log-edit="${log.id}">Modifier</button><button type="button" class="ghost inline-action danger" data-log-delete="${log.id}">Supprimer MCO</button></div>`
     : '—';
   const eventTitle = escapeHtml(getEventTitle(log.event_id));
   return `<tr><td>${new Date(log.event_time || log.created_at).toLocaleString()}</td><td><span class="badge neutral">${formatLogScope(log)}${municipality}</span></td><td>${log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢'}</td><td><strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'MCO')}</strong><br/><span class="muted">${eventTitle}</span></td><td>${place}<br/><span class="muted">${owner} · ${source}${next ? ` · ${next}` : ''}</span><br/>${escapeHtml(log.description || '')}${log.actions_taken ? `<br/><span class="muted">Actions: ${escapeHtml(log.actions_taken)}</span>` : ''}</td><td>${actions}</td></tr>`;
@@ -6797,8 +6808,7 @@ function bindAppInteractions() {
         const eventId = openEventButton.getAttribute('data-muni-open-event');
         if (!eventId) return;
         closeMunicipalityDetailsModal();
-        setActivePanel('logs-panel');
-        selectOperationalEvent(eventId);
+        openOperationalEventMcoForm(eventId);
         return;
       }
 
@@ -6912,7 +6922,7 @@ function bindAppInteractions() {
     const editButton = event.target.closest('[data-log-edit]');
     const deleteEventButton = event.target.closest('[data-event-delete]');
     if (openEventButton) {
-      selectOperationalEvent(openEventButton.getAttribute('data-event-open'));
+      openOperationalEventMcoForm(openEventButton.getAttribute('data-event-open'));
       return;
     }
 
