@@ -541,6 +541,7 @@
 
         <section id="logs-panel" class="panel view hidden" hidden>
           <h3>Main courante</h3>
+          <p class="muted">Vue simplifiée : création d'évènement, suivi des évènements (ouverts en premier), puis gestion MCO dans la fiche évènement.</p>
           <form id="event-form" class="form" data-requires-edit>
             <input name="title" placeholder="Titre évènement (ex: Crue Isère centre-ville)" required />
             <input name="address" placeholder="Adresse / secteur concerné" required />
@@ -555,6 +556,23 @@
             </select>
             <button type="submit">Créer l'évènement</button>
           </form>
+
+          <article class="logs-events-list-wrap">
+            <h4>Évènements</h4>
+            <ul id="events-list" class="list"></ul>
+          </article>
+
+          <article id="event-detail" class="event-detail hidden" hidden>
+            <div class="event-detail-head">
+              <div>
+                <h4 id="event-detail-title">Fiche évènement</h4>
+                <p id="event-detail-meta" class="muted">-</p>
+              </div>
+              <div class="event-detail-actions">
+                <button id="event-close-btn" type="button" class="ghost" data-requires-edit>Clôturer l'évènement</button>
+              </div>
+            </div>
+
           <form id="log-form" class="form" data-requires-edit>
             <select name="event_id" id="log-event-id" required>
               <option value="">Sélectionnez un évènement</option>
@@ -589,28 +607,8 @@
             <textarea name="actions_taken" placeholder="Actions engagées / décisions"></textarea>
             <button type="submit">Ajouter l'entrée</button>
           </form>
-          <div class="form" id="logs-filters">
-            <select id="logs-event-filter">
-              <option value="all">Tous les évènements</option>
-            </select>
-            <input id="logs-search" type="search" placeholder="Rechercher (catégorie, texte, lieu, commune...)" />
-            <select id="logs-municipality-filter">
-              <option value="all">Toutes les communes</option>
-            </select>
-            <select id="logs-scope-filter">
-              <option value="all">Tous les périmètres</option>
-              <option value="departemental">Départemental</option>
-              <option value="commune">Commune</option>
-              <option value="pcs">PCS</option>
-            </select>
-            <select id="logs-sort">
-              <option value="date_desc">Tri: plus récent</option>
-              <option value="date_asc">Tri: plus ancien</option>
-              <option value="danger_desc">Tri: criticité</option>
-              <option value="type_asc">Tri: catégorie A→Z</option>
-            </select>
-          </div>
-          <p class="muted">Entrées affichées: <strong id="logs-count">0</strong> · <button id="logs-export" type="button" class="ghost">Exporter CSV</button></p>
+
+          <p class="muted">Entrées affichées: <strong id="logs-count">0</strong></p>
           <div class="logs-tables-grid">
             <article>
               <h4>Nouveaux / En cours / Suivi</h4>
@@ -631,6 +629,7 @@
               <tbody id="logs-table-closed"></tbody>
             </table>
           </div>
+          </article>
         </section>
 
         <section id="news-panel" class="panel view hidden" hidden>

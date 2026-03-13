@@ -200,6 +200,7 @@ let mapStats = { stations: 0, pcs: 0, resources: 0, custom: 0, traffic: 0 };
 let mapControlsCollapsed = false;
 let cachedCrisisPoints = [];
 let cachedEvents = [];
+let selectedOperationalEventId = null;
 let cachedLogs = [];
 let cachedDashboardSnapshot = {};
 let cachedExternalRisksSnapshot = {};
@@ -772,11 +773,81 @@ function getEventTitle(eventId) {
   return event?.title || `Évènement #${id}`;
 }
 
+function eventStatusRank(status = 'ouvert') {
+  const normalized = String(status || 'ouvert').toLowerCase();
+  if (normalized === 'ouvert') return 0;
+  if (normalized === 'en_cours') return 1;
+  if (normalized === 'stabilise') return 2;
+  if (normalized === 'clos') return 3;
+  return 4;
+}
+
+function sortOperationalEvents(events = []) {
+  return [...(Array.isArray(events) ? events : [])].sort((a, b) => {
+    const statusDiff = eventStatusRank(a.status) - eventStatusRank(b.status);
+    if (statusDiff !== 0) return statusDiff;
+    return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+  });
+}
+
+function getSelectedOperationalEvent() {
+  if (!selectedOperationalEventId) return null;
+  return cachedEvents.find((event) => String(event.id) === String(selectedOperationalEventId)) || null;
+}
+
+function renderEventsList() {
+  const target = document.getElementById('events-list');
+  if (!target) return;
+
+  const sortedEvents = sortOperationalEvents(cachedEvents);
+  const markup = sortedEvents.map((event) => {
+    const isSelected = String(event.id) === String(selectedOperationalEventId);
+    const municipality = event.municipality_id ? ` · ${escapeHtml(getMunicipalityName(event.municipality_id))}` : ' · Départemental';
+    const status = EVENT_STATUS_LABEL[event.status] || event.status || 'Ouvert';
+    const actionLabel = isSelected ? 'Fiche ouverte' : 'Ouvrir la fiche';
+    return `<li class="event-list-item${isSelected ? ' active' : ''}"><strong>${escapeHtml(event.title || 'Évènement')}</strong><br/><span class="muted">${escapeHtml(event.address || '-')}${municipality}</span><br/><span class="badge neutral">${escapeHtml(status)}</span> <button type="button" class="ghost inline-action" data-event-open="${event.id}">${actionLabel}</button></li>`;
+  }).join('');
+
+  target.innerHTML = markup || '<li>Aucun évènement pour le moment.</li>';
+}
+
+function updateEventDetailPanel() {
+  const detailPanel = document.getElementById('event-detail');
+  const selectedEvent = getSelectedOperationalEvent();
+  if (!detailPanel) return;
+  if (!selectedEvent) {
+    setVisibility(detailPanel, false);
+    return;
+  }
+
+  setVisibility(detailPanel, true);
+  setText('event-detail-title', selectedEvent.title || 'Fiche évènement');
+  const status = EVENT_STATUS_LABEL[selectedEvent.status] || selectedEvent.status || 'Ouvert';
+  const locality = selectedEvent.municipality_id ? getMunicipalityName(selectedEvent.municipality_id) : 'Départemental';
+  setText('event-detail-meta', `${selectedEvent.address || 'Adresse non renseignée'} · ${locality} · Statut: ${status}`);
+
+  const closeButton = document.getElementById('event-close-btn');
+  if (closeButton) {
+    closeButton.setAttribute('data-event-close', String(selectedEvent.id));
+    closeButton.disabled = String(selectedEvent.status || '').toLowerCase() === 'clos';
+  }
+
+  const eventSelect = document.getElementById('log-event-id');
+  if (eventSelect) eventSelect.value = String(selectedEvent.id);
+}
+
+function selectOperationalEvent(eventId) {
+  selectedOperationalEventId = eventId ? String(eventId) : null;
+  updateEventDetailPanel();
+  renderEventsList();
+  renderLogsList();
+}
+
 function populateEventOptions(events = []) {
-  const source = Array.isArray(events) ? events : [];
+  const source = sortOperationalEvents(events);
   const eventSelect = document.getElementById('log-event-id');
   if (eventSelect) {
-    const current = eventSelect.value;
+    const current = eventSelect.value || (selectedOperationalEventId ? String(selectedOperationalEventId) : '');
     const options = '<option value="">Sélectionnez un évènement</option>' + source
       .map((event) => `<option value="${event.id}">${escapeHtml(event.title)} · ${escapeHtml(EVENT_STATUS_LABEL[event.status] || event.status || 'ouvert')}</option>`)
       .join('');
@@ -6024,30 +6095,14 @@ function buildLogTableRow(log = {}) {
 }
 
 function renderLogsList() {
-  const eventFilter = String(document.getElementById('logs-event-filter')?.value || 'all');
-  const search = String(document.getElementById('logs-search')?.value || '').trim().toLowerCase();
-  const municipalityFilter = String(document.getElementById('logs-municipality-filter')?.value || 'all');
-  const scopeFilter = String(document.getElementById('logs-scope-filter')?.value || 'all');
-  const sort = String(document.getElementById('logs-sort')?.value || 'date_desc');
-
   let filtered = [...cachedLogs];
-  if (eventFilter !== 'all') filtered = filtered.filter((log) => String(log.event_id || '') === eventFilter);
-  if (scopeFilter !== 'all') filtered = filtered.filter((log) => String(log.target_scope || 'departemental') === scopeFilter);
-  if (municipalityFilter !== 'all') filtered = filtered.filter((log) => String(log.municipality_id || '') === municipalityFilter);
-  if (search) {
-    filtered = filtered.filter((log) => {
-      const haystack = [log.event_type, log.description, log.target_scope, log.status, log.location, log.source, log.tags, getMunicipalityName(log.municipality_id), getEventTitle(log.event_id)]
-        .map((value) => String(value || '').toLowerCase()).join(' ');
-      return haystack.includes(search);
-    });
+  if (selectedOperationalEventId) {
+    filtered = filtered.filter((log) => String(log.event_id || '') === String(selectedOperationalEventId));
+  } else {
+    filtered = [];
   }
 
-  filtered.sort((a, b) => {
-    if (sort === 'date_asc') return new Date(a.event_time || a.created_at).getTime() - new Date(b.event_time || b.created_at).getTime();
-    if (sort === 'danger_desc') return computeLogCriticality(b.danger_level) - computeLogCriticality(a.danger_level);
-    if (sort === 'type_asc') return String(a.event_type || '').localeCompare(String(b.event_type || ''), 'fr');
-    return new Date(b.event_time || b.created_at).getTime() - new Date(a.event_time || a.created_at).getTime();
-  });
+  filtered.sort((a, b) => new Date(b.event_time || b.created_at).getTime() - new Date(a.event_time || a.created_at).getTime());
 
   const openLogs = filtered.filter((log) => ['nouveau', 'en_cours', 'suivi'].includes(String(log.status || '').toLowerCase()));
   const closedLogs = filtered.filter((log) => String(log.status || '').toLowerCase() === 'clos');
@@ -6072,6 +6127,15 @@ async function loadEvents(preloaded = null) {
   cachedEvents = keepPreviousArray(previousEvents, events);
   saveSnapshot(STORAGE_KEYS.eventsSnapshot, cachedEvents);
   populateEventOptions(cachedEvents);
+  if (selectedOperationalEventId && !getSelectedOperationalEvent()) {
+    selectedOperationalEventId = null;
+  }
+  if (!selectedOperationalEventId) {
+    const firstOpen = sortOperationalEvents(cachedEvents).find((event) => String(event.status || '').toLowerCase() !== 'clos');
+    if (firstOpen) selectedOperationalEventId = String(firstOpen.id);
+  }
+  renderEventsList();
+  updateEventDetailPanel();
   renderLogsList();
 }
 
@@ -6757,12 +6821,31 @@ function bindAppInteractions() {
     }
   });
   document.getElementById('logs-panel')?.addEventListener('click', async (event) => {
+    const openEventButton = event.target.closest('[data-event-open]');
+    const closeEventButton = event.target.closest('[data-event-close]');
     const statusButton = event.target.closest('[data-log-status]');
     const deleteButton = event.target.closest('[data-log-delete]');
-    if (!statusButton && !deleteButton) return;
+    if (openEventButton) {
+      selectOperationalEvent(openEventButton.getAttribute('data-event-open'));
+      return;
+    }
+
+    if (!statusButton && !deleteButton && !closeEventButton) return;
     if (!canEdit()) return;
 
     try {
+      if (closeEventButton) {
+        const eventId = closeEventButton.getAttribute('data-event-close');
+        if (eventId) {
+          await api(`/events/${eventId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'clos' }),
+          });
+          await loadEvents();
+        }
+      }
+
       if (statusButton) {
         const logId = statusButton.getAttribute('data-log-status');
         const status = statusButton.getAttribute('data-log-next');
@@ -7158,6 +7241,8 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
       }),
     });
     event.target.reset();
+    const eventSelect = document.getElementById('log-event-id');
+    if (eventSelect && selectedOperationalEventId) eventSelect.value = String(selectedOperationalEventId);
     if (errorTarget) errorTarget.textContent = '';
     syncLogScopeFields();
     await refreshAll();
@@ -7172,7 +7257,7 @@ document.getElementById('event-form')?.addEventListener('submit', async (event) 
   const form = new FormData(event.target);
   const errorTarget = document.getElementById('dashboard-error');
   try {
-    await api('/events', {
+    const createdEvent = await api('/events', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -7184,6 +7269,7 @@ document.getElementById('event-form')?.addEventListener('submit', async (event) 
     });
     event.target.reset();
     if (errorTarget) errorTarget.textContent = '';
+    selectedOperationalEventId = createdEvent?.id ? String(createdEvent.id) : selectedOperationalEventId;
     await loadEvents();
   } catch (error) {
     if (errorTarget) errorTarget.textContent = sanitizeErrorMessage(error.message);
