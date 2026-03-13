@@ -140,9 +140,26 @@ class OperationalLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     municipality_id: Mapped[int | None] = mapped_column(ForeignKey("municipalities.id"), nullable=True)
+    event_id: Mapped[int | None] = mapped_column(ForeignKey("incident_events.id"), nullable=True)
 
     created_by = relationship("User")
     municipality = relationship("Municipality")
+    event = relationship("IncidentEvent")
+
+
+class IncidentEvent(Base):
+    __tablename__ = "incident_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title: Mapped[str] = mapped_column(String(180))
+    address: Mapped[str] = mapped_column(String(220))
+    status: Mapped[str] = mapped_column(String(20), default="ouvert")
+    municipality_id: Mapped[int | None] = mapped_column(ForeignKey("municipalities.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+
+    municipality = relationship("Municipality")
+    created_by = relationship("User")
 
 
 class PublicShare(Base):

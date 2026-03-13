@@ -4,6 +4,7 @@ const STORAGE_KEYS = {
   appSidebarCollapsed: 'appSidebarCollapsed',
   mapPointsCache: 'mapPointsCache',
   municipalitiesCache: 'municipalitiesCache',
+  eventsSnapshot: 'eventsSnapshot',
   logsSnapshot: 'logsSnapshot',
   usersSnapshot: 'usersSnapshot',
   dashboardSnapshot: 'dashboardSnapshot',
@@ -198,6 +199,7 @@ let trafficGeocodeCache = new Map();
 let mapStats = { stations: 0, pcs: 0, resources: 0, custom: 0, traffic: 0 };
 let mapControlsCollapsed = false;
 let cachedCrisisPoints = [];
+let cachedEvents = [];
 let cachedLogs = [];
 let cachedDashboardSnapshot = {};
 let cachedExternalRisksSnapshot = {};
@@ -707,6 +709,7 @@ const normalizeLevel = (level) => ({ verte: 'vert', green: 'vert', yellow: 'jaun
 const levelColor = (level) => ({ vert: '#2f9e44', jaune: '#f59f00', orange: '#f76707', rouge: '#e03131' }[normalizeLevel(level)] || '#2f9e44');
 const LOG_LEVEL_EMOJI = { vert: '🟢', jaune: '🟡', orange: '🟠', rouge: '🔴' };
 const LOG_STATUS_LABEL = { nouveau: 'Nouveau', en_cours: 'En cours', suivi: 'Suivi', clos: 'Clos' };
+const EVENT_STATUS_LABEL = { ouvert: 'Ouvert', en_cours: 'En cours', stabilise: 'Stabilisé', clos: 'Clos' };
 
 function debounce(fn, wait = 200) {
   let timeoutId = null;
@@ -736,7 +739,7 @@ function formatLogLine(log = {}) {
   const next = log.next_update_due ? ` · ⏱️ MAJ ${new Date(log.next_update_due).toLocaleString()}` : '';
   const actions = log.actions_taken ? `<div class="muted">Actions: ${escapeHtml(log.actions_taken)}</div>` : '';
   const statusActions = canEdit() ? `<div class="map-inline-actions"><button type="button" class="ghost inline-action" data-log-status="${log.id}" data-log-next="en_cours">En cours</button><button type="button" class="ghost inline-action" data-log-status="${log.id}" data-log-next="suivi">Suivi</button><button type="button" class="ghost inline-action" data-log-status="${log.id}" data-log-next="clos">Clôturer</button><button type="button" class="ghost inline-action danger" data-log-delete="${log.id}">Supprimer</button></div>` : '';
-  return `<li><strong>${new Date(log.event_time || log.created_at).toLocaleString()}</strong> · <span class="badge neutral">${formatLogScope(log)}${municipality}</span> ${log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢'} <strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'MCO')}</strong> · <span class="badge neutral">${status}</span>${place}${owner}${source}${next}<div>${escapeHtml(log.description || '')}</div>${actions}${statusActions}</li>`;
+  return `<li><strong>${new Date(log.event_time || log.created_at).toLocaleString()}</strong> · <span class="badge neutral">${formatLogScope(log)}${municipality}</span> ${log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢'} <strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'MCO')}</strong> · <span class="muted">${escapeHtml(getEventTitle(log.event_id))}</span> · <span class="badge neutral">${status}</span>${place}${owner}${source}${next}<div>${escapeHtml(log.description || '')}</div>${actions}${statusActions}</li>`;
 }
 
 function formatLogScope(log = {}) {
@@ -760,6 +763,36 @@ function getMunicipalityName(municipalityId) {
     // ignore cache parsing issues
   }
   return `#${id}`;
+}
+
+function getEventTitle(eventId) {
+  const id = String(eventId || '');
+  if (!id) return 'Évènement non défini';
+  const event = (Array.isArray(cachedEvents) ? cachedEvents : []).find((item) => String(item.id) === id);
+  return event?.title || `Évènement #${id}`;
+}
+
+function populateEventOptions(events = []) {
+  const source = Array.isArray(events) ? events : [];
+  const eventSelect = document.getElementById('log-event-id');
+  if (eventSelect) {
+    const current = eventSelect.value;
+    const options = '<option value="">Sélectionnez un évènement</option>' + source
+      .map((event) => `<option value="${event.id}">${escapeHtml(event.title)} · ${escapeHtml(EVENT_STATUS_LABEL[event.status] || event.status || 'ouvert')}</option>`)
+      .join('');
+    setHtml('log-event-id', options);
+    if (current) eventSelect.value = current;
+  }
+
+  const filterSelect = document.getElementById('logs-event-filter');
+  if (filterSelect) {
+    const current = filterSelect.value;
+    const options = '<option value="all">Tous les évènements</option>' + source
+      .map((event) => `<option value="${event.id}">${escapeHtml(event.title)}</option>`)
+      .join('');
+    setHtml('logs-event-filter', options);
+    if (current) filterSelect.value = current;
+  }
 }
 
 function populateLogMunicipalityOptions(municipalities = []) {
@@ -787,6 +820,16 @@ function populateLogMunicipalityOptions(municipalities = []) {
     const current = formSelect.value;
     setHtml('log-municipality-id', createOptions(true));
     if (current) formSelect.value = current;
+  }
+
+  const eventSelect = document.getElementById('event-municipality-id');
+  if (eventSelect) {
+    const current = eventSelect.value;
+    const eventOptions = `<option value="">Aucune commune (départemental)</option>` + source
+      .map((m) => `<option value="${m.id}">${escapeHtml(m.name)}</option>`)
+      .join('');
+    setHtml('event-municipality-id', eventOptions);
+    if (current) eventSelect.value = current;
   }
 
   const filterSelect = document.getElementById('logs-municipality-filter');
@@ -1127,6 +1170,12 @@ function hydrateUiFromLocalCache() {
     cachedLogs = cachedLogsSnapshot;
     renderLogsList();
     renderSituationOverview();
+  }
+
+  const cachedEventsSnapshot = readSnapshot(STORAGE_KEYS.eventsSnapshot);
+  if (Array.isArray(cachedEventsSnapshot) && cachedEventsSnapshot.length) {
+    cachedEvents = cachedEventsSnapshot;
+    populateEventOptions(cachedEvents);
   }
 
   const cachedUsersSnapshot = readSnapshot(STORAGE_KEYS.usersSnapshot);
@@ -5970,21 +6019,24 @@ function buildLogTableRow(log = {}) {
   const actions = canEdit()
     ? `<div class="map-inline-actions"><button type="button" class="ghost inline-action" data-log-status="${log.id}" data-log-next="en_cours">En cours</button><button type="button" class="ghost inline-action" data-log-next="suivi" data-log-status="${log.id}">Suivi</button><button type="button" class="ghost inline-action" data-log-next="clos" data-log-status="${log.id}">Clôturer</button><button type="button" class="ghost inline-action danger" data-log-delete="${log.id}">Supprimer</button></div>`
     : '—';
-  return `<tr><td>${new Date(log.event_time || log.created_at).toLocaleString()}</td><td><span class="badge neutral">${formatLogScope(log)}${municipality}</span></td><td>${log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢'}</td><td><strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'MCO')}</strong></td><td><span class="badge neutral">${status}</span></td><td>${place}<br/><span class="muted">${owner} · ${source}${next ? ` · ${next}` : ''}</span><br/>${escapeHtml(log.description || '')}${log.actions_taken ? `<br/><span class="muted">Actions: ${escapeHtml(log.actions_taken)}</span>` : ''}</td><td>${actions}</td></tr>`;
+  const eventTitle = escapeHtml(getEventTitle(log.event_id));
+  return `<tr><td>${new Date(log.event_time || log.created_at).toLocaleString()}</td><td><span class="badge neutral">${formatLogScope(log)}${municipality}</span></td><td>${log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢'}</td><td><strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'MCO')}</strong><br/><span class="muted">${eventTitle}</span></td><td><span class="badge neutral">${status}</span></td><td>${place}<br/><span class="muted">${owner} · ${source}${next ? ` · ${next}` : ''}</span><br/>${escapeHtml(log.description || '')}${log.actions_taken ? `<br/><span class="muted">Actions: ${escapeHtml(log.actions_taken)}</span>` : ''}</td><td>${actions}</td></tr>`;
 }
 
 function renderLogsList() {
+  const eventFilter = String(document.getElementById('logs-event-filter')?.value || 'all');
   const search = String(document.getElementById('logs-search')?.value || '').trim().toLowerCase();
   const municipalityFilter = String(document.getElementById('logs-municipality-filter')?.value || 'all');
   const scopeFilter = String(document.getElementById('logs-scope-filter')?.value || 'all');
   const sort = String(document.getElementById('logs-sort')?.value || 'date_desc');
 
   let filtered = [...cachedLogs];
+  if (eventFilter !== 'all') filtered = filtered.filter((log) => String(log.event_id || '') === eventFilter);
   if (scopeFilter !== 'all') filtered = filtered.filter((log) => String(log.target_scope || 'departemental') === scopeFilter);
   if (municipalityFilter !== 'all') filtered = filtered.filter((log) => String(log.municipality_id || '') === municipalityFilter);
   if (search) {
     filtered = filtered.filter((log) => {
-      const haystack = [log.event_type, log.description, log.target_scope, log.status, log.location, log.source, log.tags, getMunicipalityName(log.municipality_id)]
+      const haystack = [log.event_type, log.description, log.target_scope, log.status, log.location, log.source, log.tags, getMunicipalityName(log.municipality_id), getEventTitle(log.event_id)]
         .map((value) => String(value || '').toLowerCase()).join(' ');
       return haystack.includes(search);
     });
@@ -6012,6 +6064,15 @@ async function loadLogs(preloaded = null) {
   saveSnapshot(STORAGE_KEYS.logsSnapshot, cachedLogs);
   renderLogsList();
   renderSituationOverview();
+}
+
+async function loadEvents(preloaded = null) {
+  const previousEvents = Array.isArray(cachedEvents) ? cachedEvents : [];
+  const events = Array.isArray(preloaded) ? preloaded : await api('/events');
+  cachedEvents = keepPreviousArray(previousEvents, events);
+  saveSnapshot(STORAGE_KEYS.eventsSnapshot, cachedEvents);
+  populateEventOptions(cachedEvents);
+  renderLogsList();
 }
 
 async function exportLogsCsv() {
@@ -6057,6 +6118,7 @@ async function loadOperationsBootstrap(forceRefresh = false) {
   }
 
   await loadMunicipalities(payload.municipalities || []);
+  await loadEvents(payload.events || null);
   await loadLogs(payload.logs || []);
   if (canManageUsers()) await loadUsers(payload.users || []);
 
@@ -6077,6 +6139,7 @@ async function refreshAll(forceRefresh = false) {
       { label: 'flux API (Météo / Vigicrues / Itinisère / Bison / Géorisques)', loader: () => loadExternalRisks(forceRefresh), optional: false },
       { label: 'interconnexions API', loader: async () => renderApiInterconnections(cachedExternalRisksSnapshot), optional: true },
       { label: 'communes', loader: loadMunicipalities, optional: false },
+      { label: 'évènements', loader: loadEvents, optional: false },
       { label: 'main courante', loader: loadLogs, optional: false },
       { label: 'utilisateurs', loader: loadUsers, optional: true },
       { label: 'points cartographiques', loader: loadMapPoints, optional: true },
@@ -6672,8 +6735,11 @@ function bindAppInteractions() {
   document.getElementById('log-municipality-id')?.addEventListener('focus', () => {
     ensureLogMunicipalitiesLoaded();
   });
+  document.getElementById('log-event-id')?.addEventListener('focus', () => {
+    if (!cachedEvents.length) loadEvents();
+  });
   const debouncedLogsRender = debounce(renderLogsList, 180);
-  ['logs-search', 'logs-municipality-filter', 'logs-scope-filter', 'logs-sort'].forEach((id) => {
+  ['logs-event-filter', 'logs-search', 'logs-municipality-filter', 'logs-scope-filter', 'logs-sort'].forEach((id) => {
     document.getElementById(id)?.addEventListener('input', debouncedLogsRender);
     document.getElementById(id)?.addEventListener('change', renderLogsList);
   });
@@ -7075,6 +7141,7 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        event_id: Number(form.get('event_id')),
         event_type: form.get('event_type'),
         description: form.get('description'),
         danger_level: form.get('danger_level') || 'vert',
@@ -7094,6 +7161,30 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
     if (errorTarget) errorTarget.textContent = '';
     syncLogScopeFields();
     await refreshAll();
+  } catch (error) {
+    if (errorTarget) errorTarget.textContent = sanitizeErrorMessage(error.message);
+  }
+});
+
+document.getElementById('event-form')?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!canEdit()) return;
+  const form = new FormData(event.target);
+  const errorTarget = document.getElementById('dashboard-error');
+  try {
+    await api('/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: form.get('title'),
+        address: form.get('address'),
+        status: form.get('status') || 'ouvert',
+        municipality_id: form.get('municipality_id') ? Number(form.get('municipality_id')) : null,
+      }),
+    });
+    event.target.reset();
+    if (errorTarget) errorTarget.textContent = '';
+    await loadEvents();
   } catch (error) {
     if (errorTarget) errorTarget.textContent = sanitizeErrorMessage(error.message);
   }

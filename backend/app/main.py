@@ -21,10 +21,13 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import Base, SessionLocal, engine, get_db
-from .models import MapAnnotation, MapPoint, Municipality, MunicipalityDocument, OperationalLog, PublicShare, RiverStation, User, WeatherAlert
+from .models import IncidentEvent, MapAnnotation, MapPoint, Municipality, MunicipalityDocument, OperationalLog, PublicShare, RiverStation, User, WeatherAlert
 from .schemas import (
     MapAnnotationCreate,
     MapAnnotationOut,
+    IncidentEventCreate,
+    IncidentEventOut,
+    IncidentEventStatusUpdate,
     MapPointCreate,
     MapPointOut,
     MunicipalityCreate,
@@ -104,6 +107,18 @@ with engine.begin() as conn:
     conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS next_update_due TIMESTAMP WITHOUT TIME ZONE"))
     conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS assigned_to VARCHAR(120)"))
     conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS tags VARCHAR(255)"))
+    conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS event_id INTEGER REFERENCES incident_events(id)"))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS incident_events (
+            id SERIAL PRIMARY KEY,
+            title VARCHAR(180) NOT NULL,
+            address VARCHAR(220) NOT NULL,
+            status VARCHAR(20) NOT NULL DEFAULT 'ouvert',
+            municipality_id INTEGER REFERENCES municipalities(id) ON DELETE SET NULL,
+            created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            created_by_id INTEGER NOT NULL REFERENCES users(id)
+        )
+    """))
     conn.execute(text("""
         CREATE TABLE IF NOT EXISTS municipality_documents (
             id SERIAL PRIMARY KEY,
@@ -135,6 +150,8 @@ with engine.begin() as conn:
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_river_stations_updated_at ON river_stations(updated_at DESC)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_operational_logs_created_at ON operational_logs(created_at DESC)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_operational_logs_municipality_created_at ON operational_logs(municipality_id, created_at DESC)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_operational_logs_event_created_at ON operational_logs(event_id, created_at DESC)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_incident_events_created_at ON incident_events(created_at DESC)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_municipality_documents_created_at ON municipality_documents(created_at DESC)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_municipalities_crisis_mode ON municipalities(crisis_mode)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_municipalities_pcs_active ON municipalities(pcs_active)"))
@@ -1006,6 +1023,7 @@ def operations_bootstrap(
     risks_payload = get_external_risks_payload(refresh=refresh, db=db)
     dashboard_payload = build_dashboard_payload(db, user, external_risks=risks_payload)
     municipalities_payload = list_municipalities(db=db, user=user)
+    events_payload = list_events(db=db, user=user)
     logs_payload = list_logs(db=db, user=user)
 
     users_payload = []
@@ -1019,11 +1037,13 @@ def operations_bootstrap(
         "perf": {
             "backend_duration_ms": duration_ms,
             "municipality_count": len(municipalities_payload),
+            "event_count": len(events_payload),
             "log_count": len(logs_payload),
         },
         "dashboard": dashboard_payload,
         "external_risks": risks_payload,
         "municipalities": [MunicipalityOut.model_validate(item).model_dump() for item in municipalities_payload],
+        "events": [IncidentEventOut.model_validate(item).model_dump() for item in events_payload],
         "logs": [OperationalLogOut.model_validate(item).model_dump() for item in logs_payload],
         "users": [UserOut.model_validate(item).model_dump() for item in users_payload],
     }
@@ -1451,6 +1471,54 @@ def delete_municipality(
     return {"status": "deleted", "id": municipality_id}
 
 
+@app.post("/events", response_model=IncidentEventOut)
+def create_event(data: IncidentEventCreate, db: Session = Depends(get_db), user: User = Depends(require_roles(*EDIT_ROLES))):
+    payload = data.model_dump()
+    municipality_id = payload.get("municipality_id")
+    if municipality_id:
+        municipality = db.get(Municipality, municipality_id)
+        if not municipality:
+            raise HTTPException(404, "Commune introuvable")
+    event = IncidentEvent(**payload, created_by_id=user.id)
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    return event
+
+
+@app.patch("/events/{event_id}", response_model=IncidentEventOut)
+def update_event_status(
+    event_id: int,
+    data: IncidentEventStatusUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*EDIT_ROLES, "mairie")),
+):
+    event = db.get(IncidentEvent, event_id)
+    if not event:
+        raise HTTPException(404, "Évènement introuvable")
+
+    if user.role == "mairie":
+        municipality_id = get_user_municipality_id(user, db)
+        if municipality_id is None or event.municipality_id != municipality_id:
+            raise HTTPException(403, "Accès refusé à cette commune")
+
+    event.status = data.status
+    db.commit()
+    db.refresh(event)
+    return event
+
+
+@app.get("/events", response_model=list[IncidentEventOut])
+def list_events(db: Session = Depends(get_db), user: User = Depends(require_roles(*READ_ROLES))):
+    query = db.query(IncidentEvent).order_by(IncidentEvent.created_at.desc())
+    if user.role == "mairie":
+        municipality_id = get_user_municipality_id(user, db)
+        if municipality_id is None:
+            return []
+        query = query.filter(IncidentEvent.municipality_id == municipality_id)
+    return query.limit(300).all()
+
+
 @app.post("/logs", response_model=OperationalLogOut)
 def create_log(data: OperationalLogCreate, db: Session = Depends(get_db), user: User = Depends(require_roles(*EDIT_ROLES))):
     payload = data.model_dump()
@@ -1458,6 +1526,11 @@ def create_log(data: OperationalLogCreate, db: Session = Depends(get_db), user: 
     target_scope = payload.get("target_scope", "departemental")
     municipality_id = payload.get("municipality_id")
     linked_municipality = None
+    event_id = payload.get("event_id")
+
+    event = db.get(IncidentEvent, event_id)
+    if not event:
+        raise HTTPException(404, "Évènement introuvable")
 
     if target_scope in {"commune", "pcs"}:
         if not municipality_id:
@@ -1470,6 +1543,12 @@ def create_log(data: OperationalLogCreate, db: Session = Depends(get_db), user: 
         linked_municipality = municipality
     else:
         payload["municipality_id"] = None
+
+    if event.municipality_id and payload.get("municipality_id") and event.municipality_id != payload.get("municipality_id"):
+        raise HTTPException(400, "La commune de la main courante doit correspondre à la commune de l'évènement")
+
+    if not payload.get("municipality_id") and event.municipality_id:
+        payload["municipality_id"] = event.municipality_id
 
     entry = OperationalLog(**payload, created_by_id=user.id)
     db.add(entry)
@@ -1555,12 +1634,12 @@ def export_logs_csv(db: Session = Depends(get_db), user: User = Depends(require_
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow([
-        "id", "event_time", "created_at", "event_type", "status", "danger_level", "target_scope",
+        "id", "event_id", "event_time", "created_at", "event_type", "status", "danger_level", "target_scope",
         "municipality_id", "location", "source", "assigned_to", "tags", "description", "actions_taken", "next_update_due",
     ])
     for row in rows:
         writer.writerow([
-            row.id, row.event_time, row.created_at, row.event_type, row.status, row.danger_level, row.target_scope,
+            row.id, row.event_id, row.event_time, row.created_at, row.event_type, row.status, row.danger_level, row.target_scope,
             row.municipality_id, row.location, row.source, row.assigned_to, row.tags, row.description, row.actions_taken, row.next_update_due,
         ])
 
