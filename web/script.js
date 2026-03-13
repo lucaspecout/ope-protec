@@ -795,6 +795,36 @@ function getSelectedOperationalEvent() {
   return cachedEvents.find((event) => String(event.id) === String(selectedOperationalEventId)) || null;
 }
 
+function isOpenOrActiveEvent(event = {}) {
+  const status = String(event?.status || '').toLowerCase();
+  return status === 'ouvert' || status === 'en_cours';
+}
+
+function renderEventMcoSuggestions() {
+  const target = document.getElementById('log-event-mco-suggestions');
+  if (!target) return;
+
+  const selectedEvent = getSelectedOperationalEvent();
+  if (!selectedEvent) {
+    target.innerHTML = '<p class="muted">Sélectionnez un évènement pour afficher les tâches MCO suggérées.</p>';
+    return;
+  }
+
+  const municipalityHint = selectedEvent.municipality_id
+    ? `Commune prioritaire: <strong>${escapeHtml(getMunicipalityName(selectedEvent.municipality_id))}</strong>.`
+    : 'Portée: <strong>départementale</strong>.';
+
+  target.innerHTML = `
+    <p><strong>Logique MCO pour l'évènement sélectionné:</strong> ${municipalityHint}</p>
+    <ul class="list compact">
+      <li><strong>Qualification</strong> : renseigner le type de fait, le lieu exact et la source terrain.</li>
+      <li><strong>Action immédiate</strong> : tracer l'action engagée (appel mairie/SDIS, balisage, information population).</li>
+      <li><strong>Suivi</strong> : assigner un responsable et une prochaine échéance de mise à jour.</li>
+      <li><strong>Clôture</strong> : ne passer en <em>clos</em> qu'après validation du retour à la normale.</li>
+    </ul>
+  `;
+}
+
 function renderEventsList() {
   const target = document.getElementById('events-list');
   if (!target) return;
@@ -817,6 +847,7 @@ function updateEventDetailPanel() {
   if (!detailPanel) return;
   if (!selectedEvent) {
     setVisibility(detailPanel, false);
+    renderEventMcoSuggestions();
     return;
   }
 
@@ -834,6 +865,7 @@ function updateEventDetailPanel() {
 
   const eventSelect = document.getElementById('log-event-id');
   if (eventSelect) eventSelect.value = String(selectedEvent.id);
+  renderEventMcoSuggestions();
 }
 
 function selectOperationalEvent(eventId) {
@@ -4839,6 +4871,9 @@ async function openMunicipalityDetailsModal(municipality) {
   const municipalityLogs = (Array.isArray(logs) ? logs : [])
     .filter((log) => String(log.municipality_id || '') === String(municipality.id))
     .slice(0, 8);
+  const municipalityEvents = sortOperationalEvents(cachedEvents)
+    .filter((event) => String(event.municipality_id || '') === String(municipality.id) && isOpenOrActiveEvent(event))
+    .slice(0, 8);
   const previousState = municipalityDocumentsUiState.get(String(municipality.id)) || { search: '', type: 'all', sort: 'date_desc', uploading: false, progress: 0 };
   const state = { ...previousState, uploading: false, progress: 0 };
   municipalityDocumentsUiState.set(String(municipality.id), state);
@@ -4899,10 +4934,17 @@ async function openMunicipalityDetailsModal(municipality) {
     <p class="muted">Total: <strong>${files.length}</strong>${Object.entries(byType).map(([type, count]) => ` · ${escapeHtml(type)}: ${count}`).join('')}</p>
     ${municipalityDocumentFiltersMarkup(state, municipality.id)}
     <ul class="list compact">${municipalityFilesMarkup(filteredFiles, municipality.id)}</ul>
+    <h5>Évènements actifs de la commune (accès direct)</h5>
+    <ul class="list compact">${municipalityEvents.map((event) => {
+      const status = EVENT_STATUS_LABEL[event.status] || event.status || 'Ouvert';
+      return `<li><strong>${escapeHtml(event.title || 'Évènement')}</strong> · <span class="badge neutral">${escapeHtml(status)}</span><br>${escapeHtml(event.address || 'Adresse non renseignée')}<br><button type="button" class="ghost inline-action" data-muni-open-event="${event.id}">Ouvrir la fiche évènement</button></li>`;
+    }).join('') || '<li>Aucun évènement ouvert/en cours lié à cette commune.</li>'}</ul>
     <h5>Main courante liée à la commune</h5>
     <ul class="list compact">${municipalityLogs.map((log) => {
       const status = LOG_STATUS_LABEL[String(log.status || 'nouveau')] || 'Nouveau';
-      return `<li><strong>${new Date(log.created_at).toLocaleString()}</strong> · ${log.danger_emoji || '🟢'} <strong>${escapeHtml(log.event_type || 'MCO')}</strong> · <span class="badge neutral">${status}</span><br>${escapeHtml(log.description || '')}</li>`;
+      const eventTitle = getEventTitle(log.event_id);
+      const openAction = log.event_id ? `<br><button type="button" class="ghost inline-action" data-muni-open-event="${log.event_id}">Accéder à l'évènement</button>` : '';
+      return `<li><strong>${new Date(log.created_at).toLocaleString()}</strong> · ${log.danger_emoji || '🟢'} <strong>${escapeHtml(log.event_type || 'MCO')}</strong> · <span class="badge neutral">${status}</span><br><span class="muted">${escapeHtml(eventTitle)}</span><br>${escapeHtml(log.description || '')}${openAction}</li>`;
     }).join('') || '<li>Aucune entrée main courante associée.</li>'}</ul>
     ${quickActions}
   `);
@@ -5026,6 +5068,16 @@ function buildCriticalRisksMarkup(dashboard = {}, externalRisks = {}) {
   return risks.join('') || '<li>Aucun risque critique détecté.</li>';
 }
 
+function buildOpenEventsSituationMarkup(events = []) {
+  const openEvents = sortOperationalEvents(events).filter((event) => isOpenOrActiveEvent(event));
+  if (!openEvents.length) return '<li>Aucun évènement ouvert ou en cours.</li>';
+  return openEvents.slice(0, 10).map((event) => {
+    const status = EVENT_STATUS_LABEL[event.status] || event.status || 'Ouvert';
+    const locality = event.municipality_id ? getMunicipalityName(event.municipality_id) : 'Départemental';
+    return `<li><strong>${escapeHtml(event.title || 'Évènement')}</strong> · <span class="badge neutral">${escapeHtml(status)}</span><br/><span class="muted">${escapeHtml(locality)} · ${escapeHtml(event.address || 'Adresse non renseignée')}</span></li>`;
+  }).join('');
+}
+
 function renderSituationOverview() {
   const target = document.getElementById('situation-content');
   if (!target) return;
@@ -5114,6 +5166,11 @@ function renderSituationOverview() {
         <ul class="list compact">${buildCriticalRisksMarkup(dashboard, externalRisks)}</ul>
       </article>
     </div>
+
+    <h3>Évènements ouverts / en cours</h3>
+    <article class="tile situation-risks">
+      <ul class="list compact">${buildOpenEventsSituationMarkup(cachedEvents)}</ul>
+    </article>
 
     <h3>Fil de situation</h3>
     <div class="situation-log-columns">
@@ -6705,15 +6762,25 @@ function bindAppInteractions() {
   });
   document.getElementById('municipality-details-content')?.addEventListener('click', async (event) => {
     const crisisButton = event.target.closest('[data-muni-detail-crisis]');
+    const openEventButton = event.target.closest('[data-muni-open-event]');
     const openFileButton = event.target.closest('[data-muni-file-open]');
     const downloadFileButton = event.target.closest('[data-muni-file-download]');
     const uploadFileButton = event.target.closest('[data-muni-file-upload]');
     const deleteFileButton = event.target.closest('[data-muni-file-delete]');
-    if (!crisisButton && !openFileButton && !downloadFileButton && !uploadFileButton && !deleteFileButton) return;
+    if (!crisisButton && !openEventButton && !openFileButton && !downloadFileButton && !uploadFileButton && !deleteFileButton) return;
 
     const getMunicipality = (id) => cachedMunicipalityRecords.find((m) => String(m.id) === String(id));
 
     try {
+      if (openEventButton) {
+        const eventId = openEventButton.getAttribute('data-muni-open-event');
+        if (!eventId) return;
+        closeMunicipalityDetailsModal();
+        setActivePanel('logs-panel');
+        selectOperationalEvent(eventId);
+        return;
+      }
+
       if (crisisButton) {
         if (!canEdit()) return;
         const municipalityId = crisisButton.getAttribute('data-muni-detail-crisis');
