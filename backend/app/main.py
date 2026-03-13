@@ -1550,28 +1550,26 @@ def create_log(data: OperationalLogCreate, db: Session = Depends(get_db), user: 
     linked_municipality = None
     event_id = payload.get("event_id")
 
-    event = db.get(IncidentEvent, event_id)
-    if not event:
-        raise HTTPException(404, "Évènement introuvable")
+    event = db.get(IncidentEvent, event_id) if event_id else None
 
-    if target_scope in {"commune", "pcs"}:
-        if not municipality_id:
-            raise HTTPException(400, "Sélectionnez une commune pour ce type d'évènement")
+    if target_scope in {"commune", "pcs"} and municipality_id:
         municipality = db.get(Municipality, municipality_id)
         if not municipality:
             raise HTTPException(404, "Commune introuvable")
         if target_scope == "pcs" and not municipality.pcs_active:
             raise HTTPException(400, "La commune sélectionnée n'a pas de PCS actif")
         linked_municipality = municipality
-    else:
+    elif target_scope not in {"commune", "pcs"}:
         payload["municipality_id"] = None
 
-    if event.municipality_id and payload.get("municipality_id") and event.municipality_id != payload.get("municipality_id"):
+    if event and event.municipality_id and payload.get("municipality_id") and event.municipality_id != payload.get("municipality_id"):
         raise HTTPException(400, "La commune de la main courante doit correspondre à la commune de l'évènement")
 
-    if not payload.get("municipality_id") and event.municipality_id:
+    if event and not payload.get("municipality_id") and event.municipality_id:
         payload["municipality_id"] = event.municipality_id
 
+    payload["event_type"] = payload.get("event_type") or "MCO"
+    payload["description"] = payload.get("description") or ""
     entry = OperationalLog(**payload, created_by_id=user.id)
     db.add(entry)
 
@@ -1639,35 +1637,35 @@ def update_log(
     if not entry:
         raise HTTPException(404, "Entrée introuvable")
 
-    event = db.get(IncidentEvent, entry.event_id)
-    if not event:
-        raise HTTPException(404, "Évènement introuvable")
+    event = db.get(IncidentEvent, entry.event_id) if entry.event_id else None
 
     if user.role == "mairie":
         municipality_id = get_user_municipality_id(user, db)
-        if municipality_id is None or event.municipality_id != municipality_id:
+        event_municipality_id = event.municipality_id if event else entry.municipality_id
+        if municipality_id is None or event_municipality_id != municipality_id:
             raise HTTPException(403, "Accès refusé à cette commune")
 
     payload = data.model_dump()
     target_scope = payload.get("target_scope", "departemental")
     municipality_id = payload.get("municipality_id")
 
-    if target_scope in {"commune", "pcs"}:
-        if not municipality_id:
-            raise HTTPException(400, "Sélectionnez une commune pour ce type d'évènement")
+    if target_scope in {"commune", "pcs"} and municipality_id:
         municipality = db.get(Municipality, municipality_id)
         if not municipality:
             raise HTTPException(404, "Commune introuvable")
         if target_scope == "pcs" and not municipality.pcs_active:
             raise HTTPException(400, "La commune sélectionnée n'a pas de PCS actif")
-    else:
+    elif target_scope not in {"commune", "pcs"}:
         payload["municipality_id"] = None
 
-    if event.municipality_id and payload.get("municipality_id") and event.municipality_id != payload.get("municipality_id"):
+    if event and event.municipality_id and payload.get("municipality_id") and event.municipality_id != payload.get("municipality_id"):
         raise HTTPException(400, "La commune de la main courante doit correspondre à la commune de l'évènement")
 
-    if not payload.get("municipality_id") and event.municipality_id:
+    if event and not payload.get("municipality_id") and event.municipality_id:
         payload["municipality_id"] = event.municipality_id
+
+    payload["event_type"] = payload.get("event_type") or "MCO"
+    payload["description"] = payload.get("description") or ""
 
     for key, value in payload.items():
         setattr(entry, key, value)

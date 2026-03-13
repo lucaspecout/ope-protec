@@ -571,10 +571,6 @@
             </div>
 
           <form id="log-form" class="form logs-modern-form" data-requires-edit>
-            <select name="event_id" id="log-event-id" required>
-              <option value="">Sélectionnez un évènement</option>
-            </select>
-            <input name="event_type" placeholder="Catégorie (ex: Inondation, Voirie, Météo)" required />
             <select name="danger_level" id="log-danger-level">
               <option value="vert">🟢 Vert</option>
               <option value="jaune">🟡 Jaune</option>
@@ -592,9 +588,8 @@
             <input name="location" placeholder="Lieu / secteur" />
             <input name="source" placeholder="Source (CODIS, mairie, terrain...)" />
             <input name="assigned_to" placeholder="Responsable suivi" />
-            <input name="tags" placeholder="Tags (virgules)" />
             <input name="next_update_due" type="datetime-local" />
-            <textarea name="description" placeholder="Faits observés" required></textarea>
+            <textarea name="description" placeholder="Faits observés"></textarea>
             <textarea name="actions_taken" placeholder="Actions engagées / décisions"></textarea>
             <button type="submit">Ajouter l'entrée</button>
           </form>
