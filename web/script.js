@@ -801,26 +801,7 @@ function isOpenOrActiveEvent(event = {}) {
 function renderEventMcoSuggestions() {
   const target = document.getElementById('log-event-mco-suggestions');
   if (!target) return;
-
-  const selectedEvent = getSelectedOperationalEvent();
-  if (!selectedEvent) {
-    target.innerHTML = '<p class="muted">Sélectionnez un évènement pour afficher les tâches MCO suggérées.</p>';
-    return;
-  }
-
-  const municipalityHint = selectedEvent.municipality_id
-    ? `Commune prioritaire: <strong>${escapeHtml(getMunicipalityName(selectedEvent.municipality_id))}</strong>.`
-    : 'Portée: <strong>départementale</strong>.';
-
-  target.innerHTML = `
-    <p><strong>Logique MCO pour l'évènement sélectionné:</strong> ${municipalityHint}</p>
-    <ul class="list compact">
-      <li><strong>Qualification</strong> : renseigner le type de fait, le lieu exact et la source terrain.</li>
-      <li><strong>Action immédiate</strong> : tracer l'action engagée (appel mairie/SDIS, balisage, information population).</li>
-      <li><strong>Suivi</strong> : assigner un responsable et une prochaine échéance de mise à jour.</li>
-      <li><strong>Clôture</strong> : ne passer en <em>clos</em> qu'après validation du retour à la normale.</li>
-    </ul>
-  `;
+  target.innerHTML = '';
 }
 
 function renderEventsList() {
