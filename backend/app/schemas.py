@@ -9,6 +9,7 @@ ALLOWED_VIGILANCE_COLORS = {"vert", "jaune", "orange", "rouge"}
 ALLOWED_DANGER_LEVELS = {"vert", "jaune", "orange", "rouge"}
 ALLOWED_LOG_SCOPES = {"commune", "pcs", "departemental"}
 ALLOWED_LOG_STATUS = {"nouveau", "en_cours", "suivi", "clos"}
+ALLOWED_EVENT_STATUS = {"ouvert", "en_cours", "stabilise", "clos"}
 
 
 class Token(BaseModel):
@@ -263,6 +264,7 @@ class MunicipalityOut(BaseModel):
 
 
 class OperationalLogCreate(BaseModel):
+    event_id: int
     event_type: str
     description: str
     danger_level: str = "vert"
@@ -321,6 +323,7 @@ class OperationalLogCreate(BaseModel):
 
 class OperationalLogOut(BaseModel):
     id: int
+    event_id: int | None = None
     event_type: str
     description: str
     danger_level: str
@@ -351,6 +354,54 @@ class OperationalLogStatusUpdate(BaseModel):
         normalized = value.lower().strip()
         if normalized not in ALLOWED_LOG_STATUS:
             raise ValueError("Statut invalide")
+        return normalized
+
+
+class IncidentEventCreate(BaseModel):
+    title: str
+    address: str
+    status: str = "ouvert"
+    municipality_id: int | None = None
+
+    @field_validator("title", "address")
+    @classmethod
+    def validate_required_text(cls, value: str) -> str:
+        sanitized = value.strip()
+        if not sanitized:
+            raise ValueError("Ce champ est obligatoire")
+        return sanitized
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, value: str) -> str:
+        normalized = value.lower().strip()
+        if normalized not in ALLOWED_EVENT_STATUS:
+            raise ValueError("Statut d'évènement invalide")
+        return normalized
+
+
+class IncidentEventOut(BaseModel):
+    id: int
+    title: str
+    address: str
+    status: str
+    municipality_id: int | None = None
+    created_at: datetime
+    created_by_id: int
+
+    class Config:
+        from_attributes = True
+
+
+class IncidentEventStatusUpdate(BaseModel):
+    status: str
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, value: str) -> str:
+        normalized = value.lower().strip()
+        if normalized not in ALLOWED_EVENT_STATUS:
+            raise ValueError("Statut d'évènement invalide")
         return normalized
 
 
