@@ -541,16 +541,10 @@
 
         <section id="logs-panel" class="panel view hidden" hidden>
           <h3>Main courante</h3>
-          <p class="muted">Vue simplifiée : création d'évènement, suivi des évènements (ouverts en premier), puis gestion MCO dans la fiche évènement.</p>
-          <form id="event-form" class="form" data-requires-edit>
+          <p class="muted">Interface refondue : un évènement pilote son statut, la MCO garde uniquement les informations de suivi essentielles.</p>
+          <form id="event-form" class="form logs-modern-form" data-requires-edit>
             <input name="title" placeholder="Titre évènement (ex: Crue Isère centre-ville)" required />
             <input name="address" placeholder="Adresse / secteur concerné" required />
-            <select name="status" id="event-status">
-              <option value="ouvert">Ouvert</option>
-              <option value="en_cours">En cours</option>
-              <option value="stabilise">Stabilisé</option>
-              <option value="clos">Clos</option>
-            </select>
             <select name="municipality_id" id="event-municipality-id">
               <option value="">Aucune commune (départemental)</option>
             </select>
@@ -569,21 +563,17 @@
                 <p id="event-detail-meta" class="muted">-</p>
               </div>
               <div class="event-detail-actions">
+                <button id="event-progress-btn" type="button" class="ghost" data-requires-edit>Passer en cours</button>
+                <button id="event-stabilise-btn" type="button" class="ghost" data-requires-edit>Stabiliser</button>
                 <button id="event-close-btn" type="button" class="ghost" data-requires-edit>Clôturer l'évènement</button>
               </div>
             </div>
 
-          <form id="log-form" class="form" data-requires-edit>
+          <form id="log-form" class="form logs-modern-form" data-requires-edit>
             <select name="event_id" id="log-event-id" required>
               <option value="">Sélectionnez un évènement</option>
             </select>
             <input name="event_type" placeholder="Catégorie (ex: Inondation, Voirie, Météo)" required />
-            <select name="status" id="log-status">
-              <option value="nouveau">Nouveau</option>
-              <option value="en_cours">En cours</option>
-              <option value="suivi">Suivi</option>
-              <option value="clos">Clos</option>
-            </select>
             <select name="danger_level" id="log-danger-level">
               <option value="vert">🟢 Vert</option>
               <option value="jaune">🟡 Jaune</option>
@@ -610,26 +600,15 @@
           <div id="log-event-mco-suggestions" class="muted"></div>
 
           <p class="muted">Entrées affichées: <strong id="logs-count">0</strong></p>
-          <div class="logs-tables-grid">
-            <article>
-              <h4>Nouveaux / En cours / Suivi</h4>
-              <table class="users-table">
-                <thead>
-                  <tr><th>Horodatage</th><th>Périmètre</th><th>Criticité</th><th>Évènement</th><th>Statut</th><th>Détails</th><th>Actions</th></tr>
-                </thead>
-                <tbody id="logs-table-open"></tbody>
-              </table>
-            </article>
-          </div>
-          <div class="logs-closed-table-wrap">
-            <h4>Clos</h4>
+          <article class="logs-stream-wrap">
+            <h4>Flux MCO de l'évènement</h4>
             <table class="users-table">
               <thead>
-                <tr><th>Horodatage</th><th>Périmètre</th><th>Criticité</th><th>Évènement</th><th>Statut</th><th>Détails</th><th>Actions</th></tr>
+                <tr><th>Horodatage</th><th>Périmètre</th><th>Criticité</th><th>Évènement</th><th>Détails</th><th>Actions</th></tr>
               </thead>
-              <tbody id="logs-table-closed"></tbody>
+              <tbody id="logs-table-stream"></tbody>
             </table>
-          </div>
+          </article>
           </article>
         </section>
 

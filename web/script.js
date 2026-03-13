@@ -709,7 +709,6 @@ const passwordForm = document.getElementById('password-form');
 const normalizeLevel = (level) => ({ verte: 'vert', green: 'vert', yellow: 'jaune', red: 'rouge' }[(level || '').toLowerCase()] || (level || 'vert').toLowerCase());
 const levelColor = (level) => ({ vert: '#2f9e44', jaune: '#f59f00', orange: '#f76707', rouge: '#e03131' }[normalizeLevel(level)] || '#2f9e44');
 const LOG_LEVEL_EMOJI = { vert: '🟢', jaune: '🟡', orange: '🟠', rouge: '🔴' };
-const LOG_STATUS_LABEL = { nouveau: 'Nouveau', en_cours: 'En cours', suivi: 'Suivi', clos: 'Clos' };
 const EVENT_STATUS_LABEL = { ouvert: 'Ouvert', en_cours: 'En cours', stabilise: 'Stabilisé', clos: 'Clos' };
 
 function debounce(fn, wait = 200) {
@@ -731,16 +730,14 @@ function stationStatusLevel(station = {}) {
 }
 
 function formatLogLine(log = {}) {
-  const statusKey = String(log.status || 'nouveau');
-  const status = LOG_STATUS_LABEL[statusKey] || 'Nouveau';
   const municipality = log.municipality_id ? ` · ${escapeHtml(getMunicipalityName(log.municipality_id))}` : '';
   const place = log.location ? ` · 📍 ${escapeHtml(log.location)}` : '';
   const source = log.source ? ` · Source: ${escapeHtml(log.source)}` : '';
   const owner = log.assigned_to ? ` · 👤 ${escapeHtml(log.assigned_to)}` : '';
   const next = log.next_update_due ? ` · ⏱️ MAJ ${new Date(log.next_update_due).toLocaleString()}` : '';
   const actions = log.actions_taken ? `<div class="muted">Actions: ${escapeHtml(log.actions_taken)}</div>` : '';
-  const statusActions = canEdit() ? `<div class="map-inline-actions"><button type="button" class="ghost inline-action" data-log-status="${log.id}" data-log-next="en_cours">En cours</button><button type="button" class="ghost inline-action" data-log-status="${log.id}" data-log-next="suivi">Suivi</button><button type="button" class="ghost inline-action" data-log-status="${log.id}" data-log-next="clos">Clôturer</button><button type="button" class="ghost inline-action danger" data-log-delete="${log.id}">Supprimer</button></div>` : '';
-  return `<li><strong>${new Date(log.event_time || log.created_at).toLocaleString()}</strong> · <span class="badge neutral">${formatLogScope(log)}${municipality}</span> ${log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢'} <strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'MCO')}</strong> · <span class="muted">${escapeHtml(getEventTitle(log.event_id))}</span> · <span class="badge neutral">${status}</span>${place}${owner}${source}${next}<div>${escapeHtml(log.description || '')}</div>${actions}${statusActions}</li>`;
+  const deleteAction = canEdit() ? `<div class="map-inline-actions"><button type="button" class="ghost inline-action danger" data-log-delete="${log.id}">Supprimer</button></div>` : '';
+  return `<li><strong>${new Date(log.event_time || log.created_at).toLocaleString()}</strong> · <span class="badge neutral">${formatLogScope(log)}${municipality}</span> ${log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢'} <strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'MCO')}</strong> · <span class="muted">${escapeHtml(getEventTitle(log.event_id))}</span>${place}${owner}${source}${next}<div>${escapeHtml(log.description || '')}</div>${actions}${deleteAction}</li>`;
 }
 
 function formatLogScope(log = {}) {
@@ -857,10 +854,27 @@ function updateEventDetailPanel() {
   const locality = selectedEvent.municipality_id ? getMunicipalityName(selectedEvent.municipality_id) : 'Départemental';
   setText('event-detail-meta', `${selectedEvent.address || 'Adresse non renseignée'} · ${locality} · Statut: ${status}`);
 
+  const normalizedStatus = String(selectedEvent.status || '').toLowerCase();
+  const progressButton = document.getElementById('event-progress-btn');
+  if (progressButton) {
+    progressButton.setAttribute('data-event-status', String(selectedEvent.id));
+    progressButton.setAttribute('data-event-next', 'en_cours');
+    progressButton.disabled = normalizedStatus === 'en_cours' || normalizedStatus === 'stabilise' || normalizedStatus === 'clos';
+  }
+
+  const stabiliseButton = document.getElementById('event-stabilise-btn');
+  if (stabiliseButton) {
+    stabiliseButton.setAttribute('data-event-status', String(selectedEvent.id));
+    stabiliseButton.setAttribute('data-event-next', 'stabilise');
+    stabiliseButton.disabled = normalizedStatus === 'stabilise' || normalizedStatus === 'clos';
+  }
+
   const closeButton = document.getElementById('event-close-btn');
   if (closeButton) {
-    closeButton.setAttribute('data-event-close', String(selectedEvent.id));
-    closeButton.disabled = String(selectedEvent.status || '').toLowerCase() === 'clos';
+    const isClosed = normalizedStatus === 'clos';
+    closeButton.setAttribute('data-event-status', String(selectedEvent.id));
+    closeButton.setAttribute('data-event-next', isClosed ? 'ouvert' : 'clos');
+    closeButton.textContent = isClosed ? "Réouvrir l'évènement" : "Clôturer l'évènement";
   }
 
   const eventSelect = document.getElementById('log-event-id');
@@ -6137,18 +6151,16 @@ function computeLogCriticality(level) {
 }
 
 function buildLogTableRow(log = {}) {
-  const statusKey = String(log.status || 'nouveau');
-  const status = LOG_STATUS_LABEL[statusKey] || 'Nouveau';
   const municipality = log.municipality_id ? ` · ${escapeHtml(getMunicipalityName(log.municipality_id))}` : '';
   const place = log.location ? `📍 ${escapeHtml(log.location)}` : 'Lieu non précisé';
   const source = log.source ? `Source: ${escapeHtml(log.source)}` : 'Source non précisée';
   const owner = log.assigned_to ? `👤 ${escapeHtml(log.assigned_to)}` : '👤 Non assigné';
   const next = log.next_update_due ? `⏱️ MAJ ${new Date(log.next_update_due).toLocaleString()}` : '';
   const actions = canEdit()
-    ? `<div class="map-inline-actions"><button type="button" class="ghost inline-action" data-log-status="${log.id}" data-log-next="en_cours">En cours</button><button type="button" class="ghost inline-action" data-log-next="suivi" data-log-status="${log.id}">Suivi</button><button type="button" class="ghost inline-action" data-log-next="clos" data-log-status="${log.id}">Clôturer</button><button type="button" class="ghost inline-action danger" data-log-delete="${log.id}">Supprimer</button></div>`
+    ? `<div class="map-inline-actions"><button type="button" class="ghost inline-action danger" data-log-delete="${log.id}">Supprimer</button></div>`
     : '—';
   const eventTitle = escapeHtml(getEventTitle(log.event_id));
-  return `<tr><td>${new Date(log.event_time || log.created_at).toLocaleString()}</td><td><span class="badge neutral">${formatLogScope(log)}${municipality}</span></td><td>${log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢'}</td><td><strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'MCO')}</strong><br/><span class="muted">${eventTitle}</span></td><td><span class="badge neutral">${status}</span></td><td>${place}<br/><span class="muted">${owner} · ${source}${next ? ` · ${next}` : ''}</span><br/>${escapeHtml(log.description || '')}${log.actions_taken ? `<br/><span class="muted">Actions: ${escapeHtml(log.actions_taken)}</span>` : ''}</td><td>${actions}</td></tr>`;
+  return `<tr><td>${new Date(log.event_time || log.created_at).toLocaleString()}</td><td><span class="badge neutral">${formatLogScope(log)}${municipality}</span></td><td>${log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢'}</td><td><strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'MCO')}</strong><br/><span class="muted">${eventTitle}</span></td><td>${place}<br/><span class="muted">${owner} · ${source}${next ? ` · ${next}` : ''}</span><br/>${escapeHtml(log.description || '')}${log.actions_taken ? `<br/><span class="muted">Actions: ${escapeHtml(log.actions_taken)}</span>` : ''}</td><td>${actions}</td></tr>`;
 }
 
 function renderLogsList() {
@@ -6161,12 +6173,8 @@ function renderLogsList() {
 
   filtered.sort((a, b) => new Date(b.event_time || b.created_at).getTime() - new Date(a.event_time || a.created_at).getTime());
 
-  const openLogs = filtered.filter((log) => ['nouveau', 'en_cours', 'suivi'].includes(String(log.status || '').toLowerCase()));
-  const closedLogs = filtered.filter((log) => String(log.status || '').toLowerCase() === 'clos');
-
   setText('logs-count', String(filtered.length));
-  setHtml('logs-table-open', openLogs.map((log) => buildLogTableRow(log)).join('') || '<tr><td colspan="7">Aucun évènement nouveau / en cours / suivi.</td></tr>');
-  setHtml('logs-table-closed', closedLogs.map((log) => buildLogTableRow(log)).join('') || '<tr><td colspan="7">Aucun évènement clos.</td></tr>');
+  setHtml('logs-table-stream', filtered.map((log) => buildLogTableRow(log)).join('') || '<tr><td colspan="6">Aucune entrée MCO pour cet évènement.</td></tr>');
 }
 
 async function loadLogs(preloaded = null) {
@@ -6889,38 +6897,26 @@ function bindAppInteractions() {
   });
   document.getElementById('logs-panel')?.addEventListener('click', async (event) => {
     const openEventButton = event.target.closest('[data-event-open]');
-    const closeEventButton = event.target.closest('[data-event-close]');
-    const statusButton = event.target.closest('[data-log-status]');
+    const eventStatusButton = event.target.closest('[data-event-status]');
     const deleteButton = event.target.closest('[data-log-delete]');
     if (openEventButton) {
       selectOperationalEvent(openEventButton.getAttribute('data-event-open'));
       return;
     }
 
-    if (!statusButton && !deleteButton && !closeEventButton) return;
+    if (!eventStatusButton && !deleteButton) return;
     if (!canEdit()) return;
 
     try {
-      if (closeEventButton) {
-        const eventId = closeEventButton.getAttribute('data-event-close');
-        if (eventId) {
-          await api(`/events/${eventId}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status: 'clos' }),
-          });
-          await loadEvents();
-        }
-      }
-
-      if (statusButton) {
-        const logId = statusButton.getAttribute('data-log-status');
-        const status = statusButton.getAttribute('data-log-next');
-        await api(`/logs/${logId}`, {
+      if (eventStatusButton) {
+        const eventId = eventStatusButton.getAttribute('data-event-status');
+        const status = eventStatusButton.getAttribute('data-event-next');
+        await api(`/events/${eventId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ status }),
         });
+        await loadEvents();
       }
 
       if (deleteButton) {
@@ -7296,7 +7292,7 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
         description: form.get('description'),
         danger_level: form.get('danger_level') || 'vert',
         danger_emoji: LOG_LEVEL_EMOJI[form.get('danger_level') || 'vert'] || '🟢',
-        status: form.get('status') || 'nouveau',
+        status: 'nouveau',
         target_scope: form.get('target_scope'),
         municipality_id: form.get('municipality_id') ? Number(form.get('municipality_id')) : null,
         location: form.get('location') || null,
@@ -7330,7 +7326,7 @@ document.getElementById('event-form')?.addEventListener('submit', async (event) 
       body: JSON.stringify({
         title: form.get('title'),
         address: form.get('address'),
-        status: form.get('status') || 'ouvert',
+        status: 'ouvert',
         municipality_id: form.get('municipality_id') ? Number(form.get('municipality_id')) : null,
       }),
     });
