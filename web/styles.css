@@ -237,7 +237,7 @@ label { display: block; margin-bottom: .8rem; }
 .app-header-nav-actions { display: flex; align-items: center; gap: .55rem; }
 .app--sidebar-collapsed { grid-template-columns: 86px minmax(0,1fr); }
 .app--sidebar-collapsed .sidebar-header,
-.app--sidebar-collapsed .danger { display: none; }
+.app--sidebar-collapsed #logout-btn { display: none; }
 .app--sidebar-collapsed .sidebar { padding: .8rem .55rem; }
 .app--sidebar-collapsed .side-nav .menu-btn { display: grid; place-items: center; text-align: center; padding: .72rem .35rem; font-size: 1.1rem; }
 .app--sidebar-collapsed .side-nav .menu-btn .menu-label { display: none; }
