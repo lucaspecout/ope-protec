@@ -709,6 +709,7 @@ const passwordForm = document.getElementById('password-form');
 const normalizeLevel = (level) => ({ verte: 'vert', green: 'vert', yellow: 'jaune', red: 'rouge' }[(level || '').toLowerCase()] || (level || 'vert').toLowerCase());
 const levelColor = (level) => ({ vert: '#2f9e44', jaune: '#f59f00', orange: '#f76707', rouge: '#e03131' }[normalizeLevel(level)] || '#2f9e44');
 const LOG_LEVEL_EMOJI = { vert: '🟢', jaune: '🟡', orange: '🟠', rouge: '🔴' };
+const LOG_STATUS_LABEL = { nouveau: 'Nouveau', en_cours: 'En cours', suivi: 'Suivi', clos: 'Clos' };
 const EVENT_STATUS_LABEL = { ouvert: 'Ouvert', en_cours: 'En cours', stabilise: 'Stabilisé', clos: 'Clos' };
 
 function debounce(fn, wait = 200) {
