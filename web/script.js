@@ -737,7 +737,7 @@ function formatLogLine(log = {}) {
   const owner = log.assigned_to ? ` · 👤 ${escapeHtml(log.assigned_to)}` : '';
   const next = log.next_update_due ? ` · ⏱️ MAJ ${new Date(log.next_update_due).toLocaleString()}` : '';
   const actions = log.actions_taken ? `<div class="muted">Actions: ${escapeHtml(log.actions_taken)}</div>` : '';
-  const deleteAction = canEdit() ? `<div class="map-inline-actions"><button type="button" class="ghost inline-action danger" data-log-delete="${log.id}">Supprimer</button></div>` : '';
+  const deleteAction = canEdit() ? `<div class="map-inline-actions"><button type="button" class="ghost inline-action" data-log-edit="${log.id}">Modifier</button><button type="button" class="ghost inline-action danger" data-log-delete="${log.id}">Supprimer</button></div>` : '';
   return `<li><strong>${new Date(log.event_time || log.created_at).toLocaleString()}</strong> · <span class="badge neutral">${formatLogScope(log)}${municipality}</span> ${log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢'} <strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'MCO')}</strong> · <span class="muted">${escapeHtml(getEventTitle(log.event_id))}</span>${place}${owner}${source}${next}<div>${escapeHtml(log.description || '')}</div>${actions}${deleteAction}</li>`;
 }
 
@@ -804,6 +804,39 @@ function renderEventMcoSuggestions() {
   target.innerHTML = '';
 }
 
+function getLogById(logId) {
+  return (Array.isArray(cachedLogs) ? cachedLogs : []).find((log) => String(log.id) === String(logId)) || null;
+}
+
+function fillLogFormFromEntry(log = {}) {
+  const form = document.getElementById('log-form');
+  if (!form) return;
+  form.elements.event_id.value = String(log.event_id || selectedOperationalEventId || '');
+  form.elements.event_type.value = log.event_type || '';
+  form.elements.danger_level.value = log.danger_level || 'vert';
+  form.elements.target_scope.value = log.target_scope || 'departemental';
+  form.elements.municipality_id.value = log.municipality_id ? String(log.municipality_id) : '';
+  form.elements.location.value = log.location || '';
+  form.elements.source.value = log.source || '';
+  form.elements.assigned_to.value = log.assigned_to || '';
+  form.elements.tags.value = log.tags || '';
+  form.elements.next_update_due.value = log.next_update_due ? toDatetimeLocal(log.next_update_due) : '';
+  form.elements.description.value = log.description || '';
+  form.elements.actions_taken.value = log.actions_taken || '';
+  form.dataset.editLogId = String(log.id);
+  const submitButton = form.querySelector('button[type="submit"]');
+  if (submitButton) submitButton.textContent = 'Enregistrer la modification';
+  syncLogScopeFields();
+}
+
+function resetLogFormState() {
+  const form = document.getElementById('log-form');
+  if (!form) return;
+  delete form.dataset.editLogId;
+  const submitButton = form.querySelector('button[type="submit"]');
+  if (submitButton) submitButton.textContent = "Ajouter l'entrée";
+}
+
 function renderEventsList() {
   const target = document.getElementById('events-list');
   if (!target) return;
@@ -857,6 +890,11 @@ function updateEventDetailPanel() {
     closeButton.setAttribute('data-event-status', String(selectedEvent.id));
     closeButton.setAttribute('data-event-next', isClosed ? 'ouvert' : 'clos');
     closeButton.textContent = isClosed ? "Réouvrir l'évènement" : "Clôturer l'évènement";
+  }
+
+  const deleteButton = document.getElementById('event-delete-btn');
+  if (deleteButton) {
+    deleteButton.setAttribute('data-event-delete', String(selectedEvent.id));
   }
 
   const eventSelect = document.getElementById('log-event-id');
@@ -5014,6 +5052,14 @@ function safeDateToLocale(value, options = {}) {
     : '-';
 }
 
+function toDatetimeLocal(value) {
+  const date = new Date(value || 0);
+  if (!Number.isFinite(date.getTime()) || date.getTime() <= 0) return '';
+  const offset = date.getTimezoneOffset();
+  const localDate = new Date(date.getTime() - (offset * 60000));
+  return localDate.toISOString().slice(0, 16);
+}
+
 function buildSituationLogMarkup(log = {}) {
   const status = LOG_STATUS_LABEL[String(log.status || 'nouveau')] || 'Nouveau';
   const at = safeDateToLocale(log.event_time || log.created_at || Date.now());
@@ -6139,7 +6185,7 @@ function buildLogTableRow(log = {}) {
   const owner = log.assigned_to ? `👤 ${escapeHtml(log.assigned_to)}` : '👤 Non assigné';
   const next = log.next_update_due ? `⏱️ MAJ ${new Date(log.next_update_due).toLocaleString()}` : '';
   const actions = canEdit()
-    ? `<div class="map-inline-actions"><button type="button" class="ghost inline-action danger" data-log-delete="${log.id}">Supprimer</button></div>`
+    ? `<div class="map-inline-actions"><button type="button" class="ghost inline-action" data-log-edit="${log.id}">Modifier</button><button type="button" class="ghost inline-action danger" data-log-delete="${log.id}">Supprimer</button></div>`
     : '—';
   const eventTitle = escapeHtml(getEventTitle(log.event_id));
   return `<tr><td>${new Date(log.event_time || log.created_at).toLocaleString()}</td><td><span class="badge neutral">${formatLogScope(log)}${municipality}</span></td><td>${log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢'}</td><td><strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'MCO')}</strong><br/><span class="muted">${eventTitle}</span></td><td>${place}<br/><span class="muted">${owner} · ${source}${next ? ` · ${next}` : ''}</span><br/>${escapeHtml(log.description || '')}${log.actions_taken ? `<br/><span class="muted">Actions: ${escapeHtml(log.actions_taken)}</span>` : ''}</td><td>${actions}</td></tr>`;
@@ -6881,12 +6927,14 @@ function bindAppInteractions() {
     const openEventButton = event.target.closest('[data-event-open]');
     const eventStatusButton = event.target.closest('[data-event-status]');
     const deleteButton = event.target.closest('[data-log-delete]');
+    const editButton = event.target.closest('[data-log-edit]');
+    const deleteEventButton = event.target.closest('[data-event-delete]');
     if (openEventButton) {
       selectOperationalEvent(openEventButton.getAttribute('data-event-open'));
       return;
     }
 
-    if (!eventStatusButton && !deleteButton) return;
+    if (!eventStatusButton && !deleteButton && !editButton && !deleteEventButton) return;
     if (!canEdit()) return;
 
     try {
@@ -6906,6 +6954,24 @@ function bindAppInteractions() {
         const confirmed = window.confirm('Supprimer cette entrée de main courante ?');
         if (!confirmed) return;
         await api(`/logs/${logId}`, { method: 'DELETE' });
+      }
+
+      if (deleteEventButton) {
+        const eventId = deleteEventButton.getAttribute('data-event-delete');
+        const confirmed = window.confirm('Supprimer cet évènement et toutes ses entrées MCO ?');
+        if (!confirmed) return;
+        await api(`/events/${eventId}`, { method: 'DELETE' });
+        if (String(selectedOperationalEventId) === String(eventId)) selectedOperationalEventId = null;
+        await loadEvents();
+      }
+
+      if (editButton) {
+        const logId = editButton.getAttribute('data-log-edit');
+        const log = getLogById(logId);
+        if (!log) return;
+        fillLogFormFromEntry(log);
+        document.getElementById('log-form')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
       }
 
       await loadLogs();
@@ -7265,27 +7331,38 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
   const errorTarget = document.getElementById('dashboard-error');
   await ensureLogMunicipalitiesLoaded();
   try {
-    await api('/logs', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        event_id: Number(form.get('event_id')),
-        event_type: form.get('event_type'),
-        description: form.get('description'),
-        danger_level: form.get('danger_level') || 'vert',
-        danger_emoji: LOG_LEVEL_EMOJI[form.get('danger_level') || 'vert'] || '🟢',
-        status: 'nouveau',
-        target_scope: form.get('target_scope'),
-        municipality_id: form.get('municipality_id') ? Number(form.get('municipality_id')) : null,
-        location: form.get('location') || null,
-        source: form.get('source') || null,
-        assigned_to: form.get('assigned_to') || null,
-        tags: form.get('tags') || null,
-        next_update_due: form.get('next_update_due') || null,
-        actions_taken: form.get('actions_taken') || null,
-      }),
-    });
+    const payload = {
+      event_id: Number(form.get('event_id')),
+      event_type: form.get('event_type'),
+      description: form.get('description'),
+      danger_level: form.get('danger_level') || 'vert',
+      danger_emoji: LOG_LEVEL_EMOJI[form.get('danger_level') || 'vert'] || '🟢',
+      status: 'nouveau',
+      target_scope: form.get('target_scope'),
+      municipality_id: form.get('municipality_id') ? Number(form.get('municipality_id')) : null,
+      location: form.get('location') || null,
+      source: form.get('source') || null,
+      assigned_to: form.get('assigned_to') || null,
+      tags: form.get('tags') || null,
+      next_update_due: form.get('next_update_due') || null,
+      actions_taken: form.get('actions_taken') || null,
+    };
+    const editingLogId = event.target.dataset.editLogId;
+    if (editingLogId) {
+      await api(`/logs/${editingLogId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    } else {
+      await api('/logs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    }
     event.target.reset();
+    resetLogFormState();
     const eventSelect = document.getElementById('log-event-id');
     if (eventSelect && selectedOperationalEventId) eventSelect.value = String(selectedOperationalEventId);
     if (errorTarget) errorTarget.textContent = '';

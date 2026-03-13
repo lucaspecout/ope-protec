@@ -37,6 +37,7 @@ from .schemas import (
     OperationalLogCreate,
     OperationalLogOut,
     OperationalLogStatusUpdate,
+    OperationalLogUpdate,
     PasswordChangeRequest,
     ShareAccessRequest,
     Token,
@@ -1508,6 +1509,27 @@ def update_event_status(
     return event
 
 
+@app.delete("/events/{event_id}")
+def delete_event(
+    event_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*EDIT_ROLES, "mairie")),
+):
+    event = db.get(IncidentEvent, event_id)
+    if not event:
+        raise HTTPException(404, "Évènement introuvable")
+
+    if user.role == "mairie":
+        municipality_id = get_user_municipality_id(user, db)
+        if municipality_id is None or event.municipality_id != municipality_id:
+            raise HTTPException(403, "Accès refusé à cette commune")
+
+    db.query(OperationalLog).filter(OperationalLog.event_id == event_id).delete(synchronize_session=False)
+    db.delete(event)
+    db.commit()
+    return {"status": "deleted", "id": event_id}
+
+
 @app.get("/events", response_model=list[IncidentEventOut])
 def list_events(db: Session = Depends(get_db), user: User = Depends(require_roles(*READ_ROLES))):
     query = db.query(IncidentEvent).order_by(IncidentEvent.created_at.desc())
@@ -1604,6 +1626,55 @@ def delete_log(
     db.delete(entry)
     db.commit()
     return {"status": "deleted", "id": log_id}
+
+
+@app.put("/logs/{log_id}", response_model=OperationalLogOut)
+def update_log(
+    log_id: int,
+    data: OperationalLogUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*EDIT_ROLES, "mairie")),
+):
+    entry = db.get(OperationalLog, log_id)
+    if not entry:
+        raise HTTPException(404, "Entrée introuvable")
+
+    event = db.get(IncidentEvent, entry.event_id)
+    if not event:
+        raise HTTPException(404, "Évènement introuvable")
+
+    if user.role == "mairie":
+        municipality_id = get_user_municipality_id(user, db)
+        if municipality_id is None or event.municipality_id != municipality_id:
+            raise HTTPException(403, "Accès refusé à cette commune")
+
+    payload = data.model_dump()
+    target_scope = payload.get("target_scope", "departemental")
+    municipality_id = payload.get("municipality_id")
+
+    if target_scope in {"commune", "pcs"}:
+        if not municipality_id:
+            raise HTTPException(400, "Sélectionnez une commune pour ce type d'évènement")
+        municipality = db.get(Municipality, municipality_id)
+        if not municipality:
+            raise HTTPException(404, "Commune introuvable")
+        if target_scope == "pcs" and not municipality.pcs_active:
+            raise HTTPException(400, "La commune sélectionnée n'a pas de PCS actif")
+    else:
+        payload["municipality_id"] = None
+
+    if event.municipality_id and payload.get("municipality_id") and event.municipality_id != payload.get("municipality_id"):
+        raise HTTPException(400, "La commune de la main courante doit correspondre à la commune de l'évènement")
+
+    if not payload.get("municipality_id") and event.municipality_id:
+        payload["municipality_id"] = event.municipality_id
+
+    for key, value in payload.items():
+        setattr(entry, key, value)
+
+    db.commit()
+    db.refresh(entry)
+    return entry
 
 
 @app.get("/logs", response_model=list[OperationalLogOut])
