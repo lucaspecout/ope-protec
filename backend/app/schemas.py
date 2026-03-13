@@ -357,6 +357,62 @@ class OperationalLogStatusUpdate(BaseModel):
         return normalized
 
 
+class OperationalLogUpdate(BaseModel):
+    event_type: str
+    description: str
+    danger_level: str = "vert"
+    danger_emoji: str = "🟢"
+    target_scope: str = "departemental"
+    status: str = "nouveau"
+    location: str | None = None
+    source: str | None = None
+    actions_taken: str | None = None
+    next_update_due: datetime | None = None
+    assigned_to: str | None = None
+    tags: str | None = None
+    municipality_id: int | None = None
+
+    @field_validator("event_type", "description")
+    @classmethod
+    def validate_required_text(cls, value: str) -> str:
+        sanitized = value.strip()
+        if not sanitized:
+            raise ValueError("Ce champ est obligatoire")
+        return sanitized
+
+    @field_validator("danger_level")
+    @classmethod
+    def validate_danger_level(cls, value: str) -> str:
+        normalized = value.lower().strip()
+        if normalized not in ALLOWED_DANGER_LEVELS:
+            raise ValueError("Niveau de danger invalide")
+        return normalized
+
+    @field_validator("target_scope")
+    @classmethod
+    def validate_target_scope(cls, value: str) -> str:
+        normalized = value.lower().strip()
+        if normalized not in ALLOWED_LOG_SCOPES:
+            raise ValueError("Cible invalide")
+        return normalized
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, value: str) -> str:
+        normalized = value.lower().strip()
+        if normalized not in ALLOWED_LOG_STATUS:
+            raise ValueError("Statut invalide")
+        return normalized
+
+    @field_validator("location", "source", "actions_taken", "assigned_to", "tags")
+    @classmethod
+    def strip_optional_fields(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        sanitized = value.strip()
+        return sanitized or None
+
+
 class IncidentEventCreate(BaseModel):
     title: str
     address: str
