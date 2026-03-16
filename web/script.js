@@ -2526,7 +2526,7 @@ async function renderMunicipalitiesOnMap(municipalities = []) {
       fillColor: isInCrisis ? '#e03131' : '#17335f',
       fillOpacity: 0.95,
     })
-      .bindPopup(`<strong>${municipality.name}</strong><br>Code postal: ${municipality.postal_code || '-'}<br>Responsable: ${municipality.manager}<br>PCS: actif<br>Statut: ${isInCrisis ? 'CRISE' : 'veille'}`)
+      .bindPopup(`<strong>${municipality.name}</strong><br>Code postal: ${municipality.postal_code || '-'}<br>PCS: actif<br>Statut: ${isInCrisis ? 'CRISE' : 'veille'}`)
       .addTo(pcsLayer);
 
     if (isInCrisis) {
@@ -4690,7 +4690,6 @@ function openMunicipalityEditor(municipality) {
   const form = document.getElementById('municipality-edit-form');
   if (!panel || !form || !municipality) return;
   form.elements.id.value = municipality.id;
-  form.elements.manager.value = municipality.manager || '';
   form.elements.phone.value = municipality.phone || '';
   form.elements.email.value = municipality.email || '';
   form.elements.postal_code.value = municipality.postal_code || '';
@@ -4699,7 +4698,6 @@ function openMunicipalityEditor(municipality) {
   form.elements.additional_info.value = municipality.additional_info || '';
   form.elements.population.value = municipality.population ?? '';
   form.elements.shelter_capacity.value = municipality.shelter_capacity ?? '';
-  form.elements.radio_channel.value = municipality.radio_channel || '';
   form.elements.vigilance_color.value = normalizeLevel(municipality.vigilance_color || 'vert');
   form.elements.pcs_active.checked = Boolean(municipality.pcs_active);
   setText('municipality-editor-title', `Éditer ${municipality.name}`);
@@ -4952,12 +4950,10 @@ async function openMunicipalityDetailsModal(municipality) {
 
   setHtml('municipality-details-content', `
     <h4>${escapeHtml(municipality.name)}</h4>
-    <p><strong>Responsable:</strong> ${escapeHtml(municipality.manager || '-')}</p>
     <p><strong>Téléphone:</strong> ${escapeHtml(municipality.phone || '-')} · <strong>Email:</strong> ${escapeHtml(municipality.email || '-')}</p>
     <p><strong>Code postal:</strong> ${escapeHtml(municipality.postal_code || '-')} · <strong>Code INSEE:</strong> ${escapeHtml(municipality.insee_code || '-')} · <strong>PCS:</strong> ${municipality.pcs_active ? 'actif' : 'inactif'}</p>
     <p><strong>Statut:</strong> ${municipality.crisis_mode ? 'CRISE' : 'veille'} · <strong>Vigilance:</strong> ${escapeHtml(normalizeLevel(municipality.vigilance_color || 'vert'))}</p>
     <p><strong>Population:</strong> ${municipality.population ?? '-'} · <strong>Capacité d'accueil:</strong> ${municipality.shelter_capacity ?? '-'}</p>
-    <p><strong>Canal radio:</strong> ${escapeHtml(municipality.radio_channel || '-')}</p>
     <p><strong>Contacts d'astreinte:</strong><br>${escapeHtml(municipality.contacts || 'Aucun')}</p>
     <p><strong>Informations complémentaires:</strong><br>${escapeHtml(municipality.additional_info || 'Aucune')}</p>
     <h5>Documents partagés</h5>
@@ -6089,12 +6085,11 @@ function renderMunicipalitiesList(municipalities = []) {
         <h4>${escapeHtml(m.name)}</h4>
         <span class="badge ${normalizeLevel(m.vigilance_color || 'vert') === 'rouge' ? 'red' : normalizeLevel(m.vigilance_color || 'vert') === 'orange' ? 'orange' : normalizeLevel(m.vigilance_color || 'vert') === 'jaune' ? 'yellow' : 'green'}">${normalizeLevel(m.vigilance_color || 'vert')}</span>
       </header>
-      <p><strong>${escapeHtml(m.manager)}</strong> · ${escapeHtml(m.phone)} · ${escapeHtml(m.email)}</p>
+      <p><strong>${escapeHtml(m.phone)}</strong> · ${escapeHtml(m.email)}</p>
       <p style="color:${dangerColor}">Statut: ${m.crisis_mode ? 'CRISE' : 'veille'} · PCS ${m.pcs_active ? 'actif' : 'inactif'} · ${m.postal_code || 'CP ?'}</p>
       <div class="municipality-stats">
         <p>Population<br><strong>${m.population ?? '-'}</strong></p>
         <p>Accueil<br><strong>${m.shelter_capacity ?? '-'}</strong></p>
-        <p>Radio<br><strong>${escapeHtml(m.radio_channel || '-')}</strong></p>
         <p>Contacts<br><strong>${escapeHtml(m.contacts || '-')}</strong></p>
       </div>
       <p class="municipality-docs">Documents: personnalisés</p>
@@ -6120,13 +6115,11 @@ function applyMunicipalityFilters() {
   if (search) {
     filtered = filtered.filter((item) => [
       item.name,
-      item.manager,
       item.phone,
       item.email,
       item.postal_code,
       item.contacts,
       item.additional_info,
-      item.radio_channel,
     ].map((value) => String(value || '').toLowerCase()).join(' ').includes(search));
   }
 
@@ -6979,7 +6972,6 @@ function bindAppInteractions() {
     const form = event.target;
     const municipalityId = form.elements.id.value;
     const payload = {
-      manager: form.elements.manager.value.trim(),
       phone: form.elements.phone.value.trim(),
       email: form.elements.email.value.trim(),
       postal_code: form.elements.postal_code.value.trim() || null,
@@ -6988,7 +6980,6 @@ function bindAppInteractions() {
       additional_info: form.elements.additional_info.value.trim() || null,
       population: Number(form.elements.population.value || 0) || null,
       shelter_capacity: Number(form.elements.shelter_capacity.value || 0) || null,
-      radio_channel: form.elements.radio_channel.value.trim() || null,
       vigilance_color: normalizeLevel(form.elements.vigilance_color.value || 'vert'),
       pcs_active: Boolean(form.elements.pcs_active.checked),
     };
@@ -7284,6 +7275,59 @@ passwordForm.addEventListener('submit', async (event) => {
   }
 });
 
+
+async function fetchMunicipalityByPostalCode(postalCode) {
+  const code = String(postalCode || '').trim();
+  if (!/^\d{5}$/.test(code)) return null;
+  const response = await queueApiRequest(() => fetchWithTimeout(`https://geo.api.gouv.fr/communes?codePostal=${encodeURIComponent(code)}&fields=nom,code,population&boost=population&limit=1`));
+  const payload = await parseJsonResponse(response, 'geo-api-commune-by-postal-code');
+  if (!Array.isArray(payload) || !payload.length) return null;
+  const commune = payload[0] || {};
+  return {
+    name: String(commune.nom || '').trim(),
+    insee_code: String(commune.code || '').trim(),
+    population: Number(commune.population || 0) || null,
+  };
+}
+
+async function autofillMunicipalityFromPostalCode(formEl) {
+  if (!formEl) return;
+  const postalInput = formEl.elements.postal_code;
+  const nameInput = formEl.elements.name;
+  const inseeInput = formEl.elements.insee_code;
+  const populationInput = formEl.elements.population;
+  const postalCode = String(postalInput?.value || '').trim();
+  if (!/^\d{5}$/.test(postalCode)) return;
+
+  try {
+    const municipality = await fetchMunicipalityByPostalCode(postalCode);
+    if (!municipality) return;
+    if (nameInput && !String(nameInput.value || '').trim()) nameInput.value = municipality.name || '';
+    if (inseeInput) inseeInput.value = municipality.insee_code || '';
+    if (populationInput && !String(populationInput.value || '').trim()) {
+      populationInput.value = municipality.population ?? '';
+    }
+  } catch (error) {
+    // silence: user can still enter values manually
+  }
+}
+
+document.getElementById('municipality-form')?.elements?.postal_code?.addEventListener('change', async (event) => {
+  await autofillMunicipalityFromPostalCode(event.target?.form);
+});
+
+document.getElementById('municipality-form')?.elements?.postal_code?.addEventListener('blur', async (event) => {
+  await autofillMunicipalityFromPostalCode(event.target?.form);
+});
+
+document.getElementById('municipality-edit-form')?.elements?.postal_code?.addEventListener('change', async (event) => {
+  await autofillMunicipalityFromPostalCode(event.target?.form);
+});
+
+document.getElementById('municipality-edit-form')?.elements?.postal_code?.addEventListener('blur', async (event) => {
+  await autofillMunicipalityFromPostalCode(event.target?.form);
+});
+
 document.getElementById('municipality-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!canEdit()) return;
@@ -7295,7 +7339,7 @@ document.getElementById('municipality-form').addEventListener('submit', async (e
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name: form.get('name'),
-        manager: form.get('manager'),
+        manager: (form.get('name') || '').trim(),
         phone: form.get('phone'),
         email: form.get('email'),
         postal_code: form.get('postal_code'),
@@ -7304,7 +7348,6 @@ document.getElementById('municipality-form').addEventListener('submit', async (e
         additional_info: form.get('additional_info'),
         population: Number(form.get('population') || 0) || null,
         shelter_capacity: Number(form.get('shelter_capacity') || 0) || null,
-        radio_channel: form.get('radio_channel'),
       }),
     });
     event.target.reset();

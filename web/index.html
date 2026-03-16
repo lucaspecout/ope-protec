@@ -483,17 +483,15 @@
           </div>
           <p class="muted">Communes affichées: <strong id="municipalities-count">0</strong></p>
           <form id="municipality-form" class="form" data-requires-edit>
+            <input name="postal_code" placeholder="Code postal" pattern="[0-9]{5}" maxlength="5" required />
             <input name="name" placeholder="Nom commune" required />
-            <input name="manager" placeholder="Responsable" required />
             <input name="phone" placeholder="Téléphone" required />
             <input name="email" placeholder="Email" type="email" required />
-            <input name="postal_code" placeholder="Code postal" pattern="[0-9]{5}" maxlength="5" required />
-            <input name="insee_code" placeholder="Code INSEE (5 chiffres)" pattern="[0-9]{5}" maxlength="5" />
+            <input name="insee_code" placeholder="Code INSEE (auto)" pattern="[0-9]{5}" maxlength="5" readonly />
             <input name="contacts" placeholder="Contacts d'astreinte (tel, mails)" />
             <input name="additional_info" placeholder="Infos complémentaires (zones sensibles, écoles...)" />
             <input name="population" type="number" placeholder="Population" min="0" />
             <input name="shelter_capacity" type="number" placeholder="Capacité d'accueil" min="0" />
-            <input name="radio_channel" placeholder="Canal radio / fréquence" />
             <button type="submit">Ajouter</button>
           </form>
           <p id="municipality-feedback" class="muted"></p>
@@ -515,16 +513,14 @@
             </div>
             <form id="municipality-edit-form" class="municipality-edit-form">
               <input type="hidden" name="id" />
-              <label>Responsable<input name="manager" required /></label>
               <label>Téléphone<input name="phone" required /></label>
               <label>Email<input name="email" type="email" required /></label>
               <label>Code postal<input name="postal_code" maxlength="5" pattern="[0-9]{5}" /></label>
-              <label>Code INSEE<input name="insee_code" maxlength="5" pattern="[0-9]{5}" /></label>
+              <label>Code INSEE<input name="insee_code" maxlength="5" pattern="[0-9]{5}" readonly /></label>
               <label>Contacts d'astreinte<textarea name="contacts" rows="2"></textarea></label>
               <label>Informations complémentaires<textarea name="additional_info" rows="3"></textarea></label>
               <label>Population<input name="population" type="number" min="0" /></label>
               <label>Capacité d'accueil<input name="shelter_capacity" type="number" min="0" /></label>
-              <label>Canal radio<input name="radio_channel" /></label>
               <label>Vigilance
                 <select name="vigilance_color">
                   <option value="vert">Vert</option>
