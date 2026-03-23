@@ -49,7 +49,11 @@ const RESOURCE_TYPE_META = {
   salle_spectacle_public: { label: 'Salle de spectacle public', icon: '🎭' },
   salle_fetes: { label: 'Salle des fêtes', icon: '🎪' },
   hopital: { label: 'Hôpital', icon: '🏥' },
+  hopital_public: { label: 'Centre hospitalier public', icon: '🏥' },
+  hopital_prive: { label: 'Hôpital / établissement privé', icon: '🏥' },
+  chu: { label: 'CHU (centre hospitalier universitaire)', icon: '🏨' },
   clinique: { label: 'Clinique', icon: '🩺' },
+  medecin: { label: 'Médecins / cabinets médicaux', icon: '🩺' },
   ehpad: { label: 'EHPAD', icon: '🧓' },
   ecole_primaire: { label: 'École primaire', icon: '🧒' },
   college: { label: 'Collège', icon: '🎒' },
@@ -537,7 +541,7 @@ function finishStartupQueue() {
 const SCHOOL_RESOURCE_TYPES = new Set(['ecole_primaire', 'college', 'lycee', 'universite', 'creche']);
 const SECURITY_RESOURCE_TYPES = new Set(['gendarmerie', 'commissariat_police_nationale', 'police_municipale']);
 const FIRE_RESOURCE_TYPES = new Set(['caserne_pompier', 'caserne']);
-const HEALTH_RESOURCE_TYPES = new Set(['hopital', 'clinique', 'ehpad']);
+const HEALTH_RESOURCE_TYPES = new Set(['hopital', 'hopital_public', 'hopital_prive', 'chu', 'clinique', 'medecin', 'ehpad']);
 const FINESS_DYNAMIC_RESOURCE_TYPES = new Set();
 const RISK_RESOURCE_TYPES = new Set(['lieu_risque', 'centrale_nucleaire', 'energie']);
 const TRANSPORT_RESOURCE_TYPES = new Set(['transport', 'transport_gare_sncf', 'transport_gare_routiere', 'transport_aeroport']);
@@ -2711,7 +2715,8 @@ function slugifyFinessCategory(value = '') {
 }
 
 function inferFinessPriority(type = '') {
-  if (type === 'hopital' || type === 'clinique') return 'critical';
+  if (['hopital', 'hopital_public', 'hopital_prive', 'chu', 'clinique'].includes(type)) return 'critical';
+  if (type === 'medecin') return 'standard';
   return 'vital';
 }
 
@@ -2719,6 +2724,10 @@ function buildFinessResourceMeta(type = '', category = '') {
   const lowerCategory = String(category || '').toLowerCase();
   const label = category || String(type || '').replace(/^finess_/, '').replace(/_/g, ' ').trim() || 'Établissement FINESS';
   let icon = '🏥';
+  if (type === 'medecin' || /medecin|médecin|cabinet medical|cabinet de medecine/.test(lowerCategory)) icon = '🩺';
+  else if (type === 'chu' || /chu|hospitalier universitaire/.test(lowerCategory)) icon = '🏨';
+  else if (type === 'hopital_public' || /hopital public|hôpital public|hospitalisation publique/.test(lowerCategory)) icon = '🏥';
+  else if (type === 'hopital_prive' || /hopital prive|hôpital privé|hospitalisation privee/.test(lowerCategory)) icon = '🏥';
   if (type === 'ehpad' || /ehpad|personnes agees|personnes âgées/.test(lowerCategory)) icon = '🧓';
   else if (type === 'clinique' || /clinique|dialyse/.test(lowerCategory)) icon = '🩺';
   else if (type === 'hopital' || /hopital|hôpital|chu|hospitalier/.test(lowerCategory)) icon = '🏥';
