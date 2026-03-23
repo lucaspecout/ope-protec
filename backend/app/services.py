@@ -2661,6 +2661,72 @@ def _finess_isere_slug(value: str) -> str:
     return cleaned or "autre"
 
 
+def _normalize_finess_text(value: str) -> str:
+    cleaned = unicodedata.normalize("NFKD", value or "")
+    cleaned = "".join(ch for ch in cleaned if not unicodedata.combining(ch))
+    return re.sub(r"\s+", " ", cleaned).strip().lower()
+
+
+_FINESS_ISERE_REQUESTED_CATEGORIES: list[tuple[str, tuple[str, ...]]] = [
+    ("Service autonomie aide (SAA)", ("service autonomie aide", " saa ")),
+    ("Appartement de Coordination Thérapeutique (ACT)", ("appartement de coordination therapeutique", " act ")),
+    ("Maisons Relais – Pensions de Famille", ("maison relais", "pension de famille")),
+    ("Centre d’Accueil et d’Accompagnement à la Réduction des Risques pour Usagers de Drogues (CAARUD)", ("caarud",)),
+    ("Centre d’Action Médico-Sociale Précoce (CAMSP)", ("camsp",)),
+    ("Centre d’Accueil Thérapeutique à Temps Partiel (CATTP)", ("cattp",)),
+    ("Centre gratuit d’information, de dépistage et de diagnostic", ("cegidd", "centre gratuit d information, de depistage et de diagnostic")),
+    ("Centre d’Hébergement et de Réinsertion Sociale (CHRS)", ("chrs", "centre d hebergement et de reinsertion sociale")),
+    ("Centre d’examens de santé", ("centre d examens de sante",)),
+    ("Centre de santé", ("centre de sante",)),
+    ("Centre de santé sexuelle", ("centre de sante sexuelle",)),
+    ("Centre de vaccination", ("centre de vaccination",)),
+    ("Centre de vaccination internationale", ("centre de vaccination internationale",)),
+    ("Autre centre d’accueil", ("autre centre d accueil",)),
+    ("Centre de lutte antituberculeuse (CLAT)", ("clat",)),
+    ("Centre Médico-Psychologique (CMP)", ("cmp ", "centre medico psychologique")),
+    ("Centre Médico-Psycho-Pédagogique (CMPP)", ("cmpp", "centre medico psycho pedagogique")),
+    ("Communautés Professionnelles Territoriales de Santé (CPTS)", ("cpts", "communaute professionnelle territoriale de sante")),
+    ("Centre de soins, d’accompagnement et de prévention en addictologie (CSAPA)", ("csapa",)),
+    ("Établissement expérimental (enfance protégée / handicap)", ("etablissement experimental",)),
+    ("Établissement d’hébergement pour personnes âgées dépendantes (EHPAD)", ("ehpad", "hebergement pour personnes agees dependantes")),
+    ("Maison de santé pour maladies mentales", ("maison de sante pour maladies mentales",)),
+    ("Espaces de vie affective, relationnelle et sexuelle (EVARS)", ("evars",)),
+    ("Structure contribuant au Service d’Accès aux Soins", ("service d acces aux soins",)),
+    ("Foyer de vie pour adultes handicapés", ("foyer de vie pour adultes handicapes",)),
+    ("Pharmacie d’officine", ("pharmacie d officine",)),
+    ("Centre hospitalier spécialisé (santé mentale)", ("centre hospitalier specialise", "sante mentale")),
+    ("Écoles formant aux professions sociales", ("ecole formant aux professions sociales", "ecoles formant aux professions sociales")),
+    ("Lits d’Accueil Médicalisés (LAM)", ("lam ", "lits d accueil medicalises")),
+    ("Laboratoire de biologie médicale", ("laboratoire de biologie medicale",)),
+    ("Lits Halte Soins Santé (LHSS)", ("lhss", "lits halte soins sante")),
+    ("Maison de naissance", ("maison de naissance",)),
+    ("Maison de santé", ("maison de sante",)),
+    ("Maison médicale de garde (MMG)", ("maison medicale de garde", "mmg")),
+    ("Résidence autonomie", ("residence autonomie",)),
+    ("Résidence sociale", ("residence sociale",)),
+    ("Service mandataire judiciaire à la protection des majeurs", ("service mandataire judiciaire a la protection des majeurs",)),
+    ("Services de prévention et de santé au travail (SPST)", ("spst", "service de prevention et de sante au travail")),
+    ("Service de soins infirmiers à domicile (SSIAD)", ("ssiad", "service de soins infirmiers a domicile")),
+    ("Service d’éducation spéciale et de soins à domicile (SESSAD)", ("sessad",)),
+    ("Service d’intervention éducative en milieu ouvert", ("service d intervention educative en milieu ouvert",)),
+    ("Établissement et service d’aide par le travail (ESAT)", ("esat",)),
+    ("Maisons départementales des personnes handicapées (MDPH)", ("mdph",)),
+    ("Protection maternelle et infantile (PMI)", ("pmi", "protection maternelle et infantile")),
+    ("Établissement de soins pluridisciplinaire", ("etablissement de soins pluridisciplinaire",)),
+    ("Maison d’accueil spécialisée (MAS)", ("mas ", "maison d accueil specialisee")),
+    ("Foyer d’hébergement adultes handicapés", ("foyer d hebergement adultes handicapes",)),
+    ("Établissement d’accueil médicalisé (handicap)", ("etablissement d accueil medicalise",)),
+    ("Foyer de l’enfance", ("foyer de l enfance",)),
+    ("Foyer de jeunes travailleurs", ("foyer de jeunes travailleurs",)),
+    ("Établissement d’accueil mère-enfant", ("etablissement d accueil mere enfant",)),
+    ("Services AEMO / AED", ("aemo", "aed")),
+    ("Service d’investigation éducative", ("service d investigation educative",)),
+    ("Centre d’accueil pour demandeurs d’asile (CADA)", ("cada", "centre d accueil pour demandeurs d asile")),
+    ("Entreprise adaptée", ("entreprise adaptee",)),
+    ("Centre de jour pour personnes âgées", ("centre de jour pour personnes agees",)),
+]
+
+
 def _finess_isere_kind(row: list[str]) -> tuple[str, str]:
     lib_cat_etab = str(row[21] if len(row) > 21 else "").strip()
     cat_etab = str(row[19] if len(row) > 19 else "").strip()
@@ -2673,13 +2739,18 @@ def _finess_isere_kind(row: list[str]) -> tuple[str, str]:
             lib_cat_agregat,
             lib_cat_etab,
         )
-    ).lower()
+    )
+    normalized_blob = f" {_normalize_finess_text(blob)} "
 
-    if any(token in blob for token in ("ehpad", "hebergement pour personnes agees dependantes", "hébergement pour personnes âgées dépendantes")):
+    for label, keywords in _FINESS_ISERE_REQUESTED_CATEGORIES:
+        if any(keyword in normalized_blob for keyword in keywords):
+            return f"finess_{_finess_isere_slug(label)}", label
+
+    if any(token in normalized_blob for token in (" ehpad ", "hebergement pour personnes agees dependantes")):
         return "ehpad", (lib_cat_etab or "EHPAD")
-    if any(token in blob for token in ("clinique", "clinique medicale", "clinique chirurgicale", "centre de dialyse")):
+    if any(token in normalized_blob for token in (" clinique ", "clinique medicale", "clinique chirurgicale", "centre de dialyse")):
         return "clinique", (lib_cat_etab or "Clinique")
-    if any(token in blob for token in ("hopital", "hôpital", "hospital", "chu", "centre hospitalier")):
+    if any(token in normalized_blob for token in ("hopital", "hospital", " chu ", "centre hospitalier")):
         return "hopital", (lib_cat_etab or "Hôpital")
 
     category_label = lib_cat_etab or lib_cat_agregat or cat_etab or "Autre établissement FINESS"
@@ -2773,6 +2844,35 @@ def _fetch_finess_isere_resources_live(limit: int = 5000) -> dict[str, Any]:
                 "active": True,
                 "priority": "critical" if kind in ("hopital", "clinique") else "vital",
                 "dynamic": True,
+                "details": {
+                    "finess_et": str(row[1] if len(row) > 1 else "").strip(),
+                    "finess_ej": str(row[2] if len(row) > 2 else "").strip(),
+                    "raison_sociale_courte": str(row[3] if len(row) > 3 else "").strip(),
+                    "raison_sociale": str(row[4] if len(row) > 4 else "").strip(),
+                    "numero_voie": str(row[7] if len(row) > 7 else "").strip(),
+                    "type_voie": str(row[8] if len(row) > 8 else "").strip(),
+                    "voie": str(row[9] if len(row) > 9 else "").strip(),
+                    "complement_voie": str(row[10] if len(row) > 10 else "").strip(),
+                    "distribution": str(row[11] if len(row) > 11 else "").strip(),
+                    "code_commune": str(row[12] if len(row) > 12 else "").strip(),
+                    "code_departement": str(row[13] if len(row) > 13 else "").strip(),
+                    "departement": str(row[14] if len(row) > 14 else "").strip(),
+                    "ligne_acheminement": str(row[15] if len(row) > 15 else "").strip(),
+                    "telephone": str(row[16] if len(row) > 16 else "").strip(),
+                    "fax": str(row[17] if len(row) > 17 else "").strip(),
+                    "categorie_code": str(row[19] if len(row) > 19 else "").strip(),
+                    "categorie_agregat_code": str(row[20] if len(row) > 20 else "").strip(),
+                    "categorie_libelle": str(row[21] if len(row) > 21 else "").strip(),
+                    "siret": str(row[22] if len(row) > 22 else "").strip(),
+                    "naf": str(row[23] if len(row) > 23 else "").strip(),
+                    "type_etablissement_code": str(row[24] if len(row) > 24 else "").strip(),
+                    "type_etablissement_libelle": str(row[25] if len(row) > 25 else "").strip(),
+                    "statut_juridique_code": str(row[26] if len(row) > 26 else "").strip(),
+                    "statut_juridique_libelle": str(row[27] if len(row) > 27 else "").strip(),
+                    "date_ouverture": str(row[28] if len(row) > 28 else "").strip(),
+                    "date_autorisation": str(row[29] if len(row) > 29 else "").strip(),
+                    "date_maj": str(row[30] if len(row) > 30 else "").strip(),
+                },
             }
         )
 

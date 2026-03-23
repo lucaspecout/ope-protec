@@ -595,6 +595,8 @@ label { display: block; margin-bottom: .8rem; }
 .map-toggle-grid label select { min-height: 30px; margin: 0 0 0 .35rem; padding: .2rem .38rem; font-size: .75rem; max-width: 220px; }
 .map-panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: .8rem; flex-wrap: wrap; }
 .map-quick-actions { display: flex; flex-wrap: wrap; gap: .45rem; }
+.popup-details-list { margin: .4rem 0; padding-left: 1rem; }
+.popup-details-list li { margin: .1rem 0; }
 .map-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .35rem; margin: 0; }
 .map-summary article { border: 1px solid #d5e2fb; border-radius: 9px; padding: .32rem .44rem; background: linear-gradient(180deg, #fff, #f4f8ff); }
 .map-summary p { margin: 0; color: #4f6388; font-size: .74rem; }
