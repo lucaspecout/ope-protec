@@ -49,6 +49,7 @@ const RESOURCE_TYPE_META = {
   salle_spectacle_public: { label: 'Salle de spectacle public', icon: '🎭' },
   salle_fetes: { label: 'Salle des fêtes', icon: '🎪' },
   hopital: { label: 'Hôpital', icon: '🏥' },
+  clinique: { label: 'Clinique', icon: '🩺' },
   ehpad: { label: 'EHPAD', icon: '🧓' },
   ecole_primaire: { label: 'École primaire', icon: '🧒' },
   college: { label: 'Collège', icon: '🎒' },
@@ -536,7 +537,7 @@ function finishStartupQueue() {
 const SCHOOL_RESOURCE_TYPES = new Set(['ecole_primaire', 'college', 'lycee', 'universite', 'creche']);
 const SECURITY_RESOURCE_TYPES = new Set(['gendarmerie', 'commissariat_police_nationale', 'police_municipale']);
 const FIRE_RESOURCE_TYPES = new Set(['caserne_pompier', 'caserne']);
-const HEALTH_RESOURCE_TYPES = new Set(['hopital', 'ehpad']);
+const HEALTH_RESOURCE_TYPES = new Set(['hopital', 'clinique', 'ehpad']);
 const RISK_RESOURCE_TYPES = new Set(['lieu_risque', 'centrale_nucleaire', 'energie']);
 const TRANSPORT_RESOURCE_TYPES = new Set(['transport', 'transport_gare_sncf', 'transport_gare_routiere', 'transport_aeroport']);
 const COMMAND_RESOURCE_TYPES = new Set(['poste_commandement']);
@@ -1800,6 +1801,7 @@ async function computeZoneImpact() {
   const inhabitantsPerKm2 = inhabitantsPerM2 * 1_000_000;
   const schoolsCount = resourcesInZone.filter((resource) => SCHOOL_RESOURCE_TYPES.has(resource.type)).length;
   const hospitalsCount = resourcesInZone.filter((resource) => resource.type === 'hopital').length;
+  const clinicsCount = resourcesInZone.filter((resource) => resource.type === 'clinique').length;
   const sensitivePlacesCount = resourcesInZone.filter((resource) => RISK_RESOURCE_TYPES.has(resource.type)).length;
   const ehpadCount = resourcesInZone.filter((resource) => resource.type === 'ehpad').length;
   const hostingPlacesCount = resourcesInZone.filter((resource) => HOSTING_RESOURCE_TYPES.has(resource.type)).length;
@@ -1817,7 +1819,7 @@ async function computeZoneImpact() {
     areaBasedPopulation > 0
       ? `👥 <strong>Population estimée dans la zone tracée (pondérée par surface):</strong> <strong>${Math.round(areaBasedPopulation).toLocaleString('fr-FR')}</strong> habitant(s).`
       : `👥 <strong>Population exposée (INSEE):</strong> <strong>${estimatedPopulation.toLocaleString('fr-FR')}</strong> habitant(s) (population légale des communes intersectées).`,
-    `🏫 <strong>Exposition e:</strong> ${schoolsCount} école(s), ${hospitalsCount} hôpital(aux), ${sensitivePlacesCount} lieu(x) sensible(s), ${ehpadCount} EHPAD, ${hostingPlacesCount} lieu(x) d'accueil.`,
+    `🏫 <strong>Exposition e:</strong> ${schoolsCount} école(s), ${hospitalsCount} hôpital(aux), ${clinicsCount} clinique(s), ${sensitivePlacesCount} lieu(x) sensible(s), ${ehpadCount} EHPAD, ${hostingPlacesCount} lieu(x) d'accueil.`,
     streetInsights.streets.length
       ? `🛣️ <strong>Rues détectées dans la zone (OpenStreetMap):</strong> ${streetInsights.streets.slice(0, 10).map((name) => escapeHtml(name)).join(', ')}.`
       : '🛣️ <strong>Rues détectées dans la zone:</strong> aucune donnée de rue exploitable remontée pour cette emprise.',
@@ -2649,14 +2651,14 @@ async function loadFinessIsereResources() {
     return finessPointsCache;
   }
   try {
-    const payload = await api('/api/finess/isere/resources', { cacheTtlMs: STATIC_POINTS_CACHE_TTL_MS });
+    const payload = await api('/api/finess/isere/resources?limit=400', { cacheTtlMs: STATIC_POINTS_CACHE_TTL_MS });
     const resources = Array.isArray(payload?.resources) ? payload.resources : [];
     finessPointsCache = resources
       .map((resource) => {
         const lat = Number(resource?.lat);
         const lon = Number(resource?.lon);
         if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-        const type = resource?.type === 'ehpad' ? 'ehpad' : 'hopital';
+        const type = resource?.type === 'ehpad' ? 'ehpad' : (resource?.type === 'clinique' ? 'clinique' : 'hopital');
         return {
           id: String(resource?.id || `finess-${resource?.finess_id || Math.random().toString(36).slice(2)}`),
           name: String(resource?.name || 'Établissement FINESS'),
@@ -2665,7 +2667,7 @@ async function loadFinessIsereResources() {
           lon,
           active: true,
           address: String(resource?.address || resource?.city || 'Adresse non renseignée'),
-          priority: type === 'hopital' ? 'critical' : 'vital',
+          priority: type === 'ehpad' ? 'vital' : 'critical',
           info: String(resource?.info || 'Source FINESS data.gouv.fr'),
           source: String(resource?.source || 'https://www.data.gouv.fr/fr/datasets/finess-extraction-du-fichier-des-etablissements/'),
           dynamic: true,
