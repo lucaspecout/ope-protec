@@ -1098,7 +1098,7 @@ def interactive_map_vigieau_alerts(
 @app.get("/api/finess/isere/resources")
 def interactive_map_finess_isere_resources(
     refresh: bool = False,
-    limit: int = 250,
+    limit: int = 400,
     _: User = Depends(require_roles(*READ_ROLES)),
 ):
     safe_limit = max(20, min(limit, 400))

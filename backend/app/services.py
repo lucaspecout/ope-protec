@@ -2658,7 +2658,9 @@ def _finess_isere_kind(row: list[str]) -> str | None:
     blob = " ".join((row[3] if len(row) > 3 else "", row[4] if len(row) > 4 else "", row[19] if len(row) > 19 else "", row[21] if len(row) > 21 else "")).lower()
     if any(token in blob for token in ("ehpad", "hebergement pour personnes agees dependantes", "hébergement pour personnes âgées dépendantes")):
         return "ehpad"
-    if any(token in blob for token in ("hopital", "hôpital", "hospital", "clinique", "chu", "centre hospitalier")):
+    if any(token in blob for token in ("clinique", "clinique medicale", "clinique chirurgicale", "centre de dialyse")):
+        return "clinique"
+    if any(token in blob for token in ("hopital", "hôpital", "hospital", "chu", "centre hospitalier")):
         return "hopital"
     return None
 
@@ -2706,6 +2708,7 @@ def _fetch_finess_isere_resources_live(limit: int = 250) -> dict[str, Any]:
     points: list[dict[str, Any]] = []
     hospitals_total = 0
     ehpad_total = 0
+    clinics_total = 0
     for row in rows:
         if len(row) < 22 or row[13].strip() != "38":
             continue
@@ -2714,6 +2717,8 @@ def _fetch_finess_isere_resources_live(limit: int = 250) -> dict[str, Any]:
             continue
         if kind == "hopital":
             hospitals_total += 1
+        if kind == "clinique":
+            clinics_total += 1
         if kind == "ehpad":
             ehpad_total += 1
         if len(points) >= max(20, min(limit, 400)):
@@ -2743,9 +2748,9 @@ def _fetch_finess_isere_resources_live(limit: int = 250) -> dict[str, Any]:
                 "address": re.sub(r"\s+", " ", " ".join(part for part in address_parts if part).strip()),
                 "finess_id": str(row[1] if len(row) > 1 else "").strip(),
                 "source": "https://www.data.gouv.fr/fr/datasets/finess-extraction-du-fichier-des-etablissements/",
-                "info": f"Source FINESS data.gouv.fr · {kind.upper()}",
+                "info": f"Source FINESS data.gouv.fr · {kind.capitalize()}",
                 "active": True,
-                "priority": "critical" if kind == "hopital" else "vital",
+                "priority": "critical" if kind in ("hopital", "clinique") else "vital",
                 "dynamic": True,
             }
         )
@@ -2756,6 +2761,7 @@ def _fetch_finess_isere_resources_live(limit: int = 250) -> dict[str, Any]:
         "dataset_url": "https://www.data.gouv.fr/fr/datasets/finess-extraction-du-fichier-des-etablissements/",
         "updated_at": datetime.utcnow().isoformat() + "Z",
         "hospitals_total": hospitals_total,
+        "clinics_total": clinics_total,
         "ehpad_total": ehpad_total,
         "resources_total": len(points),
         "resources": points,
@@ -2774,6 +2780,7 @@ def fetch_finess_isere_resources(force_refresh: bool = False, limit: int = 250) 
                 "source": "FINESS data.gouv.fr",
                 "updated_at": datetime.utcnow().isoformat() + "Z",
                 "hospitals_total": 0,
+                "clinics_total": 0,
                 "ehpad_total": 0,
                 "resources_total": 0,
                 "resources": [],
