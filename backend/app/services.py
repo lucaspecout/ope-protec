@@ -499,6 +499,8 @@ _rte_electricity_cache_lock = Lock()
 _rte_electricity_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _finess_isere_cache_lock = Lock()
 _finess_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_finess_isere_communes_lock = Lock()
+_finess_isere_communes_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _isere_opendata_cache_lock = Lock()
 _isere_opendata_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _anfr_isere_cache_lock = Lock()
@@ -2742,14 +2744,23 @@ def _finess_isere_kind(row: list[str]) -> tuple[str, str]:
     )
     normalized_blob = f" {_normalize_finess_text(blob)} "
 
+    if any(token in normalized_blob for token in (" medecin ", " medecins ", "cabinet medical", "cabinet de medecine", "medecine generale", "medecin generaliste", "maison medicale", "maison de sante", "centre de sante")):
+        return "medecin", (lib_cat_etab or "Médecins / cabinet médical")
+
     for label, keywords in _FINESS_ISERE_REQUESTED_CATEGORIES:
         if any(keyword in normalized_blob for keyword in keywords):
             return f"finess_{_finess_isere_slug(label)}", label
 
+    if any(token in normalized_blob for token in (" chu ", "centre hospitalier universitaire", "c.h.u")):
+        return "chu", (lib_cat_etab or "CHU")
     if any(token in normalized_blob for token in (" ehpad ", "hebergement pour personnes agees dependantes")):
         return "ehpad", (lib_cat_etab or "EHPAD")
     if any(token in normalized_blob for token in (" clinique ", "clinique medicale", "clinique chirurgicale", "centre de dialyse")):
         return "clinique", (lib_cat_etab or "Clinique")
+    if any(token in normalized_blob for token in (" hospitalisation privee ", "hopital prive", "hôpital privé", "etablissement prive", "établissement privé")):
+        return "hopital_prive", (lib_cat_etab or "Hôpital privé")
+    if any(token in normalized_blob for token in (" hospitalisation publique ", "hopital public", "hôpital public", "centre hospitalier public")):
+        return "hopital_public", (lib_cat_etab or "Hôpital public")
     if any(token in normalized_blob for token in ("hopital", "hospital", " chu ", "centre hospitalier")):
         return "hopital", (lib_cat_etab or "Hôpital")
 
@@ -2777,6 +2788,40 @@ def _finess_commune_center(city: str) -> tuple[float, float] | None:
         return None
 
 
+def _fetch_isere_commune_centers() -> dict[str, tuple[float, float]]:
+    payload = _http_get_json(
+        "https://geo.api.gouv.fr/departements/38/communes?fields=code,nom,centre&format=json",
+        timeout=12,
+    )
+    rows = payload if isinstance(payload, list) else []
+    centers: dict[str, tuple[float, float]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        code = str(row.get("code") or "").strip()
+        coordinates = ((row.get("centre") or {}).get("coordinates") if isinstance(row.get("centre"), dict) else None)
+        if not code or not isinstance(coordinates, list) or len(coordinates) != 2:
+            continue
+        lon, lat = coordinates
+        try:
+            centers[code] = (float(lat), float(lon))
+        except (TypeError, ValueError):
+            continue
+    return centers
+
+
+def _get_isere_commune_centers(force_refresh: bool = False) -> dict[str, tuple[float, float]]:
+    def loader() -> dict[str, tuple[float, float]]:
+        return _fetch_isere_commune_centers()
+    return _cached_external_payload(
+        cache=_finess_isere_communes_cache,
+        lock=_finess_isere_communes_lock,
+        ttl_seconds=86400,
+        force_refresh=force_refresh,
+        loader=loader,
+    )
+
+
 def _fetch_finess_isere_resources_live(limit: int = 5000) -> dict[str, Any]:
     dataset_url = "https://www.data.gouv.fr/api/1/datasets/finess-extraction-du-fichier-des-etablissements/"
     dataset = _http_get_json(dataset_url, timeout=12)
@@ -2797,8 +2842,13 @@ def _fetch_finess_isere_resources_live(limit: int = 5000) -> dict[str, Any]:
     next(rows, None)  # ligne métadonnées
 
     commune_center_cache: dict[str, tuple[float, float] | None] = {}
+    centers_by_code = _get_isere_commune_centers()
     points: list[dict[str, Any]] = []
     hospitals_total = 0
+    chu_total = 0
+    medecins_total = 0
+    hospitals_public_total = 0
+    hospitals_private_total = 0
     ehpad_total = 0
     clinics_total = 0
     categories: dict[str, int] = {}
@@ -2809,6 +2859,14 @@ def _fetch_finess_isere_resources_live(limit: int = 5000) -> dict[str, Any]:
         categories[category_label] = categories.get(category_label, 0) + 1
         if kind == "hopital":
             hospitals_total += 1
+        if kind == "chu":
+            chu_total += 1
+        if kind == "medecin":
+            medecins_total += 1
+        if kind == "hopital_public":
+            hospitals_public_total += 1
+        if kind == "hopital_prive":
+            hospitals_private_total += 1
         if kind == "clinique":
             clinics_total += 1
         if kind == "ehpad":
@@ -2819,9 +2877,12 @@ def _fetch_finess_isere_resources_live(limit: int = 5000) -> dict[str, Any]:
         postal_code, city = _extract_city_from_finess_address_line(row[15] if len(row) > 15 else "")
         if not city:
             continue
-        if city not in commune_center_cache:
-            commune_center_cache[city] = _finess_commune_center(city)
-        coords = commune_center_cache.get(city)
+        code_commune = str(row[12] if len(row) > 12 else "").strip()
+        coords = centers_by_code.get(code_commune) if code_commune else None
+        if not coords:
+            if city not in commune_center_cache:
+                commune_center_cache[city] = _finess_commune_center(city)
+            coords = commune_center_cache.get(city)
         if not coords:
             continue
         lat, lon = coords
@@ -2882,6 +2943,10 @@ def _fetch_finess_isere_resources_live(limit: int = 5000) -> dict[str, Any]:
         "dataset_url": "https://www.data.gouv.fr/fr/datasets/finess-extraction-du-fichier-des-etablissements/",
         "updated_at": datetime.utcnow().isoformat() + "Z",
         "hospitals_total": hospitals_total,
+        "chu_total": chu_total,
+        "medecins_total": medecins_total,
+        "hospitals_public_total": hospitals_public_total,
+        "hospitals_private_total": hospitals_private_total,
         "clinics_total": clinics_total,
         "ehpad_total": ehpad_total,
         "categories_total": len(categories),
@@ -2906,6 +2971,10 @@ def fetch_finess_isere_resources(force_refresh: bool = False, limit: int = 5000)
                 "source": "FINESS data.gouv.fr",
                 "updated_at": datetime.utcnow().isoformat() + "Z",
                 "hospitals_total": 0,
+                "chu_total": 0,
+                "medecins_total": 0,
+                "hospitals_public_total": 0,
+                "hospitals_private_total": 0,
                 "clinics_total": 0,
                 "ehpad_total": 0,
                 "categories_total": 0,
