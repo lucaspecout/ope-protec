@@ -710,7 +710,7 @@ const normalizeLevel = (level) => ({ verte: 'vert', green: 'vert', yellow: 'jaun
 const levelColor = (level) => ({ vert: '#2f9e44', jaune: '#f59f00', orange: '#f76707', rouge: '#e03131' }[normalizeLevel(level)] || '#2f9e44');
 const LOG_LEVEL_EMOJI = { vert: '🟢', jaune: '🟡', orange: '🟠', rouge: '🔴' };
 const LOG_STATUS_LABEL = { nouveau: 'Nouveau', en_cours: 'En cours', suivi: 'Suivi', clos: 'Clos' };
-const EVENT_STATUS_LABEL = { ouvert: 'Ouvert', en_cours: 'En cours', stabilise: 'Stabilisé', clos: 'Clos' };
+const EVENT_STATUS_LABEL = { ouvert: 'Ouvert', clos: 'Clos' };
 
 function debounce(fn, wait = 200) {
   let timeoutId = null;
@@ -774,10 +774,8 @@ function getEventTitle(eventId) {
 function eventStatusRank(status = 'ouvert') {
   const normalized = String(status || 'ouvert').toLowerCase();
   if (normalized === 'ouvert') return 0;
-  if (normalized === 'en_cours') return 1;
-  if (normalized === 'stabilise') return 2;
-  if (normalized === 'clos') return 3;
-  return 4;
+  if (normalized === 'clos') return 1;
+  return 2;
 }
 
 function sortOperationalEvents(events = []) {
@@ -795,7 +793,7 @@ function getSelectedOperationalEvent() {
 
 function isOpenOrActiveEvent(event = {}) {
   const status = String(event?.status || '').toLowerCase();
-  return status === 'ouvert' || status === 'en_cours';
+  return status === 'ouvert';
 }
 
 function renderEventMcoSuggestions() {
@@ -870,20 +868,6 @@ function updateEventDetailPanel() {
   setText('event-detail-meta', `${selectedEvent.address || 'Adresse non renseignée'} · ${locality} · Statut: ${status}`);
 
   const normalizedStatus = String(selectedEvent.status || '').toLowerCase();
-  const progressButton = document.getElementById('event-progress-btn');
-  if (progressButton) {
-    progressButton.setAttribute('data-event-status', String(selectedEvent.id));
-    progressButton.setAttribute('data-event-next', 'en_cours');
-    progressButton.disabled = normalizedStatus === 'en_cours' || normalizedStatus === 'stabilise' || normalizedStatus === 'clos';
-  }
-
-  const stabiliseButton = document.getElementById('event-stabilise-btn');
-  if (stabiliseButton) {
-    stabiliseButton.setAttribute('data-event-status', String(selectedEvent.id));
-    stabiliseButton.setAttribute('data-event-next', 'stabilise');
-    stabiliseButton.disabled = normalizedStatus === 'stabilise' || normalizedStatus === 'clos';
-  }
-
   const closeButton = document.getElementById('event-close-btn');
   if (closeButton) {
     const isClosed = normalizedStatus === 'clos';

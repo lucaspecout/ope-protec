@@ -9,7 +9,7 @@ ALLOWED_VIGILANCE_COLORS = {"vert", "jaune", "orange", "rouge"}
 ALLOWED_DANGER_LEVELS = {"vert", "jaune", "orange", "rouge"}
 ALLOWED_LOG_SCOPES = {"commune", "pcs", "departemental"}
 ALLOWED_LOG_STATUS = {"nouveau", "en_cours", "suivi", "clos"}
-ALLOWED_EVENT_STATUS = {"ouvert", "en_cours", "stabilise", "clos"}
+ALLOWED_EVENT_STATUS = {"ouvert", "clos"}
 
 
 class Token(BaseModel):
