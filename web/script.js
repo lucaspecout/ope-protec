@@ -6022,7 +6022,22 @@ function renderApiInterconnections(data = {}) {
     const degraded = status !== 'online' || Boolean(payload.error);
     const errorLabel = serviceErrorLabel(payload);
     const updatedAt = payload.updated_at ? safeDateToLocale(payload.updated_at, { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-';
-    return `<article class="api-card"><h4>${service.label}</h4><p>Statut: <span class="${degraded ? 'ko' : 'ok'}">${status}</span></p><p>Indicateur: <strong>${escapeHtml(service.level)}</strong></p><p class="muted">${escapeHtml(service.details)}</p><p class="${degraded ? 'ko' : 'muted'}">Erreur actuelle: ${escapeHtml(errorLabel)}</p><p class="muted api-card-refresh">Dernière récupération API: ${escapeHtml(updatedAt)}</p></article>`;
+    const rawDetails = String(service.details || '');
+    const detailsWithoutLinks = rawDetails.replace(/https?:\/\/\S+/gi, '').replace(/\s{2,}/g, ' ').trim();
+    const detailsText = detailsWithoutLinks || 'Détail disponible dans la source officielle.';
+    const sourceCandidates = [
+      payload.source_data,
+      payload.source,
+      payload.source_reseaux,
+      payload.dataset_url,
+      payload.source_url,
+      payload.link,
+    ];
+    const sourceUrl = sourceCandidates.find((candidate) => String(candidate || '').startsWith('http'));
+    const openSourceButton = sourceUrl
+      ? `<a class="ghost inline-action api-card-open-link" href="${escapeHtml(String(sourceUrl))}" target="_blank" rel="noreferrer noopener">Ouvrir</a>`
+      : '';
+    return `<article class="api-card"><h4>${service.label}</h4><p>Statut: <span class="${degraded ? 'ko' : 'ok'}">${status}</span></p><p>Indicateur: <strong>${escapeHtml(service.level)}</strong></p><p class="muted">${escapeHtml(detailsText)}</p>${openSourceButton ? `<p>${openSourceButton}</p>` : ''}<p class="${degraded ? 'ko' : 'muted'}">Erreur actuelle: ${escapeHtml(errorLabel)}</p><p class="muted api-card-refresh">Dernière récupération API: ${escapeHtml(updatedAt)}</p></article>`;
   }).join('');
 
   const rawBlocks = services.map((service) => {
