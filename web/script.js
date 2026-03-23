@@ -2680,6 +2680,7 @@ async function loadFinessIsereResources() {
           info: String(resource?.info || `Source FINESS data.gouv.fr · ${meta.label}`),
           category: meta.label,
           source: String(resource?.source || 'https://www.data.gouv.fr/fr/datasets/finess-extraction-du-fichier-des-etablissements/'),
+          details: resource?.details && typeof resource.details === 'object' ? resource.details : null,
           dynamic: true,
         };
       })
@@ -2755,6 +2756,30 @@ function syncFinessHealthFilterOptions() {
   dynamicOptions.sort((a, b) => a.label.localeCompare(b.label, 'fr', { sensitivity: 'base' }));
   select.innerHTML = ['<option value="all">Toutes les catégories FINESS</option>', ...dynamicOptions.map((option) => `<option value="${escapeHtml(option.type)}">${escapeHtml(option.label)}</option>`)].join('');
   select.value = values.has(previous) ? previous : 'all';
+}
+
+function formatFinessDetailsHtml(resource = {}) {
+  const details = resource?.details && typeof resource.details === 'object' ? resource.details : null;
+  if (!details) return '';
+  const entries = [
+    ['FINESS ET', details.finess_et],
+    ['FINESS EJ', details.finess_ej],
+    ['SIRET', details.siret],
+    ['Téléphone', details.telephone],
+    ['Fax', details.fax],
+    ['Catégorie', details.categorie_libelle || details.categorie_code],
+    ['Agrégat', details.categorie_agregat_code],
+    ['Statut', details.statut_juridique_libelle || details.statut_juridique_code],
+    ['Type', details.type_etablissement_libelle || details.type_etablissement_code],
+    ['Code commune', details.code_commune],
+    ['Date ouverture', details.date_ouverture],
+    ['Date autorisation', details.date_autorisation],
+    ['Date maj FINESS', details.date_maj],
+  ]
+    .filter(([, value]) => String(value || '').trim())
+    .map(([label, value]) => `<li><strong>${escapeHtml(label)}:</strong> ${escapeHtml(String(value))}</li>`)
+    .join('');
+  return entries ? `<ul class="popup-details-list">${entries}</ul>` : '';
 }
 
 async function loadIserePopulationPoints() {
@@ -3045,7 +3070,7 @@ async function renderResources() {
     window.L.marker([coords.lat, coords.lon], {
       icon: window.L.divIcon({ className: 'map-resource-icon-wrap', html: markerHtml, iconSize: [24, 24], iconAnchor: [12, 12] }),
     })
-      .bindPopup(`<strong>${meta.icon} ${r.name}</strong><br>Type: ${meta.label}<br>Niveau: ${priorityLabel[r.priority] || 'standard'}<br>Adresse: ${r.address}<br>${escapeHtml(r.info || '')}<br><a href="${escapeHtml(r.source || '#')}" target="_blank" rel="noreferrer">Source publique</a>`)
+      .bindPopup(`<strong>${meta.icon} ${r.name}</strong><br>Type: ${meta.label}<br>Niveau: ${priorityLabel[r.priority] || 'standard'}<br>Adresse: ${r.address}<br>${escapeHtml(r.info || '')}${formatFinessDetailsHtml(r)}<br><a href="${escapeHtml(r.source || '#')}" target="_blank" rel="noreferrer">Source publique</a>`)
       .addTo(resourceLayer);
   });
   setMapFeedback(`${resources.length} ressource(s) affichée(s).`);
