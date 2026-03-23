@@ -5587,7 +5587,7 @@ function renderSncfAlerts(sncf = {}) {
   const alerts = Array.isArray(sncf?.alerts) ? sncf.alerts : [];
   const total = Number(sncf?.alerts_total ?? alerts.length);
   setRiskText('sncf-status', `${sncf.status || 'inconnu'} · ${total} alerte(s)`, sncf.status === 'online' ? 'vert' : 'jaune');
-  setText('sncf-info', `Filtre Isère · accidents/travaux de voie · source ${sncf.source || '-'}`);
+  setServiceInfoWithSource('sncf-info', 'Filtre Isère · accidents/travaux de voie', sncf.source || '');
   setHtml('sncf-alerts-list', alerts.slice(0, 10).map((alert) => {
     const level = normalizeLevel(alert.level || alert.severity || 'jaune');
     const type = escapeHtml(alert.type || 'alerte');
@@ -5608,7 +5608,7 @@ function renderApicAlerts(apic = {}) {
   const total = Number(apic?.alerts_total ?? alerts.length);
   const level = normalizeLevel(apic?.level || (total > 0 ? 'jaune' : 'vert'));
   setRiskText('apic-status', `${apic.status || 'inconnu'} · ${total} alerte(s)`, level);
-  setText('apic-info', `Département 38 · source ${apic.source_data || apic.source || '-'}`);
+  setServiceInfoWithSource('apic-info', 'Département 38', apic.source_data || apic.source || '');
   setHtml('apic-list', alerts.slice(0, 10).map((alert) => {
     const zone = escapeHtml(alert.zone || 'Isère');
     const alertLevel = normalizeLevel(alert.level || 'jaune');
@@ -5623,12 +5623,25 @@ function renderVigicruesFlashAlerts(vigicruesFlash = {}) {
   const total = Number(vigicruesFlash?.alerts_total ?? alerts.length);
   const level = normalizeLevel(vigicruesFlash?.level || (total > 0 ? 'jaune' : 'vert'));
   setRiskText('vigicrues-flash-status', `${vigicruesFlash.status || 'inconnu'} · ${total} alerte(s)`, level);
-  setText('vigicrues-flash-info', `Département 38 · source ${vigicruesFlash.source_data || vigicruesFlash.source || '-'}`);
+  setServiceInfoWithSource('vigicrues-flash-info', 'Département 38', vigicruesFlash.source_data || vigicruesFlash.source || '');
   setHtml('vigicrues-flash-list', alerts.slice(0, 10).map((alert) => {
     const zone = escapeHtml(alert.zone || 'Isère');
     const alertLevel = normalizeLevel(alert.level || 'jaune');
     return `<li><strong>${zone}</strong> · <span style="color:${levelColor(alertLevel)}">${escapeHtml(alertLevel)}</span></li>`;
   }).join('') || '<li>Aucune alerte Vigicrues Flash en cours sur l’Isère.</li>');
+}
+
+function setServiceInfoWithSource(targetId, label, sourceCandidate) {
+  const safeLabel = escapeHtml(String(label || '').trim() || '-');
+  const safeSource = String(sourceCandidate || '').trim();
+  if (safeSource.startsWith('http')) {
+    setHtml(
+      targetId,
+      `<span>${safeLabel} · source officielle</span> <a class="ghost inline-action api-card-open-link" href="${escapeHtml(safeSource)}" target="_blank" rel="noreferrer noopener">Ouvrir</a>`,
+    );
+    return;
+  }
+  setText(targetId, `${label} · source indisponible`);
 }
 
 
