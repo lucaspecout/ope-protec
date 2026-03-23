@@ -538,6 +538,7 @@ const SCHOOL_RESOURCE_TYPES = new Set(['ecole_primaire', 'college', 'lycee', 'un
 const SECURITY_RESOURCE_TYPES = new Set(['gendarmerie', 'commissariat_police_nationale', 'police_municipale']);
 const FIRE_RESOURCE_TYPES = new Set(['caserne_pompier', 'caserne']);
 const HEALTH_RESOURCE_TYPES = new Set(['hopital', 'clinique', 'ehpad']);
+const FINESS_DYNAMIC_RESOURCE_TYPES = new Set();
 const RISK_RESOURCE_TYPES = new Set(['lieu_risque', 'centrale_nucleaire', 'energie']);
 const TRANSPORT_RESOURCE_TYPES = new Set(['transport', 'transport_gare_sncf', 'transport_gare_routiere', 'transport_aeroport']);
 const COMMAND_RESOURCE_TYPES = new Set(['poste_commandement']);
@@ -2626,7 +2627,7 @@ function shouldDisplayBaseResourceType(type = '') {
     if (type === 'transport' && transportTypeFilter === 'transport_gare_sncf') return true;
     return transportTypeFilter === type;
   }
-  if (HEALTH_RESOURCE_TYPES.has(type)) {
+  if (HEALTH_RESOURCE_TYPES.has(type) || FINESS_DYNAMIC_RESOURCE_TYPES.has(type)) {
     const healthEnabled = document.getElementById('filter-resources-health')?.checked ?? false;
     const healthTypeFilter = document.getElementById('filter-resources-health-type')?.value || 'all';
     if (!healthEnabled) return false;
@@ -2647,18 +2648,26 @@ async function loadFinessIsereResources() {
   const cached = readFreshSnapshot(STORAGE_KEYS.staticFinessCache, STATIC_POINTS_CACHE_TTL_MS);
   if (Array.isArray(cached)) {
     finessPointsCache = cached;
+    rebuildFinessMetaFromCache();
+    syncFinessHealthFilterOptions();
     finessLoaded = true;
     return finessPointsCache;
   }
   try {
-    const payload = await api('/api/finess/isere/resources?limit=400', { cacheTtlMs: STATIC_POINTS_CACHE_TTL_MS });
+    const payload = await api('/api/finess/isere/resources?limit=20000', { cacheTtlMs: STATIC_POINTS_CACHE_TTL_MS });
     const resources = Array.isArray(payload?.resources) ? payload.resources : [];
+    const dynamicTypeMeta = new Map();
+    FINESS_DYNAMIC_RESOURCE_TYPES.clear();
     finessPointsCache = resources
       .map((resource) => {
         const lat = Number(resource?.lat);
         const lon = Number(resource?.lon);
         if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-        const type = resource?.type === 'ehpad' ? 'ehpad' : (resource?.type === 'clinique' ? 'clinique' : 'hopital');
+        const rawType = String(resource?.type || '').trim().toLowerCase();
+        const category = String(resource?.category || '').trim() || 'Établissement FINESS';
+        const type = rawType || `finess_${slugifyFinessCategory(category)}`;
+        const meta = buildFinessResourceMeta(type, category);
+        dynamicTypeMeta.set(type, meta);
         return {
           id: String(resource?.id || `finess-${resource?.finess_id || Math.random().toString(36).slice(2)}`),
           name: String(resource?.name || 'Établissement FINESS'),
@@ -2667,20 +2676,85 @@ async function loadFinessIsereResources() {
           lon,
           active: true,
           address: String(resource?.address || resource?.city || 'Adresse non renseignée'),
-          priority: type === 'ehpad' ? 'vital' : 'critical',
-          info: String(resource?.info || 'Source FINESS data.gouv.fr'),
+          priority: String(resource?.priority || inferFinessPriority(type)),
+          info: String(resource?.info || `Source FINESS data.gouv.fr · ${meta.label}`),
+          category: meta.label,
           source: String(resource?.source || 'https://www.data.gouv.fr/fr/datasets/finess-extraction-du-fichier-des-etablissements/'),
           dynamic: true,
         };
       })
       .filter(Boolean);
+    dynamicTypeMeta.forEach((meta, type) => {
+      RESOURCE_TYPE_META[type] = meta;
+      if (!HEALTH_RESOURCE_TYPES.has(type)) FINESS_DYNAMIC_RESOURCE_TYPES.add(type);
+    });
+    syncFinessHealthFilterOptions();
     saveSnapshot(STORAGE_KEYS.staticFinessCache, finessPointsCache);
   } catch {
     const staleCached = readSnapshot(STORAGE_KEYS.staticFinessCache);
     finessPointsCache = Array.isArray(staleCached) ? staleCached : [];
+    rebuildFinessMetaFromCache();
+    syncFinessHealthFilterOptions();
   }
   finessLoaded = true;
   return finessPointsCache;
+}
+
+function slugifyFinessCategory(value = '') {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '') || 'autre';
+}
+
+function inferFinessPriority(type = '') {
+  if (type === 'hopital' || type === 'clinique') return 'critical';
+  return 'vital';
+}
+
+function buildFinessResourceMeta(type = '', category = '') {
+  const lowerCategory = String(category || '').toLowerCase();
+  const label = category || String(type || '').replace(/^finess_/, '').replace(/_/g, ' ').trim() || 'Établissement FINESS';
+  let icon = '🏥';
+  if (type === 'ehpad' || /ehpad|personnes agees|personnes âgées/.test(lowerCategory)) icon = '🧓';
+  else if (type === 'clinique' || /clinique|dialyse/.test(lowerCategory)) icon = '🩺';
+  else if (type === 'hopital' || /hopital|hôpital|chu|hospitalier/.test(lowerCategory)) icon = '🏥';
+  else if (/psy|sante mentale|santé mentale/.test(lowerCategory)) icon = '🧠';
+  else if (/handicap|ime|mas|foyer/.test(lowerCategory)) icon = '♿';
+  else if (/laboratoire|analyse/.test(lowerCategory)) icon = '🧪';
+  else if (/pharmacie/.test(lowerCategory)) icon = '💊';
+  return { label, icon };
+}
+
+function rebuildFinessMetaFromCache() {
+  FINESS_DYNAMIC_RESOURCE_TYPES.clear();
+  (finessPointsCache || []).forEach((resource) => {
+    const type = String(resource?.type || '').trim().toLowerCase();
+    if (!type) return;
+    const category = String(resource?.category || '').trim() || 'Établissement FINESS';
+    RESOURCE_TYPE_META[type] = buildFinessResourceMeta(type, category);
+    if (!HEALTH_RESOURCE_TYPES.has(type)) FINESS_DYNAMIC_RESOURCE_TYPES.add(type);
+  });
+}
+
+function syncFinessHealthFilterOptions() {
+  const select = document.getElementById('filter-resources-health-type');
+  if (!select) return;
+  const previous = select.value || 'all';
+  const values = new Set(['all']);
+  const dynamicOptions = [];
+  const types = [...HEALTH_RESOURCE_TYPES, ...FINESS_DYNAMIC_RESOURCE_TYPES];
+  types.forEach((type) => {
+    const meta = RESOURCE_TYPE_META[type];
+    if (!meta) return;
+    values.add(type);
+    dynamicOptions.push({ type, label: meta.label });
+  });
+  dynamicOptions.sort((a, b) => a.label.localeCompare(b.label, 'fr', { sensitivity: 'base' }));
+  select.innerHTML = ['<option value="all">Toutes les catégories FINESS</option>', ...dynamicOptions.map((option) => `<option value="${escapeHtml(option.type)}">${escapeHtml(option.label)}</option>`)].join('');
+  select.value = values.has(previous) ? previous : 'all';
 }
 
 async function loadIserePopulationPoints() {
@@ -2943,6 +3017,7 @@ function syncTelecomFilterState() {
 
 async function renderResources() {
   await Promise.all([loadIsereInstitutions(), loadFinessIsereResources(), loadTelecomPoints()]);
+  syncFinessHealthFilterOptions();
   const resources = getDisplayedResources();
   const priorityLabel = { critical: 'critique', vital: 'vital', risk: 'à risque', standard: 'standard' };
   const markerColor = { critical: '#e03131', vital: '#1971c2', risk: '#f08c00', standard: '#2f9e44' };

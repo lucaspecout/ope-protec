@@ -2654,15 +2654,36 @@ def _extract_city_from_finess_address_line(value: str) -> tuple[str | None, str 
     return postal_code, city
 
 
-def _finess_isere_kind(row: list[str]) -> str | None:
-    blob = " ".join((row[3] if len(row) > 3 else "", row[4] if len(row) > 4 else "", row[19] if len(row) > 19 else "", row[21] if len(row) > 21 else "")).lower()
+def _finess_isere_slug(value: str) -> str:
+    cleaned = unicodedata.normalize("NFKD", value or "")
+    cleaned = "".join(ch for ch in cleaned if not unicodedata.combining(ch))
+    cleaned = re.sub(r"[^a-zA-Z0-9]+", "_", cleaned).strip("_").lower()
+    return cleaned or "autre"
+
+
+def _finess_isere_kind(row: list[str]) -> tuple[str, str]:
+    lib_cat_etab = str(row[21] if len(row) > 21 else "").strip()
+    cat_etab = str(row[19] if len(row) > 19 else "").strip()
+    lib_cat_agregat = str(row[20] if len(row) > 20 else "").strip()
+    blob = " ".join(
+        (
+            str(row[3] if len(row) > 3 else ""),
+            str(row[4] if len(row) > 4 else ""),
+            cat_etab,
+            lib_cat_agregat,
+            lib_cat_etab,
+        )
+    ).lower()
+
     if any(token in blob for token in ("ehpad", "hebergement pour personnes agees dependantes", "hébergement pour personnes âgées dépendantes")):
-        return "ehpad"
+        return "ehpad", (lib_cat_etab or "EHPAD")
     if any(token in blob for token in ("clinique", "clinique medicale", "clinique chirurgicale", "centre de dialyse")):
-        return "clinique"
+        return "clinique", (lib_cat_etab or "Clinique")
     if any(token in blob for token in ("hopital", "hôpital", "hospital", "chu", "centre hospitalier")):
-        return "hopital"
-    return None
+        return "hopital", (lib_cat_etab or "Hôpital")
+
+    category_label = lib_cat_etab or lib_cat_agregat or cat_etab or "Autre établissement FINESS"
+    return f"finess_{_finess_isere_slug(category_label)}", category_label
 
 
 def _finess_commune_center(city: str) -> tuple[float, float] | None:
@@ -2685,7 +2706,7 @@ def _finess_commune_center(city: str) -> tuple[float, float] | None:
         return None
 
 
-def _fetch_finess_isere_resources_live(limit: int = 250) -> dict[str, Any]:
+def _fetch_finess_isere_resources_live(limit: int = 5000) -> dict[str, Any]:
     dataset_url = "https://www.data.gouv.fr/api/1/datasets/finess-extraction-du-fichier-des-etablissements/"
     dataset = _http_get_json(dataset_url, timeout=12)
     resources = dataset.get("resources") if isinstance(dataset, dict) else []
@@ -2709,19 +2730,19 @@ def _fetch_finess_isere_resources_live(limit: int = 250) -> dict[str, Any]:
     hospitals_total = 0
     ehpad_total = 0
     clinics_total = 0
+    categories: dict[str, int] = {}
     for row in rows:
         if len(row) < 22 or row[13].strip() != "38":
             continue
-        kind = _finess_isere_kind(row)
-        if not kind:
-            continue
+        kind, category_label = _finess_isere_kind(row)
+        categories[category_label] = categories.get(category_label, 0) + 1
         if kind == "hopital":
             hospitals_total += 1
         if kind == "clinique":
             clinics_total += 1
         if kind == "ehpad":
             ehpad_total += 1
-        if len(points) >= max(20, min(limit, 400)):
+        if len(points) >= max(200, min(limit, 20000)):
             continue
 
         postal_code, city = _extract_city_from_finess_address_line(row[15] if len(row) > 15 else "")
@@ -2740,7 +2761,7 @@ def _fetch_finess_isere_resources_live(limit: int = 250) -> dict[str, Any]:
                 "name": str((row[4] if len(row) > 4 else "") or (row[3] if len(row) > 3 else "")).strip() or "Établissement FINESS",
                 "short_name": str(row[3] if len(row) > 3 else "").strip() or "",
                 "type": kind,
-                "category": str(row[21] if len(row) > 21 else "").strip(),
+                "category": category_label,
                 "lat": lat,
                 "lon": lon,
                 "city": city,
@@ -2748,7 +2769,7 @@ def _fetch_finess_isere_resources_live(limit: int = 250) -> dict[str, Any]:
                 "address": re.sub(r"\s+", " ", " ".join(part for part in address_parts if part).strip()),
                 "finess_id": str(row[1] if len(row) > 1 else "").strip(),
                 "source": "https://www.data.gouv.fr/fr/datasets/finess-extraction-du-fichier-des-etablissements/",
-                "info": f"Source FINESS data.gouv.fr · {kind.capitalize()}",
+                "info": f"Source FINESS data.gouv.fr · {category_label}",
                 "active": True,
                 "priority": "critical" if kind in ("hopital", "clinique") else "vital",
                 "dynamic": True,
@@ -2763,13 +2784,18 @@ def _fetch_finess_isere_resources_live(limit: int = 250) -> dict[str, Any]:
         "hospitals_total": hospitals_total,
         "clinics_total": clinics_total,
         "ehpad_total": ehpad_total,
+        "categories_total": len(categories),
+        "categories": [
+            {"label": label, "count": count}
+            for label, count in sorted(categories.items(), key=lambda item: (-item[1], item[0].lower()))
+        ],
         "resources_total": len(points),
         "resources": points,
     }
 
 
-def fetch_finess_isere_resources(force_refresh: bool = False, limit: int = 250) -> dict[str, Any]:
-    safe_limit = max(20, min(limit, 400))
+def fetch_finess_isere_resources(force_refresh: bool = False, limit: int = 5000) -> dict[str, Any]:
+    safe_limit = max(200, min(limit, 20000))
 
     def loader() -> dict[str, Any]:
         try:
@@ -2782,6 +2808,8 @@ def fetch_finess_isere_resources(force_refresh: bool = False, limit: int = 250) 
                 "hospitals_total": 0,
                 "clinics_total": 0,
                 "ehpad_total": 0,
+                "categories_total": 0,
+                "categories": [],
                 "resources_total": 0,
                 "resources": [],
                 "error": str(exc),
