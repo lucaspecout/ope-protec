@@ -12,7 +12,7 @@ const STORAGE_KEYS = {
   apiInterconnectionsSnapshot: 'apiInterconnectionsSnapshot',
   homeLiveSnapshot: 'homeLiveSnapshot',
   staticInstitutionsCache: 'staticInstitutionsCache',
-  staticFinessCache: 'staticFinessCacheV2',
+  staticFinessCache: 'staticFinessCacheV3',
   serviceStatusHistory: 'serviceStatusHistory',
 };
 const AUTO_REFRESH_MS = 60000;
@@ -2662,7 +2662,7 @@ async function loadFinessIsereResources() {
     return finessPointsCache;
   }
   try {
-    const payload = await api('/api/finess/isere/resources?limit=100000', { cacheTtlMs: STATIC_POINTS_CACHE_TTL_MS });
+    const payload = await api('/api/finess/isere/resources?limit=20000', { cacheTtlMs: STATIC_POINTS_CACHE_TTL_MS });
     const resources = Array.isArray(payload?.resources) ? payload.resources : [];
     const dynamicTypeMeta = new Map();
     FINESS_DYNAMIC_RESOURCE_TYPES.clear();
@@ -2801,7 +2801,7 @@ function syncFinessHealthFilterOptions() {
   dynamicOptions.sort((a, b) => a.label.localeCompare(b.label, 'fr', { sensitivity: 'base' }));
   select.innerHTML = [
     ...prioritizedOptions.map((option) => `<option value="${escapeHtml(option.type)}">${escapeHtml(option.label)} (${option.total})</option>`),
-    '<option value="all">Toutes les catégories FINESS (Isère)</option>',
+    '<option value="all">Toutes les catégories stratégiques FINESS (Isère)</option>',
     ...dynamicOptions.map((option) => `<option value="${escapeHtml(option.type)}">${escapeHtml(option.label)} (${option.total})</option>`),
   ].join('');
   select.value = values.has(previous) ? previous : 'all';
