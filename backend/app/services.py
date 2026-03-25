@@ -466,6 +466,7 @@ _ATMO_AURA_CACHE_TTL_SECONDS = 900
 _SNCF_ISERE_CACHE_TTL_SECONDS = 180
 _RTE_ELECTRICITY_CACHE_TTL_SECONDS = 300
 _FINESS_ISERE_CACHE_TTL_SECONDS = 43200
+_FINESS_ISERE_MAX_LIMIT = 100000
 _ISERE_OPENDATA_CACHE_TTL_SECONDS = 1800
 _ANFR_ISERE_CACHE_TTL_SECONDS = 43200
 _ARCEP_ISERE_CACHE_TTL_SECONDS = 900
@@ -2852,6 +2853,7 @@ def _fetch_finess_isere_resources_live(limit: int = 5000) -> dict[str, Any]:
     ehpad_total = 0
     clinics_total = 0
     categories: dict[str, int] = {}
+    max_points = max(200, min(limit, _FINESS_ISERE_MAX_LIMIT))
     for row in rows:
         if len(row) < 22 or row[13].strip() != "38":
             continue
@@ -2871,7 +2873,7 @@ def _fetch_finess_isere_resources_live(limit: int = 5000) -> dict[str, Any]:
             clinics_total += 1
         if kind == "ehpad":
             ehpad_total += 1
-        if len(points) >= max(200, min(limit, 20000)):
+        if len(points) >= max_points:
             continue
 
         postal_code, city = _extract_city_from_finess_address_line(row[15] if len(row) > 15 else "")
@@ -2960,7 +2962,7 @@ def _fetch_finess_isere_resources_live(limit: int = 5000) -> dict[str, Any]:
 
 
 def fetch_finess_isere_resources(force_refresh: bool = False, limit: int = 5000) -> dict[str, Any]:
-    safe_limit = max(200, min(limit, 20000))
+    safe_limit = max(200, min(limit, _FINESS_ISERE_MAX_LIMIT))
 
     def loader() -> dict[str, Any]:
         try:
