@@ -466,7 +466,7 @@ _ATMO_AURA_CACHE_TTL_SECONDS = 900
 _SNCF_ISERE_CACHE_TTL_SECONDS = 180
 _RTE_ELECTRICITY_CACHE_TTL_SECONDS = 300
 _FINESS_ISERE_CACHE_TTL_SECONDS = 43200
-_FINESS_ISERE_MAX_LIMIT = 100000
+_FINESS_ISERE_MAX_LIMIT = 20000
 _FINESS_ISERE_STABLE_CSV_URL = "https://static.data.gouv.fr/resources/finess-extraction-du-fichier-des-etablissements/20260312-094547/etalab-cs1100507-stock-20260311-0343.csv"
 _ISERE_OPENDATA_CACHE_TTL_SECONDS = 1800
 _ANFR_ISERE_CACHE_TTL_SECONDS = 43200
@@ -503,6 +503,113 @@ _finess_isere_cache_lock = Lock()
 _finess_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _finess_isere_communes_lock = Lock()
 _finess_isere_communes_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+
+
+_FINESS_STRATEGIC_LABEL_KEYWORDS: tuple[str, ...] = (
+    "chu",
+    "centre hospitalier",
+    "hopital",
+    "hôpital",
+    "clinique",
+    "urgence",
+    "samu",
+    "smur",
+    "dialyse",
+    "maternite",
+    "maternité",
+    "reanimation",
+    "réanimation",
+    "caisson hyperbare",
+    "laboratoire",
+    "lits halte soins sante",
+    "lhss",
+    "lits d accueil medicalises",
+    "lam",
+    "ehpad",
+    "ssiad",
+    "maison medicale de garde",
+    "mmg",
+    "centre de sante",
+    "centre de vaccination",
+    "centre gratuit d information, de depistage et de diagnostic",
+    "cegidd",
+    "centre de lutte antituberculeuse",
+    "clat",
+    "cmp",
+    "cmpp",
+    "camsp",
+    "cattp",
+    "csapa",
+    "pharmacie d officine",
+    "centre medico psychologique",
+    "centre medico psycho pedagogique",
+)
+
+_FINESS_NON_STRATEGIC_LABEL_KEYWORDS: tuple[str, ...] = (
+    "foyer",
+    "residence",
+    "résidence",
+    "entreprise adaptee",
+    "ecole formant",
+    "service d investigation educative",
+    "service d intervention educative",
+    "service mandataire judiciaire",
+    "centre d accueil pour demandeurs d asile",
+    "c a d a",
+    "aemo",
+    "aed",
+    "maison relais",
+    "pension de famille",
+    "chrs",
+    "autre centre d accueil",
+    "etablissement experimental",
+)
+
+
+def _finess_isere_is_strategic(kind: str, category_label: str, normalized_blob: str) -> bool:
+    if kind in {"chu", "hopital", "hopital_public", "hopital_prive", "clinique", "ehpad", "medecin"}:
+        return True
+    normalized_label = _normalize_finess_text(category_label)
+    if any(token in normalized_label for token in _FINESS_NON_STRATEGIC_LABEL_KEYWORDS):
+        return False
+    if any(token in normalized_blob for token in ("ministere", "ministère", "siege", "siège", "administratif")):
+        return False
+    if any(token in normalized_label for token in _FINESS_STRATEGIC_LABEL_KEYWORDS):
+        return True
+    return False
+
+
+def _finess_precise_geocode(
+    *,
+    query: str,
+    postcode: str | None = None,
+    citycode: str | None = None,
+    timeout: int = 8,
+) -> tuple[float, float] | None:
+    q = (query or "").strip()
+    if not q:
+        return None
+    parts = [f"q={quote_plus(q)}", "limit=1", "autocomplete=0"]
+    if postcode:
+        parts.append(f"postcode={quote_plus(postcode)}")
+    if citycode:
+        parts.append(f"citycode={quote_plus(citycode)}")
+    url = f"https://api-adresse.data.gouv.fr/search/?{'&'.join(parts)}"
+    try:
+        payload = _http_get_json(url, timeout=timeout)
+    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError):
+        return None
+    features = payload.get("features") if isinstance(payload, dict) else None
+    if not isinstance(features, list) or not features:
+        return None
+    coordinates = (((features[0] or {}).get("geometry") or {}).get("coordinates"))
+    if not isinstance(coordinates, list) or len(coordinates) != 2:
+        return None
+    lon, lat = coordinates
+    try:
+        return float(lat), float(lon)
+    except (TypeError, ValueError):
+        return None
 _isere_opendata_cache_lock = Lock()
 _isere_opendata_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _anfr_isere_cache_lock = Lock()
@@ -2665,10 +2772,6 @@ def _finess_isere_slug(value: str) -> str:
     return cleaned or "autre"
 
 
-def _finess_isere_location_type(city: str) -> str:
-    return f"finess_commune_{_finess_isere_slug(city or 'autre')}"
-
-
 def _normalize_finess_text(value: str) -> str:
     cleaned = unicodedata.normalize("NFKD", value or "")
     cleaned = "".join(ch for ch in cleaned if not unicodedata.combining(ch))
@@ -2856,6 +2959,7 @@ def _fetch_finess_isere_resources_live(limit: int = 5000) -> dict[str, Any]:
     next(rows, None)  # ligne métadonnées
 
     commune_center_cache: dict[str, tuple[float, float] | None] = {}
+    geocode_cache: dict[str, tuple[float, float] | None] = {}
     centers_by_code = _get_isere_commune_centers()
     points: list[dict[str, Any]] = []
     hospitals_total = 0
@@ -2871,6 +2975,9 @@ def _fetch_finess_isere_resources_live(limit: int = 5000) -> dict[str, Any]:
         if len(row) < 22 or row[13].strip() != "38":
             continue
         kind, category_label = _finess_isere_kind(row)
+        normalized_blob = f" {_normalize_finess_text(' '.join((str(row[3] if len(row) > 3 else ''), str(row[4] if len(row) > 4 else ''), str(row[19] if len(row) > 19 else ''), str(row[20] if len(row) > 20 else ''), str(row[21] if len(row) > 21 else ''))))} "
+        if not _finess_isere_is_strategic(kind=kind, category_label=category_label, normalized_blob=normalized_blob):
+            continue
         if kind == "hopital":
             hospitals_total += 1
         if kind == "chu":
@@ -2891,14 +2998,25 @@ def _fetch_finess_isere_resources_live(limit: int = 5000) -> dict[str, Any]:
         postal_code, city = _extract_city_from_finess_address_line(row[15] if len(row) > 15 else "")
         if not city:
             continue
-        location_type = _finess_isere_location_type(city)
-        location_label = f"Commune · {city}"
+        location_type = kind
+        location_label = category_label
         categories[location_label] = categories.get(location_label, 0) + 1
         code_commune = _normalize_finess_commune_code(
             row[12] if len(row) > 12 else "",
             row[13] if len(row) > 13 else "",
         )
-        coords = centers_by_code.get(code_commune) if code_commune else None
+        address_parts = [row[7] if len(row) > 7 else "", row[8] if len(row) > 8 else "", row[9] if len(row) > 9 else "", row[15] if len(row) > 15 else ""]
+        full_address = re.sub(r"\s+", " ", " ".join(part for part in address_parts if part).strip())
+        geocode_key = "|".join((full_address.lower(), postal_code or "", code_commune or ""))
+        if geocode_key not in geocode_cache:
+            geocode_cache[geocode_key] = _finess_precise_geocode(
+                query=full_address or f"{category_label} {city}",
+                postcode=postal_code or None,
+                citycode=code_commune or None,
+            )
+        coords = geocode_cache.get(geocode_key)
+        if not coords:
+            coords = centers_by_code.get(code_commune) if code_commune else None
         if not coords:
             if city not in commune_center_cache:
                 commune_center_cache[city] = _finess_commune_center(city)
@@ -2906,7 +3024,6 @@ def _fetch_finess_isere_resources_live(limit: int = 5000) -> dict[str, Any]:
         if not coords:
             continue
         lat, lon = coords
-        address_parts = [row[8] if len(row) > 8 else "", row[9] if len(row) > 9 else "", row[15] if len(row) > 15 else ""]
         points.append(
             {
                 "id": f"finess-{row[1] if len(row) > 1 else len(points)}",
@@ -2920,10 +3037,10 @@ def _fetch_finess_isere_resources_live(limit: int = 5000) -> dict[str, Any]:
                 "lon": lon,
                 "city": city,
                 "postal_code": postal_code,
-                "address": re.sub(r"\s+", " ", " ".join(part for part in address_parts if part).strip()),
+                "address": full_address,
                 "finess_id": str(row[1] if len(row) > 1 else "").strip(),
                 "source": "https://www.data.gouv.fr/fr/datasets/finess-extraction-du-fichier-des-etablissements/",
-                "info": f"Source FINESS data.gouv.fr · {location_label} · {category_label}",
+                "info": f"Source FINESS data.gouv.fr · {category_label} · {city}",
                 "active": True,
                 "priority": "critical" if kind in ("hopital", "clinique") else "vital",
                 "dynamic": True,
