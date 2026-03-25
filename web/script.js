@@ -237,6 +237,7 @@ let institutionPointsCache = [];
 let institutionsLoaded = false;
 let finessPointsCache = [];
 let finessLoaded = false;
+let finessTypeCounts = {};
 let iserePopulationPointsCache = [];
 let iserePopulationLoaded = false;
 let iserePopulationByInseeCache = new Map();
@@ -2652,13 +2653,14 @@ async function loadFinessIsereResources() {
   const cached = readFreshSnapshot(STORAGE_KEYS.staticFinessCache, STATIC_POINTS_CACHE_TTL_MS);
   if (Array.isArray(cached)) {
     finessPointsCache = cached;
+    finessTypeCounts = computeFinessTypeCounts(finessPointsCache);
     rebuildFinessMetaFromCache();
     syncFinessHealthFilterOptions();
     finessLoaded = true;
     return finessPointsCache;
   }
   try {
-    const payload = await api('/api/finess/isere/resources?limit=20000', { cacheTtlMs: STATIC_POINTS_CACHE_TTL_MS });
+    const payload = await api('/api/finess/isere/resources?limit=100000', { cacheTtlMs: STATIC_POINTS_CACHE_TTL_MS });
     const resources = Array.isArray(payload?.resources) ? payload.resources : [];
     const dynamicTypeMeta = new Map();
     FINESS_DYNAMIC_RESOURCE_TYPES.clear();
@@ -2689,6 +2691,7 @@ async function loadFinessIsereResources() {
         };
       })
       .filter(Boolean);
+    finessTypeCounts = computeFinessTypeCounts(finessPointsCache);
     dynamicTypeMeta.forEach((meta, type) => {
       RESOURCE_TYPE_META[type] = meta;
       if (!HEALTH_RESOURCE_TYPES.has(type)) FINESS_DYNAMIC_RESOURCE_TYPES.add(type);
@@ -2698,6 +2701,7 @@ async function loadFinessIsereResources() {
   } catch {
     const staleCached = readSnapshot(STORAGE_KEYS.staticFinessCache);
     finessPointsCache = Array.isArray(staleCached) ? staleCached : [];
+    finessTypeCounts = computeFinessTypeCounts(finessPointsCache);
     rebuildFinessMetaFromCache();
     syncFinessHealthFilterOptions();
   }
@@ -2749,21 +2753,37 @@ function rebuildFinessMetaFromCache() {
   });
 }
 
+function computeFinessTypeCounts(resources = []) {
+  const counts = {};
+  (Array.isArray(resources) ? resources : []).forEach((resource) => {
+    const type = String(resource?.type || '').trim().toLowerCase();
+    if (!type) return;
+    counts[type] = (counts[type] || 0) + 1;
+  });
+  return counts;
+}
+
 function syncFinessHealthFilterOptions() {
   const select = document.getElementById('filter-resources-health-type');
   if (!select) return;
   const previous = select.value || 'all';
   const values = new Set(['all']);
   const dynamicOptions = [];
+  const seenLabels = new Set();
   const types = [...HEALTH_RESOURCE_TYPES, ...FINESS_DYNAMIC_RESOURCE_TYPES];
   types.forEach((type) => {
     const meta = RESOURCE_TYPE_META[type];
     if (!meta) return;
+    if (seenLabels.has(meta.label)) return;
+    seenLabels.add(meta.label);
     values.add(type);
-    dynamicOptions.push({ type, label: meta.label });
+    dynamicOptions.push({ type, label: meta.label, total: Number(finessTypeCounts[type] || 0) });
   });
   dynamicOptions.sort((a, b) => a.label.localeCompare(b.label, 'fr', { sensitivity: 'base' }));
-  select.innerHTML = ['<option value="all">Toutes les catégories FINESS</option>', ...dynamicOptions.map((option) => `<option value="${escapeHtml(option.type)}">${escapeHtml(option.label)}</option>`)].join('');
+  select.innerHTML = [
+    '<option value="all">Toutes les catégories FINESS (Isère)</option>',
+    ...dynamicOptions.map((option) => `<option value="${escapeHtml(option.type)}">${escapeHtml(option.label)} (${option.total})</option>`),
+  ].join('');
   select.value = values.has(previous) ? previous : 'all';
 }
 

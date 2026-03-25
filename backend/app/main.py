@@ -1101,7 +1101,7 @@ def interactive_map_finess_isere_resources(
     limit: int = 5000,
     _: User = Depends(require_roles(*READ_ROLES)),
 ):
-    safe_limit = max(200, min(limit, 20000))
+    safe_limit = max(200, min(limit, 100000))
     return fetch_finess_isere_resources(force_refresh=refresh, limit=safe_limit)
 
 
