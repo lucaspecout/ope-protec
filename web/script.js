@@ -543,6 +543,7 @@ const SCHOOL_RESOURCE_TYPES = new Set(['ecole_primaire', 'college', 'lycee', 'un
 const SECURITY_RESOURCE_TYPES = new Set(['gendarmerie', 'commissariat_police_nationale', 'police_municipale']);
 const FIRE_RESOURCE_TYPES = new Set(['caserne_pompier', 'caserne']);
 const HEALTH_RESOURCE_TYPES = new Set(['hopital', 'hopital_public', 'hopital_prive', 'chu', 'clinique', 'medecin', 'ehpad']);
+const HEALTH_URGENT_CARE_TYPES = new Set(['chu', 'hopital', 'hopital_public', 'hopital_prive', 'clinique']);
 const FINESS_DYNAMIC_RESOURCE_TYPES = new Set();
 const RISK_RESOURCE_TYPES = new Set(['lieu_risque', 'centrale_nucleaire', 'energie']);
 const TRANSPORT_RESOURCE_TYPES = new Set(['transport', 'transport_gare_sncf', 'transport_gare_routiere', 'transport_aeroport']);
@@ -2636,6 +2637,7 @@ function shouldDisplayBaseResourceType(type = '') {
     const healthEnabled = document.getElementById('filter-resources-health')?.checked ?? false;
     const healthTypeFilter = document.getElementById('filter-resources-health-type')?.value || 'all';
     if (!healthEnabled) return false;
+    if (healthTypeFilter === 'health_urgent_care') return HEALTH_URGENT_CARE_TYPES.has(type);
     return healthTypeFilter === 'all' || healthTypeFilter === type;
   }
   if (COMMAND_RESOURCE_TYPES.has(type)) return document.getElementById('filter-resources-command')?.checked ?? true;
@@ -2776,10 +2778,19 @@ function syncFinessHealthFilterOptions() {
   if (!select) return;
   const previous = select.value || 'all';
   const values = new Set(['all']);
+  const urgentCount = [...HEALTH_URGENT_CARE_TYPES].reduce((sum, type) => sum + Number(finessTypeCounts[type] || 0), 0);
+  const ehpadCount = Number(finessTypeCounts.ehpad || 0);
+  const prioritizedOptions = [
+    { type: 'health_urgent_care', label: 'Lieux de soins d’urgence (CHU, hôpitaux, cliniques)', total: urgentCount },
+    { type: 'ehpad', label: 'EHPAD', total: ehpadCount },
+  ];
+  prioritizedOptions.forEach((option) => values.add(option.type));
   const dynamicOptions = [];
   const seenLabels = new Set();
   const types = [...HEALTH_RESOURCE_TYPES, ...FINESS_DYNAMIC_RESOURCE_TYPES];
+  const skippedTypes = new Set([...HEALTH_URGENT_CARE_TYPES, 'ehpad']);
   types.forEach((type) => {
+    if (skippedTypes.has(type)) return;
     const meta = RESOURCE_TYPE_META[type];
     if (!meta) return;
     if (seenLabels.has(meta.label)) return;
@@ -2789,6 +2800,7 @@ function syncFinessHealthFilterOptions() {
   });
   dynamicOptions.sort((a, b) => a.label.localeCompare(b.label, 'fr', { sensitivity: 'base' }));
   select.innerHTML = [
+    ...prioritizedOptions.map((option) => `<option value="${escapeHtml(option.type)}">${escapeHtml(option.label)} (${option.total})</option>`),
     '<option value="all">Toutes les catégories FINESS (Isère)</option>',
     ...dynamicOptions.map((option) => `<option value="${escapeHtml(option.type)}">${escapeHtml(option.label)} (${option.total})</option>`),
   ].join('');
