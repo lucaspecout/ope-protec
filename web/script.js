@@ -5207,6 +5207,78 @@ function buildOpenEventsSituationMarkup(events = []) {
   }).join('');
 }
 
+function buildMeteoSituationModalContent(meteo = {}) {
+  const renderAlertLine = (alert = {}) => {
+    const phenomenon = escapeHtml(alert.phenomenon || 'Phénomène');
+    const level = normalizeLevel(alert.level || 'inconnu');
+    const details = Array.isArray(alert.details) && alert.details.length
+      ? `<br><span class="muted">${alert.details.map((detail) => escapeHtml(detail)).join(' · ')}</span>`
+      : '';
+    return `<li><strong>${phenomenon}</strong> · <span class="risk-${level}">${escapeHtml(level)}</span>${details}</li>`;
+  };
+  const renderSection = (title, alerts = []) => `
+    <h5>${escapeHtml(title)}</h5>
+    <ul class="situation-kpi-modal__list">
+      ${Array.isArray(alerts) && alerts.length ? alerts.map((alert) => renderAlertLine(alert)).join('') : '<li>Aucune alerte significative.</li>'}
+    </ul>
+  `;
+  return `
+    <p class="muted">Source: Météo-France Vigilance · vue identique au panneau Services connectés.</p>
+    ${renderSection('J0 · En cours', meteo.current_alerts || [])}
+    ${renderSection('J1 · Demain', meteo.tomorrow_alerts || [])}
+  `;
+}
+
+function buildSituationKpiModalContent(key, externalRisks = {}) {
+  const dashboard = cachedDashboardSnapshot || {};
+  const meteo = externalRisks?.meteo_france || {};
+  const vigicrues = externalRisks?.vigicrues || {};
+  const bison = externalRisks?.bison_fute || {};
+  const sncf = externalRisks?.sncf_isere || {};
+  const vigieau = externalRisks?.vigieau || {};
+  const apic = externalRisks?.apic_isere || {};
+  const vigicruesFlash = externalRisks?.vigicrues_flash_isere || {};
+  const atmo = externalRisks?.atmo_aura || {};
+  const arcep = externalRisks?.arcep_isere || {};
+  switch (key) {
+    case 'meteo':
+      return buildMeteoSituationModalContent(meteo);
+    case 'crues':
+      return `<p><strong>Niveau Vigicrues:</strong> ${escapeHtml(normalizeLevel(vigicrues.water_alert_level || 'inconnu'))}</p><p><strong>Stations suivies:</strong> ${Number((vigicrues.stations || []).length || 0)}</p>`;
+    case 'global-risk':
+      return `<p><strong>Risque global consolidé:</strong> ${escapeHtml(normalizeLevel(dashboard.global_risk || meteo.level || 'inconnu'))}</p><p class="muted">Consolidation météo + crues + alertes externes.</p>`;
+    case 'communes-crise':
+      return `<p><strong>Communes en crise:</strong> ${Number(dashboard.communes_crise ?? 0)}</p><p class="muted">Valeur issue du suivi des PCS actifs côté dashboard.</p>`;
+    case 'bison':
+      return `<p><strong>Bison Futé Isère J0:</strong> départ ${escapeHtml(normalizeLevel(bison.today?.isere?.departure || 'inconnu'))} / arrivée ${escapeHtml(normalizeLevel(bison.today?.isere?.return || 'inconnu'))}</p><p><strong>Bison Futé Isère J1:</strong> départ ${escapeHtml(normalizeLevel(bison.tomorrow?.isere?.departure || 'inconnu'))} / arrivée ${escapeHtml(normalizeLevel(bison.tomorrow?.isere?.return || 'inconnu'))}</p>`;
+    case 'sncf':
+      return `<p><strong>Alertes SNCF Isère:</strong> ${Number(sncf.alerts_total ?? (sncf.alerts || []).length)}</p><ul class="situation-kpi-modal__list">${(sncf.alerts || []).slice(0, 8).map((alert) => `<li><strong>${escapeHtml(alert.title || 'Alerte SNCF')}</strong><br><span class="muted">${escapeHtml(alert.description || '')}</span></li>`).join('') || '<li>Aucune alerte en cours.</li>'}</ul>`;
+    case 'arcep':
+      return `<p><strong>Sites mobiles indisponibles:</strong> ${Number(arcep.outages_total ?? 0)}</p><p class="muted">Source: ARCEP / data.gouv.fr.</p>`;
+    case 'vigieau':
+      return `<p><strong>Restrictions eau:</strong> ${Number((vigieau.alerts || []).length)}</p><ul class="situation-kpi-modal__list">${(vigieau.alerts || []).slice(0, 8).map((alert) => `<li><strong>${escapeHtml(alert.zone || 'Isère')}</strong> · ${escapeHtml(alert.level || 'non définie')}<br><span class="muted">${escapeHtml(alert.measure || 'Restriction')}</span></li>`).join('') || '<li>Aucune alerte restriction d’eau.</li>'}</ul>`;
+    case 'atmo':
+      return `<p><strong>Qualité de l’air:</strong> ${escapeHtml(String(atmo.today?.label || normalizeLevel(atmo.today?.level || 'inconnu')).toLowerCase())}</p><p><strong>Indice:</strong> ${escapeHtml(String(atmo.today?.index ?? '-'))}</p>`;
+    case 'apic':
+      return `<p><strong>Alertes APIC Isère:</strong> ${Number(apic.alerts_total ?? (apic.alerts || []).length)}</p><ul class="situation-kpi-modal__list">${(apic.alerts || []).slice(0, 8).map((alert) => `<li><strong>${escapeHtml(alert.zone || 'Isère')}</strong> · ${escapeHtml(normalizeLevel(alert.level || 'jaune'))}</li>`).join('') || '<li>Aucune alerte APIC en cours.</li>'}</ul>`;
+    case 'vigicrues-flash':
+      return `<p><strong>Alertes Vigicrues Flash Isère:</strong> ${Number(vigicruesFlash.alerts_total ?? (vigicruesFlash.alerts || []).length)}</p><ul class="situation-kpi-modal__list">${(vigicruesFlash.alerts || []).slice(0, 8).map((alert) => `<li><strong>${escapeHtml(alert.zone || 'Isère')}</strong> · ${escapeHtml(normalizeLevel(alert.level || 'jaune'))}</li>`).join('') || '<li>Aucune alerte Vigicrues Flash.</li>'}</ul>`;
+    default:
+      return '<p>Aucun détail supplémentaire disponible pour ce KPI.</p>';
+  }
+}
+
+function openSituationKpiModal(key, label) {
+  const modal = document.getElementById('situation-kpi-modal');
+  if (!modal) return;
+  const title = document.getElementById('situation-kpi-modal-title');
+  const content = document.getElementById('situation-kpi-modal-content');
+  if (title) title.textContent = `Détail · ${label || 'KPI'}`;
+  if (content) setHtml('situation-kpi-modal-content', buildSituationKpiModalContent(key, cachedExternalRisksSnapshot || {}));
+  if (typeof modal.showModal === 'function') modal.showModal();
+  else modal.setAttribute('open', 'open');
+}
+
 function renderSituationOverview() {
   const target = document.getElementById('situation-content');
   if (!target) return;
@@ -5241,10 +5313,10 @@ function renderSituationOverview() {
     ? sortPrefectureItemsByRecency(externalRisks.prefecture_isere.items).slice(0, 4)
     : [];
   const kpiCards = [
-    { label: 'Vigilance météo', value: vigilance, info: 'Source Météo-France', css: normalizeLevel(vigilance) },
-    { label: 'Niveau crues', value: crues, info: 'Source Vigicrues', css: normalizeLevel(crues) },
-    { label: 'Risque global', value: globalRisk, info: 'Calcul consolidé', css: normalizeLevel(globalRisk) },
-    { label: 'Communes en crise', value: String(crisisCount), info: 'PCS actif', css: crisisCount > 0 ? 'rouge' : 'vert' },
+    { key: 'meteo', label: 'Vigilance météo', value: vigilance, info: 'Source Météo-France', css: normalizeLevel(vigilance) },
+    { key: 'crues', label: 'Niveau crues', value: crues, info: 'Source Vigicrues', css: normalizeLevel(crues) },
+    { key: 'global-risk', label: 'Risque global', value: globalRisk, info: 'Calcul consolidé', css: normalizeLevel(globalRisk) },
+    { key: 'communes-crise', label: 'Communes en crise', value: String(crisisCount), info: 'PCS actif', css: crisisCount > 0 ? 'rouge' : 'vert' },
   ];
   const bisonDeparture = normalizeLevel(externalRisks?.bison_fute?.today?.isere?.departure || 'inconnu');
   const bisonReturn = normalizeLevel(externalRisks?.bison_fute?.today?.isere?.return || 'inconnu');
@@ -5258,13 +5330,13 @@ function renderSituationOverview() {
   const arcepOutages = Number(externalRisks?.arcep_isere?.outages_total ?? 0);
   const orangeOrRedLogsCount = activeLogs.filter((log) => ['orange', 'rouge'].includes(normalizeLevel(log.danger_level))).length;
   const mobilityCards = [
-    { label: 'Bison Futé (38) · Départ / Arrivée', value: `${bisonDeparture} / ${bisonReturn}`, info: 'Tendance Isère départ / arrivée', css: bisonCombinedLevel },
-    { label: 'SNCF · alertes Isère', value: `${sncfAlerts}`, info: 'Accidents / travaux de voie', css: sncfAlerts > 0 ? 'orange' : 'vert' },
-    { label: 'ARCEP · Sites mobiles indisponibles Isère', value: `${arcepOutages}`, info: 'Source data.gouv.fr / ARCEP', css: arcepOutages > 0 ? 'jaune' : 'vert' },
-    { label: 'Vigieau', value: `${vigieauAlertsCount}`, info: "Restriction(s) d'eau active(s)", css: vigieauAlertsCount > 0 ? 'jaune' : 'vert' },
-    { label: "Qualité de l'air", value: atmoLabel, info: 'Source Atmo AURA', css: atmoLevel },
-    { label: 'APIC · alertes Isère', value: `${apicAlerts}`, info: 'Pluie intense à l’échelle communale', css: apicAlerts > 0 ? 'orange' : 'vert' },
-    { label: 'Vigicrues Flash · alertes Isère', value: `${vigicruesFlashAlerts}`, info: 'Avertissements crues rapides', css: vigicruesFlashAlerts > 0 ? 'orange' : 'vert' },
+    { key: 'bison', label: 'Bison Futé (38) · Départ / Arrivée', value: `${bisonDeparture} / ${bisonReturn}`, info: 'Tendance Isère départ / arrivée', css: bisonCombinedLevel },
+    { key: 'sncf', label: 'SNCF · alertes Isère', value: `${sncfAlerts}`, info: 'Accidents / travaux de voie', css: sncfAlerts > 0 ? 'orange' : 'vert' },
+    { key: 'arcep', label: 'ARCEP · Sites mobiles indisponibles Isère', value: `${arcepOutages}`, info: 'Source data.gouv.fr / ARCEP', css: arcepOutages > 0 ? 'jaune' : 'vert' },
+    { key: 'vigieau', label: 'Vigieau', value: `${vigieauAlertsCount}`, info: "Restriction(s) d'eau active(s)", css: vigieauAlertsCount > 0 ? 'jaune' : 'vert' },
+    { key: 'atmo', label: "Qualité de l'air", value: atmoLabel, info: 'Source Atmo AURA', css: atmoLevel },
+    { key: 'apic', label: 'APIC · alertes Isère', value: `${apicAlerts}`, info: 'Pluie intense à l’échelle communale', css: apicAlerts > 0 ? 'orange' : 'vert' },
+    { key: 'vigicrues-flash', label: 'Vigicrues Flash · alertes Isère', value: `${vigicruesFlashAlerts}`, info: 'Avertissements crues rapides', css: vigicruesFlashAlerts > 0 ? 'orange' : 'vert' },
   ];
   const generatedAt = safeDateToLocale(Date.now());
 
@@ -5280,11 +5352,11 @@ function renderSituationOverview() {
     </div>
 
     <div class="situation-top-grid">
-      ${kpiCards.map((card) => `<article class="tile situation-tile"><h3>${card.label}</h3><p class="kpi-value ${card.css}">${escapeHtml(card.value)}</p><p class="muted">${card.info}</p></article>`).join('')}
+      ${kpiCards.map((card) => `<article class="tile situation-tile situation-tile--interactive" role="button" tabindex="0" data-kpi-key="${escapeHtml(card.key)}" data-kpi-label="${escapeHtml(card.label)}"><h3>${card.label}</h3><p class="kpi-value ${card.css}">${escapeHtml(card.value)}</p><p class="muted">${card.info}</p><p class="muted situation-kpi-hint">Cliquer pour voir le détail service connecté</p></article>`).join('')}
     </div>
 
     <div class="situation-top-grid">
-      ${mobilityCards.map((card) => `<article class="tile situation-tile"><h3>${card.label}</h3><p class="kpi-value ${card.css}">${escapeHtml(card.value)}</p><p class="muted">${card.info}</p></article>`).join('')}
+      ${mobilityCards.map((card) => `<article class="tile situation-tile situation-tile--interactive" role="button" tabindex="0" data-kpi-key="${escapeHtml(card.key)}" data-kpi-label="${escapeHtml(card.label)}"><h3>${card.label}</h3><p class="kpi-value ${card.css}">${escapeHtml(card.value)}</p><p class="muted">${card.info}</p><p class="muted situation-kpi-hint">Cliquer pour voir le détail service connecté</p></article>`).join('')}
     </div>
 
     <div class="situation-middle-grid">
@@ -5687,6 +5759,22 @@ function bindSituationActions() {
       }
     }
   });
+  const situationContent = document.getElementById('situation-content');
+  if (situationContent && !situationContent.dataset.kpiPopupBound) {
+    situationContent.dataset.kpiPopupBound = '1';
+    situationContent.addEventListener('click', (event) => {
+      const tile = event.target.closest('[data-kpi-key]');
+      if (!tile) return;
+      openSituationKpiModal(tile.getAttribute('data-kpi-key'), tile.getAttribute('data-kpi-label'));
+    });
+    situationContent.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      const tile = event.target.closest('[data-kpi-key]');
+      if (!tile) return;
+      event.preventDefault();
+      openSituationKpiModal(tile.getAttribute('data-kpi-key'), tile.getAttribute('data-kpi-label'));
+    });
+  }
 }
 
 function renderDashboard(dashboard = {}) {
@@ -6916,6 +7004,18 @@ function bindAppInteractions() {
   });
   document.getElementById('municipality-details-modal')?.addEventListener('click', (event) => {
     if (event.target?.id === 'municipality-details-modal') closeMunicipalityDetailsModal();
+  });
+  document.getElementById('situation-kpi-modal-close')?.addEventListener('click', () => {
+    const modal = document.getElementById('situation-kpi-modal');
+    if (typeof modal?.close === 'function') modal.close();
+    else modal?.removeAttribute('open');
+  });
+  document.getElementById('situation-kpi-modal')?.addEventListener('click', (event) => {
+    if (event.target?.id === 'situation-kpi-modal') {
+      const modal = document.getElementById('situation-kpi-modal');
+      if (typeof modal?.close === 'function') modal.close();
+      else modal?.removeAttribute('open');
+    }
   });
   document.getElementById('municipality-details-content')?.addEventListener('click', async (event) => {
     const crisisButton = event.target.closest('[data-muni-detail-crisis]');
