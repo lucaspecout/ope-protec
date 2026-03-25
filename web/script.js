@@ -12,7 +12,7 @@ const STORAGE_KEYS = {
   apiInterconnectionsSnapshot: 'apiInterconnectionsSnapshot',
   homeLiveSnapshot: 'homeLiveSnapshot',
   staticInstitutionsCache: 'staticInstitutionsCache',
-  staticFinessCache: 'staticFinessCache',
+  staticFinessCache: 'staticFinessCacheV2',
   serviceStatusHistory: 'serviceStatusHistory',
 };
 const AUTO_REFRESH_MS = 60000;
@@ -2672,7 +2672,9 @@ async function loadFinessIsereResources() {
         const rawType = String(resource?.type || '').trim().toLowerCase();
         const category = String(resource?.category || '').trim() || 'Établissement FINESS';
         const type = rawType || `finess_${slugifyFinessCategory(category)}`;
-        const meta = buildFinessResourceMeta(type, category);
+        const healthKind = String(resource?.health_kind || '').trim().toLowerCase();
+        const healthCategory = String(resource?.health_category || '').trim();
+        const meta = buildFinessResourceMeta(type, category, healthKind, healthCategory);
         dynamicTypeMeta.set(type, meta);
         return {
           id: String(resource?.id || `finess-${resource?.finess_id || Math.random().toString(36).slice(2)}`),
@@ -2682,9 +2684,11 @@ async function loadFinessIsereResources() {
           lon,
           active: true,
           address: String(resource?.address || resource?.city || 'Adresse non renseignée'),
-          priority: String(resource?.priority || inferFinessPriority(type)),
-          info: String(resource?.info || `Source FINESS data.gouv.fr · ${meta.label}`),
+          priority: String(resource?.priority || inferFinessPriority(healthKind || type)),
+          info: String(resource?.info || `Source FINESS data.gouv.fr · ${meta.label}${healthCategory ? ` · ${healthCategory}` : ''}`),
           category: meta.label,
+          health_kind: healthKind,
+          health_category: healthCategory,
           source: String(resource?.source || 'https://www.data.gouv.fr/fr/datasets/finess-extraction-du-fichier-des-etablissements/'),
           details: resource?.details && typeof resource.details === 'object' ? resource.details : null,
           dynamic: true,
@@ -2724,21 +2728,23 @@ function inferFinessPriority(type = '') {
   return 'vital';
 }
 
-function buildFinessResourceMeta(type = '', category = '') {
+function buildFinessResourceMeta(type = '', category = '', healthKind = '', healthCategory = '') {
   const lowerCategory = String(category || '').toLowerCase();
+  const lowerHealth = `${String(healthKind || '').toLowerCase()} ${String(healthCategory || '').toLowerCase()}`;
   const label = category || String(type || '').replace(/^finess_/, '').replace(/_/g, ' ').trim() || 'Établissement FINESS';
   let icon = '🏥';
-  if (type === 'medecin' || /medecin|médecin|cabinet medical|cabinet de medecine/.test(lowerCategory)) icon = '🩺';
-  else if (type === 'chu' || /chu|hospitalier universitaire/.test(lowerCategory)) icon = '🏨';
-  else if (type === 'hopital_public' || /hopital public|hôpital public|hospitalisation publique/.test(lowerCategory)) icon = '🏥';
-  else if (type === 'hopital_prive' || /hopital prive|hôpital privé|hospitalisation privee/.test(lowerCategory)) icon = '🏥';
-  if (type === 'ehpad' || /ehpad|personnes agees|personnes âgées/.test(lowerCategory)) icon = '🧓';
-  else if (type === 'clinique' || /clinique|dialyse/.test(lowerCategory)) icon = '🩺';
-  else if (type === 'hopital' || /hopital|hôpital|chu|hospitalier/.test(lowerCategory)) icon = '🏥';
-  else if (/psy|sante mentale|santé mentale/.test(lowerCategory)) icon = '🧠';
-  else if (/handicap|ime|mas|foyer/.test(lowerCategory)) icon = '♿';
-  else if (/laboratoire|analyse/.test(lowerCategory)) icon = '🧪';
-  else if (/pharmacie/.test(lowerCategory)) icon = '💊';
+  if (type === 'medecin' || /medecin|médecin|cabinet medical|cabinet de medecine/.test(lowerHealth)) icon = '🩺';
+  else if (type === 'chu' || /chu|hospitalier universitaire/.test(lowerHealth)) icon = '🏨';
+  else if (type === 'hopital_public' || /hopital public|hôpital public|hospitalisation publique/.test(lowerHealth)) icon = '🏥';
+  else if (type === 'hopital_prive' || /hopital prive|hôpital privé|hospitalisation privee/.test(lowerHealth)) icon = '🏥';
+  if (type === 'ehpad' || /ehpad|personnes agees|personnes âgées/.test(lowerHealth)) icon = '🧓';
+  else if (type === 'clinique' || /clinique|dialyse/.test(lowerHealth)) icon = '🩺';
+  else if (type === 'hopital' || /hopital|hôpital|chu|hospitalier/.test(lowerHealth)) icon = '🏥';
+  else if (/psy|sante mentale|santé mentale/.test(lowerHealth)) icon = '🧠';
+  else if (/handicap|ime|mas|foyer/.test(lowerHealth)) icon = '♿';
+  else if (/laboratoire|analyse/.test(lowerHealth)) icon = '🧪';
+  else if (/pharmacie/.test(lowerHealth)) icon = '💊';
+  else if (/commune/.test(lowerCategory)) icon = '📍';
   return { label, icon };
 }
 
@@ -2748,7 +2754,9 @@ function rebuildFinessMetaFromCache() {
     const type = String(resource?.type || '').trim().toLowerCase();
     if (!type) return;
     const category = String(resource?.category || '').trim() || 'Établissement FINESS';
-    RESOURCE_TYPE_META[type] = buildFinessResourceMeta(type, category);
+    const healthKind = String(resource?.health_kind || '').trim().toLowerCase();
+    const healthCategory = String(resource?.health_category || '').trim();
+    RESOURCE_TYPE_META[type] = buildFinessResourceMeta(type, category, healthKind, healthCategory);
     if (!HEALTH_RESOURCE_TYPES.has(type)) FINESS_DYNAMIC_RESOURCE_TYPES.add(type);
   });
 }

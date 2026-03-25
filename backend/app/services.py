@@ -467,6 +467,7 @@ _SNCF_ISERE_CACHE_TTL_SECONDS = 180
 _RTE_ELECTRICITY_CACHE_TTL_SECONDS = 300
 _FINESS_ISERE_CACHE_TTL_SECONDS = 43200
 _FINESS_ISERE_MAX_LIMIT = 100000
+_FINESS_ISERE_STABLE_CSV_URL = "https://static.data.gouv.fr/resources/finess-extraction-du-fichier-des-etablissements/20260312-094547/etalab-cs1100507-stock-20260311-0343.csv"
 _ISERE_OPENDATA_CACHE_TTL_SECONDS = 1800
 _ANFR_ISERE_CACHE_TTL_SECONDS = 43200
 _ARCEP_ISERE_CACHE_TTL_SECONDS = 900
@@ -2664,6 +2665,10 @@ def _finess_isere_slug(value: str) -> str:
     return cleaned or "autre"
 
 
+def _finess_isere_location_type(city: str) -> str:
+    return f"finess_commune_{_finess_isere_slug(city or 'autre')}"
+
+
 def _normalize_finess_text(value: str) -> str:
     cleaned = unicodedata.normalize("NFKD", value or "")
     cleaned = "".join(ch for ch in cleaned if not unicodedata.combining(ch))
@@ -2843,18 +2848,7 @@ def _get_isere_commune_centers(force_refresh: bool = False) -> dict[str, tuple[f
 
 
 def _fetch_finess_isere_resources_live(limit: int = 5000) -> dict[str, Any]:
-    dataset_url = "https://www.data.gouv.fr/api/1/datasets/finess-extraction-du-fichier-des-etablissements/"
-    dataset = _http_get_json(dataset_url, timeout=12)
-    resources = dataset.get("resources") if isinstance(dataset, dict) else []
-    csv_url = ""
-    for resource in resources or []:
-        title = str(resource.get("title") or "").lower()
-        if "géolocalis" in title and str(resource.get("url") or "").endswith(".csv"):
-            csv_url = str(resource.get("url") or "")
-            break
-    if not csv_url:
-        raise RuntimeError("Ressource FINESS géolocalisée introuvable sur data.gouv.fr")
-
+    csv_url = _FINESS_ISERE_STABLE_CSV_URL
     request = Request(csv_url, headers={"User-Agent": "ope-protec/1.0"})
     csv_bytes = _http_get_with_retries(request=request, timeout=45)
     decoded = csv_bytes.decode("utf-8", errors="ignore").splitlines()
@@ -2877,7 +2871,6 @@ def _fetch_finess_isere_resources_live(limit: int = 5000) -> dict[str, Any]:
         if len(row) < 22 or row[13].strip() != "38":
             continue
         kind, category_label = _finess_isere_kind(row)
-        categories[category_label] = categories.get(category_label, 0) + 1
         if kind == "hopital":
             hospitals_total += 1
         if kind == "chu":
@@ -2898,6 +2891,9 @@ def _fetch_finess_isere_resources_live(limit: int = 5000) -> dict[str, Any]:
         postal_code, city = _extract_city_from_finess_address_line(row[15] if len(row) > 15 else "")
         if not city:
             continue
+        location_type = _finess_isere_location_type(city)
+        location_label = f"Commune · {city}"
+        categories[location_label] = categories.get(location_label, 0) + 1
         code_commune = _normalize_finess_commune_code(
             row[12] if len(row) > 12 else "",
             row[13] if len(row) > 13 else "",
@@ -2916,8 +2912,10 @@ def _fetch_finess_isere_resources_live(limit: int = 5000) -> dict[str, Any]:
                 "id": f"finess-{row[1] if len(row) > 1 else len(points)}",
                 "name": str((row[4] if len(row) > 4 else "") or (row[3] if len(row) > 3 else "")).strip() or "Établissement FINESS",
                 "short_name": str(row[3] if len(row) > 3 else "").strip() or "",
-                "type": kind,
-                "category": category_label,
+                "type": location_type,
+                "category": location_label,
+                "health_kind": kind,
+                "health_category": category_label,
                 "lat": lat,
                 "lon": lon,
                 "city": city,
@@ -2925,7 +2923,7 @@ def _fetch_finess_isere_resources_live(limit: int = 5000) -> dict[str, Any]:
                 "address": re.sub(r"\s+", " ", " ".join(part for part in address_parts if part).strip()),
                 "finess_id": str(row[1] if len(row) > 1 else "").strip(),
                 "source": "https://www.data.gouv.fr/fr/datasets/finess-extraction-du-fichier-des-etablissements/",
-                "info": f"Source FINESS data.gouv.fr · {category_label}",
+                "info": f"Source FINESS data.gouv.fr · {location_label} · {category_label}",
                 "active": True,
                 "priority": "critical" if kind in ("hopital", "clinique") else "vital",
                 "dynamic": True,
@@ -2965,6 +2963,7 @@ def _fetch_finess_isere_resources_live(limit: int = 5000) -> dict[str, Any]:
         "status": "online",
         "source": "FINESS data.gouv.fr",
         "dataset_url": "https://www.data.gouv.fr/fr/datasets/finess-extraction-du-fichier-des-etablissements/",
+        "csv_url": csv_url,
         "updated_at": datetime.utcnow().isoformat() + "Z",
         "hospitals_total": hospitals_total,
         "chu_total": chu_total,
