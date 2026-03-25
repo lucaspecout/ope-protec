@@ -2734,6 +2734,7 @@ def _finess_isere_kind(row: list[str]) -> tuple[str, str]:
     lib_cat_etab = str(row[21] if len(row) > 21 else "").strip()
     cat_etab = str(row[19] if len(row) > 19 else "").strip()
     lib_cat_agregat = str(row[20] if len(row) > 20 else "").strip()
+    cat_agregat_code = str(row[20] if len(row) > 20 else "").strip()
     blob = " ".join(
         (
             str(row[3] if len(row) > 3 else ""),
@@ -2748,25 +2749,43 @@ def _finess_isere_kind(row: list[str]) -> tuple[str, str]:
     if any(token in normalized_blob for token in (" medecin ", " medecins ", "cabinet medical", "cabinet de medecine", "medecine generale", "medecin generaliste", "maison medicale", "maison de sante", "centre de sante")):
         return "medecin", (lib_cat_etab or "Médecins / cabinet médical")
 
+    if any(token in normalized_blob for token in (" ehpad ", "hebergement pour personnes agees dependantes")):
+        return "ehpad", (lib_cat_etab or "EHPAD")
+    if any(token in normalized_blob for token in (" chu ", " c.h.u ", "centre hospitalier universitaire", "centres hospitaliers regionaux", "centre hospitalier regional")):
+        return "chu", (lib_cat_etab or "CHU")
+    if any(token in normalized_blob for token in (" clinique ", "cliniques", "clinique medicale", "clinique chirurgicale", "centre de dialyse")):
+        return "clinique", (lib_cat_etab or "Clinique")
+    if (
+        cat_agregat_code in {"1107"}
+        or any(token in normalized_blob for token in (" hospitalisation privee ", "etablissement de sante prive", "etablissement prive", "etablissements de sante prive"))
+    ):
+        return "hopital_prive", (lib_cat_etab or "Hôpital privé")
+    if (
+        cat_agregat_code in {"1101", "1102", "1103", "1106", "1109", "1110"}
+        or any(token in normalized_blob for token in (" hospitalisation publique ", "etablissement public de sante", "centre hospitalier public", "centre hospitalier"))
+    ):
+        return "hopital_public", (lib_cat_etab or "Hôpital public")
+    if any(token in normalized_blob for token in ("hopital", "hopitaux", "hospital", "centre hospitalier", "centres hospitaliers", "hospitalier")):
+        return "hopital", (lib_cat_etab or "Hôpital")
+
     for label, keywords in _FINESS_ISERE_REQUESTED_CATEGORIES:
         if any(keyword in normalized_blob for keyword in keywords):
             return f"finess_{_finess_isere_slug(label)}", label
 
-    if any(token in normalized_blob for token in (" chu ", "centre hospitalier universitaire", "c.h.u")):
-        return "chu", (lib_cat_etab or "CHU")
-    if any(token in normalized_blob for token in (" ehpad ", "hebergement pour personnes agees dependantes")):
-        return "ehpad", (lib_cat_etab or "EHPAD")
-    if any(token in normalized_blob for token in (" clinique ", "clinique medicale", "clinique chirurgicale", "centre de dialyse")):
-        return "clinique", (lib_cat_etab or "Clinique")
-    if any(token in normalized_blob for token in (" hospitalisation privee ", "hopital prive", "hôpital privé", "etablissement prive", "établissement privé")):
-        return "hopital_prive", (lib_cat_etab or "Hôpital privé")
-    if any(token in normalized_blob for token in (" hospitalisation publique ", "hopital public", "hôpital public", "centre hospitalier public")):
-        return "hopital_public", (lib_cat_etab or "Hôpital public")
-    if any(token in normalized_blob for token in ("hopital", "hospital", " chu ", "centre hospitalier")):
-        return "hopital", (lib_cat_etab or "Hôpital")
-
     category_label = lib_cat_etab or lib_cat_agregat or cat_etab or "Autre établissement FINESS"
     return f"finess_{_finess_isere_slug(category_label)}", category_label
+
+
+def _normalize_finess_commune_code(code_commune: str, departement_code: str) -> str:
+    normalized = str(code_commune or "").strip()
+    department = str(departement_code or "").strip()
+    if not normalized:
+        return ""
+    if re.fullmatch(r"\d{5}", normalized):
+        return normalized
+    if department and re.fullmatch(r"\d{2}", department) and re.fullmatch(r"\d{3}", normalized):
+        return f"{department}{normalized}"
+    return normalized
 
 
 def _finess_commune_center(city: str) -> tuple[float, float] | None:
@@ -2879,7 +2898,10 @@ def _fetch_finess_isere_resources_live(limit: int = 5000) -> dict[str, Any]:
         postal_code, city = _extract_city_from_finess_address_line(row[15] if len(row) > 15 else "")
         if not city:
             continue
-        code_commune = str(row[12] if len(row) > 12 else "").strip()
+        code_commune = _normalize_finess_commune_code(
+            row[12] if len(row) > 12 else "",
+            row[13] if len(row) > 13 else "",
+        )
         coords = centers_by_code.get(code_commune) if code_commune else None
         if not coords:
             if city not in commune_center_cache:
@@ -2917,7 +2939,7 @@ def _fetch_finess_isere_resources_live(limit: int = 5000) -> dict[str, Any]:
                     "voie": str(row[9] if len(row) > 9 else "").strip(),
                     "complement_voie": str(row[10] if len(row) > 10 else "").strip(),
                     "distribution": str(row[11] if len(row) > 11 else "").strip(),
-                    "code_commune": str(row[12] if len(row) > 12 else "").strip(),
+                    "code_commune": code_commune,
                     "code_departement": str(row[13] if len(row) > 13 else "").strip(),
                     "departement": str(row[14] if len(row) > 14 else "").strip(),
                     "ligne_acheminement": str(row[15] if len(row) > 15 else "").strip(),
