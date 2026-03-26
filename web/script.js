@@ -251,6 +251,46 @@ let cachedHomeLiveSnapshot = {};
 let cachedPcsScenarios = [];
 let cachedExercises = [];
 let cachedHazardLayers = {};
+const exerciseSimulatorState = {
+  running: false,
+  progress: 0,
+  practiceDone: new Set(),
+  quizIndex: 0,
+  quizScore: 0,
+  quizUnlocked: false,
+};
+const EXERCISE_QUIZ_BANK = [
+  {
+    question: 'Une alerte crue orange est confirmée sur une commune en crise. Quelle action est prioritaire dans les 10 premières minutes ?',
+    options: [
+      'Activer le PCS local, vérifier les moyens de sauvegarde et qualifier les zones à évacuer.',
+      'Attendre un second bulletin avant toute action terrain.',
+      'Publier un message réseaux sociaux sans coordination mairie/préfecture.',
+    ],
+    answer: 0,
+    rationale: 'La première action attendue est la coordination PCS + qualification rapide des enjeux humains.',
+  },
+  {
+    question: 'En mode exercice, quel indicateur valide une bonne priorisation des moyens ?',
+    options: [
+      'Le nombre total de véhicules engagés, quel que soit leur type.',
+      'Le délai d’arrivée sur les points vitaux et la couverture des populations sensibles.',
+      'Le volume de messages échangés entre opérateurs.',
+    ],
+    answer: 1,
+    rationale: 'La performance opérationnelle repose surtout sur la couverture des enjeux critiques et les délais.',
+  },
+  {
+    question: 'Pendant l’analyse de zone, quel signal impose une alerte renforcée immédiate ?',
+    options: [
+      'Zone avec faible densité et aucun point sensible connu.',
+      'Présence simultanée d’établissements de santé, axes routiers coupables et risque météo aggravé.',
+      'Absence de retours citoyens pendant 30 minutes.',
+    ],
+    answer: 1,
+    rationale: 'Le cumul d’enjeux sensibles + mobilité perturbée + aléa fort justifie l’escalade.',
+  },
+];
 let lastRenderedExternalRisksSignature = null;
 let lastRenderedApiInterconnectionsSignature = null;
 
@@ -6422,6 +6462,7 @@ async function loadMunicipalities(preloaded = null) {
   cachedMunicipalityRecords = municipalities;
   cachedMunicipalities = municipalities;
   populateLogMunicipalityOptions(municipalities);
+  syncExerciseMunicipalityOptions();
   syncLogScopeFields();
   syncLogOtherFields();
   applyMunicipalityFilters();
@@ -6513,7 +6554,133 @@ async function loadUsers(preloaded = null) {
   }).join('') || '<tr><td colspan="6">Aucun utilisateur.</td></tr>');
 }
 
+function renderExerciseProgress() {
+  const progress = Math.max(0, Math.min(100, Number(exerciseSimulatorState.progress || 0)));
+  const progressFill = document.getElementById('exercise-progress-fill');
+  const progressText = document.getElementById('exercise-progress-text');
+  if (progressFill) progressFill.style.width = `${progress}%`;
+  if (progressText) {
+    const practiceCount = exerciseSimulatorState.practiceDone.size;
+    progressText.textContent = `${progress}% · Actions validées ${practiceCount}/3 · Quiz ${exerciseSimulatorState.quizScore}/${EXERCISE_QUIZ_BANK.length}`;
+  }
+}
+
+function renderExerciseQuizQuestion() {
+  const questionTarget = document.getElementById('exercise-quiz-question');
+  const optionsTarget = document.getElementById('exercise-quiz-options');
+  const feedbackTarget = document.getElementById('exercise-quiz-feedback');
+  if (!questionTarget || !optionsTarget || !feedbackTarget) return;
+
+  if (!exerciseSimulatorState.quizUnlocked) {
+    questionTarget.textContent = 'Le quiz s’active après validation des 3 actions de mise en pratique.';
+    optionsTarget.innerHTML = '';
+    feedbackTarget.textContent = 'Complétez d’abord la qualification, la priorisation des moyens et l’analyse de zone.';
+    return;
+  }
+
+  const currentQuestion = EXERCISE_QUIZ_BANK[exerciseSimulatorState.quizIndex];
+  if (!currentQuestion) {
+    questionTarget.textContent = 'Quiz terminé ✅';
+    optionsTarget.innerHTML = '';
+    feedbackTarget.textContent = `Score final: ${exerciseSimulatorState.quizScore}/${EXERCISE_QUIZ_BANK.length}.`;
+    return;
+  }
+
+  questionTarget.textContent = currentQuestion.question;
+  optionsTarget.innerHTML = currentQuestion.options
+    .map((option, idx) => `<button type="button" data-exercise-quiz-answer="${idx}">${escapeHtml(option)}</button>`)
+    .join('');
+  feedbackTarget.textContent = 'Choisissez la meilleure décision opérationnelle.';
+}
+
+function updateExerciseLiveBadge() {
+  const badge = document.getElementById('exercise-live-badge');
+  const lab = document.getElementById('exercise-lab');
+  if (!badge || !lab) return;
+  badge.textContent = exerciseSimulatorState.running ? 'Simulation active' : 'En attente';
+  badge.classList.toggle('running', exerciseSimulatorState.running);
+  lab.classList.toggle('is-running', exerciseSimulatorState.running);
+}
+
+function syncExerciseMunicipalityOptions() {
+  const select = document.getElementById('exercise-zone-municipality');
+  if (!select) return;
+  const current = select.value;
+  const municipalities = Array.isArray(cachedMunicipalities) ? cachedMunicipalities : [];
+  setHtml(
+    'exercise-zone-municipality',
+    '<option value="">Choisir une commune</option>' + municipalities
+      .slice()
+      .sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || ''), 'fr'))
+      .map((municipality) => `<option value="${municipality.id}">${escapeHtml(municipality.name || `Commune #${municipality.id}`)}</option>`)
+      .join(''),
+  );
+  if (current) select.value = current;
+}
+
+function applyExercisePracticeAction(actionKey = '') {
+  const feedbackTarget = document.getElementById('exercise-practice-feedback');
+  exerciseSimulatorState.practiceDone.add(actionKey);
+  const actionCount = exerciseSimulatorState.practiceDone.size;
+  const buttons = Array.from(document.querySelectorAll('#exercise-practice-actions [data-practice-action]'));
+  buttons.forEach((button) => {
+    const key = button.getAttribute('data-practice-action');
+    button.classList.toggle('done', exerciseSimulatorState.practiceDone.has(key));
+  });
+
+  if (feedbackTarget) {
+    if (actionCount >= 3) {
+      feedbackTarget.textContent = '✅ Mise en pratique validée. Le quiz opérationnel est débloqué.';
+    } else {
+      feedbackTarget.textContent = `Action validée (${actionCount}/3). Continuez la mise en pratique pour débloquer le quiz.`;
+    }
+  }
+
+  if (actionCount >= 3) {
+    exerciseSimulatorState.quizUnlocked = true;
+    exerciseSimulatorState.progress = Math.max(exerciseSimulatorState.progress, 45);
+    renderExerciseQuizQuestion();
+  }
+  renderExerciseProgress();
+}
+
+function analyzeExerciseZone() {
+  const select = document.getElementById('exercise-zone-municipality');
+  const outputTarget = document.getElementById('exercise-zone-analysis');
+  if (!select || !outputTarget) return;
+  const municipalityId = Number(select.value || 0);
+  const municipality = (cachedMunicipalities || []).find((item) => Number(item?.id) === municipalityId);
+  if (!municipality) {
+    setHtml('exercise-zone-analysis', '<li>Sélectionnez une commune pour lancer l’analyse de zone.</li>');
+    return;
+  }
+
+  const danger = georisquesDangerLevelFromCommune(municipality);
+  const floodDocs = Number(municipality.flood_documents || municipality.nb_documents || 0);
+  const ppr = Number(municipality.ppr_total || 0);
+  const crisis = municipality.crisis_mode ? '🔴 Commune actuellement en crise.' : '🟢 Commune en veille.';
+  const signals = [
+    `<li><strong>${escapeHtml(municipality.name || 'Commune')}</strong> · Niveau danger: <strong>${escapeHtml(danger.label)}</strong>.</li>`,
+    `<li>${crisis}</li>`,
+    `<li>📄 Documents inondation: <strong>${floodDocs}</strong> · Plans de prévention: <strong>${ppr}</strong>.</li>`,
+    `<li>🎯 Recommandation exercice: positionner un point de commandement avancé et vérifier 2 itinéraires de repli.</li>`,
+  ];
+  setHtml('exercise-zone-analysis', signals.join(''));
+
+  applyExercisePracticeAction('zone');
+  exerciseSimulatorState.progress = Math.max(exerciseSimulatorState.progress, 35);
+  renderExerciseProgress();
+}
+
+function initExerciseModeInteractions() {
+  renderExerciseProgress();
+  renderExerciseQuizQuestion();
+  updateExerciseLiveBadge();
+  syncExerciseMunicipalityOptions();
+}
+
 async function loadV2Modules() {
+  initExerciseModeInteractions();
   try {
     cachedPcsScenarios = await api('/pcs/scenarios');
     const select = document.getElementById('exercise-scenario-id');
@@ -7780,6 +7947,88 @@ document.getElementById('exercise-form')?.addEventListener('submit', async (even
   } catch (error) {
     setHtml('exercise-list', `<li>Erreur création exercice: ${escapeHtml(sanitizeErrorMessage(error.message))}</li>`);
   }
+});
+
+document.getElementById('exercise-start-btn')?.addEventListener('click', () => {
+  exerciseSimulatorState.running = true;
+  exerciseSimulatorState.progress = Math.max(exerciseSimulatorState.progress, 10);
+  updateExerciseLiveBadge();
+  renderExerciseProgress();
+  setText('exercise-practice-feedback', 'Simulation lancée. Commencez par qualifier l’alerte puis priorisez les moyens.');
+});
+
+document.getElementById('exercise-next-btn')?.addEventListener('click', () => {
+  if (!exerciseSimulatorState.running) {
+    setText('exercise-practice-feedback', 'Démarrez d’abord la simulation interactive.');
+    return;
+  }
+  exerciseSimulatorState.progress = Math.min(100, exerciseSimulatorState.progress + 15);
+  if (exerciseSimulatorState.progress >= 100) {
+    exerciseSimulatorState.running = false;
+    updateExerciseLiveBadge();
+  }
+  renderExerciseProgress();
+});
+
+document.getElementById('exercise-practice-actions')?.addEventListener('click', (event) => {
+  const button = event.target.closest('button[data-practice-action]');
+  if (!button) return;
+  if (!exerciseSimulatorState.running) {
+    setText('exercise-practice-feedback', 'Lancez d’abord la simulation pour valider les actions terrain.');
+    return;
+  }
+  const actionKey = String(button.getAttribute('data-practice-action') || '');
+  applyExercisePracticeAction(actionKey);
+  if (actionKey === 'qualification') {
+    exerciseSimulatorState.progress = Math.max(exerciseSimulatorState.progress, 20);
+  } else if (actionKey === 'resources') {
+    exerciseSimulatorState.progress = Math.max(exerciseSimulatorState.progress, 30);
+  }
+  renderExerciseProgress();
+});
+
+document.getElementById('exercise-zone-analyze-btn')?.addEventListener('click', () => {
+  if (!exerciseSimulatorState.running) {
+    setHtml('exercise-zone-analysis', '<li>Lancez la simulation avant l’analyse de zone.</li>');
+    return;
+  }
+  analyzeExerciseZone();
+});
+
+document.getElementById('exercise-quiz-options')?.addEventListener('click', (event) => {
+  const button = event.target.closest('button[data-exercise-quiz-answer]');
+  if (!button) return;
+  const currentQuestion = EXERCISE_QUIZ_BANK[exerciseSimulatorState.quizIndex];
+  if (!currentQuestion) return;
+  const chosen = Number(button.getAttribute('data-exercise-quiz-answer'));
+  const buttons = Array.from(document.querySelectorAll('#exercise-quiz-options button[data-exercise-quiz-answer]'));
+  buttons.forEach((item) => item.disabled = true);
+
+  const isCorrect = chosen === Number(currentQuestion.answer);
+  button.classList.add(isCorrect ? 'correct' : 'wrong');
+  if (!isCorrect) {
+    const correctButton = buttons.find((item) => Number(item.getAttribute('data-exercise-quiz-answer')) === Number(currentQuestion.answer));
+    if (correctButton) correctButton.classList.add('correct');
+  } else {
+    exerciseSimulatorState.quizScore += 1;
+  }
+
+  setText(
+    'exercise-quiz-feedback',
+    `${isCorrect ? '✅ Bonne décision.' : '❌ Choix perfectible.'} ${currentQuestion.rationale}`,
+  );
+
+  exerciseSimulatorState.quizIndex += 1;
+  exerciseSimulatorState.progress = Math.min(100, exerciseSimulatorState.progress + 20);
+  renderExerciseProgress();
+
+  window.setTimeout(() => {
+    renderExerciseQuizQuestion();
+    if (exerciseSimulatorState.quizIndex >= EXERCISE_QUIZ_BANK.length) {
+      exerciseSimulatorState.running = false;
+      updateExerciseLiveBadge();
+    }
+  }, 850);
 });
 
 document.getElementById('refresh-hazards-btn')?.addEventListener('click', async () => {
