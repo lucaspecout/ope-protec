@@ -568,6 +568,7 @@ def shutdown_auth_executor() -> None:
 
 @app.get("/health")
 def healthcheck():
+    logger.info("healthcheck status=ok")
     return {
         "status": "ok",
         "service": settings.app_name,
@@ -912,6 +913,7 @@ async def login(request: Request):
 
 @app.get("/auth/me", response_model=UserOut)
 def auth_me(user: User = Depends(get_current_user)):
+    logger.info("auth_me username=%s role=%s", user.username, user.role)
     return user
 
 

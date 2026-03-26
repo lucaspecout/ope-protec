@@ -1,5 +1,6 @@
 const STORAGE_KEYS = {
   token: 'token',
+  currentUser: 'currentUserSnapshot',
   activePanel: 'activePanel',
   appSidebarCollapsed: 'appSidebarCollapsed',
   mapPointsCache: 'mapPointsCache',
@@ -24,12 +25,16 @@ const API_CACHE_TTL_MS = 300000;
 const API_PANEL_REFRESH_MS = 60000;
 const API_MAX_CONCURRENT_REQUESTS = 3;
 const API_REFRESH_MAX_CONCURRENT_LOADERS = 4;
-const API_REQUEST_TIMEOUT_MS = 15000;
-const LOGIN_REQUEST_TIMEOUT_MS = 10000;
+const API_REQUEST_TIMEOUT_MS = 25000;
+const LOGIN_REQUEST_TIMEOUT_MS = 20000;
 const API_RETRY_BASE_DELAY_MS = 400;
-const API_MAX_RETRIES_GET = 2;
+const API_MAX_RETRIES_GET = 3;
 const API_MAX_RETRIES_NON_GET = 1;
 const API_ORIGIN_COOLDOWN_MS = 120000;
+const OFFLINE_FAILURE_THRESHOLD = 3;
+const SESSION_RESTORE_MAX_ATTEMPTS = 3;
+const SESSION_RESTORE_RETRY_DELAY_MS = 1200;
+const SESSION_RECOVERY_INTERVAL_MS = 20000;
 const STATIC_POINTS_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const OSM_DETAILS_MIN_ZOOM = 15;
 const PANEL_TITLES = {
@@ -130,6 +135,12 @@ const RESOURCE_POINTS = [
 
 let token = localStorage.getItem(STORAGE_KEYS.token);
 let currentUser = null;
+let connectivityState = {
+  consecutiveFailures: 0,
+  backendLikelyOffline: false,
+  lastFailureReason: '',
+  lastStatusMessage: '',
+};
 let pendingCurrentPassword = '';
 let refreshTimer = null;
 let liveEventsTimer = null;
@@ -161,6 +172,7 @@ const apiNetworkMetrics = {
 let preferredApiOrigin = window.location.origin;
 const apiOriginFailures = new Map();
 const startupQueueState = { total: 0, completed: 0, current: '' };
+let sessionRecoveryTimer = null;
 
 const ISERE_MAJOR_CITIES = [
   { key: 'grenoble', name: 'Grenoble', lat: 45.1885, lon: 5.7245, population: 158180 },
@@ -1313,6 +1325,132 @@ function setLoginError(message = '', debugDetails = '') {
   debugWrap.classList.remove('hidden');
 }
 
+function logConnectionEvent(event, details = {}) {
+  const timestamp = new Date().toISOString();
+  const payload = { timestamp, event, ...details };
+  if (event.includes('error') || event.includes('timeout') || event.includes('offline')) {
+    console.warn('[connection]', payload);
+    return;
+  }
+  console.info('[connection]', payload);
+}
+
+function persistCurrentUserSnapshot(user) {
+  try {
+    if (!user || typeof user !== 'object') return;
+    localStorage.setItem(STORAGE_KEYS.currentUser, JSON.stringify({
+      savedAt: Date.now(),
+      user,
+    }));
+  } catch (_) {
+    // ignore localStorage failures
+  }
+}
+
+function readCurrentUserSnapshot() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(STORAGE_KEYS.currentUser) || 'null');
+    if (!raw || typeof raw !== 'object' || !raw.user) return null;
+    return raw.user;
+  } catch (_) {
+    return null;
+  }
+}
+
+function setConnectionStatus(message = '', level = 'info') {
+  const dashboardError = document.getElementById('dashboard-error');
+  const loginError = document.getElementById('login-error');
+  const previousMessage = connectivityState.lastStatusMessage;
+  const safeMessage = String(message || '').trim();
+  connectivityState.lastStatusMessage = safeMessage;
+  if (dashboardError) {
+    if (level === 'error') {
+      dashboardError.textContent = safeMessage;
+    } else if (safeMessage) {
+      dashboardError.textContent = safeMessage;
+    } else if (dashboardError.textContent === previousMessage) {
+      dashboardError.textContent = '';
+    }
+  }
+  if (loginError && !token && level !== 'error') {
+    loginError.textContent = safeMessage;
+  }
+}
+
+function markConnectivityHealthy(context = 'api_success') {
+  const wasOffline = connectivityState.backendLikelyOffline;
+  connectivityState.consecutiveFailures = 0;
+  connectivityState.backendLikelyOffline = false;
+  connectivityState.lastFailureReason = '';
+  if (wasOffline) {
+    setConnectionStatus('Session restaurée · connexion serveur rétablie.', 'info');
+    logConnectionEvent('online_restored', { context });
+    return;
+  }
+  if (connectivityState.lastStatusMessage && connectivityState.lastStatusMessage.includes('nouvelle tentative')) {
+    setConnectionStatus('', 'info');
+  }
+}
+
+function markConnectivityFailure(error, context = 'api_failure') {
+  const isTransient = Boolean(error?.isTimeout || isNetworkFetchError(error) || error?.status == null);
+  if (!isTransient) return;
+  connectivityState.consecutiveFailures += 1;
+  connectivityState.lastFailureReason = sanitizeErrorMessage(error?.message || 'indisponible');
+  logConnectionEvent('transient_error', {
+    context,
+    consecutive_failures: connectivityState.consecutiveFailures,
+    reason: connectivityState.lastFailureReason,
+  });
+  if (connectivityState.consecutiveFailures >= OFFLINE_FAILURE_THRESHOLD) {
+    connectivityState.backendLikelyOffline = true;
+    setConnectionStatus('Serveur temporairement indisponible, tentative de reconnexion…', 'warning');
+  } else {
+    setConnectionStatus('Le serveur répond lentement, nouvelle tentative…', 'warning');
+  }
+}
+
+async function waitForSessionRecovery() {
+  for (let attempt = 1; attempt <= SESSION_RESTORE_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      logConnectionEvent('session_restore_attempt', { attempt });
+      const me = await api('/auth/me', {
+        logoutOn401: false,
+        bypassCache: true,
+        cacheTtlMs: 0,
+        highPriority: true,
+        timeoutMs: API_REQUEST_TIMEOUT_MS,
+      });
+      logConnectionEvent('session_restore_success', { attempt, username: me?.username || 'unknown' });
+      return me;
+    } catch (error) {
+      if (Number(error?.status) === 401) throw error;
+      logConnectionEvent('session_restore_retry', { attempt, reason: sanitizeErrorMessage(error?.message || 'erreur') });
+      if (attempt < SESSION_RESTORE_MAX_ATTEMPTS) await wait(SESSION_RESTORE_RETRY_DELAY_MS * attempt);
+    }
+  }
+  return null;
+}
+
+async function probeBackendHealth() {
+  try {
+    await api('/health', {
+      omitAuth: true,
+      logoutOn401: false,
+      bypassCache: true,
+      cacheTtlMs: 0,
+      highPriority: true,
+      timeoutMs: 6000,
+      maxRetries: 1,
+    });
+    logConnectionEvent('health_probe_ok', {});
+    return true;
+  } catch (error) {
+    logConnectionEvent('health_probe_error', { reason: sanitizeErrorMessage(error?.message || 'erreur') });
+    return false;
+  }
+}
+
 function buildLoginDebugDetails(error, username = '') {
   const lines = [
     `Horodatage: ${new Date().toISOString()}`,
@@ -1333,7 +1471,7 @@ function buildLoginDebugDetails(error, username = '') {
     lines.push(`Cause technique: ${String(error.cause.message)}`);
   }
 
-  lines.push('Conseils: vérifier docker compose up -d, l\'écoute backend sur 0.0.0.0:1182, et le reverse proxy.');
+  lines.push('Conseils: vérifier docker compose up -d, l\'écoute backend sur 0.0.0.0:1182, le reverse proxy, et les timeouts réseau.');
   return lines.join('\n');
 }
 
@@ -1648,6 +1786,7 @@ async function requestApiAcrossOrigins(path, fetchOptions = {}, {
         preferredApiOrigin = origin;
         apiOriginFailures.delete(origin);
         recordApiMetric('success', nowMs() - startedAt);
+        markConnectivityHealthy(path);
         return payload;
       } catch (error) {
         if (error?.isAbort) {
@@ -1656,6 +1795,7 @@ async function requestApiAcrossOrigins(path, fetchOptions = {}, {
         }
         if (error?.isTimeout) recordApiMetric('timeouts', nowMs() - startedAt);
         apiOriginFailures.set(origin, Date.now());
+        markConnectivityFailure(error, path);
         if (error?.status !== undefined && error?.status !== null) throw error;
         lastError = error;
       }
@@ -7795,13 +7935,21 @@ function bindAppInteractions() {
 function logout() {
   token = null;
   currentUser = null;
+  connectivityState = {
+    consecutiveFailures: 0,
+    backendLikelyOffline: false,
+    lastFailureReason: '',
+    lastStatusMessage: '',
+  };
   clearApiCache();
   localStorage.removeItem(STORAGE_KEYS.token);
+  localStorage.removeItem(STORAGE_KEYS.currentUser);
   if (refreshTimer) clearInterval(refreshTimer);
   if (liveEventsTimer) clearInterval(liveEventsTimer);
   if (apiPanelTimer) clearInterval(apiPanelTimer);
   if (apiResyncTimer) clearInterval(apiResyncTimer);
   if (photoCameraRefreshTimer) clearInterval(photoCameraRefreshTimer);
+  if (sessionRecoveryTimer) clearInterval(sessionRecoveryTimer);
   stopMapAnnotationsSync();
   finishStartupQueue();
   showHome();
@@ -7947,6 +8095,7 @@ function startHomeLiveRefresh() {
 }
 
 async function initializeAuthenticatedSession({ runRefreshInBackground = false } = {}) {
+  persistCurrentUserSnapshot(currentUser);
   document.getElementById('current-role').textContent = roleLabel(currentUser.role);
   document.getElementById('current-commune').textContent = currentUser.municipality_name || 'Toutes';
   applyRoleVisibility();
@@ -7966,6 +8115,29 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
   startAutoRefresh();
   startLiveEventsRefresh();
   startMapAnnotationsSync();
+  if (sessionRecoveryTimer) clearInterval(sessionRecoveryTimer);
+  sessionRecoveryTimer = setInterval(async () => {
+    if (!token || document.hidden) return;
+    try {
+      const me = await api('/auth/me', {
+        logoutOn401: false,
+        bypassCache: true,
+        cacheTtlMs: 0,
+        timeoutMs: API_REQUEST_TIMEOUT_MS,
+      });
+      if (me?.username) {
+        currentUser = me;
+        persistCurrentUserSnapshot(currentUser);
+      }
+      markConnectivityHealthy('session_recovery_timer');
+    } catch (error) {
+      if (Number(error?.status) === 401) {
+        logout();
+        return;
+      }
+      markConnectivityFailure(error, 'session_recovery_timer');
+    }
+  }, SESSION_RECOVERY_INTERVAL_MS);
 }
 
 loginForm.addEventListener('submit', async (event) => {
@@ -7980,6 +8152,7 @@ loginForm.addEventListener('submit', async (event) => {
   const password = String(form.get('password') || '');
 
   try {
+    setConnectionStatus('Connexion au serveur en cours…', 'info');
     const payload = new URLSearchParams({ username, password });
     const result = await api('/auth/login', {
       method: 'POST',
@@ -7994,6 +8167,7 @@ loginForm.addEventListener('submit', async (event) => {
     token = result.access_token;
     localStorage.setItem(STORAGE_KEYS.token, token);
     pendingCurrentPassword = password;
+    logConnectionEvent('login_success_token_received', { username });
 
     if (result.must_change_password) {
       setVisibility(loginForm, false);
@@ -8003,7 +8177,9 @@ loginForm.addEventListener('submit', async (event) => {
 
     currentUser = await api('/auth/me');
     await initializeAuthenticatedSession({ runRefreshInBackground: true });
+    setConnectionStatus('Session restaurée.', 'info');
   } catch (error) {
+    logConnectionEvent('login_error', { username, reason: sanitizeErrorMessage(error?.message || 'erreur') });
     setLoginError(error.message, buildLoginDebugDetails(error, username));
   } finally {
     isLoginSubmitting = false;
@@ -8352,6 +8528,15 @@ document.getElementById('incident-print-btn')?.addEventListener('click', () => w
     loadHomeLiveStatus();
     if (token) refreshAll(false);
   });
+  window.addEventListener('offline', () => {
+    logConnectionEvent('browser_offline', {});
+    setConnectionStatus('Connexion réseau perdue. Tentative de reprise dès que possible…', 'warning');
+  });
+  window.addEventListener('online', () => {
+    logConnectionEvent('browser_online', {});
+    setConnectionStatus('Réseau détecté. Vérification du serveur…', 'info');
+    if (token) refreshAll(true);
+  });
 
   try {
     const cachedMunicipalities = JSON.parse(localStorage.getItem(STORAGE_KEYS.municipalitiesCache) || '[]');
@@ -8364,12 +8549,28 @@ document.getElementById('incident-print-btn')?.addEventListener('click', () => w
   }
 
   if (!token) return showHome();
+  setConnectionStatus('Restauration de session en cours…', 'info');
+  const cachedUser = readCurrentUserSnapshot();
   try {
-    currentUser = await api('/auth/me');
+    const restoredUser = await waitForSessionRecovery();
+    if (!restoredUser) throw createApiError('Session indisponible temporairement');
+    currentUser = restoredUser;
     await initializeAuthenticatedSession({ runRefreshInBackground: true });
+    setConnectionStatus('Session restaurée.', 'info');
+    return;
   } catch (error) {
     if (Number(error?.status) === 401) {
       logout();
+      return;
+    }
+    const healthOk = await probeBackendHealth();
+    logConnectionEvent('session_restore_error', { reason: sanitizeErrorMessage(error?.message || 'erreur') });
+    if (cachedUser && cachedUser.username) {
+      currentUser = cachedUser;
+      await initializeAuthenticatedSession({ runRefreshInBackground: true });
+      setConnectionStatus(healthOk
+        ? 'Session restaurée localement. Le backend est joignable mais lent, nouvelle tentative en cours…'
+        : 'Session restaurée localement. Backend temporairement indisponible, tentative de reconnexion…', 'warning');
       return;
     }
     setLoginError(`Session conservée mais API indisponible: ${sanitizeErrorMessage(error?.message || 'erreur inconnue')}`, buildLoginDebugDetails(error, currentUser?.username || 'session existante'));
