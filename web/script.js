@@ -1106,6 +1106,11 @@ function populateLogMunicipalityOptions(municipalities = []) {
   }
 }
 
+function syncExerciseMunicipalityOptions() {
+  // Le simulateur d'exercice n'utilise pas toujours une sélection de commune.
+  // Cette fonction est conservée pour compatibilité avec les appels existants.
+}
+
 function syncLogScopeFields() {
   const scopeSelect = document.getElementById('log-target-scope');
   const municipalitySelect = document.getElementById('log-municipality-id');
