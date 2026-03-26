@@ -643,6 +643,50 @@
                 </select>
                 <button type="submit">Lancer</button>
               </form>
+              <div id="exercise-lab" class="exercise-lab" aria-live="polite">
+                <div class="exercise-lab__top">
+                  <p class="muted">Simulation immersive en 3 phases</p>
+                  <span id="exercise-live-badge" class="exercise-live-badge">En attente</span>
+                </div>
+                <div class="exercise-progress">
+                  <span id="exercise-progress-fill"></span>
+                </div>
+                <p id="exercise-progress-text" class="muted">0% · Démarrer pour lancer les interactions.</p>
+                <div class="exercise-cta-row">
+                  <button id="exercise-start-btn" type="button" class="ghost">▶ Démarrer exercice interactif</button>
+                  <button id="exercise-next-btn" type="button" class="ghost">⏭️ Étape suivante</button>
+                </div>
+
+                <section class="exercise-block">
+                  <h5>Mise en pratique terrain</h5>
+                  <div id="exercise-practice-actions" class="exercise-practice-actions">
+                    <button type="button" data-practice-action="qualification">Qualifier l’alerte terrain</button>
+                    <button type="button" data-practice-action="resources">Prioriser les moyens critiques</button>
+                    <button type="button" data-practice-action="zone">Analyser la zone d’impact</button>
+                  </div>
+                  <p id="exercise-practice-feedback" class="muted">Validez les 3 actions pour débloquer le quiz.</p>
+                </section>
+
+                <section class="exercise-block">
+                  <h5>Quiz opérationnel</h5>
+                  <p id="exercise-quiz-question" class="exercise-quiz-question">Le quiz s’active après la mise en pratique.</p>
+                  <div id="exercise-quiz-options" class="exercise-quiz-options"></div>
+                  <p id="exercise-quiz-feedback" class="muted"></p>
+                </section>
+
+                <section class="exercise-block">
+                  <h5>Analyse de zone guidée</h5>
+                  <div class="exercise-zone-controls">
+                    <select id="exercise-zone-municipality">
+                      <option value="">Choisir une commune</option>
+                    </select>
+                    <button id="exercise-zone-analyze-btn" type="button" class="ghost">Analyser</button>
+                  </div>
+                  <ul id="exercise-zone-analysis" class="list compact">
+                    <li>Aucune analyse de zone pour l’instant.</li>
+                  </ul>
+                </section>
+              </div>
               <ul id="exercise-list" class="list"></ul>
             </div>
             <div class="tile">

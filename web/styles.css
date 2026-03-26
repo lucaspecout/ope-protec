@@ -1221,3 +1221,110 @@ select:focus {
   overflow: auto;
   white-space: pre-wrap;
 }
+
+.exercise-lab {
+  margin-top: .75rem;
+  border: 1px solid #d6e3fa;
+  border-radius: 12px;
+  padding: .75rem;
+  background: linear-gradient(180deg, #f7fbff, #edf4ff);
+}
+.exercise-lab__top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: .5rem;
+}
+.exercise-live-badge {
+  border-radius: 999px;
+  padding: .25rem .55rem;
+  font-size: .75rem;
+  font-weight: 700;
+  border: 1px solid #c8d9fb;
+  background: #e8f0ff;
+  color: #1c4a8f;
+}
+.exercise-live-badge.running {
+  background: #e9fff2;
+  border-color: #b9efcd;
+  color: #16673f;
+  animation: pulse-soft 1.8s ease-in-out infinite;
+}
+.exercise-progress {
+  margin-top: .5rem;
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: #dce7fa;
+  overflow: hidden;
+}
+#exercise-progress-fill {
+  display: block;
+  width: 0%;
+  height: 100%;
+  background: linear-gradient(90deg, #2e67c8, #1ba35f);
+  transition: width .35s ease;
+}
+.exercise-cta-row,
+.exercise-practice-actions,
+.exercise-zone-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .45rem;
+}
+.exercise-practice-actions {
+  grid-template-columns: 1fr;
+}
+.exercise-block {
+  margin-top: .65rem;
+  padding-top: .6rem;
+  border-top: 1px dashed #c6d8f8;
+}
+.exercise-block h5 {
+  margin-bottom: .45rem;
+}
+.exercise-practice-actions button.done {
+  background: linear-gradient(140deg, #1c9656, #167e47);
+  color: #fff;
+}
+.exercise-quiz-options {
+  display: grid;
+  gap: .35rem;
+}
+.exercise-quiz-options button {
+  background: #fff;
+  color: #1a427d;
+  border: 1px solid #cfe0fa;
+  text-align: left;
+}
+.exercise-quiz-options button.correct {
+  background: #e7f8ef;
+  border-color: #8fd1ab;
+  color: #16673f;
+}
+.exercise-quiz-options button.wrong {
+  background: #fff1f3;
+  border-color: #efb8c2;
+  color: #8a2a39;
+}
+.exercise-zone-controls {
+  grid-template-columns: 1.4fr .7fr;
+}
+#exercise-zone-analysis {
+  margin-top: .5rem;
+}
+#exercise-lab.is-running {
+  background-image: linear-gradient(105deg, #f6fbff 0%, #edf4ff 35%, #f6fbff 70%);
+  background-size: 240px 100%;
+  animation: shimmer 2.2s linear infinite;
+}
+
+@keyframes pulse-soft {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(36, 173, 97, 0.2); }
+  50% { box-shadow: 0 0 0 7px rgba(36, 173, 97, 0); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -240px 0; }
+  100% { background-position: 240px 0; }
+}
