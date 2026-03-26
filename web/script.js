@@ -6926,9 +6926,15 @@ async function loadV2Modules() {
   renderV2Modules();
 }
 
-async function loadOperationsBootstrap(forceRefresh = false) {
+async function loadOperationsBootstrap(forceRefresh = false, options = {}) {
+  const { signal = null } = options;
   const suffix = forceRefresh ? '?refresh=true' : '';
-  const payload = await api(`/operations/bootstrap${suffix}`, { cacheTtlMs: 5000 });
+  const payload = await api(`/operations/bootstrap${suffix}`, {
+    cacheTtlMs: forceRefresh ? 0 : 5000,
+    bypassCache: forceRefresh,
+    highPriority: true,
+    signal,
+  });
   if (!payload || typeof payload !== 'object') throw new Error('Réponse bootstrap invalide');
 
   if (payload.dashboard) {
@@ -6996,19 +7002,38 @@ async function refreshAll(forceRefresh = false) {
 
   refreshAllInFlight = withPreservedScroll(async () => {
     apiDefaultSignal = refreshSignal;
-    const loaders = [
-      { label: 'flux API (Météo / Vigicrues / Itinisère / Bison / Géorisques)', loader: () => loadExternalRisks(forceRefresh), optional: false, priority: 'critical' },
-      { label: 'main courante', loader: loadLogs, optional: false, priority: 'critical' },
-      { label: 'évènements', loader: loadEvents, optional: false, priority: 'critical' },
-      { label: 'communes', loader: loadMunicipalities, optional: false, priority: 'high' },
-      { label: 'tableau de bord', loader: () => loadDashboard(forceRefresh), optional: true, priority: 'high' },
-      { label: 'interconnexions API', loader: async () => renderApiInterconnections(cachedExternalRisksSnapshot), optional: true },
-      { label: 'utilisateurs', loader: loadUsers, optional: true },
-      { label: 'modules V2', loader: loadV2Modules, optional: true },
-      { label: 'points cartographiques', loader: loadMapPoints, optional: true },
-      { label: 'annotations tactiques', loader: loadMapAnnotations, optional: true },
-      { label: 'trafic cartographique', loader: renderTrafficOnMap, optional: true },
-    ];
+    let bootstrapOk = false;
+    try {
+      setStartupQueueCurrent('Chargement prioritaire: consolidation des données opérationnelles…');
+      await loadOperationsBootstrap(forceRefresh, { signal: refreshSignal });
+      bootstrapOk = true;
+    } catch (error) {
+      document.getElementById('dashboard-error').textContent = `Bootstrap indisponible, bascule en mode dégradé: ${sanitizeErrorMessage(error.message)}`;
+    }
+
+    const loaders = bootstrapOk
+      ? [
+        { label: 'tableau de bord', loader: () => loadDashboard(forceRefresh), optional: true, priority: 'high' },
+        { label: 'interconnexions API', loader: async () => renderApiInterconnections(cachedExternalRisksSnapshot), optional: true },
+        { label: 'utilisateurs', loader: loadUsers, optional: true },
+        { label: 'modules V2', loader: loadV2Modules, optional: true },
+        { label: 'points cartographiques', loader: loadMapPoints, optional: true },
+        { label: 'annotations tactiques', loader: loadMapAnnotations, optional: true },
+        { label: 'trafic cartographique', loader: renderTrafficOnMap, optional: true },
+      ]
+      : [
+        { label: 'flux API (Météo / Vigicrues / Itinisère / Bison / Géorisques)', loader: () => loadExternalRisks(forceRefresh), optional: false, priority: 'critical' },
+        { label: 'main courante', loader: loadLogs, optional: false, priority: 'critical' },
+        { label: 'évènements', loader: loadEvents, optional: false, priority: 'critical' },
+        { label: 'communes', loader: loadMunicipalities, optional: false, priority: 'high' },
+        { label: 'tableau de bord', loader: () => loadDashboard(forceRefresh), optional: true, priority: 'high' },
+        { label: 'interconnexions API', loader: async () => renderApiInterconnections(cachedExternalRisksSnapshot), optional: true },
+        { label: 'utilisateurs', loader: loadUsers, optional: true },
+        { label: 'modules V2', loader: loadV2Modules, optional: true },
+        { label: 'points cartographiques', loader: loadMapPoints, optional: true },
+        { label: 'annotations tactiques', loader: loadMapAnnotations, optional: true },
+        { label: 'trafic cartographique', loader: renderTrafficOnMap, optional: true },
+      ];
 
     const orderedLoaders = loaders.slice().sort((a, b) => {
       const rank = { critical: 0, high: 1 };
