@@ -1,9 +1,11 @@
 from datetime import datetime, timedelta
 from copy import deepcopy
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import re
 import secrets
 import hashlib
+import logging
 from threading import Lock, Thread
 from time import sleep
 from typing import Callable
@@ -15,13 +17,13 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request,
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .database import Base, SessionLocal, engine, get_db
+from .database import Base, SessionLocal, SessionLocalAuth, engine, get_db
 from .models import ExerciseRun, IncidentEvent, MapAnnotation, MapPoint, Municipality, MunicipalityDocument, OperationalLog, PcsGuidanceRun, PublicShare, RiverStation, ScenarioTemplate, User, WeatherAlert
 from .schemas import (
     MapAnnotationCreate,
@@ -224,6 +226,7 @@ app = FastAPI(title=settings.app_name)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.add_middleware(GZipMiddleware, minimum_size=800)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+logger = logging.getLogger("ope_protec.concurrency")
 
 ALLOWED_WEATHER_TRANSITIONS = {("jaune", "orange"), ("orange", "rouge")}
 READ_ROLES = {"admin", "ope", "securite", "visiteur", "mairie"}
@@ -258,6 +261,9 @@ _map_annotations_revision = 0
 _weather_cleanup_lock = Lock()
 _last_weather_cleanup_at: datetime | None = None
 _WEATHER_CLEANUP_MIN_INTERVAL = timedelta(minutes=10)
+_inflight_request_count_lock = Lock()
+_inflight_request_count = 0
+_auth_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="auth-login")
 DEFAULT_SCENARIO_LIBRARY = [
     {
         "name": "Inondation majeure",
@@ -300,6 +306,31 @@ DEFAULT_SCENARIO_LIBRARY = [
         "reflex": "Fiche réflexe tempête-réseau: priorisation sites vitaux, alternatives radio, suivi ENEDIS/ARCEP.",
     },
 ]
+
+
+@app.middleware("http")
+async def log_request_timing(request: Request, call_next):
+    global _inflight_request_count
+    started_at = datetime.utcnow()
+    with _inflight_request_count_lock:
+        _inflight_request_count += 1
+        active_requests = _inflight_request_count
+    try:
+        response = await call_next(request)
+        return response
+    finally:
+        duration_ms = int((datetime.utcnow() - started_at).total_seconds() * 1000)
+        with _inflight_request_count_lock:
+            _inflight_request_count -= 1
+            remaining_requests = _inflight_request_count
+        logger.info(
+            "request method=%s path=%s duration_ms=%s active_requests=%s remaining_requests=%s",
+            request.method,
+            request.url.path,
+            duration_ms,
+            active_requests,
+            remaining_requests,
+        )
 
 
 def bump_map_annotations_revision() -> int:
@@ -528,6 +559,11 @@ def _continuous_external_refresh() -> None:
 def startup_warmup_external_sources() -> None:
     Thread(target=_warmup_external_sources, daemon=True).start()
     Thread(target=_continuous_external_refresh, daemon=True).start()
+
+
+@app.on_event("shutdown")
+def shutdown_auth_executor() -> None:
+    _auth_executor.shutdown(wait=False, cancel_futures=True)
 
 
 @app.get("/health")
@@ -840,15 +876,37 @@ def delete_user(user_id: int, db: Session = Depends(get_db), actor: User = Depen
     return {"status": "deleted", "id": user_id}
 
 
+def authenticate_locally(username: str, password: str) -> tuple[str, bool] | None:
+    db = SessionLocalAuth()
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user or not verify_password(password, user.hashed_password):
+            return None
+        return user.username, user.must_change_password
+    finally:
+        db.close()
+
+
 @app.post("/auth/login", response_model=Token)
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.username == form_data.username).first()
-    if not user or not verify_password(form_data.password, user.hashed_password):
+async def login(request: Request):
+    form_data = await request.form()
+    username = str(form_data.get("username") or "")
+    password = str(form_data.get("password") or "")
+    if not username or not password:
+        raise HTTPException(400, "Formulaire d'authentification incomplet")
+
+    start_wait = datetime.utcnow()
+    loop = asyncio.get_running_loop()
+    auth_result = await loop.run_in_executor(_auth_executor, authenticate_locally, username, password)
+    wait_ms = int((datetime.utcnow() - start_wait).total_seconds() * 1000)
+    logger.info("login_attempt username=%s auth_duration_ms=%s", username, wait_ms)
+    if not auth_result:
         raise HTTPException(401, "Utilisateur ou mot de passe incorrect")
+    authenticated_username, must_change_password = auth_result
     return {
-        "access_token": create_access_token(user.username),
+        "access_token": create_access_token(authenticated_username),
         "token_type": "bearer",
-        "must_change_password": user.must_change_password,
+        "must_change_password": must_change_password,
     }
 
 

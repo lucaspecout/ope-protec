@@ -12,6 +12,15 @@ engine = create_engine(
     pool_recycle=settings.db_pool_recycle_seconds,
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+auth_engine = create_engine(
+    settings.database_url,
+    pool_pre_ping=True,
+    pool_size=4,
+    max_overflow=2,
+    pool_timeout=2,
+    pool_recycle=settings.db_pool_recycle_seconds,
+)
+SessionLocalAuth = sessionmaker(autocommit=False, autoflush=False, bind=auth_engine)
 Base = declarative_base()
 
 
