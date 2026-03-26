@@ -14,6 +14,8 @@ const STORAGE_KEYS = {
   staticInstitutionsCache: 'staticInstitutionsCache',
   staticFinessCache: 'staticFinessCacheV3',
   serviceStatusHistory: 'serviceStatusHistory',
+  v2IncidentCatalog: 'v2IncidentCatalog',
+  v2IncidentChecklist: 'v2IncidentChecklist',
 };
 const AUTO_REFRESH_MS = 60000;
 const EVENTS_LIVE_REFRESH_MS = 60000;
@@ -265,6 +267,86 @@ let cachedHomeLiveSnapshot = {};
 let cachedPcsScenarios = [];
 let cachedExercises = [];
 let cachedHazardLayers = {};
+let v2IncidentCatalog = [];
+let v2SelectedIncidentId = null;
+let v2ChecklistProgress = {};
+let v2AdminModeEnabled = false;
+let v2EditorIncidentId = null;
+
+const INCIDENT_CATEGORY_LABELS = {
+  climatique: 'Climatique',
+  technologique: 'Technologique',
+  sanitaire: 'Sanitaire',
+  securite: 'Sécurité civile',
+  reseaux: 'Réseaux critiques',
+  autre: 'Autre',
+};
+
+function buildDefaultIncidents() {
+  return [
+    {
+      id: 'inc-inondation',
+      name: 'Inondation',
+      category: 'climatique',
+      severity: 4,
+      summary: {
+        definition: 'Submersion rapide ou progressive de zones habitées, voiries et infrastructures.',
+        impacts: ['Mise en danger des personnes', 'Isolement de quartiers', 'Rupture de mobilité'],
+        vigilance: ['Surveiller la montée des eaux', 'Identifier zones à évacuer en priorité'],
+      },
+      steps: ['Évaluation initiale', 'Sécurisation des zones inondables', 'Alerte et transmission CODIS/Préfecture', 'Mobilisation moyens communaux', 'Coordination interservices', 'Suivi de situation heure par heure', 'Retour à la normale et débrief'],
+      checklist: ['Activer cellule de crise', 'Vérifier points sensibles (écoles, EHPAD, hôpital)', 'Informer la population via canaux officiels', 'Préparer centres d’accueil', 'Tracer décisions en main courante'],
+      decisionAid: {
+        questions: ['Des personnes sont-elles piégées ?', 'Les axes d’accès secours restent-ils praticables ?'],
+        escalation: ['Passage en niveau 5 si menace sur vies humaines', 'Demande de renfort zonal si plusieurs communes touchées'],
+        thresholds: ['Vigilance orange + débordement constaté', 'Coupure de 2 axes majeurs ou plus'],
+        recommendations: ['Prioriser sauvegarde humaine', 'Limiter déplacements non essentiels'],
+        orientation: 'Si montée rapide + saturation moyens locaux, déclencher immédiatement escalade préfectorale.',
+      },
+    },
+    {
+      id: 'inc-feu',
+      name: 'Feu / Incendie',
+      category: 'securite',
+      severity: 5,
+      summary: {
+        definition: 'Incendie urbain, industriel ou de végétation avec propagation possible.',
+        impacts: ['Victimes potentielles', 'Destruction d’infrastructures', 'Pollution atmosphérique locale'],
+        vigilance: ['Direction du vent', 'Présence matières dangereuses'],
+      },
+      steps: ['Évaluation initiale', 'Sécurisation et périmètre', 'Alerte SDIS / forces de l’ordre', 'Mobilisation logistique et accueil évacués', 'Coordination commandement', 'Suivi des fumées et impacts', 'Retour à la normale'],
+      checklist: ['Confirmer périmètre de sécurité', 'Évacuer bâtiments exposés', 'Protéger points critiques', 'Prévoir communication population', 'Planifier relogement temporaire'],
+      decisionAid: {
+        questions: ['Le feu menace-t-il une zone dense ?', 'Y a-t-il des produits dangereux ?'],
+        escalation: ['Escalade immédiate si site sensible touché', 'Activation ORSEC si propagation multi-sites'],
+        thresholds: ['Feu non maîtrisé après 30 min', 'Plus de 50 personnes à évacuer'],
+        recommendations: ['Créer un point de situation toutes les 15 minutes'],
+        orientation: 'Si propagation active + vent défavorable, orienter vers évacuation préventive.',
+      },
+    },
+    {
+      id: 'inc-rupture-reseau',
+      name: 'Rupture de réseau',
+      category: 'reseaux',
+      severity: 3,
+      summary: {
+        definition: 'Interruption durable d’électricité, télécom, eau ou transport.',
+        impacts: ['Perte de services essentiels', 'Blocage activités vitales', 'Risque sur publics fragiles'],
+        vigilance: ['Durée estimée de la panne', 'Impacts sur santé et sécurité'],
+      },
+      steps: ['Évaluation initiale', 'Sécurisation des sites sensibles', 'Alerte opérateurs et autorités', 'Mobilisation moyens de secours', 'Coordination de continuité', 'Suivi de rétablissement', 'Retour à la normale'],
+      checklist: ['Identifier zones impactées', 'Lister sites prioritaires', 'Activer solutions de secours', 'Informer usagers', 'Consigner heure de reprise'],
+      decisionAid: {
+        questions: ['Un service vital est-il interrompu ?', 'Le délai opérateur est-il fiable ?'],
+        escalation: ['Escalade si hôpital/EHPAD sans autonomie', 'Escalade si panne > 4h en zone dense'],
+        thresholds: ['Plus de 10 000 habitants touchés', 'Indisponibilité multi-réseaux simultanée'],
+        recommendations: ['Prioriser énergie de secours et communications'],
+        orientation: 'Si cumuls de pannes, passer en conduite interservices renforcée.',
+      },
+    },
+  ];
+}
+
 const exerciseSimulatorState = {
   running: false,
   progress: 0,
@@ -6632,163 +6714,211 @@ async function loadUsers(preloaded = null) {
   }).join('') || '<tr><td colspan="6">Aucun utilisateur.</td></tr>');
 }
 
-function renderExerciseProgress() {
-  const progress = Math.max(0, Math.min(100, Number(exerciseSimulatorState.progress || 0)));
-  const progressFill = document.getElementById('exercise-progress-fill');
-  const progressText = document.getElementById('exercise-progress-text');
-  if (progressFill) progressFill.style.width = `${progress}%`;
-  if (progressText) {
-    const practiceCount = exerciseSimulatorState.practiceDone.size;
-    progressText.textContent = `${progress}% · Actions validées ${practiceCount}/3 · Quiz ${exerciseSimulatorState.quizScore}/${EXERCISE_QUIZ_BANK.length}`;
-  }
+function cloneIncident(incident) {
+  return JSON.parse(JSON.stringify(incident));
 }
 
-function renderExerciseQuizQuestion() {
-  const questionTarget = document.getElementById('exercise-quiz-question');
-  const optionsTarget = document.getElementById('exercise-quiz-options');
-  const feedbackTarget = document.getElementById('exercise-quiz-feedback');
-  if (!questionTarget || !optionsTarget || !feedbackTarget) return;
-
-  if (!exerciseSimulatorState.quizUnlocked) {
-    questionTarget.textContent = 'Le quiz s’active après validation des 3 actions de mise en pratique.';
-    optionsTarget.innerHTML = '';
-    feedbackTarget.textContent = 'Complétez d’abord la qualification, la priorisation des moyens et l’analyse de zone.';
-    return;
+function loadIncidentCatalogFromStorage() {
+  const stored = readSnapshot(STORAGE_KEYS.v2IncidentCatalog);
+  v2IncidentCatalog = Array.isArray(stored) && stored.length ? stored : buildDefaultIncidents();
+  if (!v2SelectedIncidentId || !v2IncidentCatalog.some((item) => item.id === v2SelectedIncidentId)) {
+    v2SelectedIncidentId = v2IncidentCatalog[0]?.id || null;
   }
-
-  const currentQuestion = EXERCISE_QUIZ_BANK[exerciseSimulatorState.quizIndex];
-  if (!currentQuestion) {
-    questionTarget.textContent = 'Quiz terminé ✅';
-    optionsTarget.innerHTML = '';
-    feedbackTarget.textContent = `Score final: ${exerciseSimulatorState.quizScore}/${EXERCISE_QUIZ_BANK.length}.`;
-    return;
-  }
-
-  questionTarget.textContent = currentQuestion.question;
-  optionsTarget.innerHTML = currentQuestion.options
-    .map((option, idx) => `<button type="button" data-exercise-quiz-answer="${idx}">${escapeHtml(option)}</button>`)
-    .join('');
-  feedbackTarget.textContent = 'Choisissez la meilleure décision opérationnelle.';
+  const checklist = readSnapshot(STORAGE_KEYS.v2IncidentChecklist);
+  v2ChecklistProgress = checklist && typeof checklist === 'object' ? checklist : {};
 }
 
-function updateExerciseLiveBadge() {
-  const badge = document.getElementById('exercise-live-badge');
-  const lab = document.getElementById('exercise-lab');
-  if (!badge || !lab) return;
-  badge.textContent = exerciseSimulatorState.running ? 'Simulation active' : 'En attente';
-  badge.classList.toggle('running', exerciseSimulatorState.running);
-  lab.classList.toggle('is-running', exerciseSimulatorState.running);
+function saveIncidentCatalog() {
+  saveSnapshot(STORAGE_KEYS.v2IncidentCatalog, v2IncidentCatalog);
 }
 
-function syncExerciseMunicipalityOptions() {
-  const select = document.getElementById('exercise-zone-municipality');
+function saveIncidentChecklistProgress() {
+  saveSnapshot(STORAGE_KEYS.v2IncidentChecklist, v2ChecklistProgress);
+}
+
+function getSelectedIncident() {
+  return v2IncidentCatalog.find((item) => item.id === v2SelectedIncidentId) || null;
+}
+
+function getIncidentChecklistState(incidentId = '') {
+  const state = v2ChecklistProgress[incidentId];
+  return state && typeof state === 'object' ? state : {};
+}
+
+function getIncidentProgressPercent(incident) {
+  const checks = Array.isArray(incident?.checklist) ? incident.checklist : [];
+  if (!checks.length) return 0;
+  const state = getIncidentChecklistState(incident.id);
+  const done = checks.filter((_, idx) => Boolean(state[idx])).length;
+  return Math.round((done / checks.length) * 100);
+}
+
+function computeIncidentCriticality(incident) {
+  const base = Number(incident?.severity || 1);
+  const progressPenalty = Math.round((100 - getIncidentProgressPercent(incident)) / 25);
+  return Math.min(5, Math.max(1, base + progressPenalty - 2));
+}
+
+function renderIncidentCategoryFilter() {
+  const categories = Array.from(new Set(v2IncidentCatalog.map((item) => item.category).filter(Boolean)));
+  const select = document.getElementById('incident-category-filter');
   if (!select) return;
-  const current = select.value;
-  const municipalities = Array.isArray(cachedMunicipalities) ? cachedMunicipalities : [];
-  setHtml(
-    'exercise-zone-municipality',
-    '<option value="">Choisir une commune</option>' + municipalities
-      .slice()
-      .sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || ''), 'fr'))
-      .map((municipality) => `<option value="${municipality.id}">${escapeHtml(municipality.name || `Commune #${municipality.id}`)}</option>`)
-      .join(''),
-  );
-  if (current) select.value = current;
+  const current = select.value || 'all';
+  select.innerHTML = `<option value="all">Toutes catégories</option>${categories.map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(INCIDENT_CATEGORY_LABELS[category] || category)}</option>`).join('')}`;
+  select.value = categories.includes(current) ? current : 'all';
 }
 
-function applyExercisePracticeAction(actionKey = '') {
-  const feedbackTarget = document.getElementById('exercise-practice-feedback');
-  exerciseSimulatorState.practiceDone.add(actionKey);
-  const actionCount = exerciseSimulatorState.practiceDone.size;
-  const buttons = Array.from(document.querySelectorAll('#exercise-practice-actions [data-practice-action]'));
-  buttons.forEach((button) => {
-    const key = button.getAttribute('data-practice-action');
-    button.classList.toggle('done', exerciseSimulatorState.practiceDone.has(key));
+function renderIncidentList() {
+  const search = String(document.getElementById('incident-search')?.value || '').toLowerCase().trim();
+  const category = String(document.getElementById('incident-category-filter')?.value || 'all');
+  const severity = String(document.getElementById('incident-severity-filter')?.value || 'all');
+  const filtered = v2IncidentCatalog.filter((incident) => {
+    const blob = `${incident.name} ${incident.category} ${incident.summary?.definition || ''}`.toLowerCase();
+    const matchSearch = !search || blob.includes(search);
+    const matchCategory = category === 'all' || incident.category === category;
+    const matchSeverity = severity === 'all' || String(incident.severity) === severity;
+    return matchSearch && matchCategory && matchSeverity;
   });
 
-  if (feedbackTarget) {
-    if (actionCount >= 3) {
-      feedbackTarget.textContent = '✅ Mise en pratique validée. Le quiz opérationnel est débloqué.';
-    } else {
-      feedbackTarget.textContent = `Action validée (${actionCount}/3). Continuez la mise en pratique pour débloquer le quiz.`;
-    }
-  }
-
-  if (actionCount >= 3) {
-    exerciseSimulatorState.quizUnlocked = true;
-    exerciseSimulatorState.progress = Math.max(exerciseSimulatorState.progress, 45);
-    renderExerciseQuizQuestion();
-  }
-  renderExerciseProgress();
+  const list = document.getElementById('incident-list');
+  const empty = document.getElementById('incident-empty');
+  if (!list || !empty) return;
+  list.innerHTML = filtered.map((incident) => {
+    const severityClass = `v2-severity v2-severity--${Math.max(1, Math.min(5, Number(incident.severity || 1)))}`;
+    const progress = getIncidentProgressPercent(incident);
+    return `<li data-incident-id="${incident.id}" class="${incident.id === v2SelectedIncidentId ? 'active' : ''}">
+      <strong>${escapeHtml(incident.name)}</strong><span class="${severityClass}">N${Number(incident.severity || 1)}</span>
+      <div class="muted">${escapeHtml(INCIDENT_CATEGORY_LABELS[incident.category] || incident.category || 'Autre')}</div>
+      <div class="muted">Checklist: ${progress}%</div>
+    </li>`;
+  }).join('');
+  empty.classList.toggle('hidden', filtered.length > 0);
 }
 
-function analyzeExerciseZone() {
-  const select = document.getElementById('exercise-zone-municipality');
-  const outputTarget = document.getElementById('exercise-zone-analysis');
-  if (!select || !outputTarget) return;
-  const municipalityId = Number(select.value || 0);
-  const municipality = (cachedMunicipalities || []).find((item) => Number(item?.id) === municipalityId);
-  if (!municipality) {
-    setHtml('exercise-zone-analysis', '<li>Sélectionnez une commune pour lancer l’analyse de zone.</li>');
+function renderIncidentView() {
+  const target = document.getElementById('incident-view');
+  if (!target) return;
+  const incident = getSelectedIncident();
+  if (!incident) {
+    target.innerHTML = '<p class="muted">Sélectionnez un incident.</p>';
     return;
   }
-
-  const danger = georisquesDangerLevelFromCommune(municipality);
-  const floodDocs = Number(municipality.flood_documents || municipality.nb_documents || 0);
-  const ppr = Number(municipality.ppr_total || 0);
-  const crisis = municipality.crisis_mode ? '🔴 Commune actuellement en crise.' : '🟢 Commune en veille.';
-  const signals = [
-    `<li><strong>${escapeHtml(municipality.name || 'Commune')}</strong> · Niveau danger: <strong>${escapeHtml(danger.label)}</strong>.</li>`,
-    `<li>${crisis}</li>`,
-    `<li>📄 Documents inondation: <strong>${floodDocs}</strong> · Plans de prévention: <strong>${ppr}</strong>.</li>`,
-    `<li>🎯 Recommandation exercice: positionner un point de commandement avancé et vérifier 2 itinéraires de repli.</li>`,
-  ];
-  setHtml('exercise-zone-analysis', signals.join(''));
-
-  applyExercisePracticeAction('zone');
-  exerciseSimulatorState.progress = Math.max(exerciseSimulatorState.progress, 35);
-  renderExerciseProgress();
+  const checklistState = getIncidentChecklistState(incident.id);
+  const checklistDone = incident.checklist.filter((_, idx) => Boolean(checklistState[idx])).length;
+  const progress = getIncidentProgressPercent(incident);
+  const dynamicAdvice = checklistDone >= Math.ceil(incident.checklist.length * 0.6)
+    ? 'Progression satisfaisante. Maintenir le rythme de suivi et préparer la phase retour à la normale.'
+    : 'Plus de 40% de la checklist reste ouverte: renforcer la coordination et la remontée de situation.';
+  const crit = computeIncidentCriticality(incident);
+  target.innerHTML = `
+    <div class="v2-detail-header">
+      <div>
+        <h4>${escapeHtml(incident.name)} <span class="v2-severity v2-severity--${Math.max(1, Math.min(5, Number(incident.severity || 1)))}">N${Number(incident.severity || 1)}</span></h4>
+        <p class="muted">${escapeHtml(INCIDENT_CATEGORY_LABELS[incident.category] || incident.category || 'Autre')}</p>
+      </div>
+      <div class="v2-inline-actions ${v2AdminModeEnabled ? '' : 'hidden'}">
+        <button type="button" class="ghost" id="incident-edit-btn">Modifier</button>
+        <button type="button" class="ghost" id="incident-duplicate-btn">Dupliquer</button>
+        <button type="button" class="ghost danger" id="incident-delete-btn">Supprimer</button>
+      </div>
+    </div>
+    <div class="v2-kpis">
+      <div class="v2-kpi"><strong>Criticité dynamique</strong><div>${'🔴'.repeat(crit)}${'⚪'.repeat(5 - crit)}</div></div>
+      <div class="v2-kpi"><strong>Checklist</strong><div>${checklistDone}/${incident.checklist.length} (${progress}%)</div><progress value="${progress}" max="100"></progress></div>
+      <div class="v2-kpi"><strong>Alerte terrain</strong><div>${crit >= 4 ? 'Urgence élevée' : crit >= 3 ? 'Vigilance renforcée' : 'Surveillance active'}</div></div>
+    </div>
+    <section class="v2-block"><h5>A. Résumé de la situation</h5>
+      <p><strong>Définition:</strong> ${escapeHtml(incident.summary?.definition || '-')}</p>
+      <p><strong>Impacts possibles:</strong> ${(incident.summary?.impacts || []).map((item) => escapeHtml(item)).join(' · ') || '-'}</p>
+      <p><strong>Points de vigilance immédiats:</strong> ${(incident.summary?.vigilance || []).map((item) => escapeHtml(item)).join(' · ') || '-'}</p>
+    </section>
+    <section class="v2-block"><h5>B. Démarches à suivre</h5>
+      <ol class="v2-steps">${(incident.steps || []).map((step) => `<li>${escapeHtml(step)}</li>`).join('')}</ol>
+    </section>
+    <section class="v2-block"><h5>C. Checklist opérationnelle</h5>
+      <ul class="list v2-checklist">${(incident.checklist || []).map((item, idx) => `<li><label><input type="checkbox" data-checklist-index="${idx}" ${checklistState[idx] ? 'checked' : ''}/> ${escapeHtml(item)}</label></li>`).join('')}</ul>
+      <div class="v2-inline-actions"><button id="incident-checklist-reset" type="button" class="ghost">Réinitialiser checklist</button></div>
+    </section>
+    <section class="v2-block"><h5>D. Aide à la décision</h5>
+      <ul class="list v2-decision">
+        <li><strong>Questions clés:</strong> ${(incident.decisionAid?.questions || []).map((item) => escapeHtml(item)).join(' · ') || '-'}</li>
+        <li><strong>Critères d’escalade:</strong> ${(incident.decisionAid?.escalation || []).map((item) => escapeHtml(item)).join(' · ') || '-'}</li>
+        <li><strong>Seuils de vigilance:</strong> ${(incident.decisionAid?.thresholds || []).map((item) => escapeHtml(item)).join(' · ') || '-'}</li>
+        <li><strong>Recommandations:</strong> ${(incident.decisionAid?.recommendations || []).map((item) => escapeHtml(item)).join(' · ') || '-'}</li>
+        <li><strong>Orientation:</strong> ${escapeHtml(incident.decisionAid?.orientation || '-')}</li>
+        <li><strong>Suggestion dynamique:</strong> ${escapeHtml(dynamicAdvice)}</li>
+      </ul>
+    </section>`;
 }
 
-function initExerciseModeInteractions() {
-  renderExerciseProgress();
-  renderExerciseQuizQuestion();
-  updateExerciseLiveBadge();
-  syncExerciseMunicipalityOptions();
+function buildAdminEditor(incident) {
+  const editor = document.getElementById('incident-admin-editor');
+  if (!editor) return;
+  if (!incident) {
+    editor.classList.add('hidden');
+    editor.innerHTML = '';
+    return;
+  }
+  editor.classList.remove('hidden');
+  editor.classList.add('v2-admin-editor');
+  editor.innerHTML = `
+    <h4>Mode édition admin</h4>
+    <form id="incident-admin-form" class="form">
+      <input name="name" value="${escapeHtml(incident.name || '')}" placeholder="Nom incident" required />
+      <div class="split">
+        <select name="category">${Object.entries(INCIDENT_CATEGORY_LABELS).map(([key, label]) => `<option value="${key}" ${incident.category === key ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('')}</select>
+        <select name="severity">${[1, 2, 3, 4, 5].map((value) => `<option value="${value}" ${Number(incident.severity) === value ? 'selected' : ''}>Niveau ${value}</option>`).join('')}</select>
+      </div>
+      <textarea name="definition" placeholder="Définition">${escapeHtml(incident.summary?.definition || '')}</textarea>
+      <textarea name="impacts" placeholder="Impacts (une ligne = un impact)">${escapeHtml((incident.summary?.impacts || []).join('\n'))}</textarea>
+      <textarea name="vigilance" placeholder="Vigilance (une ligne = un point)">${escapeHtml((incident.summary?.vigilance || []).join('\n'))}</textarea>
+      <div><strong>Démarches à suivre</strong><div id="incident-admin-steps"></div><button type="button" id="incident-admin-add-step" class="ghost">Ajouter une étape</button></div>
+      <div><strong>Checklist opérationnelle</strong><div id="incident-admin-checklist"></div><button type="button" id="incident-admin-add-check" class="ghost">Ajouter un item checklist</button></div>
+      <textarea name="questions" placeholder="Questions clés (une ligne = une question)">${escapeHtml((incident.decisionAid?.questions || []).join('\n'))}</textarea>
+      <textarea name="escalation" placeholder="Critères d'escalade">${escapeHtml((incident.decisionAid?.escalation || []).join('\n'))}</textarea>
+      <textarea name="thresholds" placeholder="Seuils de vigilance">${escapeHtml((incident.decisionAid?.thresholds || []).join('\n'))}</textarea>
+      <textarea name="recommendations" placeholder="Recommandations">${escapeHtml((incident.decisionAid?.recommendations || []).join('\n'))}</textarea>
+      <textarea name="orientation" placeholder="Orientation">${escapeHtml(incident.decisionAid?.orientation || '')}</textarea>
+      <div class="v2-inline-actions">
+        <button type="submit">Sauvegarder</button>
+        <button type="button" id="incident-admin-cancel" class="ghost">Annuler</button>
+      </div>
+    </form>`;
+
+  const renderSortable = (targetId, items) => {
+    const target = document.getElementById(targetId);
+    if (!target) return;
+    target.innerHTML = items.map((item, idx) => `<div class="v2-sortable-item" draggable="true" data-sort-index="${idx}"><span class="v2-drag">↕</span><textarea>${escapeHtml(item)}</textarea><button type="button" class="ghost danger" data-remove-index="${idx}">✕</button></div>`).join('');
+  };
+  renderSortable('incident-admin-steps', incident.steps || []);
+  renderSortable('incident-admin-checklist', incident.checklist || []);
+}
+
+function renderV2AdminState() {
+  const canAdmin = currentUser?.role === 'admin';
+  const toggle = document.getElementById('incident-admin-toggle');
+  const createBtn = document.getElementById('incident-create-btn');
+  if (toggle) {
+    toggle.disabled = !canAdmin;
+    if (!canAdmin) toggle.checked = false;
+  }
+  v2AdminModeEnabled = canAdmin && Boolean(toggle?.checked);
+  if (!v2AdminModeEnabled) v2EditorIncidentId = null;
+  if (createBtn) createBtn.classList.toggle('hidden', !v2AdminModeEnabled);
+}
+
+function renderV2Modules() {
+  renderV2AdminState();
+  renderIncidentCategoryFilter();
+  renderIncidentList();
+  renderIncidentView();
+  const editing = v2AdminModeEnabled ? v2IncidentCatalog.find((item) => item.id === v2EditorIncidentId) : null;
+  buildAdminEditor(editing || null);
 }
 
 async function loadV2Modules() {
-  initExerciseModeInteractions();
-  try {
-    cachedPcsScenarios = await api('/pcs/scenarios');
-    const select = document.getElementById('exercise-scenario-id');
-    if (select) {
-      setHtml(
-        'exercise-scenario-id',
-        cachedPcsScenarios.map((scenario) => `<option value="${scenario.id}">${escapeHtml(scenario.name)} (${escapeHtml(scenario.hazard_type)})</option>`).join('') || '<option value="">Aucun scénario</option>',
-      );
-    }
-  } catch (error) {
-    setText('pcs-guidance-result', `Scénarios indisponibles: ${sanitizeErrorMessage(error.message)}`);
-  }
-
-  try {
-    cachedExercises = await api('/exercises');
-    setHtml('exercise-list', cachedExercises.map((exercise) => `<li>#${exercise.id} · ${escapeHtml(exercise.mode)} · score ${Number(exercise.score_preparedness || 0)} · ${escapeHtml(exercise.status || '-')}</li>`).join('') || '<li>Aucun exercice lancé.</li>');
-  } catch (error) {
-    setHtml('exercise-list', `<li>Exercices indisponibles: ${escapeHtml(sanitizeErrorMessage(error.message))}</li>`);
-  }
-
-  try {
-    const hazards = await api('/cartography/multi-hazards');
-    cachedHazardLayers = hazards?.layers || {};
-    const floodCount = Array.isArray(cachedHazardLayers.zones_inondables) ? cachedHazardLayers.zones_inondables.length : 0;
-    const sensitiveCount = Array.isArray(cachedHazardLayers.points_sensibles) ? cachedHazardLayers.points_sensibles.length : 0;
-    const vulnerableCount = Array.isArray(cachedHazardLayers.populations_vulnerables) ? cachedHazardLayers.populations_vulnerables.length : 0;
-    setText('hazards-summary', `Couches: inondables ${floodCount} · sensibles ${sensitiveCount} · vulnérables ${vulnerableCount}`);
-  } catch (error) {
-    setText('hazards-summary', `Couches indisponibles: ${sanitizeErrorMessage(error.message)}`);
-  }
+  loadIncidentCatalogFromStorage();
+  renderV2Modules();
 }
 
 async function loadOperationsBootstrap(forceRefresh = false) {
@@ -8025,139 +8155,157 @@ document.getElementById('event-form')?.addEventListener('submit', async (event) 
   }
 });
 
-document.getElementById('pcs-guidance-form')?.addEventListener('submit', async (event) => {
+document.getElementById('incident-admin-toggle')?.addEventListener('change', () => {
+  renderV2Modules();
+});
+
+document.getElementById('incident-search')?.addEventListener('input', () => renderIncidentList());
+document.getElementById('incident-category-filter')?.addEventListener('change', () => renderIncidentList());
+document.getElementById('incident-severity-filter')?.addEventListener('change', () => renderIncidentList());
+
+document.getElementById('incident-list')?.addEventListener('click', (event) => {
+  const item = event.target.closest('li[data-incident-id]');
+  if (!item) return;
+  v2SelectedIncidentId = String(item.getAttribute('data-incident-id') || '');
+  v2EditorIncidentId = null;
+  renderV2Modules();
+});
+
+document.getElementById('incident-view')?.addEventListener('click', (event) => {
+  const incident = getSelectedIncident();
+  if (!incident) return;
+  const checkbox = event.target.closest('input[data-checklist-index]');
+  if (checkbox) {
+    const index = Number(checkbox.getAttribute('data-checklist-index'));
+    const state = getIncidentChecklistState(incident.id);
+    state[index] = checkbox.checked;
+    v2ChecklistProgress[incident.id] = state;
+    saveIncidentChecklistProgress();
+    renderV2Modules();
+    return;
+  }
+  if (event.target.closest('#incident-checklist-reset')) {
+    v2ChecklistProgress[incident.id] = {};
+    saveIncidentChecklistProgress();
+    renderV2Modules();
+    return;
+  }
+  if (event.target.closest('#incident-edit-btn') && v2AdminModeEnabled) {
+    v2EditorIncidentId = incident.id;
+    buildAdminEditor(incident);
+    return;
+  }
+  if (event.target.closest('#incident-duplicate-btn') && v2AdminModeEnabled) {
+    const copy = cloneIncident(incident);
+    copy.id = `inc-${Date.now()}`;
+    copy.name = `${copy.name} (copie)`;
+    v2IncidentCatalog.unshift(copy);
+    saveIncidentCatalog();
+    v2SelectedIncidentId = copy.id;
+    renderV2Modules();
+    return;
+  }
+  if (event.target.closest('#incident-delete-btn') && v2AdminModeEnabled) {
+    v2IncidentCatalog = v2IncidentCatalog.filter((item) => item.id !== incident.id);
+    saveIncidentCatalog();
+    v2SelectedIncidentId = v2IncidentCatalog[0]?.id || null;
+    renderV2Modules();
+  }
+});
+
+document.getElementById('incident-create-btn')?.addEventListener('click', () => {
+  if (!v2AdminModeEnabled) return;
+  const created = {
+    id: `inc-${Date.now()}`,
+    name: 'Nouvel incident',
+    category: 'autre',
+    severity: 2,
+    summary: { definition: '', impacts: [], vigilance: [] },
+    steps: ['Évaluation initiale'],
+    checklist: ['Item checklist'],
+    decisionAid: { questions: [], escalation: [], thresholds: [], recommendations: [], orientation: '' },
+  };
+  v2IncidentCatalog.unshift(created);
+  v2SelectedIncidentId = created.id;
+  saveIncidentCatalog();
+  renderV2Modules();
+  v2EditorIncidentId = created.id;
+  buildAdminEditor(created);
+});
+
+document.getElementById('incident-admin-editor')?.addEventListener('click', (event) => {
+  const stepsWrap = document.getElementById('incident-admin-steps');
+  const checksWrap = document.getElementById('incident-admin-checklist');
+  if (event.target.closest('#incident-admin-cancel')) {
+    v2EditorIncidentId = null;
+    buildAdminEditor(null);
+    return;
+  }
+  if (event.target.closest('#incident-admin-add-step') && stepsWrap) {
+    stepsWrap.insertAdjacentHTML('beforeend', '<div class="v2-sortable-item" draggable="true" data-sort-index=""><span class="v2-drag">↕</span><textarea>Nouvelle étape</textarea><button type="button" class="ghost danger" data-remove-index="">✕</button></div>');
+  }
+  if (event.target.closest('#incident-admin-add-check') && checksWrap) {
+    checksWrap.insertAdjacentHTML('beforeend', '<div class="v2-sortable-item" draggable="true" data-sort-index=""><span class="v2-drag">↕</span><textarea>Nouvel item</textarea><button type="button" class="ghost danger" data-remove-index="">✕</button></div>');
+  }
+  const removeBtn = event.target.closest('button[data-remove-index]');
+  if (removeBtn) removeBtn.closest('.v2-sortable-item')?.remove();
+});
+
+document.getElementById('incident-admin-editor')?.addEventListener('dragstart', (event) => {
+  const row = event.target.closest('.v2-sortable-item');
+  if (!row) return;
+  event.dataTransfer?.setData('text/plain', String(Array.from(row.parentElement?.children || []).indexOf(row)));
+  row.dataset.dragging = '1';
+});
+document.getElementById('incident-admin-editor')?.addEventListener('dragover', (event) => event.preventDefault());
+document.getElementById('incident-admin-editor')?.addEventListener('drop', (event) => {
   event.preventDefault();
-  if (!canEdit()) return;
-  const form = new FormData(event.target);
-  try {
-    const result = await api('/pcs/guidance', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        hazard_type: form.get('hazard_type'),
-        alert_level: form.get('alert_level'),
-      }),
-    });
-    const checklist = Array.isArray(result.checklist) ? result.checklist.map((item) => `• ${item}`).join('\n') : '-';
-    setText('pcs-guidance-result', `Niveau recommandé: ${result.recommended_level}\nÉtape: ${result.current_step}\nChecklist:\n${checklist}\n\n${result.reflex_sheet || ''}`);
-  } catch (error) {
-    setText('pcs-guidance-result', `Erreur guidance PCS: ${sanitizeErrorMessage(error.message)}`);
-  }
+  const sourceIndex = Number(event.dataTransfer?.getData('text/plain'));
+  const targetRow = event.target.closest('.v2-sortable-item');
+  const sourceRow = document.querySelector('.v2-sortable-item[data-dragging="1"]');
+  if (!targetRow || !sourceRow || !targetRow.parentElement || sourceIndex < 0) return;
+  targetRow.parentElement.insertBefore(sourceRow, targetRow);
+  sourceRow.removeAttribute('data-dragging');
 });
 
-document.getElementById('exercise-form')?.addEventListener('submit', async (event) => {
+document.getElementById('incident-admin-editor')?.addEventListener('submit', (event) => {
+  const formEl = event.target.closest('#incident-admin-form');
+  if (!formEl) return;
   event.preventDefault();
-  if (!canEdit()) return;
-  const form = new FormData(event.target);
-  try {
-    await api('/exercises', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        scenario_id: Number(form.get('scenario_id')),
-        mode: form.get('mode') || 'exercice',
-      }),
-    });
-    await loadV2Modules();
-  } catch (error) {
-    setHtml('exercise-list', `<li>Erreur création exercice: ${escapeHtml(sanitizeErrorMessage(error.message))}</li>`);
-  }
+  const incident = getSelectedIncident();
+  if (!incident || !v2AdminModeEnabled) return;
+  const form = new FormData(formEl);
+  const toLines = (value) => String(value || '').split('\n').map((line) => line.trim()).filter(Boolean);
+  incident.name = String(form.get('name') || 'Incident');
+  incident.category = String(form.get('category') || 'autre');
+  incident.severity = Number(form.get('severity') || 1);
+  incident.summary = { definition: String(form.get('definition') || ''), impacts: toLines(form.get('impacts')), vigilance: toLines(form.get('vigilance')) };
+  incident.steps = Array.from(document.querySelectorAll('#incident-admin-steps .v2-sortable-item textarea')).map((el) => String(el.value || '').trim()).filter(Boolean);
+  incident.checklist = Array.from(document.querySelectorAll('#incident-admin-checklist .v2-sortable-item textarea')).map((el) => String(el.value || '').trim()).filter(Boolean);
+  incident.decisionAid = {
+    questions: toLines(form.get('questions')),
+    escalation: toLines(form.get('escalation')),
+    thresholds: toLines(form.get('thresholds')),
+    recommendations: toLines(form.get('recommendations')),
+    orientation: String(form.get('orientation') || ''),
+  };
+  saveIncidentCatalog();
+  v2EditorIncidentId = null;
+  buildAdminEditor(null);
+  renderV2Modules();
 });
 
-document.getElementById('exercise-start-btn')?.addEventListener('click', () => {
-  exerciseSimulatorState.running = true;
-  exerciseSimulatorState.progress = Math.max(exerciseSimulatorState.progress, 10);
-  updateExerciseLiveBadge();
-  renderExerciseProgress();
-  setText('exercise-practice-feedback', 'Simulation lancée. Commencez par qualifier l’alerte puis priorisez les moyens.');
+document.getElementById('incident-export-btn')?.addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify(v2IncidentCatalog, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `incidents-v2-${new Date().toISOString().slice(0, 10)}.json`;
+  link.click();
+  URL.revokeObjectURL(url);
 });
 
-document.getElementById('exercise-next-btn')?.addEventListener('click', () => {
-  if (!exerciseSimulatorState.running) {
-    setText('exercise-practice-feedback', 'Démarrez d’abord la simulation interactive.');
-    return;
-  }
-  exerciseSimulatorState.progress = Math.min(100, exerciseSimulatorState.progress + 15);
-  if (exerciseSimulatorState.progress >= 100) {
-    exerciseSimulatorState.running = false;
-    updateExerciseLiveBadge();
-  }
-  renderExerciseProgress();
-});
-
-document.getElementById('exercise-practice-actions')?.addEventListener('click', (event) => {
-  const button = event.target.closest('button[data-practice-action]');
-  if (!button) return;
-  if (!exerciseSimulatorState.running) {
-    setText('exercise-practice-feedback', 'Lancez d’abord la simulation pour valider les actions terrain.');
-    return;
-  }
-  const actionKey = String(button.getAttribute('data-practice-action') || '');
-  applyExercisePracticeAction(actionKey);
-  if (actionKey === 'qualification') {
-    exerciseSimulatorState.progress = Math.max(exerciseSimulatorState.progress, 20);
-  } else if (actionKey === 'resources') {
-    exerciseSimulatorState.progress = Math.max(exerciseSimulatorState.progress, 30);
-  }
-  renderExerciseProgress();
-});
-
-document.getElementById('exercise-zone-analyze-btn')?.addEventListener('click', () => {
-  if (!exerciseSimulatorState.running) {
-    setHtml('exercise-zone-analysis', '<li>Lancez la simulation avant l’analyse de zone.</li>');
-    return;
-  }
-  analyzeExerciseZone();
-});
-
-document.getElementById('exercise-quiz-options')?.addEventListener('click', (event) => {
-  const button = event.target.closest('button[data-exercise-quiz-answer]');
-  if (!button) return;
-  const currentQuestion = EXERCISE_QUIZ_BANK[exerciseSimulatorState.quizIndex];
-  if (!currentQuestion) return;
-  const chosen = Number(button.getAttribute('data-exercise-quiz-answer'));
-  const buttons = Array.from(document.querySelectorAll('#exercise-quiz-options button[data-exercise-quiz-answer]'));
-  buttons.forEach((item) => item.disabled = true);
-
-  const isCorrect = chosen === Number(currentQuestion.answer);
-  button.classList.add(isCorrect ? 'correct' : 'wrong');
-  if (!isCorrect) {
-    const correctButton = buttons.find((item) => Number(item.getAttribute('data-exercise-quiz-answer')) === Number(currentQuestion.answer));
-    if (correctButton) correctButton.classList.add('correct');
-  } else {
-    exerciseSimulatorState.quizScore += 1;
-  }
-
-  setText(
-    'exercise-quiz-feedback',
-    `${isCorrect ? '✅ Bonne décision.' : '❌ Choix perfectible.'} ${currentQuestion.rationale}`,
-  );
-
-  exerciseSimulatorState.quizIndex += 1;
-  exerciseSimulatorState.progress = Math.min(100, exerciseSimulatorState.progress + 20);
-  renderExerciseProgress();
-
-  window.setTimeout(() => {
-    renderExerciseQuizQuestion();
-    if (exerciseSimulatorState.quizIndex >= EXERCISE_QUIZ_BANK.length) {
-      exerciseSimulatorState.running = false;
-      updateExerciseLiveBadge();
-    }
-  }, 850);
-});
-
-document.getElementById('refresh-hazards-btn')?.addEventListener('click', async () => {
-  await loadV2Modules();
-});
-
-document.getElementById('generate-official-docs-btn')?.addEventListener('click', async () => {
-  try {
-    const payload = await api('/documents/official');
-    setText('official-docs-output', JSON.stringify(payload, null, 2));
-  } catch (error) {
-    setText('official-docs-output', `Erreur génération: ${sanitizeErrorMessage(error.message)}`);
-  }
-});
+document.getElementById('incident-print-btn')?.addEventListener('click', () => window.print());
 
 (async function bootstrap() {
   updateApiQueueVisual();

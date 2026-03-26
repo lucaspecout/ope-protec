@@ -613,93 +613,45 @@
         </section>
 
         <section id="v2-panel" class="panel view hidden" hidden>
-          <h3>V2 · Continuité, scénarios et documents</h3>
-          <p class="muted">Assistant PCS guidé, bibliothèque de scénarios/exercices, cartographie multi-aléas et génération documentaire certifiée.</p>
-          <article class="tile-grid">
-            <div class="tile">
-              <h4>Assistant PCS</h4>
-              <form id="pcs-guidance-form" class="form" data-requires-edit>
-                <select name="hazard_type" required>
-                  <option value="inondation">Inondation</option>
-                  <option value="feu_foret">Feu de forêt</option>
-                  <option value="tempete_reseau">Tempête / rupture réseau</option>
-                </select>
-                <select name="alert_level" required>
-                  <option value="jaune">Jaune</option>
-                  <option value="orange">Orange</option>
-                  <option value="rouge">Rouge</option>
-                </select>
-                <button type="submit">Déclencher guidance</button>
-              </form>
-              <div id="pcs-guidance-result" class="muted">Aucune guidance en cours.</div>
+          <div class="v2-crisis-head">
+            <div>
+              <h3>Modules V2 · Sélection d’incident</h3>
+              <p class="muted">Choix rapide d’incident, démarches terrain, checklist opérationnelle et aide à la décision.</p>
             </div>
-            <div class="tile">
-              <h4>Scénarios & exercices</h4>
-              <form id="exercise-form" class="form" data-requires-edit>
-                <select id="exercise-scenario-id" name="scenario_id" required></select>
-                <select name="mode">
-                  <option value="exercice">Mode exercice</option>
-                  <option value="reel">Mode réel</option>
+            <div class="v2-head-actions">
+              <label class="v2-admin-toggle"><input id="incident-admin-toggle" type="checkbox" /> Mode admin</label>
+              <button id="incident-export-btn" type="button" class="ghost">Exporter JSON</button>
+              <button id="incident-print-btn" type="button" class="ghost">Imprimer fiche</button>
+            </div>
+          </div>
+
+          <div class="v2-crisis-layout">
+            <aside class="v2-selector tile">
+              <h4>1) Sélection</h4>
+              <div class="v2-selector-controls">
+                <input id="incident-search" type="search" placeholder="Recherche rapide (ex: inondation, feu...)" />
+                <select id="incident-category-filter">
+                  <option value="all">Toutes catégories</option>
                 </select>
-                <button type="submit">Lancer</button>
-              </form>
-              <div id="exercise-lab" class="exercise-lab" aria-live="polite">
-                <div class="exercise-lab__top">
-                  <p class="muted">Simulation immersive en 3 phases</p>
-                  <span id="exercise-live-badge" class="exercise-live-badge">En attente</span>
-                </div>
-                <div class="exercise-progress">
-                  <span id="exercise-progress-fill"></span>
-                </div>
-                <p id="exercise-progress-text" class="muted">0% · Démarrer pour lancer les interactions.</p>
-                <div class="exercise-cta-row">
-                  <button id="exercise-start-btn" type="button" class="ghost">▶ Démarrer exercice interactif</button>
-                  <button id="exercise-next-btn" type="button" class="ghost">⏭️ Étape suivante</button>
-                </div>
-
-                <section class="exercise-block">
-                  <h5>Mise en pratique terrain</h5>
-                  <div id="exercise-practice-actions" class="exercise-practice-actions">
-                    <button type="button" data-practice-action="qualification">Qualifier l’alerte terrain</button>
-                    <button type="button" data-practice-action="resources">Prioriser les moyens critiques</button>
-                    <button type="button" data-practice-action="zone">Analyser la zone d’impact</button>
-                  </div>
-                  <p id="exercise-practice-feedback" class="muted">Validez les 3 actions pour débloquer le quiz.</p>
-                </section>
-
-                <section class="exercise-block">
-                  <h5>Quiz opérationnel</h5>
-                  <p id="exercise-quiz-question" class="exercise-quiz-question">Le quiz s’active après la mise en pratique.</p>
-                  <div id="exercise-quiz-options" class="exercise-quiz-options"></div>
-                  <p id="exercise-quiz-feedback" class="muted"></p>
-                </section>
-
-                <section class="exercise-block">
-                  <h5>Analyse de zone guidée</h5>
-                  <div class="exercise-zone-controls">
-                    <select id="exercise-zone-municipality">
-                      <option value="">Choisir une commune</option>
-                    </select>
-                    <button id="exercise-zone-analyze-btn" type="button" class="ghost">Analyser</button>
-                  </div>
-                  <ul id="exercise-zone-analysis" class="list compact">
-                    <li>Aucune analyse de zone pour l’instant.</li>
-                  </ul>
-                </section>
+                <select id="incident-severity-filter">
+                  <option value="all">Toutes criticités</option>
+                  <option value="1">Niveau 1</option>
+                  <option value="2">Niveau 2</option>
+                  <option value="3">Niveau 3</option>
+                  <option value="4">Niveau 4</option>
+                  <option value="5">Niveau 5</option>
+                </select>
+                <button id="incident-create-btn" type="button" class="ghost hidden">+ Nouvel incident</button>
               </div>
-              <ul id="exercise-list" class="list"></ul>
-            </div>
-            <div class="tile">
-              <h4>Cartographie multi-aléas</h4>
-              <button id="refresh-hazards-btn" type="button">Actualiser couches</button>
-              <div id="hazards-summary" class="muted">-</div>
-            </div>
-            <div class="tile">
-              <h4>Documents officiels</h4>
-              <button id="generate-official-docs-btn" type="button">Générer dossier</button>
-              <pre id="official-docs-output" class="muted"></pre>
-            </div>
-          </article>
+              <ul id="incident-list" class="list v2-incident-list"></ul>
+              <p id="incident-empty" class="muted hidden">Aucun incident ne correspond aux filtres.</p>
+            </aside>
+
+            <section class="v2-incident-detail tile" aria-live="polite">
+              <div id="incident-view"></div>
+              <div id="incident-admin-editor" class="hidden"></div>
+            </section>
+          </div>
         </section>
 
         <section id="news-panel" class="panel view hidden" hidden>
