@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from copy import deepcopy
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 import re
 import secrets
@@ -1059,14 +1059,31 @@ def build_external_risks_payload(
     results: dict[str, dict] = {}
     completed = 0
     total_jobs = len(fetch_jobs)
+    max_workers = min(6, max(1, total_jobs))
 
-    for key, (fetcher, fallback) in fetch_jobs.items():
-        if pre_fetch_callback is not None:
-            pre_fetch_callback(key, completed, total_jobs)
-        results[key] = safe_fetch(key, fetcher, fallback)
-        completed += 1
-        if progress_callback is not None:
-            progress_callback(key, results[key], completed, total_jobs)
+    future_to_key: dict = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for key, (fetcher, fallback) in fetch_jobs.items():
+            if pre_fetch_callback is not None:
+                pre_fetch_callback(key, completed, total_jobs)
+            future = executor.submit(safe_fetch, key, fetcher, fallback)
+            future_to_key[future] = key
+
+        for future in as_completed(future_to_key):
+            key = future_to_key[future]
+            try:
+                results[key] = future.result()
+            except Exception as exc:
+                with errors_lock:
+                    errors[key] = str(exc)
+                results[key] = {
+                    "status": "unavailable",
+                    "error": str(exc),
+                    "updated_at": utc_timestamp(),
+                }
+            completed += 1
+            if progress_callback is not None:
+                progress_callback(key, results[key], completed, total_jobs)
 
     payload = {"updated_at": utc_timestamp(), **results}
     payload["refresh"] = {
