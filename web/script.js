@@ -38,6 +38,7 @@ const PANEL_TITLES = {
   'api-panel': 'Interconnexions API',
   'municipalities-panel': 'Communes partenaires',
   'logs-panel': 'Main courante opérationnelle',
+  'v2-panel': 'Modules V2 de gestion de crise',
   'map-panel': 'Carte stratégique Isère',
   'users-panel': 'Gestion des utilisateurs',
 };
@@ -247,6 +248,9 @@ let isereCommunesGeometryLoaded = false;
 let telecomPointsCache = [];
 let telecomLoaded = false;
 let cachedHomeLiveSnapshot = {};
+let cachedPcsScenarios = [];
+let cachedExercises = [];
+let cachedHazardLayers = {};
 let lastRenderedExternalRisksSignature = null;
 let lastRenderedApiInterconnectionsSignature = null;
 
@@ -823,6 +827,7 @@ function fillLogFormFromEntry(log = {}) {
   form.elements.location.value = log.location || '';
   form.elements.source.value = log.source || '';
   form.elements.assigned_to.value = log.assigned_to || '';
+  if (form.elements.assigned_role) form.elements.assigned_role.value = log.assigned_role || '';
   form.elements.next_update_due.value = log.next_update_due ? toDatetimeLocal(log.next_update_due) : '';
   form.elements.description.value = log.description || '';
   form.elements.actions_taken.value = log.actions_taken || '';
@@ -5576,7 +5581,7 @@ function buildSitrepHtml() {
     const municipalityName = log.municipality_id ? getMunicipalityName(log.municipality_id) : 'Non précisée';
     return {
       when: new Date(log.event_time || log.created_at || Date.now()),
-      html: `<strong>${escapeHtml(at)}</strong> · ${escapeHtml(log.event_type || 'Évènement')} · ${escapeHtml(normalizeLevel(log.danger_level || 'vert'))}<br/>Commune concernée: <strong>${escapeHtml(municipalityName)}</strong> · Portée: ${escapeHtml(formatLogScope(log))}<br/>Statut: ${escapeHtml(LOG_STATUS_LABEL[String(log.status || 'nouveau')] || 'Nouveau')} · Lieu: ${escapeHtml(log.location || 'non précisé')}<br/>Source: ${escapeHtml(log.source || 'non précisée')} · Responsable: ${escapeHtml(log.assigned_to || 'non assigné')}<br/>Description: ${escapeHtml(log.description || 'Aucune description')} · Actions: ${escapeHtml(log.actions_taken || 'Aucune')}`,
+      html: `<strong>${escapeHtml(at)}</strong> · ${escapeHtml(log.event_type || 'Évènement')} · ${escapeHtml(normalizeLevel(log.danger_level || 'vert'))}<br/>Commune concernée: <strong>${escapeHtml(municipalityName)}</strong> · Portée: ${escapeHtml(formatLogScope(log))}<br/>Statut: ${escapeHtml(LOG_STATUS_LABEL[String(log.status || 'nouveau')] || 'Nouveau')} · Lieu: ${escapeHtml(log.location || 'non précisé')}<br/>Source: ${escapeHtml(log.source || 'non précisée')} · Responsable: ${escapeHtml(log.assigned_to || 'non assigné')} (${escapeHtml(log.assigned_role || 'non défini')})<br/>Description: ${escapeHtml(log.description || 'Aucune description')} · Actions: ${escapeHtml(log.actions_taken || 'Aucune')}`,
     };
   });
   const logItemsToday = detailedLogItems.filter((entry) => isSameDayLocal(entry.when, now)).map((entry) => entry.html);
@@ -6432,12 +6437,13 @@ function buildLogTableRow(log = {}) {
   const place = log.location ? `📍 ${escapeHtml(log.location)}` : 'Lieu non précisé';
   const source = log.source ? `Source: ${escapeHtml(log.source)}` : 'Source non précisée';
   const owner = log.assigned_to ? `👤 ${escapeHtml(log.assigned_to)}` : '👤 Non assigné';
+  const role = log.assigned_role ? `(${escapeHtml(log.assigned_role)})` : '';
   const next = log.next_update_due ? `⏱️ MAJ ${new Date(log.next_update_due).toLocaleString()}` : '';
   const actions = canEdit()
     ? `<div class="map-inline-actions"><button type="button" class="ghost inline-action" data-log-edit="${log.id}">Modifier</button><button type="button" class="ghost inline-action danger" data-log-delete="${log.id}">Supprimer MCO</button></div>`
     : '—';
   const eventTitle = escapeHtml(getEventTitle(log.event_id));
-  return `<tr><td>${new Date(log.event_time || log.created_at).toLocaleString()}</td><td><span class="badge neutral">${formatLogScope(log)}${municipality}</span></td><td>${log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢'}</td><td><strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'MCO')}</strong><br/><span class="muted">${eventTitle}</span></td><td>${place}<br/><span class="muted">${owner} · ${source}${next ? ` · ${next}` : ''}</span><br/>${escapeHtml(log.description || '')}${log.actions_taken ? `<br/><span class="muted">Actions: ${escapeHtml(log.actions_taken)}</span>` : ''}</td><td>${actions}</td></tr>`;
+  return `<tr><td>${new Date(log.event_time || log.created_at).toLocaleString()}</td><td><span class="badge neutral">${formatLogScope(log)}${municipality}</span></td><td>${log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢'}</td><td><strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'MCO')}</strong><br/><span class="muted">${eventTitle}</span></td><td>${place}<br/><span class="muted">${owner} ${role} · ${source}${next ? ` · ${next}` : ''}</span><br/>${escapeHtml(log.description || '')}${log.actions_taken ? `<br/><span class="muted">Actions: ${escapeHtml(log.actions_taken)}</span>` : ''}</td><td>${actions}</td></tr>`;
 }
 
 function renderLogsList() {
@@ -6507,6 +6513,39 @@ async function loadUsers(preloaded = null) {
   }).join('') || '<tr><td colspan="6">Aucun utilisateur.</td></tr>');
 }
 
+async function loadV2Modules() {
+  try {
+    cachedPcsScenarios = await api('/pcs/scenarios');
+    const select = document.getElementById('exercise-scenario-id');
+    if (select) {
+      setHtml(
+        'exercise-scenario-id',
+        cachedPcsScenarios.map((scenario) => `<option value="${scenario.id}">${escapeHtml(scenario.name)} (${escapeHtml(scenario.hazard_type)})</option>`).join('') || '<option value="">Aucun scénario</option>',
+      );
+    }
+  } catch (error) {
+    setText('pcs-guidance-result', `Scénarios indisponibles: ${sanitizeErrorMessage(error.message)}`);
+  }
+
+  try {
+    cachedExercises = await api('/exercises');
+    setHtml('exercise-list', cachedExercises.map((exercise) => `<li>#${exercise.id} · ${escapeHtml(exercise.mode)} · score ${Number(exercise.score_preparedness || 0)} · ${escapeHtml(exercise.status || '-')}</li>`).join('') || '<li>Aucun exercice lancé.</li>');
+  } catch (error) {
+    setHtml('exercise-list', `<li>Exercices indisponibles: ${escapeHtml(sanitizeErrorMessage(error.message))}</li>`);
+  }
+
+  try {
+    const hazards = await api('/cartography/multi-hazards');
+    cachedHazardLayers = hazards?.layers || {};
+    const floodCount = Array.isArray(cachedHazardLayers.zones_inondables) ? cachedHazardLayers.zones_inondables.length : 0;
+    const sensitiveCount = Array.isArray(cachedHazardLayers.points_sensibles) ? cachedHazardLayers.points_sensibles.length : 0;
+    const vulnerableCount = Array.isArray(cachedHazardLayers.populations_vulnerables) ? cachedHazardLayers.populations_vulnerables.length : 0;
+    setText('hazards-summary', `Couches: inondables ${floodCount} · sensibles ${sensitiveCount} · vulnérables ${vulnerableCount}`);
+  } catch (error) {
+    setText('hazards-summary', `Couches indisponibles: ${sanitizeErrorMessage(error.message)}`);
+  }
+}
+
 async function loadOperationsBootstrap(forceRefresh = false) {
   const suffix = forceRefresh ? '?refresh=true' : '';
   const payload = await api(`/operations/bootstrap${suffix}`, { cacheTtlMs: 5000 });
@@ -6548,6 +6587,7 @@ async function refreshAll(forceRefresh = false) {
       { label: 'évènements', loader: loadEvents, optional: false },
       { label: 'main courante', loader: loadLogs, optional: false },
       { label: 'utilisateurs', loader: loadUsers, optional: true },
+      { label: 'modules V2', loader: loadV2Modules, optional: true },
       { label: 'points cartographiques', loader: loadMapPoints, optional: true },
       { label: 'annotations tactiques', loader: loadMapAnnotations, optional: true },
       { label: 'trafic cartographique', loader: renderTrafficOnMap, optional: true },
@@ -7650,6 +7690,7 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
       location: form.get('location') || null,
       source: form.get('source') || null,
       assigned_to: form.get('assigned_to') || null,
+      assigned_role: form.get('assigned_role') || null,
       next_update_due: form.get('next_update_due') || null,
       actions_taken: form.get('actions_taken') || null,
     };
@@ -7699,6 +7740,58 @@ document.getElementById('event-form')?.addEventListener('submit', async (event) 
     await loadEvents();
   } catch (error) {
     if (errorTarget) errorTarget.textContent = sanitizeErrorMessage(error.message);
+  }
+});
+
+document.getElementById('pcs-guidance-form')?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!canEdit()) return;
+  const form = new FormData(event.target);
+  try {
+    const result = await api('/pcs/guidance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        hazard_type: form.get('hazard_type'),
+        alert_level: form.get('alert_level'),
+      }),
+    });
+    const checklist = Array.isArray(result.checklist) ? result.checklist.map((item) => `• ${item}`).join('\n') : '-';
+    setText('pcs-guidance-result', `Niveau recommandé: ${result.recommended_level}\nÉtape: ${result.current_step}\nChecklist:\n${checklist}\n\n${result.reflex_sheet || ''}`);
+  } catch (error) {
+    setText('pcs-guidance-result', `Erreur guidance PCS: ${sanitizeErrorMessage(error.message)}`);
+  }
+});
+
+document.getElementById('exercise-form')?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!canEdit()) return;
+  const form = new FormData(event.target);
+  try {
+    await api('/exercises', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scenario_id: Number(form.get('scenario_id')),
+        mode: form.get('mode') || 'exercice',
+      }),
+    });
+    await loadV2Modules();
+  } catch (error) {
+    setHtml('exercise-list', `<li>Erreur création exercice: ${escapeHtml(sanitizeErrorMessage(error.message))}</li>`);
+  }
+});
+
+document.getElementById('refresh-hazards-btn')?.addEventListener('click', async () => {
+  await loadV2Modules();
+});
+
+document.getElementById('generate-official-docs-btn')?.addEventListener('click', async () => {
+  try {
+    const payload = await api('/documents/official');
+    setText('official-docs-output', JSON.stringify(payload, null, 2));
+  } catch (error) {
+    setText('official-docs-output', `Erreur génération: ${sanitizeErrorMessage(error.message)}`);
   }
 });
 

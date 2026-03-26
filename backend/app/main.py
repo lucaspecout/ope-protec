@@ -3,6 +3,7 @@ from copy import deepcopy
 from pathlib import Path
 import re
 import secrets
+import hashlib
 from threading import Lock, Thread
 from time import sleep
 from typing import Callable
@@ -21,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import Base, SessionLocal, engine, get_db
-from .models import IncidentEvent, MapAnnotation, MapPoint, Municipality, MunicipalityDocument, OperationalLog, PublicShare, RiverStation, User, WeatherAlert
+from .models import ExerciseRun, IncidentEvent, MapAnnotation, MapPoint, Municipality, MunicipalityDocument, OperationalLog, PcsGuidanceRun, PublicShare, RiverStation, ScenarioTemplate, User, WeatherAlert
 from .schemas import (
     MapAnnotationCreate,
     MapAnnotationOut,
@@ -38,8 +39,13 @@ from .schemas import (
     OperationalLogOut,
     OperationalLogStatusUpdate,
     OperationalLogUpdate,
+    PcsGuidanceOut,
+    PcsGuidanceRequest,
     PasswordChangeRequest,
+    ExerciseRunCreate,
+    ExerciseRunOut,
     ShareAccessRequest,
+    ScenarioTemplateOut,
     Token,
     TwoFactorToggleRequest,
     UserCreate,
@@ -107,6 +113,7 @@ with engine.begin() as conn:
     conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS actions_taken TEXT"))
     conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS next_update_due TIMESTAMP WITHOUT TIME ZONE"))
     conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS assigned_to VARCHAR(120)"))
+    conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS assigned_role VARCHAR(40)"))
     conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS tags VARCHAR(255)"))
     conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS event_id INTEGER REFERENCES incident_events(id)"))
     conn.execute(text("""
@@ -170,6 +177,47 @@ with engine.begin() as conn:
             created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
         )
     """))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS scenario_templates (
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(120) NOT NULL UNIQUE,
+            hazard_type VARCHAR(40) NOT NULL DEFAULT 'multi',
+            severity VARCHAR(20) NOT NULL DEFAULT 'jaune',
+            description TEXT NOT NULL DEFAULT '',
+            default_checklist TEXT NOT NULL DEFAULT '[]',
+            reflex_sheet_template TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+    """))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS exercise_runs (
+            id SERIAL PRIMARY KEY,
+            scenario_id INTEGER NOT NULL REFERENCES scenario_templates(id) ON DELETE CASCADE,
+            municipality_id INTEGER REFERENCES municipalities(id) ON DELETE SET NULL,
+            mode VARCHAR(20) NOT NULL DEFAULT 'exercice',
+            status VARCHAR(20) NOT NULL DEFAULT 'planifie',
+            score_preparedness INTEGER NOT NULL DEFAULT 0,
+            started_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            ended_at TIMESTAMP WITHOUT TIME ZONE,
+            created_by_id INTEGER NOT NULL REFERENCES users(id)
+        )
+    """))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS pcs_guidance_runs (
+            id SERIAL PRIMARY KEY,
+            municipality_id INTEGER REFERENCES municipalities(id) ON DELETE SET NULL,
+            hazard_type VARCHAR(40) NOT NULL,
+            alert_level VARCHAR(20) NOT NULL DEFAULT 'jaune',
+            recommended_level VARCHAR(20) NOT NULL DEFAULT 'veille',
+            current_step VARCHAR(120) NOT NULL DEFAULT 'qualification',
+            checklist_json TEXT NOT NULL DEFAULT '[]',
+            reflex_sheet_text TEXT NOT NULL DEFAULT '',
+            triggered_by_id INTEGER NOT NULL REFERENCES users(id),
+            created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+    """))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_exercise_runs_started_at ON exercise_runs(started_at DESC)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_pcs_guidance_runs_created_at ON pcs_guidance_runs(created_at DESC)"))
 
 
 app = FastAPI(title=settings.app_name)
@@ -210,6 +258,48 @@ _map_annotations_revision = 0
 _weather_cleanup_lock = Lock()
 _last_weather_cleanup_at: datetime | None = None
 _WEATHER_CLEANUP_MIN_INTERVAL = timedelta(minutes=10)
+DEFAULT_SCENARIO_LIBRARY = [
+    {
+        "name": "Inondation majeure",
+        "hazard_type": "inondation",
+        "severity": "orange",
+        "description": "Montée rapide des eaux avec impacts potentiels sur ERP, écoles et axes routiers.",
+        "checklist": [
+            "Qualifier le secteur impacté et le niveau d'alerte",
+            "Alerter mairie, DGS et astreinte",
+            "Pré-positionner les équipes terrain et zones de repli",
+            "Informer ERP, écoles et EHPAD de la zone",
+            "Tracer toutes les décisions dans la main courante",
+        ],
+        "reflex": "Fiche réflexe inondation: fermeture axes bas, mise à l'abri ciblée, remontée situation toutes les 30 min.",
+    },
+    {
+        "name": "Feu de forêt périurbain",
+        "hazard_type": "feu_foret",
+        "severity": "rouge",
+        "description": "Propagation rapide d'un feu de végétation menaçant des habitations.",
+        "checklist": [
+            "Activer coordination CODIS / mairie / terrain",
+            "Identifier populations vulnérables à évacuer en priorité",
+            "Définir périmètre de sécurité et points de regroupement",
+            "Assurer continuité des communications radio",
+        ],
+        "reflex": "Fiche réflexe feu de forêt: confinement/évacuation selon vent, information riverains, protection ERP sensibles.",
+    },
+    {
+        "name": "Tempête et rupture réseau",
+        "hazard_type": "tempete_reseau",
+        "severity": "jaune",
+        "description": "Épisode vent violent entraînant coupures électriques et télécom.",
+        "checklist": [
+            "Recenser communes avec coupure électrique / mobile",
+            "Prioriser EHPAD, écoles et centres de santé",
+            "Déployer cellules d'information citoyenne",
+            "Planifier points de recharge / accueil temporaire",
+        ],
+        "reflex": "Fiche réflexe tempête-réseau: priorisation sites vitaux, alternatives radio, suivi ENEDIS/ARCEP.",
+    },
+]
 
 
 def bump_map_annotations_revision() -> int:
@@ -221,6 +311,35 @@ def bump_map_annotations_revision() -> int:
 
 def utc_timestamp() -> str:
     return datetime.utcnow().isoformat() + "Z"
+
+
+def parse_json_list(raw_value: str | None) -> list[str]:
+    if not raw_value:
+        return []
+    try:
+        payload = json.loads(raw_value)
+    except Exception:
+        return []
+    if not isinstance(payload, list):
+        return []
+    return [str(item).strip() for item in payload if str(item).strip()]
+
+
+def ensure_default_scenario_templates(db: Session) -> None:
+    if db.query(ScenarioTemplate).count() > 0:
+        return
+    for template in DEFAULT_SCENARIO_LIBRARY:
+        db.add(
+            ScenarioTemplate(
+                name=template["name"],
+                hazard_type=template["hazard_type"],
+                severity=template["severity"],
+                description=template["description"],
+                default_checklist=json.dumps(template["checklist"], ensure_ascii=False),
+                reflex_sheet_template=template["reflex"],
+            )
+        )
+    db.commit()
 
 
 def compute_global_risk(*levels: str) -> str:
@@ -1541,6 +1660,26 @@ def list_events(db: Session = Depends(get_db), user: User = Depends(require_role
     return query.limit(300).all()
 
 
+def compute_pcs_recommended_level(alert_level: str, hazard_type: str) -> str:
+    normalized = (alert_level or "jaune").lower().strip()
+    if normalized == "rouge":
+        return "crise_majeure"
+    if normalized == "orange":
+        return "activation_pc"
+    if hazard_type in {"feu_foret", "inondation"}:
+        return "pre_alerte_renforcee" if normalized == "jaune" else "veille"
+    return "veille"
+
+
+def compute_preparedness_score(logs: list[OperationalLog], checklist_items: list[str]) -> int:
+    if not checklist_items:
+        return 0
+    validated = sum(1 for item in checklist_items if any(item.lower().split(" ")[0] in (log.description or "").lower() for log in logs))
+    status_bonus = sum(1 for log in logs if (log.status or "") in {"suivi", "clos"})
+    raw_score = int(((validated + min(status_bonus, len(checklist_items))) / (2 * len(checklist_items))) * 100)
+    return max(0, min(100, raw_score))
+
+
 @app.post("/logs", response_model=OperationalLogOut)
 def create_log(data: OperationalLogCreate, db: Session = Depends(get_db), user: User = Depends(require_roles(*EDIT_ROLES))):
     payload = data.model_dump()
@@ -1686,6 +1825,226 @@ def list_logs(db: Session = Depends(get_db), user: User = Depends(require_roles(
     return query.limit(200).all()
 
 
+@app.get("/mco/timeline")
+def mco_timeline(
+    event_id: int | None = Query(default=None),
+    limit: int = Query(default=500, ge=1, le=2000),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*READ_ROLES)),
+):
+    query = db.query(OperationalLog).order_by(OperationalLog.event_time.asc(), OperationalLog.created_at.asc())
+    if event_id:
+        query = query.filter(OperationalLog.event_id == event_id)
+    if user.role == "mairie":
+        municipality_id = get_user_municipality_id(user, db)
+        if municipality_id is None:
+            return {"timeline": [], "certification_hash": None}
+        query = query.filter(OperationalLog.municipality_id == municipality_id)
+    rows = query.limit(limit).all()
+    timeline = [
+        {
+            "id": row.id,
+            "timestamp": row.event_time.isoformat() if row.event_time else row.created_at.isoformat(),
+            "type": row.event_type,
+            "description": row.description,
+            "action": row.actions_taken,
+            "assigned_to": row.assigned_to,
+            "assigned_role": row.assigned_role,
+            "status": row.status,
+            "danger_level": row.danger_level,
+        }
+        for row in rows
+    ]
+    certified_payload = json.dumps(timeline, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    certification_hash = hashlib.sha256(certified_payload).hexdigest() if timeline else None
+    return {"timeline": timeline, "certification_hash": certification_hash}
+
+
+@app.get("/pcs/scenarios", response_model=list[ScenarioTemplateOut])
+def list_pcs_scenarios(db: Session = Depends(get_db), _: User = Depends(require_roles(*READ_ROLES))):
+    ensure_default_scenario_templates(db)
+    templates = db.query(ScenarioTemplate).order_by(ScenarioTemplate.name.asc()).all()
+    result: list[ScenarioTemplateOut] = []
+    for template in templates:
+        result.append(
+            ScenarioTemplateOut(
+                id=template.id,
+                name=template.name,
+                hazard_type=template.hazard_type,
+                severity=template.severity,
+                description=template.description,
+                checklist=parse_json_list(template.default_checklist),
+                reflex_sheet_template=template.reflex_sheet_template,
+                created_at=template.created_at,
+            )
+        )
+    return result
+
+
+@app.post("/pcs/guidance", response_model=PcsGuidanceOut)
+def create_pcs_guidance(
+    data: PcsGuidanceRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*EDIT_ROLES, "mairie")),
+):
+    municipality_id = data.municipality_id
+    if user.role == "mairie":
+        municipality_id = get_user_municipality_id(user, db)
+    if municipality_id:
+        municipality = db.get(Municipality, municipality_id)
+        if not municipality:
+            raise HTTPException(404, "Commune introuvable")
+    ensure_default_scenario_templates(db)
+    template = (
+        db.query(ScenarioTemplate)
+        .filter(ScenarioTemplate.hazard_type == data.hazard_type)
+        .order_by(ScenarioTemplate.id.asc())
+        .first()
+    )
+    checklist = parse_json_list(template.default_checklist if template else "[]")
+    recommended = compute_pcs_recommended_level(data.alert_level, data.hazard_type)
+    reflex_sheet = template.reflex_sheet_template if template else f"Fiche réflexe {data.hazard_type}: appliquer protocole standard."
+    guidance = PcsGuidanceRun(
+        municipality_id=municipality_id,
+        hazard_type=data.hazard_type,
+        alert_level=data.alert_level,
+        recommended_level=recommended,
+        current_step="qualification",
+        checklist_json=json.dumps(checklist, ensure_ascii=False),
+        reflex_sheet_text=reflex_sheet,
+        triggered_by_id=user.id,
+    )
+    db.add(guidance)
+    db.commit()
+    db.refresh(guidance)
+    return PcsGuidanceOut(
+        id=guidance.id,
+        municipality_id=guidance.municipality_id,
+        hazard_type=guidance.hazard_type,
+        alert_level=guidance.alert_level,
+        recommended_level=guidance.recommended_level,
+        current_step=guidance.current_step,
+        checklist=parse_json_list(guidance.checklist_json),
+        reflex_sheet=guidance.reflex_sheet_text,
+        created_at=guidance.created_at,
+    )
+
+
+@app.post("/exercises", response_model=ExerciseRunOut)
+def create_exercise_run(
+    data: ExerciseRunCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*EDIT_ROLES, "mairie")),
+):
+    ensure_default_scenario_templates(db)
+    scenario = db.get(ScenarioTemplate, data.scenario_id)
+    if not scenario:
+        raise HTTPException(404, "Scénario introuvable")
+    municipality_id = data.municipality_id
+    if user.role == "mairie":
+        municipality_id = get_user_municipality_id(user, db)
+    if municipality_id and not db.get(Municipality, municipality_id):
+        raise HTTPException(404, "Commune introuvable")
+    exercise = ExerciseRun(
+        scenario_id=data.scenario_id,
+        municipality_id=municipality_id,
+        mode=data.mode,
+        status="en_cours",
+        created_by_id=user.id,
+    )
+    db.add(exercise)
+    db.commit()
+    db.refresh(exercise)
+    return exercise
+
+
+@app.get("/exercises", response_model=list[ExerciseRunOut])
+def list_exercise_runs(db: Session = Depends(get_db), user: User = Depends(require_roles(*READ_ROLES))):
+    query = db.query(ExerciseRun).order_by(ExerciseRun.started_at.desc())
+    if user.role == "mairie":
+        municipality_id = get_user_municipality_id(user, db)
+        if municipality_id is None:
+            return []
+        query = query.filter(ExerciseRun.municipality_id == municipality_id)
+    return query.limit(150).all()
+
+
+@app.get("/cartography/multi-hazards")
+def get_multi_hazards_cartography(db: Session = Depends(get_db), _: User = Depends(require_roles(*READ_ROLES))):
+    municipalities = db.query(Municipality).all()
+    vulnerable = [m for m in municipalities if (m.population or 0) > 5000 or (m.shelter_capacity or 0) < 150]
+    sensitive_points = db.query(MapPoint).order_by(MapPoint.created_at.desc()).limit(500).all()
+    risk_layers = {
+        "zones_inondables": [{"municipality_id": m.id, "name": m.name, "risk": "elevated" if m.vigilance_color in {"orange", "rouge"} else "watch"} for m in municipalities],
+        "points_sensibles": [{"id": p.id, "name": p.name, "category": p.category, "lat": p.lat, "lon": p.lon} for p in sensitive_points],
+        "populations_vulnerables": [{"municipality_id": m.id, "name": m.name, "population": m.population or 0, "shelter_capacity": m.shelter_capacity or 0} for m in vulnerable],
+    }
+    return {"updated_at": utc_timestamp(), "layers": risk_layers}
+
+
+@app.get("/documents/official")
+def generate_official_documents(
+    event_id: int | None = Query(default=None),
+    exercise_id: int | None = Query(default=None),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*READ_ROLES)),
+):
+    logs_query = db.query(OperationalLog).order_by(OperationalLog.event_time.asc())
+    if event_id:
+        logs_query = logs_query.filter(OperationalLog.event_id == event_id)
+    if user.role == "mairie":
+        municipality_id = get_user_municipality_id(user, db)
+        if municipality_id is None:
+            raise HTTPException(404, "Commune introuvable")
+        logs_query = logs_query.filter(OperationalLog.municipality_id == municipality_id)
+    logs = logs_query.limit(1200).all()
+    timeline_rows = [
+        {
+            "ts": (log.event_time or log.created_at).isoformat(),
+            "type": log.event_type,
+            "description": log.description,
+            "actions": log.actions_taken,
+            "assigned_role": log.assigned_role,
+        }
+        for log in logs
+    ]
+    timeline_hash = hashlib.sha256(json.dumps(timeline_rows, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest() if timeline_rows else None
+    exercise_summary = None
+    if exercise_id:
+        exercise = db.get(ExerciseRun, exercise_id)
+        if not exercise:
+            raise HTTPException(404, "Exercice introuvable")
+        scenario = db.get(ScenarioTemplate, exercise.scenario_id)
+        checklist = parse_json_list(scenario.default_checklist if scenario else "[]")
+        linked_logs = logs if not exercise.municipality_id else [log for log in logs if log.municipality_id == exercise.municipality_id]
+        score = compute_preparedness_score(linked_logs, checklist)
+        exercise.score_preparedness = score
+        if exercise.status != "termine":
+            exercise.status = "termine"
+            exercise.ended_at = datetime.utcnow()
+        db.commit()
+        exercise_summary = {
+            "exercise_id": exercise.id,
+            "scenario": scenario.name if scenario else "N/A",
+            "mode": exercise.mode,
+            "score_preparedness": score,
+            "status": exercise.status,
+        }
+
+    report_title = "Compte-rendu de crise"
+    return {
+        "title": report_title,
+        "generated_at": utc_timestamp(),
+        "crisis_report": {
+            "events_count": len({log.event_id for log in logs if log.event_id}),
+            "entries_count": len(logs),
+            "open_entries": len([log for log in logs if log.status in {"nouveau", "en_cours"}]),
+        },
+        "certified_timeline": {"hash_sha256": timeline_hash, "entries": timeline_rows[-300:]},
+        "exercise_report": exercise_summary,
+    }
+
+
 @app.get("/logs/export/csv")
 def export_logs_csv(db: Session = Depends(get_db), user: User = Depends(require_roles(*READ_ROLES))):
     query = db.query(OperationalLog).order_by(OperationalLog.created_at.desc())
@@ -1704,12 +2063,12 @@ def export_logs_csv(db: Session = Depends(get_db), user: User = Depends(require_
     writer = csv.writer(output)
     writer.writerow([
         "id", "event_id", "event_time", "created_at", "event_type", "status", "danger_level", "target_scope",
-        "municipality_id", "location", "source", "assigned_to", "tags", "description", "actions_taken", "next_update_due",
+        "municipality_id", "location", "source", "assigned_to", "assigned_role", "tags", "description", "actions_taken", "next_update_due",
     ])
     for row in rows:
         writer.writerow([
             row.id, row.event_id, row.event_time, row.created_at, row.event_type, row.status, row.danger_level, row.target_scope,
-            row.municipality_id, row.location, row.source, row.assigned_to, row.tags, row.description, row.actions_taken, row.next_update_due,
+            row.municipality_id, row.location, row.source, row.assigned_to, row.assigned_role, row.tags, row.description, row.actions_taken, row.next_update_due,
         ])
 
     output.seek(0)

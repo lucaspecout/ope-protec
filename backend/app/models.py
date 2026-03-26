@@ -135,6 +135,7 @@ class OperationalLog(Base):
     actions_taken: Mapped[str | None] = mapped_column(Text, nullable=True)
     next_update_due: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     assigned_to: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    assigned_role: Mapped[str | None] = mapped_column(String(40), nullable=True)
     tags: Mapped[str | None] = mapped_column(String(255), nullable=True)
     attachment_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -173,3 +174,52 @@ class PublicShare(Base):
     municipality_id: Mapped[int] = mapped_column(ForeignKey("municipalities.id"))
 
     municipality = relationship("Municipality")
+
+
+class ScenarioTemplate(Base):
+    __tablename__ = "scenario_templates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), unique=True)
+    hazard_type: Mapped[str] = mapped_column(String(40), default="multi")
+    severity: Mapped[str] = mapped_column(String(20), default="jaune")
+    description: Mapped[str] = mapped_column(Text, default="")
+    default_checklist: Mapped[str] = mapped_column(Text, default="[]")
+    reflex_sheet_template: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ExerciseRun(Base):
+    __tablename__ = "exercise_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    scenario_id: Mapped[int] = mapped_column(ForeignKey("scenario_templates.id"))
+    municipality_id: Mapped[int | None] = mapped_column(ForeignKey("municipalities.id"), nullable=True)
+    mode: Mapped[str] = mapped_column(String(20), default="exercice")
+    status: Mapped[str] = mapped_column(String(20), default="planifie")
+    score_preparedness: Mapped[int] = mapped_column(Integer, default=0)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+
+    scenario = relationship("ScenarioTemplate")
+    municipality = relationship("Municipality")
+    created_by = relationship("User")
+
+
+class PcsGuidanceRun(Base):
+    __tablename__ = "pcs_guidance_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    municipality_id: Mapped[int | None] = mapped_column(ForeignKey("municipalities.id"), nullable=True)
+    hazard_type: Mapped[str] = mapped_column(String(40))
+    alert_level: Mapped[str] = mapped_column(String(20), default="jaune")
+    recommended_level: Mapped[str] = mapped_column(String(20), default="veille")
+    current_step: Mapped[str] = mapped_column(String(120), default="qualification")
+    checklist_json: Mapped[str] = mapped_column(Text, default="[]")
+    reflex_sheet_text: Mapped[str] = mapped_column(Text, default="")
+    triggered_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    municipality = relationship("Municipality")
+    triggered_by = relationship("User")
