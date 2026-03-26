@@ -1202,3 +1202,22 @@ select:focus {
     border-radius: 18px;
   }
 }
+
+.tile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+#v2-panel .tile {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(10, 16, 30, 0.06);
+}
+
+#official-docs-output {
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+}

@@ -10,6 +10,9 @@ ALLOWED_DANGER_LEVELS = {"vert", "jaune", "orange", "rouge"}
 ALLOWED_LOG_SCOPES = {"commune", "pcs", "departemental"}
 ALLOWED_LOG_STATUS = {"nouveau", "en_cours", "suivi", "clos"}
 ALLOWED_EVENT_STATUS = {"ouvert", "clos"}
+ALLOWED_ASSIGNED_ROLES = {"mairie", "dgs", "astreinte", "terrain", "codis", "prefecture", "autre"}
+ALLOWED_EXERCISE_MODE = {"exercice", "reel"}
+ALLOWED_EXERCISE_STATUS = {"planifie", "en_cours", "termine"}
 
 
 class Token(BaseModel):
@@ -277,6 +280,7 @@ class OperationalLogCreate(BaseModel):
     actions_taken: str | None = None
     next_update_due: datetime | None = None
     assigned_to: str | None = None
+    assigned_role: str | None = None
     municipality_id: int | None = None
 
     @field_validator("event_type", "description")
@@ -311,13 +315,23 @@ class OperationalLogCreate(BaseModel):
             raise ValueError("Statut invalide")
         return normalized
 
-    @field_validator("location", "source", "actions_taken", "assigned_to")
+    @field_validator("location", "source", "actions_taken", "assigned_to", "assigned_role")
     @classmethod
     def strip_optional_fields(cls, value: str | None) -> str | None:
         if value is None:
             return None
         sanitized = value.strip()
         return sanitized or None
+
+    @field_validator("assigned_role")
+    @classmethod
+    def validate_assigned_role(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.lower().strip()
+        if normalized not in ALLOWED_ASSIGNED_ROLES:
+            raise ValueError("Rôle d'affectation invalide")
+        return normalized
 
 
 class OperationalLogOut(BaseModel):
@@ -335,6 +349,7 @@ class OperationalLogOut(BaseModel):
     actions_taken: str | None = None
     next_update_due: datetime | None = None
     assigned_to: str | None = None
+    assigned_role: str | None = None
     municipality_id: int | None = None
     created_at: datetime
     created_by_id: int
@@ -367,6 +382,7 @@ class OperationalLogUpdate(BaseModel):
     actions_taken: str | None = None
     next_update_due: datetime | None = None
     assigned_to: str | None = None
+    assigned_role: str | None = None
     municipality_id: int | None = None
 
     @field_validator("event_type", "description")
@@ -401,13 +417,23 @@ class OperationalLogUpdate(BaseModel):
             raise ValueError("Statut invalide")
         return normalized
 
-    @field_validator("location", "source", "actions_taken", "assigned_to")
+    @field_validator("location", "source", "actions_taken", "assigned_to", "assigned_role")
     @classmethod
     def strip_optional_fields(cls, value: str | None) -> str | None:
         if value is None:
             return None
         sanitized = value.strip()
         return sanitized or None
+
+    @field_validator("assigned_role")
+    @classmethod
+    def validate_assigned_role(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.lower().strip()
+        if normalized not in ALLOWED_ASSIGNED_ROLES:
+            raise ValueError("Rôle d'affectation invalide")
+        return normalized
 
 
 class IncidentEventCreate(BaseModel):
@@ -615,6 +641,67 @@ class MapAnnotationOut(BaseModel):
     municipality_id: int | None = None
     created_by_id: int
     created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PcsGuidanceRequest(BaseModel):
+    hazard_type: str
+    alert_level: str = "jaune"
+    municipality_id: int | None = None
+
+
+class PcsGuidanceOut(BaseModel):
+    id: int
+    municipality_id: int | None = None
+    hazard_type: str
+    alert_level: str
+    recommended_level: str
+    current_step: str
+    checklist: list[str]
+    reflex_sheet: str
+    created_at: datetime
+
+
+class ScenarioTemplateOut(BaseModel):
+    id: int
+    name: str
+    hazard_type: str
+    severity: str
+    description: str
+    checklist: list[str]
+    reflex_sheet_template: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ExerciseRunCreate(BaseModel):
+    scenario_id: int
+    municipality_id: int | None = None
+    mode: str = "exercice"
+
+    @field_validator("mode")
+    @classmethod
+    def validate_mode(cls, value: str) -> str:
+        normalized = value.lower().strip()
+        if normalized not in ALLOWED_EXERCISE_MODE:
+            raise ValueError("Mode invalide")
+        return normalized
+
+
+class ExerciseRunOut(BaseModel):
+    id: int
+    scenario_id: int
+    municipality_id: int | None = None
+    mode: str
+    status: str
+    score_preparedness: int
+    started_at: datetime
+    ended_at: datetime | None = None
+    created_by_id: int
 
     class Config:
         from_attributes = True

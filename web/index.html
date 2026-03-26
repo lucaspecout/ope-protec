@@ -148,6 +148,7 @@
           <button class="menu-btn" data-target="news-panel" data-icon="📰"><span class="menu-label">Actualités</span></button>
           <button class="menu-btn" data-target="municipalities-panel" data-icon="🏛️"><span class="menu-label">Communes</span></button>
           <button class="menu-btn" data-target="logs-panel" data-icon="📝"><span class="menu-label">Main courante</span></button>
+          <button class="menu-btn" data-target="v2-panel" data-icon="🧠"><span class="menu-label">Modules V2</span></button>
           <button class="menu-btn" data-target="map-panel" data-icon="🗺️"><span class="menu-label">Carte Isère</span></button>
           <button class="menu-btn" data-target="users-panel" data-icon="👤"><span class="menu-label">Utilisateurs</span></button>
           <button class="menu-btn" data-target="api-panel" data-icon="🧩"><span class="menu-label">Interconnexions API</span></button>
@@ -582,6 +583,15 @@
             <input name="location" placeholder="Lieu / secteur" />
             <input name="source" placeholder="Source (CODIS, mairie, terrain...)" />
             <input name="assigned_to" placeholder="Responsable suivi" />
+            <select name="assigned_role">
+              <option value="">Rôle ciblé</option>
+              <option value="mairie">Mairie</option>
+              <option value="dgs">DGS</option>
+              <option value="astreinte">Astreinte</option>
+              <option value="terrain">Terrain</option>
+              <option value="codis">CODIS</option>
+              <option value="prefecture">Préfecture</option>
+            </select>
             <input name="next_update_due" type="datetime-local" />
             <textarea name="description" placeholder="Faits observés"></textarea>
             <textarea name="actions_taken" placeholder="Actions engagées / décisions"></textarea>
@@ -599,6 +609,52 @@
               <tbody id="logs-table-stream"></tbody>
             </table>
           </article>
+          </article>
+        </section>
+
+        <section id="v2-panel" class="panel view hidden" hidden>
+          <h3>V2 · Continuité, scénarios et documents</h3>
+          <p class="muted">Assistant PCS guidé, bibliothèque de scénarios/exercices, cartographie multi-aléas et génération documentaire certifiée.</p>
+          <article class="tile-grid">
+            <div class="tile">
+              <h4>Assistant PCS</h4>
+              <form id="pcs-guidance-form" class="form" data-requires-edit>
+                <select name="hazard_type" required>
+                  <option value="inondation">Inondation</option>
+                  <option value="feu_foret">Feu de forêt</option>
+                  <option value="tempete_reseau">Tempête / rupture réseau</option>
+                </select>
+                <select name="alert_level" required>
+                  <option value="jaune">Jaune</option>
+                  <option value="orange">Orange</option>
+                  <option value="rouge">Rouge</option>
+                </select>
+                <button type="submit">Déclencher guidance</button>
+              </form>
+              <div id="pcs-guidance-result" class="muted">Aucune guidance en cours.</div>
+            </div>
+            <div class="tile">
+              <h4>Scénarios & exercices</h4>
+              <form id="exercise-form" class="form" data-requires-edit>
+                <select id="exercise-scenario-id" name="scenario_id" required></select>
+                <select name="mode">
+                  <option value="exercice">Mode exercice</option>
+                  <option value="reel">Mode réel</option>
+                </select>
+                <button type="submit">Lancer</button>
+              </form>
+              <ul id="exercise-list" class="list"></ul>
+            </div>
+            <div class="tile">
+              <h4>Cartographie multi-aléas</h4>
+              <button id="refresh-hazards-btn" type="button">Actualiser couches</button>
+              <div id="hazards-summary" class="muted">-</div>
+            </div>
+            <div class="tile">
+              <h4>Documents officiels</h4>
+              <button id="generate-official-docs-btn" type="button">Générer dossier</button>
+              <pre id="official-docs-output" class="muted"></pre>
+            </div>
           </article>
         </section>
 
