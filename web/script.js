@@ -21,6 +21,7 @@ const HOME_LIVE_REFRESH_MS = 300000;
 const API_CACHE_TTL_MS = 300000;
 const API_PANEL_REFRESH_MS = 60000;
 const API_MAX_CONCURRENT_REQUESTS = 3;
+const API_REFRESH_MAX_CONCURRENT_LOADERS = 4;
 const API_REQUEST_TIMEOUT_MS = 15000;
 const LOGIN_REQUEST_TIMEOUT_MS = 10000;
 const API_RETRY_BASE_DELAY_MS = 400;
@@ -134,6 +135,8 @@ let homeLiveTimer = null;
 let apiPanelTimer = null;
 let apiResyncTimer = null;
 let refreshAllInFlight = null;
+let refreshAllAbortController = null;
+let refreshAllSequence = 0;
 let photoCameraRefreshTimer = null;
 let socialFeedsFallbackTimer = null;
 let lastApiResyncAt = null;
@@ -142,6 +145,17 @@ const apiGetCache = new Map();
 const apiInFlight = new Map();
 const apiRequestQueue = [];
 let apiActiveRequests = 0;
+let apiDefaultSignal = null;
+const apiNetworkMetrics = {
+  started: 0,
+  success: 0,
+  failures: 0,
+  retries: 0,
+  timeouts: 0,
+  cancelled: 0,
+  cumulativeDurationMs: 0,
+  lastDurationMs: 0,
+};
 let preferredApiOrigin = window.location.origin;
 const apiOriginFailures = new Map();
 const startupQueueState = { total: 0, completed: 0, current: '' };
@@ -1411,6 +1425,37 @@ function wait(ms) {
   });
 }
 
+function nowMs() {
+  return (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+}
+
+function recordApiMetric(type, durationMs = 0) {
+  apiNetworkMetrics.lastDurationMs = Math.max(0, Math.round(durationMs || 0));
+  apiNetworkMetrics.cumulativeDurationMs += Math.max(0, durationMs || 0);
+  if (type in apiNetworkMetrics) apiNetworkMetrics[type] += 1;
+}
+
+function getApiMetricsSummary() {
+  const done = apiNetworkMetrics.success + apiNetworkMetrics.failures + apiNetworkMetrics.cancelled;
+  const averageMs = done > 0 ? Math.round(apiNetworkMetrics.cumulativeDurationMs / done) : 0;
+  return {
+    ...apiNetworkMetrics,
+    averageMs,
+    inFlight: apiActiveRequests,
+    queued: apiRequestQueue.length,
+  };
+}
+
+function appendApiMetricsToOperationsPerf() {
+  const target = document.getElementById('operations-perf');
+  if (!target) return;
+  const summary = getApiMetricsSummary();
+  const base = target.textContent || '';
+  const cleanBase = base.replace(/\s*\|\s*Réseau:.*$/, '').trim();
+  const networkPart = `Réseau: moy ${summary.averageMs} ms · ok ${summary.success} · erreurs ${summary.failures} · timeout ${summary.timeouts} · annulations ${summary.cancelled} · file ${summary.queued}`;
+  target.textContent = cleanBase ? `${cleanBase} | ${networkPart}` : networkPart;
+}
+
 function runNextQueuedApiRequest() {
   if (!apiRequestQueue.length || apiActiveRequests >= API_MAX_CONCURRENT_REQUESTS) return;
   const nextRequest = apiRequestQueue.shift();
@@ -1440,17 +1485,29 @@ function queueApiRequest(task) {
 }
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = API_REQUEST_TIMEOUT_MS) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const timeoutController = new AbortController();
+  const externalSignal = options?.signal;
+  const forwardAbort = () => timeoutController.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) timeoutController.abort();
+    else externalSignal.addEventListener('abort', forwardAbort, { once: true });
+  }
+  const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...options, signal: controller.signal });
+    return await fetch(url, { ...options, signal: timeoutController.signal });
   } catch (error) {
     if (error?.name === 'AbortError') {
-      throw createApiError('Délai dépassé, veuillez vérifier votre réseau.', null, { isTimeout: true });
+      const isTimeout = !externalSignal?.aborted;
+      throw createApiError(
+        isTimeout ? 'Délai dépassé, veuillez vérifier votre réseau.' : 'Requête annulée.',
+        null,
+        { isTimeout, isAbort: true },
+      );
     }
     throw error;
   } finally {
     clearTimeout(timeoutId);
+    if (externalSignal) externalSignal.removeEventListener('abort', forwardAbort);
   }
 }
 
@@ -1466,6 +1523,7 @@ async function requestApiAcrossOrigins(path, fetchOptions = {}, {
   highPriority = false,
   maxRetries,
   timeoutMs = API_REQUEST_TIMEOUT_MS,
+  signal = null,
 } = {}) {
   const headers = { ...(fetchOptions.headers || {}) };
   const method = String(fetchOptions.method || 'GET').toUpperCase();
@@ -1478,22 +1536,38 @@ async function requestApiAcrossOrigins(path, fetchOptions = {}, {
     ? maxRetries
     : (method === 'GET' ? API_MAX_RETRIES_GET : API_MAX_RETRIES_NON_GET);
 
+  apiNetworkMetrics.started += 1;
+  const startedAt = nowMs();
+
   for (let attempt = 0; attempt <= resolvedMaxRetries; attempt += 1) {
+    if (attempt > 0) apiNetworkMetrics.retries += 1;
     for (const origin of origins) {
+      if (signal?.aborted) {
+        const cancelled = createApiError('Requête annulée.', null, { isAbort: true });
+        recordApiMetric('cancelled', nowMs() - startedAt);
+        throw cancelled;
+      }
       const url = buildApiUrl(path, origin);
       try {
-        const runFetch = () => fetchWithTimeout(url, { ...fetchOptions, headers }, timeoutMs);
+        const runFetch = () => fetchWithTimeout(url, { ...fetchOptions, headers, signal }, timeoutMs);
         const response = await (highPriority ? runFetch() : queueApiRequest(runFetch));
         const payload = await parseJsonResponse(response, path);
         if (!response.ok) {
           const message = normalizeApiErrorMessage(payload, response.status);
           if (response.status === 401 && logoutOn401) logout();
+          recordApiMetric('failures', nowMs() - startedAt);
           throw createApiError(message, response.status);
         }
         preferredApiOrigin = origin;
         apiOriginFailures.delete(origin);
+        recordApiMetric('success', nowMs() - startedAt);
         return payload;
       } catch (error) {
+        if (error?.isAbort) {
+          recordApiMetric('cancelled', nowMs() - startedAt);
+          throw error;
+        }
+        if (error?.isTimeout) recordApiMetric('timeouts', nowMs() - startedAt);
         apiOriginFailures.set(origin, Date.now());
         if (error?.status !== undefined && error?.status !== null) throw error;
         lastError = error;
@@ -1505,6 +1579,7 @@ async function requestApiAcrossOrigins(path, fetchOptions = {}, {
     await wait(backoffMs);
   }
 
+  recordApiMetric('failures', nowMs() - startedAt);
   throw createApiError(sanitizeErrorMessage(lastError?.message || 'API indisponible'), lastError?.status, { cause: lastError, triedOrigins: origins });
 }
 
@@ -1517,10 +1592,12 @@ async function api(path, options = {}) {
     highPriority = false,
     timeoutMs = API_REQUEST_TIMEOUT_MS,
     maxRetries,
+    signal = null,
     ...fetchOptions
   } = options;
   const cacheable = !bypassCache && isCacheableRequest(path, fetchOptions);
   const cacheKey = getRequestCacheKey(path, fetchOptions);
+  const effectiveSignal = signal || apiDefaultSignal;
 
   if (cacheable) {
     const cached = apiGetCache.get(cacheKey);
@@ -1537,6 +1614,7 @@ async function api(path, options = {}) {
     highPriority,
     timeoutMs,
     maxRetries,
+    signal: effectiveSignal,
   });
 
   if (!cacheable) {
@@ -6739,40 +6817,74 @@ async function loadOperationsBootstrap(forceRefresh = false) {
   const countM = Number(perf.municipality_count || (payload.municipalities || []).length || 0);
   const countL = Number(perf.log_count || (payload.logs || []).length || 0);
   setText('operations-perf', `Perf: ${duration} ms · ${countM} communes · ${countL} événements`);
+  appendApiMetricsToOperationsPerf();
   return payload;
 }
 
+async function runLoadersWithConcurrency(loaders = [], {
+  concurrency = API_REFRESH_MAX_CONCURRENT_LOADERS,
+  refreshSignal = null,
+  refreshSeq = 0,
+} = {}) {
+  const results = new Array(loaders.length);
+  const workerCount = Math.max(1, Math.min(concurrency, loaders.length || 1));
+  let nextIndex = 0;
+
+  async function runWorker() {
+    while (nextIndex < loaders.length) {
+      if (refreshSignal?.aborted || refreshSeq !== refreshAllSequence) return;
+      const index = nextIndex;
+      nextIndex += 1;
+      const { label, loader } = loaders[index];
+      setStartupQueueCurrent(`Chargement: ${label}…`);
+      try {
+        const value = await loader();
+        results[index] = { status: 'fulfilled', value };
+      } catch (error) {
+        results[index] = { status: 'rejected', reason: error };
+      } finally {
+        advanceStartupQueue(label);
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+  return results;
+}
+
 async function refreshAll(forceRefresh = false) {
-  if (refreshAllInFlight) return refreshAllInFlight;
+  if (forceRefresh && refreshAllAbortController) refreshAllAbortController.abort();
+  if (refreshAllInFlight && !forceRefresh) return refreshAllInFlight;
+  const refreshSeq = ++refreshAllSequence;
+  refreshAllAbortController = new AbortController();
+  const refreshSignal = refreshAllAbortController.signal;
 
   refreshAllInFlight = withPreservedScroll(async () => {
+    apiDefaultSignal = refreshSignal;
     const loaders = [
-      { label: 'tableau de bord', loader: () => loadDashboard(forceRefresh), optional: true },
-      { label: 'flux API (Météo / Vigicrues / Itinisère / Bison / Géorisques)', loader: () => loadExternalRisks(forceRefresh), optional: false },
+      { label: 'flux API (Météo / Vigicrues / Itinisère / Bison / Géorisques)', loader: () => loadExternalRisks(forceRefresh), optional: false, priority: 'critical' },
+      { label: 'main courante', loader: loadLogs, optional: false, priority: 'critical' },
+      { label: 'évènements', loader: loadEvents, optional: false, priority: 'critical' },
+      { label: 'communes', loader: loadMunicipalities, optional: false, priority: 'high' },
+      { label: 'tableau de bord', loader: () => loadDashboard(forceRefresh), optional: true, priority: 'high' },
       { label: 'interconnexions API', loader: async () => renderApiInterconnections(cachedExternalRisksSnapshot), optional: true },
-      { label: 'communes', loader: loadMunicipalities, optional: false },
-      { label: 'évènements', loader: loadEvents, optional: false },
-      { label: 'main courante', loader: loadLogs, optional: false },
       { label: 'utilisateurs', loader: loadUsers, optional: true },
       { label: 'modules V2', loader: loadV2Modules, optional: true },
       { label: 'points cartographiques', loader: loadMapPoints, optional: true },
       { label: 'annotations tactiques', loader: loadMapAnnotations, optional: true },
       { label: 'trafic cartographique', loader: renderTrafficOnMap, optional: true },
     ];
+
+    const orderedLoaders = loaders.slice().sort((a, b) => {
+      const rank = { critical: 0, high: 1 };
+      return (rank[a.priority] ?? 2) - (rank[b.priority] ?? 2);
+    });
+
     startStartupQueue(loaders.length);
-    const results = await Promise.all(loaders.map(async ({ label, loader }) => {
-      setStartupQueueCurrent(`Chargement: ${label}…`);
-      try {
-        const value = await loader();
-        return { status: 'fulfilled', value };
-      } catch (error) {
-        return { status: 'rejected', reason: error };
-      } finally {
-        advanceStartupQueue(label);
-      }
-    }));
+    const results = await runLoadersWithConcurrency(orderedLoaders, { refreshSignal, refreshSeq });
+    if (refreshSignal.aborted || refreshSeq !== refreshAllSequence) return;
     const failures = results
-      .map((result, index) => ({ result, config: loaders[index] }))
+      .map((result, index) => ({ result, config: orderedLoaders[index] }))
       .filter(({ result }) => result.status === 'rejected');
 
     const blockingFailures = failures.filter(({ config }) => !config.optional);
@@ -6789,6 +6901,7 @@ async function refreshAll(forceRefresh = false) {
           : '';
         errorTarget.textContent = warning;
       }
+      appendApiMetricsToOperationsPerf();
       return;
     }
 
@@ -6801,6 +6914,8 @@ async function refreshAll(forceRefresh = false) {
   try {
     await refreshAllInFlight;
   } finally {
+    apiDefaultSignal = null;
+    refreshAllAbortController = null;
     refreshAllInFlight = null;
   }
 }
