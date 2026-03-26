@@ -17,6 +17,7 @@ const STORAGE_KEYS = {
   serviceStatusHistory: 'serviceStatusHistory',
   v2IncidentCatalog: 'v2IncidentCatalog',
   v2IncidentChecklist: 'v2IncidentChecklist',
+  postLoginPath: 'postLoginPath',
 };
 const AUTO_REFRESH_MS = 60000;
 const EVENTS_LIVE_REFRESH_MS = 60000;
@@ -50,6 +51,20 @@ const PANEL_TITLES = {
   'map-panel': 'Carte stratégique Isère',
   'users-panel': 'Gestion des utilisateurs',
 };
+const PANEL_ROUTES = {
+  'situation-panel': '/accueil',
+  'services-panel': '/services',
+  'meteo-panel': '/meteo',
+  'georisques-panel': '/georisques',
+  'news-panel': '/actualites',
+  'municipalities-panel': '/communes',
+  'logs-panel': '/main-courante',
+  'v2-panel': '/modules',
+  'map-panel': '/cartographie',
+  'users-panel': '/utilisateurs',
+  'api-panel': '/interconnexions',
+};
+const ROUTE_TO_PANEL = Object.fromEntries(Object.entries(PANEL_ROUTES).map(([panel, path]) => [path, panel]));
 
 const RESOURCE_TYPE_META = {
   poste_commandement: { label: 'Poste de commandement', icon: '🛰️' },
@@ -150,6 +165,7 @@ let apiResyncTimer = null;
 let refreshAllInFlight = null;
 let refreshAllAbortController = null;
 let refreshAllSequence = 0;
+let lastForegroundRefreshAt = 0;
 let photoCameraRefreshTimer = null;
 let socialFeedsFallbackTimer = null;
 let lastApiResyncAt = null;
@@ -1236,6 +1252,43 @@ function showHome() { setVisibility(homeView, true); setVisibility(loginView, fa
 function showLogin() { setVisibility(homeView, false); setVisibility(loginView, true); setVisibility(appView, false); setVisibility(passwordForm, false); setVisibility(loginForm, true); }
 function showApp() { setVisibility(homeView, false); setVisibility(loginView, false); setVisibility(appView, true); }
 
+function normalizeRoutePath(rawPath) {
+  const value = String(rawPath || '/').trim();
+  if (!value) return '/';
+  const path = value.startsWith('/') ? value : `/${value}`;
+  return path.endsWith('/') && path.length > 1 ? path.slice(0, -1) : path;
+}
+
+function panelFromPath(pathname) {
+  return ROUTE_TO_PANEL[pathname] || null;
+}
+
+function currentPath() {
+  return normalizeRoutePath(window.location.pathname || '/');
+}
+
+function updateBrowserPath(pathname, { replace = false } = {}) {
+  const normalized = normalizeRoutePath(pathname);
+  const current = currentPath();
+  if (current === normalized) return;
+  if (replace) {
+    window.history.replaceState({}, '', normalized);
+    return;
+  }
+  window.history.pushState({}, '', normalized);
+}
+
+function resolvePrivatePathOrFallback(pathname) {
+  const normalized = normalizeRoutePath(pathname);
+  if (panelFromPath(normalized)) return normalized;
+  return PANEL_ROUTES['situation-panel'];
+}
+
+function routeToLogin({ replace = false } = {}) {
+  showLogin();
+  updateBrowserPath('/connexion', { replace });
+}
+
 function apiOrigins() {
   const origins = [];
   const { protocol, hostname, port } = window.location;
@@ -1904,11 +1957,13 @@ async function apiFile(path) {
   throw createApiError(sanitizeErrorMessage(lastError?.message || 'API indisponible'), lastError?.status);
 }
 
-function setActivePanel(panelId) {
+function setActivePanel(panelId, options = {}) {
+  const { syncRoute = true } = options;
   localStorage.setItem(STORAGE_KEYS.activePanel, panelId);
   document.querySelectorAll('.menu-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.target === panelId));
   document.querySelectorAll('.view').forEach((panel) => setVisibility(panel, panel.id === panelId));
   document.getElementById('panel-title').textContent = PANEL_TITLES[panelId] || 'Centre opérationnel';
+  if (syncRoute && token && PANEL_ROUTES[panelId]) updateBrowserPath(PANEL_ROUTES[panelId]);
   if (panelId === 'map-panel' && leafletMap) {
     setTimeout(() => {
       leafletMap.invalidateSize();
@@ -7372,13 +7427,16 @@ async function toggleMapFullscreen() {
 }
 
 function bindHomeInteractions() {
-  const openLogin = () => showLogin();
+  const openLogin = () => routeToLogin();
   const mobileMenuButton = document.getElementById('mobile-menu-btn');
   const homeNav = document.getElementById('home-nav');
 
   document.getElementById('open-login-btn')?.addEventListener('click', openLogin);
   document.getElementById('hero-login-btn')?.addEventListener('click', openLogin);
-  document.getElementById('back-home-btn')?.addEventListener('click', showHome);
+  document.getElementById('back-home-btn')?.addEventListener('click', () => {
+    showHome();
+    updateBrowserPath('/accueil-public');
+  });
   document.getElementById('scroll-actions-btn')?.addEventListener('click', () => document.getElementById('home-features')?.scrollIntoView({ behavior: 'smooth' }));
 
   mobileMenuButton?.addEventListener('click', () => {
@@ -7944,6 +8002,7 @@ function logout() {
   clearApiCache();
   localStorage.removeItem(STORAGE_KEYS.token);
   localStorage.removeItem(STORAGE_KEYS.currentUser);
+  localStorage.removeItem(STORAGE_KEYS.postLoginPath);
   if (refreshTimer) clearInterval(refreshTimer);
   if (liveEventsTimer) clearInterval(liveEventsTimer);
   if (apiPanelTimer) clearInterval(apiPanelTimer);
@@ -7952,12 +8011,20 @@ function logout() {
   if (sessionRecoveryTimer) clearInterval(sessionRecoveryTimer);
   stopMapAnnotationsSync();
   finishStartupQueue();
-  showHome();
+  routeToLogin({ replace: true });
 }
 
 function startAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
   refreshTimer = setInterval(() => token && refreshAll(false), AUTO_REFRESH_MS);
+}
+
+function refreshOnForegroundIfNeeded(force = false) {
+  if (!token) return;
+  const now = Date.now();
+  if (!force && (now - lastForegroundRefreshAt) < 4000) return;
+  lastForegroundRefreshAt = now;
+  refreshAll(force);
 }
 
 async function refreshLiveEvents() {
@@ -8094,13 +8161,16 @@ function startHomeLiveRefresh() {
   homeLiveTimer = setInterval(loadHomeLiveStatus, HOME_LIVE_REFRESH_MS);
 }
 
-async function initializeAuthenticatedSession({ runRefreshInBackground = false } = {}) {
+async function initializeAuthenticatedSession({ runRefreshInBackground = false, preferredPath = null } = {}) {
   persistCurrentUserSnapshot(currentUser);
   document.getElementById('current-role').textContent = roleLabel(currentUser.role);
   document.getElementById('current-commune').textContent = currentUser.municipality_name || 'Toutes';
   applyRoleVisibility();
   showApp();
-  setActivePanel(localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel');
+  const panelFromRoute = panelFromPath(resolvePrivatePathOrFallback(preferredPath || currentPath()));
+  const initialPanel = panelFromRoute || localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel';
+  setActivePanel(initialPanel, { syncRoute: false });
+  updateBrowserPath(PANEL_ROUTES[initialPanel] || PANEL_ROUTES['situation-panel'], { replace: true });
   hydrateUiFromLocalCache();
   await loadIsereBoundary();
   syncLogScopeFields();
@@ -8176,7 +8246,9 @@ loginForm.addEventListener('submit', async (event) => {
     }
 
     currentUser = await api('/auth/me');
-    await initializeAuthenticatedSession({ runRefreshInBackground: true });
+    const postLoginPath = localStorage.getItem(STORAGE_KEYS.postLoginPath);
+    localStorage.removeItem(STORAGE_KEYS.postLoginPath);
+    await initializeAuthenticatedSession({ runRefreshInBackground: true, preferredPath: postLoginPath || currentPath() });
     setConnectionStatus('Session restaurée.', 'info');
   } catch (error) {
     logConnectionEvent('login_error', { username, reason: sanitizeErrorMessage(error?.message || 'erreur') });
@@ -8514,19 +8586,38 @@ document.getElementById('incident-export-btn')?.addEventListener('click', () => 
 document.getElementById('incident-print-btn')?.addEventListener('click', () => window.print());
 
 (async function bootstrap() {
+  const applyRoute = ({ replace = false } = {}) => {
+    const path = currentPath();
+    if (!token) {
+      if (path === '/accueil-public') {
+        showHome();
+        return;
+      }
+      if (panelFromPath(path)) localStorage.setItem(STORAGE_KEYS.postLoginPath, path);
+      routeToLogin({ replace });
+      return;
+    }
+
+    showApp();
+    const panelId = panelFromPath(resolvePrivatePathOrFallback(path)) || localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel';
+    setActivePanel(panelId, { syncRoute: false });
+    updateBrowserPath(PANEL_ROUTES[panelId] || PANEL_ROUTES['situation-panel'], { replace });
+  };
+
   updateApiQueueVisual();
   bindHomeInteractions();
   bindAppInteractions();
   startHomeLiveRefresh();
   startApiPanelAutoRefresh();
+  window.addEventListener('popstate', () => applyRoute({ replace: true }));
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
     loadHomeLiveStatus();
-    if (token) refreshAll(false);
+    refreshOnForegroundIfNeeded(false);
   });
   window.addEventListener('focus', () => {
     loadHomeLiveStatus();
-    if (token) refreshAll(false);
+    refreshOnForegroundIfNeeded(false);
   });
   window.addEventListener('offline', () => {
     logConnectionEvent('browser_offline', {});
@@ -8535,7 +8626,7 @@ document.getElementById('incident-print-btn')?.addEventListener('click', () => w
   window.addEventListener('online', () => {
     logConnectionEvent('browser_online', {});
     setConnectionStatus('Réseau détecté. Vérification du serveur…', 'info');
-    if (token) refreshAll(true);
+    refreshOnForegroundIfNeeded(true);
   });
 
   try {
@@ -8548,14 +8639,17 @@ document.getElementById('incident-print-btn')?.addEventListener('click', () => w
     // ignore cache parsing issues
   }
 
-  if (!token) return showHome();
+  if (!token) {
+    applyRoute({ replace: true });
+    return;
+  }
   setConnectionStatus('Restauration de session en cours…', 'info');
   const cachedUser = readCurrentUserSnapshot();
   try {
     const restoredUser = await waitForSessionRecovery();
     if (!restoredUser) throw createApiError('Session indisponible temporairement');
     currentUser = restoredUser;
-    await initializeAuthenticatedSession({ runRefreshInBackground: true });
+    await initializeAuthenticatedSession({ runRefreshInBackground: true, preferredPath: currentPath() });
     setConnectionStatus('Session restaurée.', 'info');
     return;
   } catch (error) {
@@ -8567,13 +8661,13 @@ document.getElementById('incident-print-btn')?.addEventListener('click', () => w
     logConnectionEvent('session_restore_error', { reason: sanitizeErrorMessage(error?.message || 'erreur') });
     if (cachedUser && cachedUser.username) {
       currentUser = cachedUser;
-      await initializeAuthenticatedSession({ runRefreshInBackground: true });
+      await initializeAuthenticatedSession({ runRefreshInBackground: true, preferredPath: currentPath() });
       setConnectionStatus(healthOk
         ? 'Session restaurée localement. Le backend est joignable mais lent, nouvelle tentative en cours…'
         : 'Session restaurée localement. Backend temporairement indisponible, tentative de reconnexion…', 'warning');
       return;
     }
     setLoginError(`Session conservée mais API indisponible: ${sanitizeErrorMessage(error?.message || 'erreur inconnue')}`, buildLoginDebugDetails(error, currentUser?.username || 'session existante'));
-    showLogin();
+    routeToLogin({ replace: true });
   }
 })();
