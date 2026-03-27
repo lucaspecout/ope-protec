@@ -7225,7 +7225,7 @@ async function refreshAll(forceRefresh = false) {
         { label: 'trafic cartographique', loader: renderTrafficOnMap, optional: true },
       ]
       : [
-        { label: 'flux API (Météo / Vigicrues / Itinisère / Bison / Géorisques)', loader: () => loadExternalRisks(forceRefresh), optional: false, priority: 'critical' },
+        { label: 'flux API (Météo / Vigicrues / Itinisère / Bison / Géorisques)', loader: () => loadExternalRisks(forceRefresh), optional: true, priority: 'high' },
         { label: 'main courante', loader: loadLogs, optional: false, priority: 'critical' },
         { label: 'évènements', loader: loadEvents, optional: false, priority: 'critical' },
         { label: 'communes', loader: loadMunicipalities, optional: false, priority: 'high' },
@@ -8039,31 +8039,39 @@ async function refreshLiveEvents() {
   if (!token || document.hidden) return;
   return withPreservedScroll(async () => {
     try {
-      const [logs, risks, dashboard] = await Promise.all([
+      const [logsResult, risksResult, dashboardResult] = await Promise.allSettled([
         api('/logs', { cacheTtlMs: 0, bypassCache: true }),
         api('/external/isere/risks', { cacheTtlMs: 0, bypassCache: true }),
         api('/dashboard', { cacheTtlMs: 0, bypassCache: true }),
       ]);
 
-      cachedLogs = keepPreviousArray(cachedLogs, logs);
-      renderLogsList();
+      if (logsResult.status === 'fulfilled') {
+        cachedLogs = keepPreviousArray(cachedLogs, logsResult.value);
+        renderLogsList();
+      }
 
-      cachedDashboardSnapshot = dashboard && typeof dashboard === 'object'
-        ? {
-          ...dashboard,
-          latest_logs: cachedLogs.slice(0, 8),
-        }
-        : {
-          ...(cachedDashboardSnapshot || {}),
-          latest_logs: cachedLogs.slice(0, 8),
-          updated_at: new Date().toISOString(),
-        };
-      saveSnapshot(STORAGE_KEYS.dashboardSnapshot, cachedDashboardSnapshot);
+      if (dashboardResult.status === 'fulfilled') {
+        const dashboard = dashboardResult.value;
+        cachedDashboardSnapshot = dashboard && typeof dashboard === 'object'
+          ? {
+            ...dashboard,
+            latest_logs: cachedLogs.slice(0, 8),
+          }
+          : {
+            ...(cachedDashboardSnapshot || {}),
+            latest_logs: cachedLogs.slice(0, 8),
+            updated_at: new Date().toISOString(),
+          };
+        saveSnapshot(STORAGE_KEYS.dashboardSnapshot, cachedDashboardSnapshot);
+      }
 
-      renderExternalRisks(risks);
+      if (risksResult.status === 'fulfilled') {
+        renderExternalRisks(risksResult.value);
+        saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
+        saveSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot, cachedExternalRisksSnapshot);
+      }
+
       renderSituationOverview();
-      saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
-      saveSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot, cachedExternalRisksSnapshot);
       document.getElementById('dashboard-error').textContent = '';
     } catch (error) {
       document.getElementById('dashboard-error').textContent = `Actualisation live des évènements: ${sanitizeErrorMessage(error.message)}`;
