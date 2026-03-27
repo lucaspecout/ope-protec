@@ -32,6 +32,7 @@ const API_RETRY_BASE_DELAY_MS = 400;
 const API_MAX_RETRIES_GET = 3;
 const API_MAX_RETRIES_NON_GET = 1;
 const API_ORIGIN_COOLDOWN_MS = 120000;
+const API_ORIGIN_OVERRIDE_PARAM = 'api_origin';
 const OFFLINE_FAILURE_THRESHOLD = 3;
 const SESSION_RESTORE_MAX_ATTEMPTS = 3;
 const SESSION_RESTORE_RETRY_DELAY_MS = 1200;
@@ -1300,10 +1301,18 @@ function apiOrigins() {
 
   origins.push(window.location.origin);
 
+  const apiOriginOverride = new URLSearchParams(window.location.search).get(API_ORIGIN_OVERRIDE_PARAM);
+  if (apiOriginOverride) origins.push(apiOriginOverride.trim());
+
+  const globalOrigins = Array.isArray(window.__API_ORIGINS__) ? window.__API_ORIGINS__ : [];
+  globalOrigins
+    .filter((origin) => typeof origin === 'string' && origin.trim())
+    .forEach((origin) => origins.push(origin.trim()));
+
   if (hostname) {
     const preferredProtocol = protocol === 'https:' ? 'https:' : 'http:';
     if (isDefaultWebPort) origins.push(`${preferredProtocol}//${hostname}`);
-    origins.push(`${preferredProtocol}//${hostname}:1182`);
+    if (isLocalHostname || isPrivateNetworkHostname) origins.push(`${preferredProtocol}//${hostname}:1182`);
   }
 
   if (canProbeLoopbackAliases) {
