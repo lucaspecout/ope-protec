@@ -626,6 +626,8 @@ _aura_aircraft_cache_lock = Lock()
 _aura_aircraft_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _isere_aval_polyline_cache_lock = Lock()
 _isere_aval_polyline_cache: dict[str, Any] = {"points": None, "expires_at": datetime.min}
+_external_cache_refresh_guards_lock = Lock()
+_external_cache_refresh_guards: dict[int, Lock] = {}
 _ISERE_AVAL_GRENOBLE_CUTOFF_LON = 5.67526671768763
 _ISERE_AVAL_END_POINT = [45.21599236499436, 5.67526671768763]
 
@@ -838,6 +840,14 @@ def _cached_external_payload(
     force_refresh: bool,
     loader: Any,
 ) -> dict[str, Any]:
+    cache_key = id(cache)
+
+    with _external_cache_refresh_guards_lock:
+        refresh_guard = _external_cache_refresh_guards.get(cache_key)
+        if refresh_guard is None:
+            refresh_guard = Lock()
+            _external_cache_refresh_guards[cache_key] = refresh_guard
+
     now = datetime.utcnow()
     with lock:
         cached_payload = cache.get("payload")
@@ -845,22 +855,49 @@ def _cached_external_payload(
         if not force_refresh and cached_payload and now < expires_at:
             return deepcopy(cached_payload)
 
-    payload = loader()
-    if payload.get("status") in {"online", "partial", "stale"}:
+    has_refresh_slot = refresh_guard.acquire(blocking=False)
+    if not has_refresh_slot:
         with lock:
-            cache["payload"] = deepcopy(payload)
-            cache["expires_at"] = datetime.utcnow() + timedelta(seconds=ttl_seconds)
-        return payload
+            stale_cached_payload = cache.get("payload")
+            if stale_cached_payload:
+                stale_payload = deepcopy(stale_cached_payload)
+                stale_payload["status"] = "stale"
+                stale_payload["stale_reason"] = "actualisation déjà en cours"
+                stale_payload["updated_at"] = datetime.utcnow().isoformat() + "Z"
+                return stale_payload
+        has_refresh_slot = refresh_guard.acquire(timeout=2.5)
+        if not has_refresh_slot:
+            return {
+                "status": "pending",
+                "error": "actualisation en cours, réessayez dans quelques secondes",
+                "updated_at": datetime.utcnow().isoformat() + "Z",
+            }
 
-    with lock:
-        cached_payload = cache.get("payload")
-        if cached_payload:
-            stale_payload = deepcopy(cached_payload)
-            stale_payload["status"] = "stale"
-            stale_payload["stale_reason"] = payload.get("error") or payload.get("info_state") or "service indisponible"
-            stale_payload["updated_at"] = datetime.utcnow().isoformat() + "Z"
-            return stale_payload
-    return payload
+    try:
+        with lock:
+            cached_payload = cache.get("payload")
+            expires_at = cache.get("expires_at") or datetime.min
+            if not force_refresh and cached_payload and datetime.utcnow() < expires_at:
+                return deepcopy(cached_payload)
+
+        payload = loader()
+        if payload.get("status") in {"online", "partial", "stale"}:
+            with lock:
+                cache["payload"] = deepcopy(payload)
+                cache["expires_at"] = datetime.utcnow() + timedelta(seconds=ttl_seconds)
+            return payload
+
+        with lock:
+            cached_payload = cache.get("payload")
+            if cached_payload:
+                stale_payload = deepcopy(cached_payload)
+                stale_payload["status"] = "stale"
+                stale_payload["stale_reason"] = payload.get("error") or payload.get("info_state") or "service indisponible"
+                stale_payload["updated_at"] = datetime.utcnow().isoformat() + "Z"
+                return stale_payload
+        return payload
+    finally:
+        refresh_guard.release()
 
 
 def _highest_vigilance_level(alerts: list[dict[str, Any]]) -> str:
