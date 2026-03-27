@@ -45,6 +45,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   web:
     build:
@@ -54,7 +60,7 @@ services:
     mem_limit: 512m
     depends_on:
       api:
-        condition: service_started
+        condition: service_healthy
     ports:
       - "1182:80"
 
