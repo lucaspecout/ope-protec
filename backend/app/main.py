@@ -6,12 +6,14 @@ import re
 import secrets
 import hashlib
 import logging
+import uuid
 from threading import Lock, Thread
 from time import sleep
 from typing import Callable
 
 import asyncio
 import json
+import redis
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
@@ -227,6 +229,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 app.add_middleware(GZipMiddleware, minimum_size=800)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 logger = logging.getLogger("ope_protec.concurrency")
+_redis_client = redis.Redis.from_url(settings.redis_url, socket_connect_timeout=1, socket_timeout=1)
 
 ALLOWED_WEATHER_TRANSITIONS = {("jaune", "orange"), ("orange", "rouge")}
 READ_ROLES = {"admin", "ope", "securite", "visiteur", "mairie"}
@@ -311,11 +314,14 @@ DEFAULT_SCENARIO_LIBRARY = [
 async def log_request_timing(request: Request, call_next):
     global _inflight_request_count
     started_at = datetime.utcnow()
+    request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+    request.state.request_id = request_id
     with _inflight_request_count_lock:
         _inflight_request_count += 1
         active_requests = _inflight_request_count
     try:
         response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
         return response
     finally:
         duration_ms = int((datetime.utcnow() - started_at).total_seconds() * 1000)
@@ -329,6 +335,7 @@ async def log_request_timing(request: Request, call_next):
             duration_ms,
             active_requests,
             remaining_requests,
+            extra={"request_id": request_id},
         )
 
 
@@ -570,13 +577,30 @@ def shutdown_auth_executor() -> None:
 
 @app.get("/health")
 def healthcheck():
-    logger.info("healthcheck status=ok")
+    db_status = "ok"
+    redis_status = "ok"
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception:
+        db_status = "error"
+    try:
+        _redis_client.ping()
+    except Exception:
+        redis_status = "error"
+
+    overall_status = "ok" if db_status == "ok" and redis_status == "ok" else "degraded"
+    logger.info("healthcheck status=%s db=%s redis=%s", overall_status, db_status, redis_status)
     return {
-        "status": "ok",
+        "status": overall_status,
         "service": settings.app_name,
         "deployment": "docker-ready",
         "scope": "Département de l'Isère",
         "project_validated": True,
+        "checks": {
+            "database": db_status,
+            "redis": redis_status,
+        },
     }
 
 
