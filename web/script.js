@@ -1249,7 +1249,6 @@ function georisquesDocumentUrl(doc, commune) {
   return buildGeorisquesCommuneUrl(commune);
 }
 
-function showHome() { setVisibility(homeView, true); setVisibility(loginView, false); setVisibility(appView, false); }
 function showLogin() { setVisibility(homeView, false); setVisibility(loginView, true); setVisibility(appView, false); setVisibility(passwordForm, false); setVisibility(loginForm, true); }
 function showApp() { setVisibility(homeView, false); setVisibility(loginView, false); setVisibility(appView, true); }
 
@@ -7441,10 +7440,6 @@ function bindHomeInteractions() {
 
   document.getElementById('open-login-btn')?.addEventListener('click', openLogin);
   document.getElementById('hero-login-btn')?.addEventListener('click', openLogin);
-  document.getElementById('back-home-btn')?.addEventListener('click', () => {
-    showHome();
-    updateBrowserPath('/accueil-public');
-  });
   document.getElementById('scroll-actions-btn')?.addEventListener('click', () => document.getElementById('home-features')?.scrollIntoView({ behavior: 'smooth' }));
 
   mobileMenuButton?.addEventListener('click', () => {
@@ -8605,10 +8600,6 @@ document.getElementById('incident-print-btn')?.addEventListener('click', () => w
   const applyRoute = ({ replace = false } = {}) => {
     const path = currentPath();
     if (!token) {
-      if (path === '/accueil-public') {
-        showHome();
-        return;
-      }
       if (panelFromPath(path)) localStorage.setItem(STORAGE_KEYS.postLoginPath, path);
       routeToLogin({ replace });
       return;
