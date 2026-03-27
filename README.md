@@ -68,6 +68,24 @@ Pour améliorer la fluidité des requêtes et réduire les bugs en production, a
 - **Étape 2** : séparer `api` et `web`, configurer Gunicorn + pool DB.
 - **Étape 3** : ajouter métriques/alertes et tests de charge (`k6` ou `locust`) sur endpoints critiques.
 
+## Réduire la pression des flux externes (sans changer de techno)
+
+Si les flux externes saturent l'application et bloquent des actions locales, la meilleure approche est de **réguler le rythme de collecte** avant de changer d'architecture :
+
+- `EXTERNAL_FETCH_WORKERS` : limite le nombre de flux externes traités en parallèle (recommandé: `2-3`).
+- `EXTERNAL_REFRESH_INTERVAL_SECONDS` : espace les rafraîchissements automatiques globaux (recommandé: `900` à `1800`).
+- `EXTERNAL_REFRESH_ENABLED` : permet de couper le polling global automatique (`false`) et de ne rafraîchir qu'à la demande (`?refresh=true`).
+
+Exemple déjà prêt dans `docker-compose.yml` :
+
+```yaml
+EXTERNAL_FETCH_WORKERS: 3
+EXTERNAL_REFRESH_INTERVAL_SECONDS: 900
+EXTERNAL_REFRESH_ENABLED: true
+```
+
+Cette stratégie conserve la stack actuelle (FastAPI + Docker), réduit les rafales de requêtes sortantes et protège la réactivité des opérations locales.
+
 ## Accès aux services
 
 - Interface web : `http://localhost:1182`
