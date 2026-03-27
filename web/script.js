@@ -27,6 +27,8 @@ const API_PANEL_REFRESH_MS = 60000;
 const API_MAX_CONCURRENT_REQUESTS = 3;
 const API_REFRESH_MAX_CONCURRENT_LOADERS = 4;
 const API_REQUEST_TIMEOUT_MS = 25000;
+const API_BOOTSTRAP_TIMEOUT_MS = 45000;
+const BOOTSTRAP_MIN_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const LOGIN_REQUEST_TIMEOUT_MS = 20000;
 const API_RETRY_BASE_DELAY_MS = 400;
 const API_MAX_RETRIES_GET = 3;
@@ -166,6 +168,7 @@ let apiResyncTimer = null;
 let refreshAllInFlight = null;
 let refreshAllAbortController = null;
 let refreshAllSequence = 0;
+let lastBootstrapSuccessAt = 0;
 let lastForegroundRefreshAt = 0;
 let photoCameraRefreshTimer = null;
 let socialFeedsFallbackTimer = null;
@@ -7135,6 +7138,7 @@ async function loadOperationsBootstrap(forceRefresh = false, options = {}) {
     cacheTtlMs: forceRefresh ? 0 : 5000,
     bypassCache: forceRefresh,
     highPriority: true,
+    timeoutMs: API_BOOTSTRAP_TIMEOUT_MS,
     signal,
   });
   if (!payload || typeof payload !== 'object') throw new Error('Réponse bootstrap invalide');
@@ -7204,13 +7208,20 @@ async function refreshAll(forceRefresh = false) {
 
   refreshAllInFlight = withPreservedScroll(async () => {
     apiDefaultSignal = refreshSignal;
-    let bootstrapOk = false;
-    try {
-      setStartupQueueCurrent('Chargement prioritaire: consolidation des données opérationnelles…');
-      await loadOperationsBootstrap(forceRefresh, { signal: refreshSignal });
-      bootstrapOk = true;
-    } catch (error) {
-      document.getElementById('dashboard-error').textContent = `Bootstrap indisponible, bascule en mode dégradé: ${sanitizeErrorMessage(error.message)}`;
+    const shouldRunBootstrap = forceRefresh
+      || !lastBootstrapSuccessAt
+      || (Date.now() - lastBootstrapSuccessAt) >= BOOTSTRAP_MIN_REFRESH_INTERVAL_MS;
+
+    let bootstrapOk = true;
+    if (shouldRunBootstrap) {
+      try {
+        setStartupQueueCurrent('Chargement prioritaire: consolidation des données opérationnelles…');
+        await loadOperationsBootstrap(forceRefresh, { signal: refreshSignal });
+        lastBootstrapSuccessAt = Date.now();
+      } catch (error) {
+        bootstrapOk = false;
+        document.getElementById('dashboard-error').textContent = `Bootstrap indisponible, bascule en mode dégradé: ${sanitizeErrorMessage(error.message)}`;
+      }
     }
 
     const loaders = bootstrapOk
@@ -8013,6 +8024,7 @@ function logout() {
   if (photoCameraRefreshTimer) clearInterval(photoCameraRefreshTimer);
   if (sessionRecoveryTimer) clearInterval(sessionRecoveryTimer);
   stopMapAnnotationsSync();
+  lastBootstrapSuccessAt = 0;
   finishStartupQueue();
   routeToLogin({ replace: true });
 }
