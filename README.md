@@ -184,3 +184,7 @@ Retourne un bloc consolidé :
 - `GET /api/vigieau/alerts` : restrictions d'eau Vigieau pour l'Isère (actualisation optionnelle avec `?refresh=true`).
 - `GET /api/hubeau/isere/groundwater` : synthèse des nappes phréatiques Isère via Hub'Eau (actualisation avec `?refresh=true`, taille d'échantillon avec `?station_limit=`).
 - `GET /api/opendata/isere/resilience` : indicateurs de résilience territoriale depuis opendata.isere.fr (`?refresh=true`, `?limit=` pour la taille de l'échantillon).
+
+## Audit performance détaillé
+
+Un plan d'optimisation priorisé (API/DB/Docker/infra) est disponible dans `docs/performance_optimization_blueprint.md`.

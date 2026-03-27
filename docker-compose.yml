@@ -17,10 +17,11 @@ services:
       retries: 5
 
   redis:
-    image: redis:latest
+    image: redis:7-alpine
     restart: always
     mem_limit: 1g
-    command: ["redis-server", "--appendonly", "yes"]
+    cpus: 0.75
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
     volumes:
       - redis_data:/data
     healthcheck:
@@ -35,14 +36,15 @@ services:
       dockerfile: Dockerfile
     restart: always
     mem_limit: 1g
+    cpus: 1.5
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/veille
       REDIS_URL: redis://redis:6379/0
-      SECRET_KEY: change-me-in-production
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
       EXTERNAL_FETCH_WORKERS: ${EXTERNAL_FETCH_WORKERS:-3}
       EXTERNAL_REFRESH_INTERVAL_SECONDS: ${EXTERNAL_REFRESH_INTERVAL_SECONDS:-900}
       EXTERNAL_REFRESH_ENABLED: ${EXTERNAL_REFRESH_ENABLED:-true}
-      GEORISQUES_API_TOKEN: ${GEORISQUES_API_TOKEN:-eyJhbGciOiJIUzI1NiJ9.eyJub20iOiJQRUNPVVQiLCJwcmVub20iOiJMdWNhcyBGZXJuYW5kIiwiZW1haWwiOiJsdWNhc3BlY291dEBnbWFpbC5jb20iLCJleHAiOjE4MDQ2MzY4MDAsImlhdCI6MTc3MzE0MDE1NX0.QZwqLatikYGopYKcUh3JhZHKE-xGAMlfrcAxy1jm980}
+      GEORISQUES_API_TOKEN: ${GEORISQUES_API_TOKEN:-}
     depends_on:
       db:
         condition: service_healthy
@@ -61,9 +63,15 @@ services:
       dockerfile: web/Dockerfile
     restart: always
     mem_limit: 512m
+    cpus: 0.75
     depends_on:
       api:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
     ports:
       - "1182:80"
 
