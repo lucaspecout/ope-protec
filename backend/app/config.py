@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     db_pool_timeout_seconds: int = 30
     db_pool_recycle_seconds: int = 1800
     external_fetch_workers: int = 6
+    external_refresh_interval_seconds: int = 300
+    external_refresh_enabled: bool = True
 
     class Config:
         env_file = ".env"

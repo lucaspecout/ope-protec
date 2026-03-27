@@ -232,7 +232,6 @@ ALLOWED_WEATHER_TRANSITIONS = {("jaune", "orange"), ("orange", "rouge")}
 READ_ROLES = {"admin", "ope", "securite", "visiteur", "mairie"}
 EDIT_ROLES = {"admin", "ope"}
 
-EXTERNAL_REFRESH_INTERVAL_SECONDS = 300
 _external_risks_snapshot_lock = Lock()
 _external_risks_snapshot: dict = {
     "updated_at": None,
@@ -552,13 +551,16 @@ def _continuous_external_refresh() -> None:
     """Planifie un rafraîchissement de supervision périodique sans chevauchement."""
     while True:
         trigger_external_risks_refresh(db=None)
-        sleep(EXTERNAL_REFRESH_INTERVAL_SECONDS)
+        sleep(max(60, settings.external_refresh_interval_seconds))
 
 
 @app.on_event("startup")
 def startup_warmup_external_sources() -> None:
     Thread(target=_warmup_external_sources, daemon=True).start()
-    Thread(target=_continuous_external_refresh, daemon=True).start()
+    if settings.external_refresh_enabled:
+        Thread(target=_continuous_external_refresh, daemon=True).start()
+    else:
+        logger.info("external refresh loop disabled via EXTERNAL_REFRESH_ENABLED")
 
 
 @app.on_event("shutdown")
@@ -1061,7 +1063,8 @@ def build_external_risks_payload(
     results: dict[str, dict] = {}
     completed = 0
     total_jobs = len(fetch_jobs)
-    max_workers = min(6, max(1, total_jobs))
+    configured_workers = max(1, settings.external_fetch_workers)
+    max_workers = min(configured_workers, max(1, total_jobs))
 
     future_to_key: dict = {}
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
