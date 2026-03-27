@@ -3112,6 +3112,11 @@ async function loadFinessIsereResources() {
         };
       })
       .filter(Boolean);
+    const staleCached = readSnapshot(STORAGE_KEYS.staticFinessCache);
+    if (finessPointsCache.length < 20 && Array.isArray(staleCached) && staleCached.length > finessPointsCache.length) {
+      finessPointsCache = staleCached;
+      rebuildFinessMetaFromCache();
+    }
     finessTypeCounts = computeFinessTypeCounts(finessPointsCache);
     dynamicTypeMeta.forEach((meta, type) => {
       RESOURCE_TYPE_META[type] = meta;
@@ -3318,7 +3323,7 @@ async function loadIsereInstitutions() {
     return institutionPointsCache;
   }
   const areaQueries = [
-    '["boundary"="administrative"]["admin_level"="6"]["ref:INSEE"="38"]',
+    '["boundary"="administrative"]["admin_level"="6"]["ISO3166-2"="FR-38"]',
     '["boundary"="administrative"]["admin_level"="6"]["name"="Isère"]',
     '["boundary"="administrative"]["admin_level"="6"]["name"="Isere"]',
   ];
@@ -3338,7 +3343,7 @@ area${areaFilter}->.searchArea;
 );
 out center tags;`;
 
-  let points = [];
+  const pointsById = new Map();
   for (const endpoint of overpassEndpoints) {
     for (const areaFilter of areaQueries) {
       try {
@@ -3349,8 +3354,7 @@ out center tags;`;
         }));
         const payload = await parseJsonResponse(response, `overpass-institutions-${areaFilter}`);
         const elements = Array.isArray(payload?.elements) ? payload.elements : [];
-        const seenIds = new Set();
-        points = elements
+        elements
           .map((element) => {
             const type = classifyInstitutionPoint(element);
             if (!type) return null;
@@ -3358,8 +3362,6 @@ out center tags;`;
             const lon = Number(element.lon ?? element.center?.lon);
             if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
             const id = `osm-${element.type}-${element.id}`;
-            if (seenIds.has(id)) return null;
-            seenIds.add(id);
             const name = String(element.tags?.name || '').trim() || 'Établissement';
             const address = [element.tags?.['addr:housenumber'], element.tags?.['addr:street'], element.tags?.['addr:city']].filter(Boolean).join(' ') || 'Adresse non renseignée';
             return {
@@ -3376,20 +3378,20 @@ out center tags;`;
               dynamic: true,
             };
           })
-          .filter(Boolean);
-        if (points.length) break;
+          .filter(Boolean)
+          .forEach((point) => pointsById.set(point.id, point));
       } catch {
-        points = [];
+        continue;
       }
     }
-    if (points.length) break;
+    if (pointsById.size >= 50) break;
   }
-  institutionPointsCache = points;
-  if (institutionPointsCache.length) {
+  institutionPointsCache = Array.from(pointsById.values());
+  const staleCached = readSnapshot(STORAGE_KEYS.staticInstitutionsCache);
+  if (institutionPointsCache.length >= 50) {
     saveSnapshot(STORAGE_KEYS.staticInstitutionsCache, institutionPointsCache);
-  } else {
-    const staleCached = readSnapshot(STORAGE_KEYS.staticInstitutionsCache);
-    if (Array.isArray(staleCached)) institutionPointsCache = staleCached;
+  } else if (Array.isArray(staleCached) && staleCached.length > institutionPointsCache.length) {
+    institutionPointsCache = staleCached;
   }
   institutionsLoaded = true;
   return institutionPointsCache;
