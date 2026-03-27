@@ -1808,8 +1808,7 @@ async function requestApiAcrossOrigins(path, fetchOptions = {}, {
   if (token && !fetchOptions.omitAuth) headers.Authorization = `Bearer ${token}`;
 
   let lastError = null;
-  const isLoginRequest = String(path || '').startsWith('/auth/login');
-  const origins = isLoginRequest ? [window.location.origin] : prioritizedApiOrigins();
+  const origins = prioritizedApiOrigins();
   const resolvedMaxRetries = Number.isInteger(maxRetries) && maxRetries >= 0
     ? maxRetries
     : (method === 'GET' ? API_MAX_RETRIES_GET : API_MAX_RETRIES_NON_GET);
