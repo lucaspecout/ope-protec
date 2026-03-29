@@ -1,7 +1,7 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import Boolean, DateTime, Integer, JSON, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
 
 from .database import Base
 
@@ -10,216 +10,31 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    username: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     hashed_password: Mapped[str] = mapped_column(String(255))
-    role: Mapped[str] = mapped_column(String(20), default="lecture")
-    municipality_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    two_factor_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    role: Mapped[str] = mapped_column(String(30), default="admin")
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-
-class WeatherAlert(Base):
-    __tablename__ = "weather_alerts"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    risk_type: Mapped[str] = mapped_column(String(100))
-    level: Mapped[str] = mapped_column(String(20))
-    previous_level: Mapped[str] = mapped_column(String(20), default="vert")
-    internal_mail_group: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    sent_to_internal_group: Mapped[bool] = mapped_column(Boolean, default=False)
-    source: Mapped[str] = mapped_column(String(50), default="Météo-France")
-    pcs_validated: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-
-class RiverStation(Base):
-    __tablename__ = "river_stations"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(120), unique=True)
-    municipality: Mapped[str] = mapped_column(String(120))
-    level: Mapped[str] = mapped_column(String(20), default="vert")
-    water_height_cm: Mapped[int] = mapped_column(Integer, default=0)
-    is_priority: Mapped[bool] = mapped_column(Boolean, default=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class Municipality(Base):
     __tablename__ = "municipalities"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(120), unique=True)
-    phone: Mapped[str] = mapped_column(String(30))
-    email: Mapped[str] = mapped_column(String(120))
-    manager: Mapped[str] = mapped_column(String(120))
+    name: Mapped[str] = mapped_column(String(120), unique=True, index=True)
     insee_code: Mapped[str | None] = mapped_column(String(5), nullable=True)
-    postal_code: Mapped[str | None] = mapped_column(String(10), nullable=True)
-    contacts: Mapped[str | None] = mapped_column(Text, nullable=True)
-    additional_info: Mapped[str | None] = mapped_column(Text, nullable=True)
-    population: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    shelter_capacity: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    radio_channel: Mapped[str | None] = mapped_column(String(80), nullable=True)
-    pcs_active: Mapped[bool] = mapped_column(Boolean, default=True)
     crisis_mode: Mapped[bool] = mapped_column(Boolean, default=False)
-    vigilance_color: Mapped[str] = mapped_column(String(20), default="vert")
-    orsec_plan_file: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    convention_file: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    contact_phone: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    contact_email: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
-class MunicipalityDocument(Base):
-    __tablename__ = "municipality_documents"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    municipality_id: Mapped[int] = mapped_column(ForeignKey("municipalities.id"), index=True)
-    doc_type: Mapped[str] = mapped_column(String(40), default="annexe")
-    title: Mapped[str] = mapped_column(String(160))
-    file_path: Mapped[str] = mapped_column(String(255))
-    uploaded_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-    municipality = relationship("Municipality")
-    uploaded_by = relationship("User")
-
-
-class MapPoint(Base):
-    __tablename__ = "map_points"
+class ExternalSnapshot(Base):
+    __tablename__ = "external_snapshots"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(120))
-    category: Mapped[str] = mapped_column(String(40), default="autre")
-    icon: Mapped[str] = mapped_column(String(16), default="📍")
-    icon_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    lat: Mapped[float] = mapped_column(Float)
-    lon: Mapped[float] = mapped_column(Float)
-    municipality_id: Mapped[int | None] = mapped_column(ForeignKey("municipalities.id"), nullable=True)
-    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-    municipality = relationship("Municipality")
-    created_by = relationship("User")
-
-
-class MapAnnotation(Base):
-    __tablename__ = "map_annotations"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    annotation_type: Mapped[str] = mapped_column(String(24), default="polygon")
-    geojson: Mapped[str] = mapped_column(Text)
-    text_label: Mapped[str | None] = mapped_column(String(180), nullable=True)
-    color: Mapped[str] = mapped_column(String(16), default="#d7263d")
-    weight: Mapped[int] = mapped_column(Integer, default=3)
-    fill_opacity: Mapped[float] = mapped_column(Float, default=0.18)
-    municipality_id: Mapped[int | None] = mapped_column(ForeignKey("municipalities.id"), nullable=True)
-    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-    municipality = relationship("Municipality")
-    created_by = relationship("User")
-
-
-class OperationalLog(Base):
-    __tablename__ = "operational_logs"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    event_type: Mapped[str] = mapped_column(String(80))
-    description: Mapped[str] = mapped_column(Text)
-    danger_level: Mapped[str] = mapped_column(String(20), default="vert")
-    danger_emoji: Mapped[str] = mapped_column(String(8), default="🟢")
-    target_scope: Mapped[str] = mapped_column(String(20), default="departemental")
-    status: Mapped[str] = mapped_column(String(20), default="nouveau")
-    event_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    location: Mapped[str | None] = mapped_column(String(160), nullable=True)
-    source: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    actions_taken: Mapped[str | None] = mapped_column(Text, nullable=True)
-    next_update_due: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    assigned_to: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    assigned_role: Mapped[str | None] = mapped_column(String(40), nullable=True)
-    tags: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    attachment_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    municipality_id: Mapped[int | None] = mapped_column(ForeignKey("municipalities.id"), nullable=True)
-    event_id: Mapped[int | None] = mapped_column(ForeignKey("incident_events.id"), nullable=True)
-
-    created_by = relationship("User")
-    municipality = relationship("Municipality")
-    event = relationship("IncidentEvent")
-
-
-class IncidentEvent(Base):
-    __tablename__ = "incident_events"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    title: Mapped[str] = mapped_column(String(180))
-    address: Mapped[str] = mapped_column(String(220))
-    status: Mapped[str] = mapped_column(String(20), default="ouvert")
-    municipality_id: Mapped[int | None] = mapped_column(ForeignKey("municipalities.id"), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-
-    municipality = relationship("Municipality")
-    created_by = relationship("User")
-
-
-class PublicShare(Base):
-    __tablename__ = "public_shares"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    token: Mapped[str] = mapped_column(String(120), unique=True, index=True)
-    password_hash: Mapped[str] = mapped_column(String(255))
-    active: Mapped[bool] = mapped_column(Boolean, default=True)
-    expires_at: Mapped[datetime] = mapped_column(DateTime)
-    municipality_id: Mapped[int] = mapped_column(ForeignKey("municipalities.id"))
-
-    municipality = relationship("Municipality")
-
-
-class ScenarioTemplate(Base):
-    __tablename__ = "scenario_templates"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(120), unique=True)
-    hazard_type: Mapped[str] = mapped_column(String(40), default="multi")
-    severity: Mapped[str] = mapped_column(String(20), default="jaune")
-    description: Mapped[str] = mapped_column(Text, default="")
-    default_checklist: Mapped[str] = mapped_column(Text, default="[]")
-    reflex_sheet_template: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-
-class ExerciseRun(Base):
-    __tablename__ = "exercise_runs"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    scenario_id: Mapped[int] = mapped_column(ForeignKey("scenario_templates.id"))
-    municipality_id: Mapped[int | None] = mapped_column(ForeignKey("municipalities.id"), nullable=True)
-    mode: Mapped[str] = mapped_column(String(20), default="exercice")
-    status: Mapped[str] = mapped_column(String(20), default="planifie")
-    score_preparedness: Mapped[int] = mapped_column(Integer, default=0)
-    started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-
-    scenario = relationship("ScenarioTemplate")
-    municipality = relationship("Municipality")
-    created_by = relationship("User")
-
-
-class PcsGuidanceRun(Base):
-    __tablename__ = "pcs_guidance_runs"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    municipality_id: Mapped[int | None] = mapped_column(ForeignKey("municipalities.id"), nullable=True)
-    hazard_type: Mapped[str] = mapped_column(String(40))
-    alert_level: Mapped[str] = mapped_column(String(20), default="jaune")
-    recommended_level: Mapped[str] = mapped_column(String(20), default="veille")
-    current_step: Mapped[str] = mapped_column(String(120), default="qualification")
-    checklist_json: Mapped[str] = mapped_column(Text, default="[]")
-    reflex_sheet_text: Mapped[str] = mapped_column(Text, default="")
-    triggered_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-    municipality = relationship("Municipality")
-    triggered_by = relationship("User")
+    source: Mapped[str] = mapped_column(String(80), index=True)
+    status: Mapped[str] = mapped_column(String(20), default="unknown")
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
