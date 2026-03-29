@@ -1,30 +1,24 @@
-from pydantic import AliasChoices, Field
-from pydantic_settings import BaseSettings
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    app_name: str = "Protection Civile de l'Isère – Veille Opérationnelle"
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    app_name: str = "CRISIS38 - Veille opérationnelle Isère"
+    app_env: str = "production"
+
     database_url: str = "postgresql://postgres:postgres@db:5432/veille"
     redis_url: str = "redis://redis:6379/0"
-    secret_key: str = "change-me-in-production"
-    access_token_expire_minutes: int = 1440
-    upload_dir: str = "/data/uploads"
-    report_dir: str = "/data/reports"
-    weather_retention_days: int = 90
-    georisques_api_token: str = Field(
-        default="",
-        validation_alias=AliasChoices("GEORISQUES_API_TOKEN", "GEORISQUE_API_TOKEN"),
-    )
-    db_pool_size: int = 12
-    db_max_overflow: int = 24
-    db_pool_timeout_seconds: int = 30
-    db_pool_recycle_seconds: int = 1800
-    external_fetch_workers: int = 6
-    external_refresh_interval_seconds: int = 300
-    external_refresh_enabled: bool = True
 
-    class Config:
-        env_file = ".env"
+    secret_key: str = Field(default="change-me", min_length=8)
+    access_token_expire_minutes: int = 60 * 24
+
+    external_refresh_interval_seconds: int = 300
+    external_http_timeout_seconds: float = 8.0
+    external_max_connections: int = 40
+
+    cors_origins: str = "*"
 
 
 settings = Settings()
