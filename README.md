@@ -86,6 +86,10 @@ EXTERNAL_REFRESH_ENABLED: true
 
 Cette stratégie conserve la stack actuelle (FastAPI + Docker), réduit les rafales de requêtes sortantes et protège la réactivité des opérations locales.
 
+## Audit et refonte technique (stabilité)
+
+Un audit technique détaillé et la refonte de stabilisation implémentée sont documentés dans `docs/technical_refoundation_audit.md` (gouvernance du démarrage, leader election Redis pour le refresh externe, protection anti-blocage SQL, trajectoire phase 2).
+
 ## Accès aux services
 
 - Interface web : `http://localhost:1182`

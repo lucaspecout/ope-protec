@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from contextlib import asynccontextmanager
 from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -7,8 +8,7 @@ import secrets
 import hashlib
 import logging
 import uuid
-from threading import Lock, Thread
-from time import sleep
+from threading import Event, Lock, Thread
 from typing import Callable
 
 import asyncio
@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import Base, SessionLocal, SessionLocalAuth, engine, get_db
+from .bootstrap import bootstrap_database_schema
 from .models import ExerciseRun, IncidentEvent, MapAnnotation, MapPoint, Municipality, MunicipalityDocument, OperationalLog, PcsGuidanceRun, PublicShare, RiverStation, ScenarioTemplate, User, WeatherAlert
 from .schemas import (
     MapAnnotationCreate,
@@ -93,138 +94,94 @@ Base.metadata.create_all(bind=engine)
 Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
 
 
-with engine.begin() as conn:
-    conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT FALSE"))
-    conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS municipality_name VARCHAR(120)"))
-    conn.execute(text("ALTER TABLE weather_alerts ADD COLUMN IF NOT EXISTS internal_mail_group VARCHAR(255)"))
-    conn.execute(text("ALTER TABLE weather_alerts ADD COLUMN IF NOT EXISTS sent_to_internal_group BOOLEAN DEFAULT FALSE"))
-    conn.execute(text("ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS contacts TEXT"))
-    conn.execute(text("ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS insee_code VARCHAR(5)"))
-    conn.execute(text("ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS postal_code VARCHAR(10)"))
-    conn.execute(text("ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS additional_info TEXT"))
-    conn.execute(text("ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS population INTEGER"))
-    conn.execute(text("ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS shelter_capacity INTEGER"))
-    conn.execute(text("ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS radio_channel VARCHAR(80)"))
-    conn.execute(text("ALTER TABLE river_stations ADD COLUMN IF NOT EXISTS is_priority BOOLEAN DEFAULT FALSE"))
-    conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS municipality_id INTEGER REFERENCES municipalities(id)"))
-    conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS danger_level VARCHAR(20) DEFAULT 'vert'"))
-    conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS danger_emoji VARCHAR(8) DEFAULT '🟢'"))
-    conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS target_scope VARCHAR(20) DEFAULT 'departemental'"))
-    conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'nouveau'"))
-    conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS event_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP"))
-    conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS location VARCHAR(160)"))
-    conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS source VARCHAR(120)"))
-    conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS actions_taken TEXT"))
-    conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS next_update_due TIMESTAMP WITHOUT TIME ZONE"))
-    conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS assigned_to VARCHAR(120)"))
-    conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS assigned_role VARCHAR(40)"))
-    conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS tags VARCHAR(255)"))
-    conn.execute(text("ALTER TABLE operational_logs ADD COLUMN IF NOT EXISTS event_id INTEGER REFERENCES incident_events(id)"))
-    conn.execute(text("""
-        CREATE TABLE IF NOT EXISTS incident_events (
-            id SERIAL PRIMARY KEY,
-            title VARCHAR(180) NOT NULL,
-            address VARCHAR(220) NOT NULL,
-            status VARCHAR(20) NOT NULL DEFAULT 'ouvert',
-            municipality_id INTEGER REFERENCES municipalities(id) ON DELETE SET NULL,
-            created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            created_by_id INTEGER NOT NULL REFERENCES users(id)
-        )
-    """))
-    conn.execute(text("""
-        CREATE TABLE IF NOT EXISTS municipality_documents (
-            id SERIAL PRIMARY KEY,
-            municipality_id INTEGER NOT NULL REFERENCES municipalities(id) ON DELETE CASCADE,
-            doc_type VARCHAR(40) NOT NULL DEFAULT 'annexe',
-            title VARCHAR(160) NOT NULL,
-            file_path VARCHAR(255) NOT NULL,
-            uploaded_by_id INTEGER NOT NULL REFERENCES users(id),
-            created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        )
-    """))
-    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_municipality_documents_municipality ON municipality_documents(municipality_id)"))
-    conn.execute(text("""
-        CREATE TABLE IF NOT EXISTS map_points (
-            id SERIAL PRIMARY KEY,
-            name VARCHAR(120) NOT NULL,
-            category VARCHAR(40) NOT NULL DEFAULT 'autre',
-            icon VARCHAR(16) NOT NULL DEFAULT '📍',
-            notes TEXT,
-            lat DOUBLE PRECISION NOT NULL,
-            lon DOUBLE PRECISION NOT NULL,
-            municipality_id INTEGER REFERENCES municipalities(id) ON DELETE SET NULL,
-            created_by_id INTEGER NOT NULL REFERENCES users(id),
-            created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        )
-    """))
-    conn.execute(text("ALTER TABLE map_points ADD COLUMN IF NOT EXISTS icon_url VARCHAR(512)"))
-    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_weather_alerts_created_at ON weather_alerts(created_at DESC)"))
-    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_river_stations_updated_at ON river_stations(updated_at DESC)"))
-    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_operational_logs_created_at ON operational_logs(created_at DESC)"))
-    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_operational_logs_municipality_created_at ON operational_logs(municipality_id, created_at DESC)"))
-    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_operational_logs_event_created_at ON operational_logs(event_id, created_at DESC)"))
-    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_incident_events_created_at ON incident_events(created_at DESC)"))
-    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_municipality_documents_created_at ON municipality_documents(created_at DESC)"))
-    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_municipalities_crisis_mode ON municipalities(crisis_mode)"))
-    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_municipalities_pcs_active ON municipalities(pcs_active)"))
-    conn.execute(text("""
-        CREATE TABLE IF NOT EXISTS map_annotations (
-            id SERIAL PRIMARY KEY,
-            annotation_type VARCHAR(24) NOT NULL DEFAULT 'polygon',
-            geojson TEXT NOT NULL,
-            text_label VARCHAR(180),
-            color VARCHAR(16) NOT NULL DEFAULT '#d7263d',
-            weight INTEGER NOT NULL DEFAULT 3,
-            fill_opacity DOUBLE PRECISION NOT NULL DEFAULT 0.18,
-            municipality_id INTEGER REFERENCES municipalities(id) ON DELETE SET NULL,
-            created_by_id INTEGER NOT NULL REFERENCES users(id),
-            created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        )
-    """))
-    conn.execute(text("""
-        CREATE TABLE IF NOT EXISTS scenario_templates (
-            id SERIAL PRIMARY KEY,
-            name VARCHAR(120) NOT NULL UNIQUE,
-            hazard_type VARCHAR(40) NOT NULL DEFAULT 'multi',
-            severity VARCHAR(20) NOT NULL DEFAULT 'jaune',
-            description TEXT NOT NULL DEFAULT '',
-            default_checklist TEXT NOT NULL DEFAULT '[]',
-            reflex_sheet_template TEXT NOT NULL DEFAULT '',
-            created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        )
-    """))
-    conn.execute(text("""
-        CREATE TABLE IF NOT EXISTS exercise_runs (
-            id SERIAL PRIMARY KEY,
-            scenario_id INTEGER NOT NULL REFERENCES scenario_templates(id) ON DELETE CASCADE,
-            municipality_id INTEGER REFERENCES municipalities(id) ON DELETE SET NULL,
-            mode VARCHAR(20) NOT NULL DEFAULT 'exercice',
-            status VARCHAR(20) NOT NULL DEFAULT 'planifie',
-            score_preparedness INTEGER NOT NULL DEFAULT 0,
-            started_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            ended_at TIMESTAMP WITHOUT TIME ZONE,
-            created_by_id INTEGER NOT NULL REFERENCES users(id)
-        )
-    """))
-    conn.execute(text("""
-        CREATE TABLE IF NOT EXISTS pcs_guidance_runs (
-            id SERIAL PRIMARY KEY,
-            municipality_id INTEGER REFERENCES municipalities(id) ON DELETE SET NULL,
-            hazard_type VARCHAR(40) NOT NULL,
-            alert_level VARCHAR(20) NOT NULL DEFAULT 'jaune',
-            recommended_level VARCHAR(20) NOT NULL DEFAULT 'veille',
-            current_step VARCHAR(120) NOT NULL DEFAULT 'qualification',
-            checklist_json TEXT NOT NULL DEFAULT '[]',
-            reflex_sheet_text TEXT NOT NULL DEFAULT '',
-            triggered_by_id INTEGER NOT NULL REFERENCES users(id),
-            created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        )
-    """))
-    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_exercise_runs_started_at ON exercise_runs(started_at DESC)"))
-    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_pcs_guidance_runs_created_at ON pcs_guidance_runs(created_at DESC)"))
+bootstrap_database_schema(engine)
 
 
-app = FastAPI(title=settings.app_name)
+_refresh_stop_event = Event()
+_refresh_leader_token: str | None = None
+_refresh_leader_thread: Thread | None = None
+
+
+def _refresh_leader_lock_key() -> str:
+    return "ope-protec:external-refresh:leader"
+
+
+def _claim_refresh_leadership(ttl_seconds: int = 120) -> str | None:
+    token = secrets.token_hex(16)
+    acquired = _redis_client.set(_refresh_leader_lock_key(), token, nx=True, ex=ttl_seconds)
+    return token if acquired else None
+
+
+def _renew_refresh_leadership(token: str, ttl_seconds: int = 120) -> bool:
+    lua = """
+    if redis.call("get", KEYS[1]) == ARGV[1] then
+        return redis.call("expire", KEYS[1], ARGV[2])
+    end
+    return 0
+    """
+    try:
+        return bool(_redis_client.eval(lua, 1, _refresh_leader_lock_key(), token, ttl_seconds))
+    except Exception:
+        return False
+
+
+def _release_refresh_leadership(token: str) -> None:
+    lua = """
+    if redis.call("get", KEYS[1]) == ARGV[1] then
+        return redis.call("del", KEYS[1])
+    end
+    return 0
+    """
+    try:
+        _redis_client.eval(lua, 1, _refresh_leader_lock_key(), token)
+    except Exception:
+        logger.warning("failed to release external refresh leadership lock", exc_info=True)
+
+
+def _refresh_leader_loop(token: str) -> None:
+    logger.info("external refresh leader started")
+    try:
+        trigger_external_risks_refresh(db=None)
+        while not _refresh_stop_event.wait(timeout=max(60, settings.external_refresh_interval_seconds)):
+            if not _renew_refresh_leadership(token):
+                logger.warning("external refresh leadership lost; stopping background loop")
+                return
+            trigger_external_risks_refresh(db=None)
+    finally:
+        _release_refresh_leadership(token)
+        logger.info("external refresh leader stopped")
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    global _refresh_leader_token, _refresh_leader_thread
+    _refresh_stop_event.clear()
+    if settings.external_refresh_enabled:
+        try:
+            _refresh_leader_token = _claim_refresh_leadership()
+        except Exception:
+            _refresh_leader_token = None
+            logger.warning("unable to claim refresh leadership; background refresh disabled", exc_info=True)
+        if _refresh_leader_token:
+            _refresh_leader_thread = Thread(target=_refresh_leader_loop, args=(_refresh_leader_token,), daemon=True)
+            _refresh_leader_thread.start()
+        else:
+            logger.info("external refresh disabled for this worker (leader already elected)")
+    else:
+        logger.info("external refresh loop disabled via EXTERNAL_REFRESH_ENABLED")
+
+    try:
+        yield
+    finally:
+        _refresh_stop_event.set()
+        if _refresh_leader_thread and _refresh_leader_thread.is_alive():
+            _refresh_leader_thread.join(timeout=2)
+        if _refresh_leader_token:
+            _release_refresh_leadership(_refresh_leader_token)
+        _auth_executor.shutdown(wait=False, cancel_futures=True)
+
+
+app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.add_middleware(GZipMiddleware, minimum_size=800)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
@@ -537,12 +494,6 @@ def serialize_document(document: MunicipalityDocument, db: Session) -> Municipal
         created_at=document.created_at,
     )
 
-
-def _warmup_external_sources() -> None:
-    """Démarre un premier rafraîchissement partagé dès le démarrage du serveur."""
-    trigger_external_risks_refresh(db=None)
-
-
 def _set_external_risks_snapshot(payload: dict) -> None:
     with _external_risks_snapshot_lock:
         _external_risks_snapshot["updated_at"] = datetime.utcnow()
@@ -552,28 +503,6 @@ def _set_external_risks_snapshot(payload: dict) -> None:
 def _get_external_risks_snapshot() -> dict:
     with _external_risks_snapshot_lock:
         return deepcopy(_external_risks_snapshot.get("payload") or {})
-
-
-def _continuous_external_refresh() -> None:
-    """Planifie un rafraîchissement de supervision périodique sans chevauchement."""
-    while True:
-        trigger_external_risks_refresh(db=None)
-        sleep(max(60, settings.external_refresh_interval_seconds))
-
-
-@app.on_event("startup")
-def startup_warmup_external_sources() -> None:
-    Thread(target=_warmup_external_sources, daemon=True).start()
-    if settings.external_refresh_enabled:
-        Thread(target=_continuous_external_refresh, daemon=True).start()
-    else:
-        logger.info("external refresh loop disabled via EXTERNAL_REFRESH_ENABLED")
-
-
-@app.on_event("shutdown")
-def shutdown_auth_executor() -> None:
-    _auth_executor.shutdown(wait=False, cancel_futures=True)
-
 
 @app.get("/health")
 def healthcheck():
