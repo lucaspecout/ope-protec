@@ -927,16 +927,24 @@ def trigger_external_risks_refresh(db: Session | None = None) -> None:
             return
         _external_risks_refresh_in_progress = True
 
-    jobs_order = list(build_external_risks_fetch_jobs(refresh=True, pcs_commune_names=[]).keys())
-    first_job = jobs_order[0] if jobs_order else None
-    _set_external_risks_snapshot(
-        build_external_risks_pending_payload(
-            db=db,
-            refresh=True,
-            base_snapshot=_get_external_risks_snapshot(),
-            current_key=first_job,
+    # Ouvrir une session DB dès maintenant pour récupérer les communes PCS avant de marquer
+    # l'aperçu comme "en attente" — évite que Géorisques tourne sans communes quand db=None.
+    _bootstrap_db: Session | None = None
+    try:
+        _bootstrap_db = SessionLocal() if db is None else db
+        jobs_order = list(build_external_risks_fetch_jobs(refresh=True, pcs_commune_names=[]).keys())
+        first_job = jobs_order[0] if jobs_order else None
+        _set_external_risks_snapshot(
+            build_external_risks_pending_payload(
+                db=_bootstrap_db,
+                refresh=True,
+                base_snapshot=_get_external_risks_snapshot(),
+                current_key=first_job,
+            )
         )
-    )
+    finally:
+        if _bootstrap_db is not None and _bootstrap_db is not db:
+            _bootstrap_db.close()
 
     def run_refresh() -> None:
         global _external_risks_refresh_in_progress
@@ -990,7 +998,7 @@ def trigger_external_risks_refresh(db: Session | None = None) -> None:
             error_payload["refresh"] = {
                 "in_progress": False,
                 "completed": 0,
-                "total": len(jobs) if 'jobs' in locals() else 14,
+                "total": len(build_external_risks_fetch_jobs(refresh=False, pcs_commune_names=[])),
                 "current": "Erreur",
             }
             error_payload.setdefault("errors", {})["refresh"] = str(exc)

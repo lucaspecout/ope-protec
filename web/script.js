@@ -1508,7 +1508,11 @@ async function api(path, options = {}) {
 
   if (!cacheable) {
     const responsePayload = await requestPromise;
-    clearApiCache();
+    // Vider le cache uniquement pour les mutations (POST/PUT/DELETE/PATCH), jamais pour les GET.
+    // Vider pour un GET bypassCache tuerait toutes les requêtes in-flight en cours et
+    // invaliderait des réponses récentes sans raison, causant des re-fetches inutiles.
+    const mutatingMethod = String(fetchOptions.method || 'GET').toUpperCase();
+    if (mutatingMethod !== 'GET') clearApiCache();
     return responsePayload;
   }
 
@@ -6250,6 +6254,7 @@ async function loadExternalRisks(forceRefresh = false) {
   const data = await api(`/external/isere/risks${suffix}`, {
     bypassCache: forceRefresh,
     cacheTtlMs: forceRefresh ? 0 : API_CACHE_TTL_MS,
+    timeoutMs: API_SLOW_ENDPOINT_TIMEOUT_MS,
   });
   cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, data);
   renderExternalRisks(cachedExternalRisksSnapshot);
@@ -7347,9 +7352,12 @@ async function refreshLiveEvents() {
   return withPreservedScroll(async () => {
     try {
       const [logs, risks, dashboard] = await Promise.all([
-        api('/logs', { cacheTtlMs: 0, bypassCache: true }),
-        api('/external/isere/risks', { cacheTtlMs: 0, bypassCache: true }),
-        api('/dashboard', { cacheTtlMs: 0, bypassCache: true }),
+        // TTL court pour forcer le re-fetch à chaque cycle live tout en permettant la déduplication
+        // in-flight si plusieurs appelants déclenchent la même requête simultanément.
+        // bypassCache: true est intentionnellement évité ici car il viderait apiGetCache + apiInFlight.
+        api('/logs', { cacheTtlMs: 30000 }),
+        api('/external/isere/risks', { cacheTtlMs: 45000, timeoutMs: API_SLOW_ENDPOINT_TIMEOUT_MS }),
+        api('/dashboard', { cacheTtlMs: 30000 }),
       ]);
 
       cachedLogs = keepPreviousArray(cachedLogs, logs);
