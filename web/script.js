@@ -5347,7 +5347,31 @@ function renderSituationOverview() {
     : (readSnapshot(STORAGE_KEYS.externalRisksSnapshot) || {});
 
   const vigilance = normalizeLevel(dashboard.vigilance || externalRisks?.meteo_france?.level || 'vert');
-  const crues = normalizeLevel(dashboard.crues || externalRisks?.vigicrues?.water_alert_level || 'vert');
+
+  // ── Niveau crues : tronçons AN11/12/20 + règle 5 stations orange/rouge ──
+  const vigicruesTroncons = Array.isArray(externalRisks?.vigicrues?.troncons)
+    ? externalRisks.vigicrues.troncons : [];
+  const mainTronconCodes = new Set(['AN11', 'AN12', 'AN20']);
+  const mainTronconLevels = vigicruesTroncons
+    .filter((t) => mainTronconCodes.has(String(t.code || '')))
+    .map((t) => normalizeLevel(t.level || 'vert'));
+
+  const vigicruesStations = Array.isArray(externalRisks?.vigicrues?.stations)
+    ? externalRisks.vigicrues.stations : [];
+  const alertStations = vigicruesStations
+    .filter((s) => ['orange', 'rouge'].includes(normalizeLevel(s.level || 'vert')))
+    .sort((a, b) => riskRank(b.level) - riskRank(a.level));
+  const alertCount = alertStations.length;
+  const stationsRuleLevel = alertCount >= 5
+    ? (alertStations.some((s) => normalizeLevel(s.level) === 'rouge') ? 'rouge' : 'orange')
+    : 'vert';
+
+  const crues = [
+    ...mainTronconLevels,
+    stationsRuleLevel,
+    normalizeLevel(dashboard.crues || externalRisks?.vigicrues?.water_alert_level || 'vert'),
+  ].reduce((max, lvl) => riskRank(lvl) > riskRank(max) ? lvl : max, 'vert');
+
   const globalRisk = normalizeLevel(dashboard.global_risk || vigilance);
   const crisisCount = Number(dashboard.communes_crise ?? 0);
 
@@ -5368,9 +5392,18 @@ function renderSituationOverview() {
   const prefectureItems = Array.isArray(externalRisks?.prefecture_isere?.items)
     ? sortPrefectureItemsByRecency(externalRisks.prefecture_isere.items).slice(0, 4)
     : [];
+  const cruesAlertHtml = alertCount > 0
+    ? `<ul class="list compact" style="margin-top:6px;font-size:0.82em">${
+        alertStations.slice(0, 6).map((s) => {
+          const lvl = normalizeLevel(s.level || 'vert');
+          return `<li><span style="color:${levelColor(lvl)};font-weight:600">${escapeHtml(s.station || s.code)}</span>${s.river ? ` · <span class="muted">${escapeHtml(s.river)}</span>` : ''} · ${escapeHtml(lvl)}</li>`;
+        }).join('')
+      }${alertCount > 6 ? `<li class="muted">… et ${alertCount - 6} autre(s)</li>` : ''}</ul>`
+    : `<p class="muted" style="font-size:0.82em;margin-top:4px">Aucune station en alerte</p>`;
+
   const kpiCards = [
     { key: 'meteo', label: 'Vigilance météo', value: vigilance, info: 'Source Météo-France', css: normalizeLevel(vigilance) },
-    { key: 'crues', label: 'Niveau crues', value: crues, info: 'Source Vigicrues', css: normalizeLevel(crues) },
+    { key: 'crues', label: 'Niveau crues', value: crues, info: `Tronçons AN11/12/20 · ${alertCount} station(s) en alerte`, css: normalizeLevel(crues), detail: cruesAlertHtml },
     { key: 'global-risk', label: 'Risque global', value: globalRisk, info: 'Calcul consolidé', css: normalizeLevel(globalRisk) },
     { key: 'communes-crise', label: 'Communes en crise', value: String(crisisCount), info: 'PCS actif', css: crisisCount > 0 ? 'rouge' : 'vert' },
   ];
@@ -5408,7 +5441,7 @@ function renderSituationOverview() {
     </div>
 
     <div class="situation-top-grid">
-      ${kpiCards.map((card) => `<article class="tile situation-tile situation-tile--interactive" role="button" tabindex="0" data-kpi-key="${escapeHtml(card.key)}" data-kpi-label="${escapeHtml(card.label)}"><h3>${card.label}</h3><p class="kpi-value ${card.css}">${escapeHtml(card.value)}</p><p class="muted">${card.info}</p></article>`).join('')}
+      ${kpiCards.map((card) => `<article class="tile situation-tile situation-tile--interactive" role="button" tabindex="0" data-kpi-key="${escapeHtml(card.key)}" data-kpi-label="${escapeHtml(card.label)}"><h3>${card.label}</h3><p class="kpi-value ${card.css}">${escapeHtml(card.value)}</p><p class="muted">${escapeHtml(card.info)}</p>${card.detail || ''}</article>`).join('')}
     </div>
 
     <div class="situation-top-grid">
