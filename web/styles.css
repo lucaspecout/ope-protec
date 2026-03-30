@@ -1202,3 +1202,111 @@ select:focus {
     border-radius: 18px;
   }
 }
+
+/* ── Bannière hors-ligne ─────────────────────────────────────── */
+#network-offline-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  background: #b91c1c;
+  color: #fff;
+  text-align: center;
+  padding: .5rem 1rem;
+  font-size: .875rem;
+  font-weight: 600;
+  letter-spacing: .03em;
+  display: none;
+}
+#network-offline-banner.visible { display: block; }
+
+/* ── Skeleton loading ────────────────────────────────────────── */
+@keyframes skeleton-pulse {
+  0%   { opacity: 1; }
+  50%  { opacity: .45; }
+  100% { opacity: 1; }
+}
+.skeleton {
+  border-radius: 8px;
+  background: linear-gradient(90deg, #dde8f7 25%, #eaf1fb 50%, #dde8f7 75%);
+  background-size: 200% 100%;
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+  display: block;
+}
+.skeleton-line { height: .85rem; margin-bottom: .5rem; }
+.skeleton-line:last-child { width: 60%; }
+.skeleton-title { height: 1.1rem; width: 45%; margin-bottom: .75rem; }
+
+/* ── Indicateur de statut service ───────────────────────────── */
+.status-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-right: .35rem;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+.status-dot--online  { background: #16a34a; box-shadow: 0 0 0 3px rgba(22,163,74,.18); }
+.status-dot--pending { background: #d97706; animation: skeleton-pulse 1.2s ease-in-out infinite; }
+.status-dot--stale   { background: #6b7280; }
+.status-dot--unavailable { background: #dc2626; box-shadow: 0 0 0 3px rgba(220,38,38,.18); }
+
+/* ── Erreur réseau — zone inline ─────────────────────────────── */
+.network-error-inline {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  padding: .6rem .85rem;
+  color: #991b1b;
+  font-size: .875rem;
+  margin: .5rem 0;
+}
+.network-error-inline::before {
+  content: "⚠";
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+/* ── Pulse sur badge rouge (crise active) ────────────────────── */
+@keyframes badge-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, .5); }
+  60%       { box-shadow: 0 0 0 6px rgba(220, 38, 38, 0); }
+}
+.badge.red { animation: badge-pulse 2s ease-out infinite; }
+
+/* ── Amélioration de la zone d'erreur dashboard ──────────────── */
+#dashboard-error:not(:empty),
+#users-error:not(:empty) {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  padding: .5rem .85rem;
+  font-size: .85rem;
+  margin-top: .35rem;
+}
+
+/* ── Barre de progression fine en haut lors du refresh ──────── */
+@keyframes progress-slide {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(100%); }
+}
+.refresh-bar {
+  height: 3px;
+  background: var(--primary);
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+  margin-bottom: .5rem;
+}
+.refresh-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.6), transparent);
+  animation: progress-slide 1.4s linear infinite;
+}

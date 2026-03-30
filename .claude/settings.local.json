@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs ls:*)",
+      "Bash(wc -l backend/app/*.py web/*.js web/*.css web/*.html)"
+    ]
+  }
+}

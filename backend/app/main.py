@@ -880,16 +880,32 @@ def build_external_risks_payload(
     fetch_jobs = build_external_risks_fetch_jobs(refresh=refresh, pcs_commune_names=pcs_commune_names)
 
     results: dict[str, dict] = {}
-    completed = 0
     total_jobs = len(fetch_jobs)
+    completed_count = 0
+    callback_lock = Lock()
 
-    for key, (fetcher, fallback) in fetch_jobs.items():
-        if pre_fetch_callback is not None:
-            pre_fetch_callback(key, completed, total_jobs)
-        results[key] = safe_fetch(key, fetcher, fallback)
-        completed += 1
-        if progress_callback is not None:
-            progress_callback(key, results[key], completed, total_jobs)
+    # Signaler tous les services comme "pending" avant le début des fetches parallèles
+    if pre_fetch_callback is not None:
+        for key in fetch_jobs:
+            pre_fetch_callback(key, 0, total_jobs)
+
+    def fetch_and_notify(key: str, fetcher, fallback) -> tuple[str, dict]:
+        result = safe_fetch(key, fetcher, fallback)
+        nonlocal completed_count
+        with callback_lock:
+            completed_count += 1
+            if progress_callback is not None:
+                progress_callback(key, result, completed_count, total_jobs)
+        return key, result
+
+    with ThreadPoolExecutor(max_workers=settings.external_fetch_workers) as executor:
+        futures = [
+            executor.submit(fetch_and_notify, key, fetcher, fallback)
+            for key, (fetcher, fallback) in fetch_jobs.items()
+        ]
+        for future in as_completed(futures):
+            key, result = future.result()
+            results[key] = result
 
     payload = {"updated_at": utc_timestamp(), **results}
     payload["refresh"] = {

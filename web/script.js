@@ -20,13 +20,14 @@ const EVENTS_LIVE_REFRESH_MS = 60000;
 const HOME_LIVE_REFRESH_MS = 300000;
 const API_CACHE_TTL_MS = 300000;
 const API_PANEL_REFRESH_MS = 60000;
-const API_MAX_CONCURRENT_REQUESTS = 3;
-const API_REQUEST_TIMEOUT_MS = 15000;
+const API_MAX_CONCURRENT_REQUESTS = 5;
+const API_REQUEST_TIMEOUT_MS = 20000;
+const API_SLOW_ENDPOINT_TIMEOUT_MS = 90000;
 const LOGIN_REQUEST_TIMEOUT_MS = 10000;
-const API_RETRY_BASE_DELAY_MS = 400;
-const API_MAX_RETRIES_GET = 2;
+const API_RETRY_BASE_DELAY_MS = 500;
+const API_MAX_RETRIES_GET = 3;
 const API_MAX_RETRIES_NON_GET = 1;
-const API_ORIGIN_COOLDOWN_MS = 120000;
+const API_ORIGIN_COOLDOWN_MS = 60000;
 const STATIC_POINTS_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const OSM_DETAILS_MIN_ZOOM = 15;
 const PANEL_TITLES = {
@@ -1131,11 +1132,20 @@ function buildApiUrl(path, origin) {
 function sanitizeErrorMessage(message) {
   const normalized = typeof message === 'string' ? message : String(message || '');
   if (!normalized) return 'Erreur inconnue';
-  if (normalized.includes('Failed to fetch') || normalized.includes('NetworkError')) {
-    return "Connexion API indisponible (Failed to fetch). Vérifiez le backend, le port 1182 et le proxy web.";
+  if (normalized.includes('Failed to fetch') || normalized.includes('NetworkError') || normalized.includes('ERR_CONNECTION_REFUSED')) {
+    return "Connexion API indisponible. Vérifiez que le serveur tourne (docker compose up -d) et que le port est accessible.";
+  }
+  if (normalized.includes('Délai dépassé') || normalized.includes('AbortError') || normalized.includes('timeout')) {
+    return "Délai dépassé — le serveur met trop longtemps à répondre. Réessayez dans quelques secondes.";
   }
   if (normalized.includes('<!doctype') || normalized.includes('<html')) {
     return "L'API renvoie une page HTML au lieu d'un JSON. Vérifiez que le backend tourne bien sur le même hôte (docker compose up -d).";
+  }
+  if (normalized.includes('502') || normalized.includes('Bad Gateway')) {
+    return "Erreur passerelle (502) — le backend est inaccessible depuis Nginx. Vérifiez les conteneurs Docker.";
+  }
+  if (normalized.includes('503') || normalized.includes('Service Unavailable')) {
+    return "Service temporairement indisponible (503) — réessayez dans quelques instants.";
   }
   return normalized;
 }
@@ -1144,7 +1154,9 @@ function isNetworkFetchError(error) {
   const message = String(error?.message || '');
   return message.includes('Failed to fetch')
     || message.includes('NetworkError')
-    || message.includes('Load failed');
+    || message.includes('Load failed')
+    || message.includes('ERR_CONNECTION_REFUSED')
+    || message.includes('ERR_NETWORK');
 }
 
 
@@ -6320,7 +6332,7 @@ async function loadApiInterconnections(forceRefresh = false) {
       renderApiInterconnections(cachedExternalRisksSnapshot);
     }
   }
-  const data = await api(`/external/isere/risks${suffix}`);
+  const data = await api(`/external/isere/risks${suffix}`, { timeoutMs: API_SLOW_ENDPOINT_TIMEOUT_MS });
   cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, data);
   renderApiInterconnections(cachedExternalRisksSnapshot);
   saveSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot, cachedExternalRisksSnapshot);
@@ -7701,6 +7713,17 @@ document.getElementById('event-form')?.addEventListener('submit', async (event) 
     if (errorTarget) errorTarget.textContent = sanitizeErrorMessage(error.message);
   }
 });
+
+(function initNetworkOfflineBanner() {
+  const banner = document.getElementById('network-offline-banner');
+  if (!banner) return;
+  function update() {
+    banner.classList.toggle('visible', !navigator.onLine);
+  }
+  window.addEventListener('online', update);
+  window.addEventListener('offline', update);
+  update();
+})();
 
 (async function bootstrap() {
   updateApiQueueVisual();
