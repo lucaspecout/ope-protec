@@ -181,7 +181,7 @@ ALLOWED_WEATHER_TRANSITIONS = {("jaune", "orange"), ("orange", "rouge")}
 READ_ROLES = {"admin", "ope", "securite", "visiteur", "mairie"}
 EDIT_ROLES = {"admin", "ope"}
 
-EXTERNAL_REFRESH_INTERVAL_SECONDS = 300
+EXTERNAL_REFRESH_INTERVAL_SECONDS = 90
 _external_risks_snapshot_lock = Lock()
 _external_risks_snapshot: dict = {
     "updated_at": None,
@@ -853,7 +853,6 @@ def build_external_risks_payload(
     refresh: bool = False,
     db: Session | None = None,
     progress_callback: Callable[[str, dict, int, int], None] | None = None,
-    pre_fetch_callback: Callable[[str, int, int], None] | None = None,
 ) -> dict:
     errors: dict[str, str] = {}
     errors_lock = Lock()
@@ -883,11 +882,6 @@ def build_external_risks_payload(
     total_jobs = len(fetch_jobs)
     completed_count = 0
     callback_lock = Lock()
-
-    # Signaler tous les services comme "pending" avant le début des fetches parallèles
-    if pre_fetch_callback is not None:
-        for key in fetch_jobs:
-            pre_fetch_callback(key, 0, total_jobs)
 
     def fetch_and_notify(key: str, fetcher, fallback) -> tuple[str, dict]:
         result = safe_fetch(key, fetcher, fallback)
@@ -927,54 +921,34 @@ def trigger_external_risks_refresh(db: Session | None = None) -> None:
             return
         _external_risks_refresh_in_progress = True
 
-    # Ouvrir une session DB dès maintenant pour récupérer les communes PCS avant de marquer
-    # l'aperçu comme "en attente" — évite que Géorisques tourne sans communes quand db=None.
-    _bootstrap_db: Session | None = None
-    try:
-        _bootstrap_db = SessionLocal() if db is None else db
-        jobs_order = list(build_external_risks_fetch_jobs(refresh=True, pcs_commune_names=[]).keys())
-        first_job = jobs_order[0] if jobs_order else None
-        _set_external_risks_snapshot(
-            build_external_risks_pending_payload(
-                db=_bootstrap_db,
-                refresh=True,
-                base_snapshot=_get_external_risks_snapshot(),
-                current_key=first_job,
-            )
-        )
-    finally:
-        if _bootstrap_db is not None and _bootstrap_db is not db:
-            _bootstrap_db.close()
+    # Signaler que le refresh est en cours sans écraser les données précédentes.
+    current_snapshot = _get_external_risks_snapshot() or {}
+    init_payload = dict(current_snapshot)
+    init_payload["refresh"] = {
+        "in_progress": True,
+        "completed": 0,
+        "total": len(build_external_risks_fetch_jobs(refresh=False, pcs_commune_names=[])),
+        "current": "Initialisation",
+    }
+    _set_external_risks_snapshot(init_payload)
 
     def run_refresh() -> None:
         global _external_risks_refresh_in_progress
         local_db: Session | None = None
         try:
             local_db = SessionLocal()
-            jobs = list(build_external_risks_fetch_jobs(refresh=True, pcs_commune_names=[]).keys())
-            incremental_payload = build_external_risks_pending_payload(
-                db=local_db,
-                refresh=True,
-                base_snapshot=_get_external_risks_snapshot(),
-                current_key=jobs[0] if jobs else None,
-            )
-
-            def pre_fetch_callback(key: str, completed: int, total: int) -> None:
-                incremental_payload.update(
-                    build_external_risks_pending_payload(
-                        db=local_db,
-                        refresh=True,
-                        base_snapshot=incremental_payload,
-                        current_key=key,
-                    )
-                )
-                incremental_payload["refresh"] = {
-                    "in_progress": True,
-                    "completed": completed,
-                    "total": total,
-                    "current": key,
-                }
-                _set_external_risks_snapshot(incremental_payload)
+            # Partir du snapshot existant pour ne pas effacer les données précédentes
+            # pendant le refresh — les services gardent leur dernier statut connu.
+            incremental_payload = dict(_get_external_risks_snapshot() or {})
+            incremental_payload["updated_at"] = utc_timestamp()
+            total_jobs = len(build_external_risks_fetch_jobs(refresh=True, pcs_commune_names=[]))
+            incremental_payload["refresh"] = {
+                "in_progress": True,
+                "completed": 0,
+                "total": total_jobs,
+                "current": "Démarrage des flux externes",
+            }
+            _set_external_risks_snapshot(incremental_payload)
 
             def progress_callback(key: str, data: dict, completed: int, total: int) -> None:
                 incremental_payload[key] = data
@@ -990,7 +964,6 @@ def trigger_external_risks_refresh(db: Session | None = None) -> None:
                 refresh=True,
                 db=local_db,
                 progress_callback=progress_callback,
-                pre_fetch_callback=pre_fetch_callback,
             )
             _set_external_risks_snapshot(final_payload)
         except Exception as exc:

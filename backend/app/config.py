@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     db_max_overflow: int = 24
     db_pool_timeout_seconds: int = 30
     db_pool_recycle_seconds: int = 1800
-    external_fetch_workers: int = 6
+    external_fetch_workers: int = 18
 
     class Config:
         env_file = ".env"

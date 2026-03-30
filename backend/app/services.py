@@ -146,7 +146,7 @@ def _is_retryable_network_error(exc: Exception) -> bool:
     return False
 
 
-def _http_get_with_retries(request: Request, timeout: int = 10, retries: int = 2, retry_delay_seconds: float = 0.7) -> bytes:
+def _http_get_with_retries(request: Request, timeout: int = 8, retries: int = 1, retry_delay_seconds: float = 0.5) -> bytes:
     last_error: Exception | None = None
     for attempt in range(retries + 1):
         try:
