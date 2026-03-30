@@ -181,26 +181,33 @@ ALLOWED_WEATHER_TRANSITIONS = {("jaune", "orange"), ("orange", "rouge")}
 READ_ROLES = {"admin", "ope", "securite", "visiteur", "mairie"}
 EDIT_ROLES = {"admin", "ope"}
 
-EXTERNAL_REFRESH_INTERVAL_SECONDS = 90
-_external_risks_snapshot_lock = Lock()
-_external_risks_snapshot: dict = {
-    "updated_at": None,
-    "payload": {
-        "updated_at": None,
-        "meteo_france": {},
-        "vigicrues": {},
-        "itinisere": {},
-        "bison_fute": {},
-        "georisques": {},
-        "prefecture_isere": {},
-        "dauphine_isere": {},
-        "atmo_aura": {},
-        "anfr_isere": {},
-        "arcep_isere": {},
-        "apic_isere": {},
-        "vigicrues_flash_isere": {},
-    },
+# Intervalle de rafraîchissement par service (secondes).
+# Chaque service tourne dans sa propre boucle indépendante : une panne sur
+# l'un n'affecte pas les autres, et les données les plus volatiles sont
+# rafraîchies plus souvent que les données quasi-statiques.
+SERVICE_REFRESH_INTERVALS: dict[str, int] = {
+    "prefecture_isere":        90,   # Actualités urgentes
+    "meteo_france":           120,
+    "itinisere":              120,
+    "sncf_isere":             120,
+    "vigicrues":              180,
+    "vigicrues_flash_isere":  180,
+    "apic_isere":             180,
+    "electricity_isere":      180,
+    "dauphine_isere":         180,
+    "bison_fute":             300,
+    "vigieau":                600,
+    "atmo_aura":              600,
+    "arcep_isere":            600,
+    "georisques":             600,
+    "isere_opendata":        1800,
+    "groundwater_isere":     3600,
+    "anfr_isere":           21600,   # Données quasi-statiques
+    "finess_isere":         21600,
 }
+
+_external_risks_snapshot_lock = Lock()
+_external_risks_snapshot: dict = {"updated_at": None, "payload": {}}
 _external_risks_refresh_lock = Lock()
 _external_risks_refresh_in_progress = False
 ALLOWED_DOC_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
@@ -382,11 +389,6 @@ def serialize_document(document: MunicipalityDocument, db: Session) -> Municipal
     )
 
 
-def _warmup_external_sources() -> None:
-    """Démarre un premier rafraîchissement partagé dès le démarrage du serveur."""
-    trigger_external_risks_refresh(db=None)
-
-
 def _set_external_risks_snapshot(payload: dict) -> None:
     with _external_risks_snapshot_lock:
         _external_risks_snapshot["updated_at"] = datetime.utcnow()
@@ -398,17 +400,68 @@ def _get_external_risks_snapshot() -> dict:
         return deepcopy(_external_risks_snapshot.get("payload") or {})
 
 
-def _continuous_external_refresh() -> None:
-    """Planifie un rafraîchissement de supervision périodique sans chevauchement."""
+def _update_service_slot(key: str, result: dict) -> None:
+    """Mise à jour atomique d'un seul slot de service dans le snapshot.
+    Les autres services ne sont pas affectés."""
+    with _external_risks_snapshot_lock:
+        payload = dict(_external_risks_snapshot.get("payload") or {})
+        payload[key] = deepcopy(result)
+        payload["updated_at"] = datetime.utcnow().isoformat() + "Z"
+        _external_risks_snapshot["payload"] = payload
+        _external_risks_snapshot["updated_at"] = datetime.utcnow()
+
+
+def _refresh_one_service(key: str) -> None:
+    """Récupère les données d'un seul service externe et met à jour son slot."""
+    db: Session | None = None
+    try:
+        pcs_names: list[str] = []
+        if key == "georisques":
+            db = SessionLocal()
+            pcs_names = [
+                str(name)
+                for (name,) in db.query(Municipality.name).filter(Municipality.pcs_active.is_(True)).all()
+                if name
+            ]
+        jobs = build_external_risks_fetch_jobs(refresh=True, pcs_commune_names=pcs_names)
+        if key not in jobs:
+            return
+        fetcher, fallback = jobs[key]
+        try:
+            result = fetcher()
+        except Exception as exc:
+            result = dict(fallback)
+            result["status"] = "unavailable"
+            result["error"] = str(exc)
+            result["updated_at"] = utc_timestamp()
+        _update_service_slot(key, result)
+    except Exception:
+        pass
+    finally:
+        if db is not None:
+            db.close()
+
+
+def _service_loop(key: str, interval: int) -> None:
+    """Boucle perpétuelle : première récupération immédiate au démarrage,
+    puis toutes les `interval` secondes. Indépendante des autres services."""
     while True:
-        trigger_external_risks_refresh(db=None)
-        sleep(EXTERNAL_REFRESH_INTERVAL_SECONDS)
+        _refresh_one_service(key)
+        sleep(interval)
 
 
 @app.on_event("startup")
 def startup_warmup_external_sources() -> None:
-    Thread(target=_warmup_external_sources, daemon=True).start()
-    Thread(target=_continuous_external_refresh, daemon=True).start()
+    # Initialiser le snapshot avec les valeurs par défaut ("pending") pour que le
+    # frontend affiche un état cohérent dès le premier poll, avant la fin des fetches.
+    initial_jobs = build_external_risks_fetch_jobs(refresh=False, pcs_commune_names=[])
+    initial_payload: dict = {key: dict(fallback) for key, (_, fallback) in initial_jobs.items()}
+    initial_payload["updated_at"] = utc_timestamp()
+    _set_external_risks_snapshot(initial_payload)
+
+    # Démarrer une boucle indépendante par service.
+    for key, interval in SERVICE_REFRESH_INTERVALS.items():
+        Thread(target=_service_loop, args=(key, interval), daemon=True).start()
 
 
 @app.get("/health")
@@ -914,92 +967,36 @@ def build_external_risks_payload(
 
 
 def trigger_external_risks_refresh(db: Session | None = None) -> None:
+    """Relance immédiatement tous les services en parallèle (bouton 'Actualiser maintenant').
+    Les boucles indépendantes continuent à tourner sur leur propre cadence."""
     global _external_risks_refresh_in_progress
-
     with _external_risks_refresh_lock:
         if _external_risks_refresh_in_progress:
             return
         _external_risks_refresh_in_progress = True
 
-    # Signaler que le refresh est en cours sans écraser les données précédentes.
-    current_snapshot = _get_external_risks_snapshot() or {}
-    init_payload = dict(current_snapshot)
-    init_payload["refresh"] = {
-        "in_progress": True,
-        "completed": 0,
-        "total": len(build_external_risks_fetch_jobs(refresh=False, pcs_commune_names=[])),
-        "current": "Initialisation",
-    }
-    _set_external_risks_snapshot(init_payload)
-
-    def run_refresh() -> None:
+    def run_all() -> None:
         global _external_risks_refresh_in_progress
-        local_db: Session | None = None
         try:
-            local_db = SessionLocal()
-            # Partir du snapshot existant pour ne pas effacer les données précédentes
-            # pendant le refresh — les services gardent leur dernier statut connu.
-            incremental_payload = dict(_get_external_risks_snapshot() or {})
-            incremental_payload["updated_at"] = utc_timestamp()
-            total_jobs = len(build_external_risks_fetch_jobs(refresh=True, pcs_commune_names=[]))
-            incremental_payload["refresh"] = {
-                "in_progress": True,
-                "completed": 0,
-                "total": total_jobs,
-                "current": "Démarrage des flux externes",
-            }
-            _set_external_risks_snapshot(incremental_payload)
-
-            def progress_callback(key: str, data: dict, completed: int, total: int) -> None:
-                incremental_payload[key] = data
-                incremental_payload["refresh"] = {
-                    "in_progress": True,
-                    "completed": completed,
-                    "total": total,
-                    "current": key,
-                }
-                _set_external_risks_snapshot(incremental_payload)
-
-            final_payload = build_external_risks_payload(
-                refresh=True,
-                db=local_db,
-                progress_callback=progress_callback,
-            )
-            _set_external_risks_snapshot(final_payload)
-        except Exception as exc:
-            error_payload = _get_external_risks_snapshot() or build_external_risks_pending_payload(db=None, refresh=True)
-            error_payload["refresh"] = {
-                "in_progress": False,
-                "completed": 0,
-                "total": len(build_external_risks_fetch_jobs(refresh=False, pcs_commune_names=[])),
-                "current": "Erreur",
-            }
-            error_payload.setdefault("errors", {})["refresh"] = str(exc)
-            _set_external_risks_snapshot(error_payload)
+            threads = [
+                Thread(target=_refresh_one_service, args=(key,), daemon=True)
+                for key in SERVICE_REFRESH_INTERVALS
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
         finally:
-            if local_db is not None:
-                local_db.close()
             with _external_risks_refresh_lock:
                 _external_risks_refresh_in_progress = False
 
-    Thread(target=run_refresh, daemon=True).start()
+    Thread(target=run_all, daemon=True).start()
 
 
 def get_external_risks_payload(refresh: bool = False, db: Session | None = None) -> dict:
-    snapshot = _get_external_risks_snapshot()
-    has_snapshot = bool(snapshot and any(snapshot.get(key) for key in ("meteo_france", "vigicrues", "itinisere", "bison_fute", "georisques", "prefecture_isere", "dauphine_isere", "sncf_isere", "vigieau", "atmo_aura", "anfr_isere", "arcep_isere", "apic_isere", "vigicrues_flash_isere", "electricity_isere", "finess_isere", "groundwater_isere", "isere_opendata")))
-
     if refresh:
         trigger_external_risks_refresh(db=db)
-        jobs_order = list(build_external_risks_fetch_jobs(refresh=True, pcs_commune_names=[]).keys())
-        return snapshot or build_external_risks_pending_payload(db=db, refresh=True, current_key=jobs_order[0] if jobs_order else None)
-
-    if has_snapshot:
-        return snapshot
-
-    trigger_external_risks_refresh(db=db)
-    jobs_order = list(build_external_risks_fetch_jobs(refresh=True, pcs_commune_names=[]).keys())
-    return build_external_risks_pending_payload(db=db, refresh=True, current_key=jobs_order[0] if jobs_order else None)
+    return _get_external_risks_snapshot()
 
 
 @app.get("/external/isere/risks")

@@ -1345,19 +1345,40 @@ def _fetch_vigicrues_isere_live(
             )
             for code in unique_candidate_codes
         ]
+        # Timeout global sur les lookups station : on n'attend jamais plus de 30 s.
+        # Si aucune station n'est trouvée dans ce délai, on utilise les codes de
+        # secours connus pour retourner des données minimales plutôt que d'échouer.
         try:
-            for future in as_completed(futures):
-                station = future.result()
+            for future in as_completed(futures, timeout=30):
+                try:
+                    station = future.result()
+                except Exception:
+                    station = None
                 if not station:
                     continue
                 isere_stations.append(station)
                 if station_limit is not None and len(isere_stations) >= target_isere_count:
                     break
+        except TimeoutError:
+            pass
         finally:
             executor.shutdown(wait=False, cancel_futures=True)
 
         if not isere_stations:
-            raise ValueError("Aucune station du département de l'Isère trouvée")
+            # Retourner un résultat de secours minimal plutôt que de lever une exception
+            # qui bloquerait le snapshot entier.
+            return {
+                "service": "Vigicrues",
+                "status": "stale",
+                "source": source,
+                "water_alert_level": "vert",
+                "stations": [],
+                "troncons": [],
+                "alerts": [],
+                "station_count": 0,
+                "updated_at": datetime.utcnow().isoformat() + "Z",
+                "stale_reason": "Aucune station résolue (réseau ou API Vigicrues indisponible)",
+            }
 
         troncons_index: dict[str, dict[str, Any]] = {}
         for station in isere_stations:
