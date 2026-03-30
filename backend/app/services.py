@@ -1078,26 +1078,61 @@ def normalize_level(value: Any) -> str:
 
 
 def _vigicrues_extract_observation(station_code: str) -> tuple[float, float, str]:
-    try:
-        payload = _http_get_json(
-            f"https://www.vigicrues.gouv.fr/services/observations.json/index.php?CdStationHydro={quote_plus(station_code)}&FormatDate=iso",
-            timeout=6,
-        )
-    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
+    """Fetch latest water height (in meters) and delta for a Vigicrues station.
+
+    Tries the documented v1 API first, falls back to legacy /index.php path.
+    Returns (height_m, delta_m, observed_at_iso) – all zeros on failure.
+    """
+    urls = [
+        f"https://www.vigicrues.gouv.fr/services/observations.json?CdStationHydro={quote_plus(station_code)}&GrdSerie=H&FormatDate=iso",
+        f"https://www.vigicrues.gouv.fr/services/observations.json/index.php?CdStationHydro={quote_plus(station_code)}&FormatDate=iso",
+    ]
+    payload: Any = None
+    for url in urls:
+        try:
+            payload = _http_get_json(url, timeout=8)
+            break
+        except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError):
+            continue
+    if payload is None:
         return 0.0, 0.0, ""
 
-    observations = ((payload.get("Serie") or {}).get("ObssHydro") or [])
+    serie = payload.get("Serie") or {}
+    observations = serie.get("ObssHydro") or []
     valid = [item for item in observations if item.get("ResObsHydro") not in (None, "")]
     if not valid:
         return 0.0, 0.0, ""
 
+    # Vigicrues observations are returned oldest-first; take the last two.
     latest = valid[-1]
     previous = valid[-2] if len(valid) >= 2 else latest
     latest_height = float(latest.get("ResObsHydro") or 0.0)
     previous_height = float(previous.get("ResObsHydro") or latest_height)
+    # Values are in meters (Vigicrues convention).
     delta = latest_height - previous_height
     observed_at = str(latest.get("DtObsHydro") or "")
     return latest_height, delta, observed_at
+
+
+def _fetch_vigicrues_vigicru_levels() -> dict[str, str]:
+    """Fetch ALL Vigicrues tronçon vigilance levels in a single GeoJSON call.
+
+    Returns dict: tronçon_code (e.g. "AN12") → level ("vert"|"jaune"|"orange"|"rouge").
+    Much faster and more reliable than one RSS call per tronçon.
+    """
+    payload = _http_get_json(
+        "https://www.vigicrues.gouv.fr/services/1/InfoVigiCru.geojson",
+        timeout=10,
+    )
+    niveau_map = {0: "vert", 1: "jaune", 2: "orange", 3: "rouge"}
+    result: dict[str, str] = {}
+    for feature in (payload.get("features") or []):
+        props = feature.get("properties") or {}
+        code = str(props.get("CdEntVigiCru") or "").strip()
+        niveau = props.get("NivSituVigiCruEnt")
+        if code and niveau is not None:
+            result[code] = niveau_map.get(int(niveau), "vert")
+    return result
 
 
 def _normalize_vigicrues_coordinates(coord_x: Any, coord_y: Any, commune_code: str) -> tuple[float | None, float | None]:
@@ -1250,7 +1285,7 @@ def _fetch_hubeau_isere_station_codes() -> set[str]:
 
     while True:
         payload = _http_get_json(
-            f"https://hubeau.eaufrance.fr/api/v1/hydrometrie/referentiel/stations?code_departement=38&size={page_size}&page={page}",
+            f"https://hubeau.eaufrance.fr/api/v2/hydrometrie/referentiel/stations?code_departement=38&size={page_size}&page={page}",
             timeout=10,
         )
         stations = payload.get("data") or []
@@ -1276,7 +1311,7 @@ def _fetch_hubeau_isere_stations_full() -> list[dict[str, Any]]:
     page_size = 1000
     while True:
         payload = _http_get_json(
-            f"https://hubeau.eaufrance.fr/api/v1/hydrometrie/referentiel/stations"
+            f"https://hubeau.eaufrance.fr/api/v2/hydrometrie/referentiel/stations"
             f"?code_departement=38&size={page_size}&page={page}",
             timeout=12,
         )
@@ -1297,7 +1332,7 @@ def _fetch_hubeau_stations_by_codes(codes: list[str]) -> dict[str, dict[str, Any
     codes_param = ",".join(codes)
     try:
         payload = _http_get_json(
-            f"https://hubeau.eaufrance.fr/api/v1/hydrometrie/referentiel/stations"
+            f"https://hubeau.eaufrance.fr/api/v2/hydrometrie/referentiel/stations"
             f"?code_station={codes_param}&size={len(codes)}",
             timeout=12,
         )
@@ -1327,7 +1362,7 @@ def _fetch_hubeau_observations_batch(
         per_batch_size = min(len(batch) * 20, 2000)  # ~20 obs/station pour couvrir tout le batch
         try:
             payload = _http_get_json(
-                f"https://hubeau.eaufrance.fr/api/v1/hydrometrie/observations_tr"
+                f"https://hubeau.eaufrance.fr/api/v2/hydrometrie/observations_tr"
                 f"?code_entite={codes_param}&grandeur_hydro=H"
                 f"&size={per_batch_size}&sort=desc",
                 timeout=15,
@@ -1527,6 +1562,19 @@ def _fetch_vigicrues_isere_live(
             group["stations"].append({"code": station["code"], "station": station["station"], "river": station["river"]})
             group["level"] = _highest_vigilance_level([{"level": group["level"]}, {"level": station["level"]}])
 
+        # ── Niveaux officiels Vigicrues : 1 seul appel GeoJSON ──────────────
+        vigicru_levels: dict[str, str] = {}
+        try:
+            vigicru_levels = _fetch_vigicrues_vigicru_levels()
+        except Exception:
+            pass
+
+        def _troncon_level(code: str) -> str:
+            return vigicru_levels.get(code, "vert")
+
+        def _troncon_rss(code: str) -> str:
+            return f"https://www.vigicrues.gouv.fr/territoire/rss?CdEntVigiCru={code}"
+
         # Tracé du tronçon Vigicrues AN12 (Isère grenobloise) recalé sur le
         # lit principal de l'Isère entre Saint-Martin-le-Vinoux et Domène.
         isere_grenobloise_points = [
@@ -1599,16 +1647,13 @@ def _fetch_vigicrues_isere_live(
             [45.203029700000000, 5.818190400000000],
             [45.202967006933470, 5.818678565323601],
         ]
-        isere_grenobloise_level, isere_grenobloise_rss = (None, None)
-        try:
-            isere_grenobloise_level, isere_grenobloise_rss = _fetch_vigicrues_troncon_rss_level("AN12")
-        except (ET.ParseError, HTTPError, URLError, TimeoutError, ValueError):
-            isere_grenobloise_level, isere_grenobloise_rss = (None, "https://www.vigicrues.gouv.fr/territoire/rss?CdEntVigiCru=AN12")
+        isere_grenobloise_level = _troncon_level("AN12")
+        isere_grenobloise_rss = _troncon_rss("AN12")
 
         troncons_index["AN12 Isère grenobloise"] = {
             "code": "AN12",
             "name": "Isère grenobloise",
-            "level": isere_grenobloise_level or "vert",
+            "level": isere_grenobloise_level,
             "territory": "19",
             "rss": isere_grenobloise_rss,
             "stations": [
@@ -1736,16 +1781,13 @@ def _fetch_vigicrues_isere_live(
             [45.4794719, 6.0283330],
         ]
 
-        isere_moyenne_level, isere_moyenne_rss = (None, None)
-        try:
-            isere_moyenne_level, isere_moyenne_rss = _fetch_vigicrues_troncon_rss_level("AN11")
-        except (ET.ParseError, HTTPError, URLError, TimeoutError, ValueError):
-            isere_moyenne_level, isere_moyenne_rss = (None, "https://www.vigicrues.gouv.fr/territoire/rss?CdEntVigiCru=AN11")
+        isere_moyenne_level = _troncon_level("AN11")
+        isere_moyenne_rss = _troncon_rss("AN11")
 
         troncons_index["AN11 Isère moyenne"] = {
             "code": "AN11",
             "name": "Isère moyenne",
-            "level": isere_moyenne_level or "vert",
+            "level": isere_moyenne_level,
             "territory": "19",
             "rss": isere_moyenne_rss,
             "stations": [
@@ -1815,16 +1857,13 @@ def _fetch_vigicrues_isere_live(
             [45.120207400000000, 5.696663400000000],
             [45.12021175849194, 5.696691586043316],
         ]
-        drac_aval_level, drac_aval_rss = (None, None)
-        try:
-            drac_aval_level, drac_aval_rss = _fetch_vigicrues_troncon_rss_level("AN30")
-        except (ET.ParseError, HTTPError, URLError, TimeoutError, ValueError):
-            drac_aval_level, drac_aval_rss = (None, "https://www.vigicrues.gouv.fr/territoire/rss?CdEntVigiCru=AN30")
+        drac_aval_level = _troncon_level("AN30")
+        drac_aval_rss = _troncon_rss("AN30")
 
         troncons_index["AN30 Drac aval"] = {
             "code": "AN30",
             "name": "Drac aval",
-            "level": drac_aval_level or "vert",
+            "level": drac_aval_level,
             "territory": "19",
             "rss": drac_aval_rss,
             "stations": [
@@ -1922,16 +1961,13 @@ def _fetch_vigicrues_isere_live(
             [45.027829300000000, 6.061059300000000],
             [45.027666300000000, 6.061342700000000],
         ]
-        romanche_aval_level, romanche_aval_rss = (None, None)
-        try:
-            romanche_aval_level, romanche_aval_rss = _fetch_vigicrues_troncon_rss_level("AN31")
-        except (ET.ParseError, HTTPError, URLError, TimeoutError, ValueError):
-            romanche_aval_level, romanche_aval_rss = (None, "https://www.vigicrues.gouv.fr/territoire/rss?CdEntVigiCru=AN31")
+        romanche_aval_level = _troncon_level("AN31")
+        romanche_aval_rss = _troncon_rss("AN31")
 
         troncons_index["AN31 Romanche aval"] = {
             "code": "AN31",
             "name": "Romanche aval",
-            "level": romanche_aval_level or "vert",
+            "level": romanche_aval_level,
             "territory": "19",
             "rss": romanche_aval_rss,
             "stations": [
@@ -2068,16 +2104,13 @@ def _fetch_vigicrues_isere_live(
         except (HTTPError, URLError, TimeoutError, ValueError, KeyError, TypeError):
             isere_aval_points = isere_aval_points_fallback
 
-        isere_aval_level, isere_aval_rss = (None, None)
-        try:
-            isere_aval_level, isere_aval_rss = _fetch_vigicrues_troncon_rss_level("AN20")
-        except (ET.ParseError, HTTPError, URLError, TimeoutError, ValueError):
-            isere_aval_level, isere_aval_rss = (None, "https://www.vigicrues.gouv.fr/territoire/rss?CdEntVigiCru=AN20")
+        isere_aval_level = _troncon_level("AN20")
+        isere_aval_rss = _troncon_rss("AN20")
 
         troncons_index["AN20 Isère aval"] = {
             "code": "AN20",
             "name": "Isère aval",
-            "level": isere_aval_level or "vert",
+            "level": isere_aval_level,
             "territory": "19",
             "rss": isere_aval_rss,
             "stations": [

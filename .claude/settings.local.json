@@ -3,7 +3,11 @@
     "allow": [
       "Bash(xargs ls:*)",
       "Bash(wc -l backend/app/*.py web/*.js web/*.css web/*.html)",
-      "Bash(docker compose:*)"
+      "Bash(docker compose:*)",
+      "WebSearch",
+      "WebFetch(domain:www.vigicrues.gouv.fr)",
+      "WebFetch(domain:hubeau.eaufrance.fr)",
+      "WebFetch(domain:inrae.github.io)"
     ]
   }
 }
