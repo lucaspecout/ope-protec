@@ -190,7 +190,7 @@ SERVICE_REFRESH_INTERVALS: dict[str, int] = {
     "meteo_france":           120,
     "itinisere":              120,
     "sncf_isere":             120,
-    "vigicrues":              180,
+    "vigicrues":              120,
     "vigicrues_flash_isere":  180,
     "apic_isere":             180,
     "electricity_isere":      180,

@@ -1269,6 +1269,73 @@ def _fetch_hubeau_isere_station_codes() -> set[str]:
     return station_codes
 
 
+def _fetch_hubeau_isere_stations_full() -> list[dict[str, Any]]:
+    """Fetch all active Isère hydrometric stations from HuBEAU with full metadata (1–2 HTTP calls)."""
+    stations: list[dict[str, Any]] = []
+    page = 1
+    page_size = 1000
+    while True:
+        payload = _http_get_json(
+            f"https://hubeau.eaufrance.fr/api/v1/hydrometrie/referentiel/stations"
+            f"?code_departement=38&en_service=true&size={page_size}&page={page}",
+            timeout=12,
+        )
+        data = payload.get("data") or []
+        if not data:
+            break
+        stations.extend(data)
+        if len(data) < page_size:
+            break
+        page += 1
+    return stations
+
+
+def _fetch_hubeau_observations_batch(
+    station_codes: list[str],
+    batch_size: int = 40,
+) -> dict[str, tuple[float, float, str | None]]:
+    """Fetch latest water-height observations for a list of stations via HuBEAU batch API.
+
+    Returns dict: code_station -> (height_m, delta_window_m, observed_at_iso).
+    Makes ceil(len(station_codes) / batch_size) HTTP calls total.
+    """
+    results: dict[str, tuple[float, float, str | None]] = {}
+    for i in range(0, len(station_codes), batch_size):
+        batch = station_codes[i : i + batch_size]
+        codes_param = ",".join(batch)
+        per_batch_size = len(batch) * 3  # 3 obs per station to compute delta
+        try:
+            payload = _http_get_json(
+                f"https://hubeau.eaufrance.fr/api/v1/hydrometrie/observations_tr"
+                f"?code_entite={codes_param}&grandeur_hydro=H"
+                f"&size={per_batch_size}&sort=desc",
+                timeout=15,
+            )
+        except Exception:
+            continue
+        obs_by_station: dict[str, list[dict]] = {}
+        for obs in payload.get("data") or []:
+            code = str(obs.get("code_station") or "").strip()
+            if code:
+                obs_by_station.setdefault(code, []).append(obs)
+        for code, obs_list in obs_by_station.items():
+            if not obs_list:
+                continue
+            latest = obs_list[0]
+            val = latest.get("resultat_obs")
+            if val is None:
+                continue
+            height_m = float(val) / 1000.0  # HuBEAU returns mm
+            observed_at = latest.get("date_obs")
+            delta_m = 0.0
+            if len(obs_list) >= 2:
+                prev_val = obs_list[1].get("resultat_obs")
+                if prev_val is not None:
+                    delta_m = height_m - float(prev_val) / 1000.0
+            results[code] = (height_m, delta_m, observed_at)
+    return results
+
+
 def _fetch_vigicrues_isere_live(
     sample_size: int = 1200,
     station_limit: int | None = None,
@@ -1304,69 +1371,99 @@ def _fetch_vigicrues_isere_live(
     priority_names = [name.lower() for name in (priority_names or [])]
 
     try:
-        stations_by_code: dict[str, dict[str, Any]] = {}
-        isere_catalog_codes = set(fallback_isere_codes)
-        try:
-            hubeau_codes = sorted(_fetch_hubeau_isere_station_codes())
-        except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError):
-            hubeau_codes = []
-
-        candidate_codes = [*hubeau_codes, *fallback_isere_codes]
-        candidate_codes = [code for code in candidate_codes if code]
-        if not candidate_codes:
-            raise ValueError("Aucune station candidate détectée pour l'Isère")
-
         isere_stations: list[dict[str, Any]] = []
-        seen_codes = set()
-        unique_candidate_codes: list[str] = []
-        for code in candidate_codes:
-            if code in seen_codes:
-                continue
-            seen_codes.add(code)
-            unique_candidate_codes.append(code)
 
-        target_isere_count = station_limit if station_limit is not None else max(13, len(hubeau_codes), len(fallback_isere_codes))
-        max_lookups = max(220, target_isere_count * 16)
-        if sample_size > 0:
-            max_lookups = min(max_lookups, sample_size)
-        unique_candidate_codes = unique_candidate_codes[:max_lookups]
-        worker_count = min(10, max(4, min(max(target_isere_count, 1), 24)))
-        executor = ThreadPoolExecutor(max_workers=worker_count)
-        force_include_codes = set(fallback_isere_codes)
-        futures = [
-            executor.submit(
-                _vigicrues_build_station_entry,
-                source,
-                code,
-                priority_names,
-                force_include_codes,
-                isere_catalog_codes,
-                stations_by_code.get(code),
-            )
-            for code in unique_candidate_codes
-        ]
-        # Timeout global sur les lookups station : on n'attend jamais plus de 30 s.
-        # Si aucune station n'est trouvée dans ce délai, on utilise les codes de
-        # secours connus pour retourner des données minimales plutôt que d'échouer.
+        # ── 1. Métadonnées : 1 seul appel HuBEAU pour toutes les stations de l'Isère ──
+        hubeau_stations: list[dict[str, Any]] = []
         try:
-            for future in as_completed(futures, timeout=30):
-                try:
-                    station = future.result()
-                except Exception:
-                    station = None
-                if not station:
-                    continue
-                isere_stations.append(station)
-                if station_limit is not None and len(isere_stations) >= target_isere_count:
-                    break
-        except TimeoutError:
+            hubeau_stations = _fetch_hubeau_isere_stations_full()
+        except Exception:
             pass
-        finally:
-            executor.shutdown(wait=False, cancel_futures=True)
+
+        if hubeau_stations:
+            # ── 2. Observations en batch (quelques appels groupés, pas un par station) ──
+            station_codes_all = [
+                str(s.get("code_station") or "").strip()
+                for s in hubeau_stations
+                if s.get("code_station")
+            ]
+            obs_map: dict[str, tuple[float, float, str | None]] = {}
+            try:
+                obs_map = _fetch_hubeau_observations_batch(station_codes_all)
+            except Exception:
+                pass
+
+            # ── 3. Construire les entrées de stations directement depuis HuBEAU ──
+            for s in hubeau_stations:
+                code = str(s.get("code_station") or "").strip()
+                if not code:
+                    continue
+                commune_code = str(s.get("code_commune_station") or "")
+                try:
+                    lat = float(s["latitude_station"]) if s.get("latitude_station") is not None else None
+                    lon = float(s["longitude_station"]) if s.get("longitude_station") is not None else None
+                except (TypeError, ValueError):
+                    lat = lon = None
+                station_name = (
+                    s.get("libelle_station")
+                    or s.get("libelle_cours_eau")
+                    or "Station"
+                )
+                river_name = s.get("libelle_cours_eau") or ""
+                text_blob = f"{station_name} {river_name}".lower()
+                height_m, delta_m, observed_at = obs_map.get(code, (0.0, 0.0, None))
+                level = _vigicrues_level_from_delta(abs(delta_m))
+                isere_stations.append({
+                    "code": code,
+                    "station": station_name,
+                    "river": river_name,
+                    "height_m": round(height_m, 2),
+                    "delta_window_m": round(delta_m, 3),
+                    "level": level,
+                    "control_status": "Fonctionnel",
+                    "is_priority": (
+                        "grenoble" in text_blob
+                        or any(name in text_blob for name in priority_names)
+                    ),
+                    "observed_at": observed_at,
+                    "lat": lat,
+                    "lon": lon,
+                    "commune_code": commune_code,
+                    "troncon": "",
+                    "troncon_code": "",
+                    "source_link": f"{source}/station/{code}",
+                })
+
+        # ── 4. Fallback : si HuBEAU indisponible, codes connus + batch observations ──
+        if not isere_stations:
+            fallback_codes = list(fallback_isere_codes)
+            obs_map_fb: dict[str, tuple[float, float, str | None]] = {}
+            try:
+                obs_map_fb = _fetch_hubeau_observations_batch(fallback_codes)
+            except Exception:
+                pass
+            for code in fallback_codes:
+                height_m, delta_m, observed_at = obs_map_fb.get(code, (0.0, 0.0, None))
+                level = _vigicrues_level_from_delta(abs(delta_m))
+                isere_stations.append({
+                    "code": code,
+                    "station": code,
+                    "river": "",
+                    "height_m": round(height_m, 2),
+                    "delta_window_m": round(delta_m, 3),
+                    "level": level,
+                    "control_status": "Inconnu",
+                    "is_priority": False,
+                    "observed_at": observed_at,
+                    "lat": None,
+                    "lon": None,
+                    "commune_code": "",
+                    "troncon": "",
+                    "troncon_code": "",
+                    "source_link": f"{source}/station/{code}",
+                })
 
         if not isere_stations:
-            # Retourner un résultat de secours minimal plutôt que de lever une exception
-            # qui bloquerait le snapshot entier.
             return {
                 "service": "Vigicrues",
                 "status": "stale",
@@ -1377,7 +1474,7 @@ def _fetch_vigicrues_isere_live(
                 "alerts": [],
                 "station_count": 0,
                 "updated_at": datetime.utcnow().isoformat() + "Z",
-                "stale_reason": "Aucune station résolue (réseau ou API Vigicrues indisponible)",
+                "stale_reason": "Aucune station résolue (HuBEAU et fallback indisponibles)",
             }
 
         troncons_index: dict[str, dict[str, Any]] = {}
