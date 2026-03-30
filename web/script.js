@@ -15,14 +15,14 @@ const STORAGE_KEYS = {
   staticFinessCache: 'staticFinessCacheV3',
   serviceStatusHistory: 'serviceStatusHistory',
 };
-const AUTO_REFRESH_MS = 60000;
-const EVENTS_LIVE_REFRESH_MS = 60000;
-const HOME_LIVE_REFRESH_MS = 300000;
-const API_CACHE_TTL_MS = 300000;
+const AUTO_REFRESH_MS = 45000;
+const EVENTS_LIVE_REFRESH_MS = 45000;
+const HOME_LIVE_REFRESH_MS = 60000;
+const API_CACHE_TTL_MS = 45000;
 const API_PANEL_REFRESH_MS = 60000;
-const API_MAX_CONCURRENT_REQUESTS = 5;
+const API_MAX_CONCURRENT_REQUESTS = 8;
 const API_REQUEST_TIMEOUT_MS = 20000;
-const API_SLOW_ENDPOINT_TIMEOUT_MS = 90000;
+const API_SLOW_ENDPOINT_TIMEOUT_MS = 45000;
 const LOGIN_REQUEST_TIMEOUT_MS = 10000;
 const API_RETRY_BASE_DELAY_MS = 500;
 const API_MAX_RETRIES_GET = 3;
@@ -7344,7 +7344,7 @@ function logout() {
 
 function startAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
-  refreshTimer = setInterval(() => token && refreshAll(false), AUTO_REFRESH_MS);
+  refreshTimer = setInterval(() => token && refreshAll(true), AUTO_REFRESH_MS);
 }
 
 async function refreshLiveEvents() {
@@ -7356,7 +7356,7 @@ async function refreshLiveEvents() {
         // in-flight si plusieurs appelants déclenchent la même requête simultanément.
         // bypassCache: true est intentionnellement évité ici car il viderait apiGetCache + apiInFlight.
         api('/logs', { cacheTtlMs: 30000 }),
-        api('/external/isere/risks', { cacheTtlMs: 45000, timeoutMs: API_SLOW_ENDPOINT_TIMEOUT_MS }),
+        api('/external/isere/risks', { cacheTtlMs: 30000, timeoutMs: API_SLOW_ENDPOINT_TIMEOUT_MS }),
         api('/dashboard', { cacheTtlMs: 30000 }),
       ]);
 
