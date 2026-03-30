@@ -1270,14 +1270,14 @@ def _fetch_hubeau_isere_station_codes() -> set[str]:
 
 
 def _fetch_hubeau_isere_stations_full() -> list[dict[str, Any]]:
-    """Fetch all active Isère hydrometric stations from HuBEAU with full metadata (1–2 HTTP calls)."""
+    """Fetch all Isère hydrometric stations from HuBEAU with full metadata (1–2 HTTP calls)."""
     stations: list[dict[str, Any]] = []
     page = 1
     page_size = 1000
     while True:
         payload = _http_get_json(
             f"https://hubeau.eaufrance.fr/api/v1/hydrometrie/referentiel/stations"
-            f"?code_departement=38&en_service=true&size={page_size}&page={page}",
+            f"?code_departement=38&size={page_size}&page={page}",
             timeout=12,
         )
         data = payload.get("data") or []
@@ -1288,6 +1288,27 @@ def _fetch_hubeau_isere_stations_full() -> list[dict[str, Any]]:
             break
         page += 1
     return stations
+
+
+def _fetch_hubeau_stations_by_codes(codes: list[str]) -> dict[str, dict[str, Any]]:
+    """Fetch station metadata from HuBEAU for a specific list of station codes (1 HTTP call)."""
+    if not codes:
+        return {}
+    codes_param = ",".join(codes)
+    try:
+        payload = _http_get_json(
+            f"https://hubeau.eaufrance.fr/api/v1/hydrometrie/referentiel/stations"
+            f"?code_station={codes_param}&size={len(codes)}",
+            timeout=12,
+        )
+    except Exception:
+        return {}
+    result: dict[str, dict[str, Any]] = {}
+    for s in payload.get("data") or []:
+        code = str(s.get("code_station") or "").strip()
+        if code:
+            result[code] = s
+    return result
 
 
 def _fetch_hubeau_observations_batch(
@@ -1303,7 +1324,7 @@ def _fetch_hubeau_observations_batch(
     for i in range(0, len(station_codes), batch_size):
         batch = station_codes[i : i + batch_size]
         codes_param = ",".join(batch)
-        per_batch_size = len(batch) * 3  # 3 obs per station to compute delta
+        per_batch_size = min(len(batch) * 20, 2000)  # ~20 obs/station pour couvrir tout le batch
         try:
             payload = _http_get_json(
                 f"https://hubeau.eaufrance.fr/api/v1/hydrometrie/observations_tr"
@@ -1437,27 +1458,46 @@ def _fetch_vigicrues_isere_live(
         # ── 4. Fallback : si HuBEAU indisponible, codes connus + batch observations ──
         if not isere_stations:
             fallback_codes = list(fallback_isere_codes)
+            # Récupérer les noms et métadonnées via HuBEAU par codes spécifiques
+            fb_meta = _fetch_hubeau_stations_by_codes(fallback_codes)
             obs_map_fb: dict[str, tuple[float, float, str | None]] = {}
             try:
                 obs_map_fb = _fetch_hubeau_observations_batch(fallback_codes)
             except Exception:
                 pass
             for code in fallback_codes:
+                meta = fb_meta.get(code, {})
+                station_name = (
+                    meta.get("libelle_station")
+                    or meta.get("libelle_cours_eau")
+                    or code
+                )
+                river_name = meta.get("libelle_cours_eau") or ""
+                commune_code = str(meta.get("code_commune_station") or "")
+                try:
+                    lat = float(meta["latitude_station"]) if meta.get("latitude_station") is not None else None
+                    lon = float(meta["longitude_station"]) if meta.get("longitude_station") is not None else None
+                except (TypeError, ValueError):
+                    lat = lon = None
                 height_m, delta_m, observed_at = obs_map_fb.get(code, (0.0, 0.0, None))
                 level = _vigicrues_level_from_delta(abs(delta_m))
+                text_blob = f"{station_name} {river_name}".lower()
                 isere_stations.append({
                     "code": code,
-                    "station": code,
-                    "river": "",
+                    "station": station_name,
+                    "river": river_name,
                     "height_m": round(height_m, 2),
                     "delta_window_m": round(delta_m, 3),
                     "level": level,
-                    "control_status": "Inconnu",
-                    "is_priority": False,
+                    "control_status": "Fonctionnel" if meta else "Inconnu",
+                    "is_priority": (
+                        "grenoble" in text_blob
+                        or any(name in text_blob for name in priority_names)
+                    ),
                     "observed_at": observed_at,
-                    "lat": None,
-                    "lon": None,
-                    "commune_code": "",
+                    "lat": lat,
+                    "lon": lon,
+                    "commune_code": commune_code,
                     "troncon": "",
                     "troncon_code": "",
                     "source_link": f"{source}/station/{code}",
