@@ -13,6 +13,7 @@ const STORAGE_KEYS = {
   homeLiveSnapshot: 'homeLiveSnapshot',
   staticInstitutionsCache: 'staticInstitutionsCache',
   staticFinessCache: 'staticFinessCacheV3',
+  staticTelecomCache: 'staticTelecomCacheV1',
   serviceStatusHistory: 'serviceStatusHistory',
 };
 const AUTO_REFRESH_MS = 45000;
@@ -29,6 +30,7 @@ const API_MAX_RETRIES_GET = 3;
 const API_MAX_RETRIES_NON_GET = 1;
 const API_ORIGIN_COOLDOWN_MS = 60000;
 const STATIC_POINTS_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const TELECOM_POINTS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const OSM_DETAILS_MIN_ZOOM = 15;
 const PANEL_TITLES = {
   'situation-panel': 'Situation opérationnelle',
@@ -3009,9 +3011,22 @@ function parseTelecomGenerations(value = '') {
 
 async function loadTelecomPoints() {
   if (telecomLoaded) return telecomPointsCache;
+
+  // Vérifier le cache localStorage en premier (24h) pour un affichage immédiat
+  const cached = readFreshSnapshot(STORAGE_KEYS.staticTelecomCache, TELECOM_POINTS_CACHE_TTL_MS);
+  if (Array.isArray(cached) && cached.length > 0) {
+    telecomPointsCache = cached;
+    telecomLoaded = true;
+    return telecomPointsCache;
+  }
+
+  let anfrPending = false;
   try {
-    const payload = await api('/external/isere/risks', { cacheTtlMs: 10 * 60 * 1000 });
-    const anfrPoints = Array.isArray(payload?.anfr_isere?.supports_points) ? payload.anfr_isere.supports_points : [];
+    // Cache court (2 min) pour permettre les nouvelles tentatives rapides si les données sont en attente
+    const payload = await api('/external/isere/risks', { cacheTtlMs: 2 * 60 * 1000 });
+    const anfrData = payload?.anfr_isere || {};
+    anfrPending = anfrData?.status === 'pending' && !Array.isArray(anfrData?.supports_points);
+    const anfrPoints = Array.isArray(anfrData?.supports_points) ? anfrData.supports_points : [];
     const arcepPoints = Array.isArray(payload?.arcep_isere?.outages_points) ? payload.arcep_isere.outages_points : [];
 
     const anfrResources = anfrPoints.map((point) => {
@@ -3066,10 +3081,40 @@ async function loadTelecomPoints() {
     }).filter(Boolean);
 
     telecomPointsCache = [...anfrResources, ...arcepResources];
+
+    // Sauvegarder en localStorage uniquement si on a de vraies données
+    if (telecomPointsCache.length > 0) {
+      saveSnapshot(STORAGE_KEYS.staticTelecomCache, telecomPointsCache);
+    }
   } catch {
     telecomPointsCache = [];
   }
-  telecomLoaded = true;
+
+  // Si on a des données, terminé
+  if (telecomPointsCache.length > 0) {
+    telecomLoaded = true;
+    return telecomPointsCache;
+  }
+
+  // Fallback sur le cache périmé si disponible
+  const stale = readSnapshot(STORAGE_KEYS.staticTelecomCache);
+  if (Array.isArray(stale) && stale.length > 0) {
+    telecomPointsCache = stale;
+    telecomLoaded = true;
+    return telecomPointsCache;
+  }
+
+  // Si le backend charge encore les données ANFR, planifier une nouvelle tentative automatique
+  if (anfrPending) {
+    setTimeout(async () => {
+      telecomLoaded = false;
+      apiGetCache.delete(getRequestCacheKey('/external/isere/risks', {}));
+      await renderResources();
+    }, 3 * 60 * 1000);
+  } else {
+    telecomLoaded = true;
+  }
+
   return telecomPointsCache;
 }
 
