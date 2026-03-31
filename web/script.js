@@ -178,6 +178,7 @@ let populationLayer = null;
 let mapTileLayer = null;
 let mapFloodOverlayLayer = null;
 let googleTrafficFlowLayer = null;
+let floodZoneWmsLayer = null;
 let userLocationMarker = null;
 let mapAddPointMode = false;
 let mapPoints = [];
@@ -1573,6 +1574,9 @@ async function apiFile(path) {
 }
 
 function setActivePanel(panelId) {
+  // Fermer automatiquement le menu latéral sur mobile
+  document.getElementById('app-sidebar')?.classList.remove('open');
+  document.getElementById('app-menu-btn')?.setAttribute('aria-expanded', 'false');
   localStorage.setItem(STORAGE_KEYS.activePanel, panelId);
   document.querySelectorAll('.menu-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.target === panelId));
   document.querySelectorAll('.view').forEach((panel) => setVisibility(panel, panel.id === panelId));
@@ -1989,21 +1993,6 @@ function applyBasemap(style = 'osm') {
       url: 'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png',
       options: { maxZoom: 19, attribution: '&copy; IGN/Geoportail France' },
     },
-    'isere-flood': {
-      url: 'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png',
-      options: { maxZoom: 19, attribution: '&copy; Etat (Géorisques) · fond IGN/Geoportail' },
-      floodOverlay: {
-        url: 'https://georisques.gouv.fr/services',
-        options: {
-          layers: 'PPRN_COMMUNE_RISQINOND_APPROUV,PPRN_COMMUNE_RISQINOND_PRESCRIT',
-          format: 'image/png',
-          transparent: true,
-          version: '1.3.0',
-          opacity: 0.62,
-          attribution: '&copy; Etat / Géorisques',
-        },
-      },
-    },
   };
 
   const selected = layers[style] || layers.osm;
@@ -2034,6 +2023,29 @@ function applyGoogleTrafficFlowOverlay() {
   }
 
   if (!leafletMap.hasLayer(googleTrafficFlowLayer)) googleTrafficFlowLayer.addTo(leafletMap);
+}
+
+function applyFloodZoneLayer() {
+  if (!leafletMap || typeof window.L === 'undefined') return;
+  const enabled = document.getElementById('filter-flood-zones')?.checked ?? false;
+  if (!enabled) {
+    if (floodZoneWmsLayer) {
+      leafletMap.removeLayer(floodZoneWmsLayer);
+      floodZoneWmsLayer = null;
+    }
+    return;
+  }
+  if (floodZoneWmsLayer) return;
+  // WMS Géorisques : zones d'aléa PPRI approuvées et prescrites (colorées par niveau fort/moyen/faible)
+  // Rouge/rose = aléa fort · Orange = aléa moyen · Bleu = aléa faible
+  floodZoneWmsLayer = window.L.tileLayer.wms('https://georisques.gouv.fr/services', {
+    layers: 'PPRN_ZONE_ALEA_RISQINOND_APPROUV,PPRN_ZONE_ALEA_RISQINOND_PRESCRIT',
+    format: 'image/png',
+    transparent: true,
+    version: '1.3.0',
+    opacity: 0.65,
+    attribution: '&copy; État / Géorisques — Zones inondables PPRI Isère',
+  }).addTo(leafletMap);
 }
 
 function initMap() {
@@ -6936,6 +6948,7 @@ function bindAppInteractions() {
   });
   document.getElementById('map-basemap-select')?.addEventListener('change', async (event) => { applyBasemap(event.target.value); await renderPopulationByCityLayer(); });
   document.getElementById('filter-google-traffic-flow')?.addEventListener('change', () => applyGoogleTrafficFlowOverlay());
+  document.getElementById('filter-flood-zones')?.addEventListener('change', () => applyFloodZoneLayer());
   document.getElementById('filter-resources-telecom')?.addEventListener('change', () => {
     syncTelecomFilterState();
     renderResources();

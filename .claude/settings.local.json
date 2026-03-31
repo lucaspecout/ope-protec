@@ -7,7 +7,12 @@
       "WebSearch",
       "WebFetch(domain:www.vigicrues.gouv.fr)",
       "WebFetch(domain:hubeau.eaufrance.fr)",
-      "WebFetch(domain:inrae.github.io)"
+      "WebFetch(domain:inrae.github.io)",
+      "WebFetch(domain:www.georisques.gouv.fr)",
+      "WebFetch(domain:www.isere.gouv.fr)",
+      "Read(//c/Users/pencout/OneDrive - Alma/Documents/opeprotec/ope-protec/web/**)",
+      "WebFetch(domain:www.sogefi-sig.com)",
+      "WebFetch(domain:api.gouv.fr)"
     ]
   }
 }
