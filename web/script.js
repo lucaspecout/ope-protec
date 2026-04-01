@@ -11,7 +11,7 @@ const STORAGE_KEYS = {
   externalRisksSnapshot: 'externalRisksSnapshot',
   apiInterconnectionsSnapshot: 'apiInterconnectionsSnapshot',
   homeLiveSnapshot: 'homeLiveSnapshot',
-  staticInstitutionsCache: 'staticInstitutionsCache',
+  staticInstitutionsCache: 'staticInstitutionsCacheV3',
   staticFinessCache: 'staticFinessCacheV3',
   staticTelecomCache: 'staticTelecomCacheV1',
   serviceStatusHistory: 'serviceStatusHistory',
@@ -2915,10 +2915,8 @@ function classifyInstitutionPoint(element = {}) {
   const railway = String(tags.railway || '').toLowerCase();
   const aeroway = String(tags.aeroway || '').toLowerCase();
 
+  // ── Établissements scolaires ──────────────────────────────────────────────
   if (amenity === 'kindergarten') return 'creche';
-  if (amenity === 'community_centre' || amenity === 'arts_centre') return 'centre_culturel';
-  if (amenity === 'theatre') return 'salle_spectacle_public';
-  if (amenity === 'social_facility' || socialFacility.includes('shelter') || socialFacility.includes('group_home')) return 'salle_fetes';
   if (amenity === 'university') return 'universite';
   if (amenity === 'college') return 'college';
   if (amenity === 'school') {
@@ -2926,29 +2924,63 @@ function classifyInstitutionPoint(element = {}) {
     if (name.includes('collège') || name.includes('college')) return 'college';
     return 'ecole_primaire';
   }
+
+  // ── Sécurité / secours ────────────────────────────────────────────────────
   if (amenity === 'fire_station') return 'caserne_pompier';
   if (amenity === 'police') {
     if (name.includes('gendarmerie') || policeType.includes('gendarmerie')) return 'gendarmerie';
     if (name.includes('municipale') || policeType.includes('municipal')) return 'police_municipale';
     return 'commissariat_police_nationale';
   }
+
+  // ── Transport ─────────────────────────────────────────────────────────────
   if (amenity === 'bus_station') return 'transport_gare_routiere';
   if (railway === 'station') return 'transport_gare_sncf';
   if (aeroway === 'aerodrome' || aeroway === 'airport') return 'transport_aeroport';
-  if (leisure === 'sports_hall' || building === 'sports_hall') return 'gymnase';
+
+  // ── Salles de spectacle / congrès ─────────────────────────────────────────
+  if (amenity === 'theatre' || amenity === 'cinema' || amenity === 'music_venue') return 'salle_spectacle_public';
   if (amenity === 'concert_hall' || amenity === 'events_venue') return 'salle_spectacle_public';
   if (amenity === 'convention_centre') return 'palais_congres';
+
+  // ── Gymnases et équipements sportifs ──────────────────────────────────────
+  if (leisure === 'sports_hall' || building === 'sports_hall' || building === 'gymnasium') return 'gymnase';
   if (leisure === 'stadium' || building === 'stadium') return 'stade';
-  if (leisure === 'sports_centre') return 'complexe_sportif';
-  if (leisure === 'ice_rink' || leisure === 'velodrome') return 'complexe_sportif';
-  if (name.includes('gymnase') || name.includes('salle de sport')) return 'gymnase';
-  if (name.includes('complexe sportif') || name.includes('complexe omnisports') || name.includes('complexe municipal')) return 'complexe_sportif';
+  if (leisure === 'sports_centre' || building === 'sports_centre') return 'complexe_sportif';
+  if (leisure === 'ice_rink' || leisure === 'velodrome' || leisure === 'fitness_centre') return 'complexe_sportif';
+
+  // ── Centres culturels / communautaires ────────────────────────────────────
+  if (amenity === 'community_centre' || amenity === 'arts_centre') {
+    // Distinguer salle des fêtes (foyer/polyvalente) de centre culturel
+    if (name.includes('foyer') || name.includes('polyvalent') || name.includes('fête') || name.includes('fete') || name.includes('salle')) return 'salle_fetes';
+    return 'centre_culturel';
+  }
+  if (amenity === 'hall') return 'salle_fetes';
+  if (amenity === 'social_facility' || socialFacility.includes('shelter') || socialFacility.includes('group_home')) return 'salle_fetes';
+
+  // ── Bâtiments civiques ────────────────────────────────────────────────────
+  if (building === 'civic' || building === 'public' || building === 'hall' || building === 'community_centre') return 'salle_fetes';
+
+  // ── Classification par nom ────────────────────────────────────────────────
+  // Gymnases
+  if (name.includes('gymnase') || name.includes('salle de sport') || name.includes('halle sportive') || name.includes('gym municipal') || name.includes('gymnase municipal') || name.includes('gymnase scolaire')) return 'gymnase';
+  // Complexes sportifs
+  if (name.includes('complexe sportif') || name.includes('complexe omnisports') || name.includes('complexe municipal') || name.includes('espace sportif') || name.includes('maison des sports') || name.includes('pôle sportif') || name.includes('pole sportif') || name.includes('plateau sportif')) return 'complexe_sportif';
+  // Stades
   if (name.includes('stade') || name.includes('arena ') || name.includes(' arena')) return 'stade';
-  if (name.includes('palais des sports') || name.includes('palais omnisports') || name.includes('halle omnisports') || name.includes('salle omnisports')) return 'salle_omnisports';
+  // Salles omnisports
+  if (name.includes('palais des sports') || name.includes('palais omnisports') || name.includes('halle omnisports') || name.includes('salle omnisports') || name.includes('espace omnisports') || name.includes('terrain omnisports')) return 'salle_omnisports';
+  // Palais des congrès
   if (name.includes('palais des congrès') || name.includes('palais des congres') || name.includes('centre des congrès') || name.includes('centre des congres') || name.includes('parc des expositions') || name.includes('palais de la foire')) return 'palais_congres';
-  if (name.includes('salle de concert') || name.includes('salle de spectacle') || name.includes('théâtre') || name.includes('theatre')) return 'salle_spectacle_public';
-  if (name.includes('maison des associations') || name.includes('centre social') || name.includes('maison de quartier')) return 'centre_culturel';
-  if (name.includes('salle des fêtes') || name.includes('salle des fetes') || name.includes('salle polyvalente') || name.includes('salle communale') || name.includes('salle municipale')) return 'salle_fetes';
+  // Salles de spectacle
+  if (name.includes('salle de concert') || name.includes('salle de spectacle') || name.includes('théâtre') || name.includes('theatre') || name.includes('espace culturel') || name.includes('centre culturel')) return 'salle_spectacle_public';
+  // Salles des fêtes / polyvalentes
+  if (name.includes('salle des fêtes') || name.includes('salle des fetes') || name.includes('salle polyvalente') || name.includes('salle communale') || name.includes('salle municipale') || name.includes('salle intercommunale') || name.includes('salle de la mairie') || name.includes('salle des associations')) return 'salle_fetes';
+  if (name.includes('foyer rural') || name.includes('foyer municipal') || name.includes('foyer communal') || name.includes('foyer des sports')) return 'salle_fetes';
+  if (name.includes('salle d\'accueil') || name.includes('salle de réunion') || name.includes('salle de reunion') || name.includes('halle polyvalente')) return 'salle_fetes';
+  // Centres sociaux / maisons de quartier
+  if (name.includes('maison des associations') || name.includes('centre social') || name.includes('maison de quartier') || name.includes('maison des habitants') || name.includes('centre de vie')) return 'centre_culturel';
+
   return null;
 }
 
@@ -3273,8 +3305,10 @@ async function loadIsereInstitutions() {
   if (institutionsLoaded) return institutionPointsCache;
   // Cache localStorage valide (7j) — affichage immédiat, ne charger que si non vide ET contient les nouveaux types hébergement
   const cached = readFreshSnapshot(STORAGE_KEYS.staticInstitutionsCache, STATIC_POINTS_CACHE_TTL_MS);
-  const NEW_HOSTING_TYPES = new Set(['complexe_sportif', 'stade', 'salle_omnisports', 'palais_congres']);
-  const cacheHasNewTypes = Array.isArray(cached) && cached.some((p) => NEW_HOSTING_TYPES.has(p.type));
+  // Forcer le rechargement si le cache ne contient pas encore les types hébergement élargis
+  const REQUIRED_CACHE_TYPES = new Set(['complexe_sportif', 'stade', 'salle_omnisports', 'palais_congres', 'salle_fetes']);
+  const cacheHasNewTypes = Array.isArray(cached) && REQUIRED_CACHE_TYPES.size > 0
+    && Array.from(REQUIRED_CACHE_TYPES).some((t) => cached.some((p) => p.type === t));
   if (Array.isArray(cached) && cached.length > 0 && cacheHasNewTypes) {
     institutionPointsCache = cached;
     institutionsLoaded = true;
@@ -3294,16 +3328,18 @@ async function loadIsereInstitutions() {
     'https://overpass-api.de/api/interpreter',
     'https://overpass.kumi.systems/api/interpreter',
   ];
-  const buildQuery = (areaFilter) => `[out:json][timeout:90];
+  const buildQuery = (areaFilter) => `[out:json][timeout:120];
 area${areaFilter}->.searchArea;
 (
-  nwr["amenity"~"school|college|university|kindergarten|police|fire_station|bus_station|community_centre|arts_centre|theatre|social_facility|concert_hall|events_venue|convention_centre"](area.searchArea);
-  nwr["leisure"~"sports_hall|sports_centre|stadium|ice_rink|velodrome"](area.searchArea);
-  nwr["building"~"sports_hall|stadium"](area.searchArea);
+  nwr["amenity"~"school|college|university|kindergarten|police|fire_station|bus_station|community_centre|arts_centre|theatre|social_facility|concert_hall|events_venue|convention_centre|hall|music_venue|cinema"](area.searchArea);
+  nwr["leisure"~"sports_hall|sports_centre|stadium|ice_rink|velodrome|fitness_centre"](area.searchArea);
+  nwr["building"~"sports_hall|stadium|civic|public|hall|community_centre|sports_centre|gymnasium"](area.searchArea);
   nwr["railway"="station"](area.searchArea);
   nwr["aeroway"~"aerodrome|airport"](area.searchArea);
-  nwr["name"~"gymnase|salle de sport|complexe sportif|palais des sports|salle omnisports|stade|arena", i](area.searchArea);
+  nwr["name"~"gymnase|salle de sport|complexe sportif|palais des sports|salle omnisports|stade|arena|halle sportive|halle polyvalente|espace sportif|maison des sports", i](area.searchArea);
   nwr["name"~"salle des fetes|salle polyvalente|salle communale|salle municipale|salle de concert|palais des congres|parc des expositions|maison des associations|centre social", i](area.searchArea);
+  nwr["name"~"foyer rural|foyer municipal|foyer communal|salle intercommunale|espace culturel|salle de spectacle|salle des associations|salle de reunion|salle d.accueil", i](area.searchArea);
+  nwr["name"~"espace omnisports|plateau sportif|terrain omnisports|salle omnisports|complexe omnisports|pôle sportif|pole sportif", i](area.searchArea);
 );
 out center tags;`;
 
