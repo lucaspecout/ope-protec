@@ -1791,9 +1791,52 @@ async function fetchZoneStreetInsights(geometry) {
   }
 }
 
-function renderZoneImpactPanel(lines = []) {
-  const markup = lines.length ? lines.map((line) => `<li>${line}</li>`).join('') : '<li>Aucune zone d&rsquo;analyse active.</li>' ;
-  setHtml('map-zone-impact-list', markup);
+function renderZoneImpactPanel(html = '') {
+  if (!html) {
+    setHtml('map-zone-impact-list', '<li>Aucune zone d&rsquo;analyse active.</li>');
+    return;
+  }
+  setHtml('map-zone-impact-list', html);
+}
+
+/** Géocode inverse le centre de la zone via Nominatim pour identifier ville/quartier/rue. */
+async function fetchZoneGeographicContext(geometry) {
+  const coords = zoneImpactGeometryCoordinates(geometry);
+  if (!coords.length) return {};
+  const lons = coords.map((c) => Number(c?.[0])).filter(Number.isFinite);
+  const lats = coords.map((c) => Number(c?.[1])).filter(Number.isFinite);
+  if (!lats.length || !lons.length) return {};
+  const centerLat = lats.reduce((a, b) => a + b, 0) / lats.length;
+  const centerLon = lons.reduce((a, b) => a + b, 0) / lons.length;
+  try {
+    const response = await fetchWithTimeout(
+      `https://nominatim.openstreetmap.org/reverse?lat=${centerLat}&lon=${centerLon}&format=json&addressdetails=1&accept-language=fr`,
+      { headers: { 'User-Agent': 'OPE-Protec/1.0' }, timeoutMs: 8000 },
+    );
+    const data = await parseJsonResponse(response, 'nominatim-reverse');
+    const addr = data?.address || {};
+    return {
+      city: addr.city || addr.town || addr.village || addr.municipality || null,
+      district: addr.suburb || addr.neighbourhood || addr.quarter || null,
+      street: addr.road || addr.pedestrian || addr.footway || null,
+      postcode: addr.postcode || null,
+    };
+  } catch {
+    return {};
+  }
+}
+
+/** Détermine l'échelle de la zone selon sa surface (m²). */
+function detectZoneScale(areaM2) {
+  if (areaM2 < 50_000) return 'rue';
+  if (areaM2 < 2_000_000) return 'quartier';
+  if (areaM2 < 50_000_000) return 'ville';
+  return 'secteur';
+}
+
+/** Formate un nom de ressource pour l'affichage dans le rapport d'évacuation. */
+function _zoneResourceName(r) {
+  return escapeHtml(r.name || 'Sans nom');
 }
 
 async function computeZoneImpact() {
@@ -1804,58 +1847,152 @@ async function computeZoneImpact() {
     return;
   }
 
-  renderZoneImpactPanel(['⏳ Analyse en cours (données départementales + rues/quartiers en ligne)…']);
+  renderZoneImpactPanel('<li>⏳ Analyse en cours…</li>');
 
-  const municipalities = zoneImpactDepartmentCommunesInZone(geometry);
-  const resources = getResourcesForZoneImpact();
-  const municipalitiesInZone = municipalities;
-  const inseePopulationMap = await loadIserePopulationByInsee();
-  const zonePopulationMetrics = await estimatePopulationInZoneByArea(geometry, municipalitiesInZone, inseePopulationMap);
-
-  const resourcesInZone = resources.filter((resource) => {
-    const coords = normalizeMapCoordinates(resource.lat, resource.lon);
-    if (!coords) return false;
-    return isPointInsideGeometry(coords, geometry);
-  });
-
-  const estimatedPopulation = municipalitiesInZone.reduce((sum, municipality) => {
-    const inseeCode = String(municipality.code_insee || municipality.insee || '').trim();
-    const inseePopulation = inseeCode ? Number(inseePopulationMap.get(inseeCode) || 0) : 0;
-    const fallbackPopulation = Number(municipality.population || 0);
-    return sum + (Number.isFinite(inseePopulation) && inseePopulation > 0 ? inseePopulation : fallbackPopulation);
-  }, 0);
-  const areaBasedPopulation = Number(zonePopulationMetrics.estimatedPopulation || 0);
-  const zoneAreaM2 = Number(zonePopulationMetrics.zoneAreaM2 || 0);
-  const inhabitantsPerM2 = zoneAreaM2 > 0 ? areaBasedPopulation / zoneAreaM2 : 0;
-  const inhabitantsPerKm2 = inhabitantsPerM2 * 1_000_000;
-  const schoolsCount = resourcesInZone.filter((resource) => SCHOOL_RESOURCE_TYPES.has(resource.type)).length;
-  const hospitalsCount = resourcesInZone.filter((resource) => resource.type === 'hopital').length;
-  const clinicsCount = resourcesInZone.filter((resource) => resource.type === 'clinique').length;
-  const sensitivePlacesCount = resourcesInZone.filter((resource) => RISK_RESOURCE_TYPES.has(resource.type)).length;
-  const ehpadCount = resourcesInZone.filter((resource) => resource.type === 'ehpad').length;
-  const hostingPlacesCount = resourcesInZone.filter((resource) => HOSTING_RESOURCE_TYPES.has(resource.type)).length;
-  const streetInsights = await fetchZoneStreetInsights(geometry);
+  // ─── Chargements parallèles ────────────────────────────────────────────────
+  const [inseePopulationMap, zonePopulationMetrics, streetInsights, geoCtx] = await Promise.all([
+    loadIserePopulationByInsee(),
+    (async () => {
+      const muns = zoneImpactDepartmentCommunesInZone(geometry);
+      return estimatePopulationInZoneByArea(geometry, muns, await loadIserePopulationByInsee());
+    })(),
+    fetchZoneStreetInsights(geometry),
+    fetchZoneGeographicContext(geometry),
+  ]);
   if (runSeq !== mapZoneImpactComputationSeq) return;
 
-  renderZoneImpactPanel([
-    `🧭 <strong>Maillage départemental (Géorisques Isère):</strong> ${municipalitiesInZone.length} commune(s) intersectée(s) dans la zone tracée (pas uniquement PCS).`,
-    zoneAreaM2 > 0
-      ? `📐 <strong>Surface zone tracée:</strong> <strong>${Math.round(zoneAreaM2).toLocaleString('fr-FR')}</strong> m² (${(zoneAreaM2 / 1000000).toFixed(3).replace('.', ',')} km²).`
-      : '📐 <strong>Surface zone tracée:</strong> indisponible (géométrie incomplète).',
-    areaBasedPopulation > 0
-      ? `🧮 <strong>Densité réelle sur le carré (API geo.api.gouv.fr communes + contours):</strong> <strong>${inhabitantsPerM2.toFixed(6).replace('.', ',')}</strong> hab/m² (${Math.round(inhabitantsPerKm2).toLocaleString('fr-FR')} hab/km²).`
-      : '🧮 <strong>Densité réelle sur le carré:</strong> estimation surfacique indisponible (retour sur estimation par communes intersectées).',
-    areaBasedPopulation > 0
-      ? `👥 <strong>Population estimée dans la zone tracée (pondérée par surface):</strong> <strong>${Math.round(areaBasedPopulation).toLocaleString('fr-FR')}</strong> habitant(s).`
-      : `👥 <strong>Population exposée (INSEE):</strong> <strong>${estimatedPopulation.toLocaleString('fr-FR')}</strong> habitant(s) (population légale des communes intersectées).`,
-    `🏫 <strong>Exposition e:</strong> ${schoolsCount} école(s), ${hospitalsCount} hôpital(aux), ${clinicsCount} clinique(s), ${sensitivePlacesCount} lieu(x) sensible(s), ${ehpadCount} EHPAD, ${hostingPlacesCount} lieu(x) d'accueil.`,
-    streetInsights.streets.length
-      ? `🛣️ <strong>Rues détectées dans la zone (OpenStreetMap):</strong> ${streetInsights.streets.slice(0, 10).map((name) => escapeHtml(name)).join(', ')}.`
-      : '🛣️ <strong>Rues détectées dans la zone:</strong> aucune donnée de rue exploitable remontée pour cette emprise.',
-    streetInsights.districts.length
-      ? `🏘️ <strong>Quartiers détectés:</strong> ${streetInsights.districts.map((name) => escapeHtml(name)).join(', ')}.`
-      : '🏘️ <strong>Quartiers détectés:</strong> non renseignés par les données OSM sur cette zone.',
-  ]);
+  const municipalitiesInZone = zoneImpactDepartmentCommunesInZone(geometry);
+  const resources = getResourcesForZoneImpact();
+  const resourcesInZone = resources.filter((r) => {
+    const c = normalizeMapCoordinates(r.lat, r.lon);
+    return c ? isPointInsideGeometry(c, geometry) : false;
+  });
+
+  // ─── Population ───────────────────────────────────────────────────────────
+  const areaBasedPop = Number(zonePopulationMetrics.estimatedPopulation || 0);
+  const zoneAreaM2 = Number(zonePopulationMetrics.zoneAreaM2 || 0);
+  const fallbackPop = municipalitiesInZone.reduce((sum, m) => {
+    const code = String(m.code_insee || m.insee || '').trim();
+    const p = code ? Number(inseePopulationMap.get(code) || 0) : 0;
+    return sum + (p > 0 ? p : Number(m.population || 0));
+  }, 0);
+  const population = areaBasedPop > 0 ? Math.round(areaBasedPop) : fallbackPop;
+  const popSource = areaBasedPop > 0 ? 'pondérée par surface (INSEE + contours communes)' : 'population légale communes intersectées (INSEE)';
+
+  // ─── Échelle géographique ─────────────────────────────────────────────────
+  const scale = detectZoneScale(zoneAreaM2);
+  let geoLabel = '';
+  if (scale === 'rue' && geoCtx.street) {
+    geoLabel = `${geoCtx.street}${geoCtx.city ? `, ${geoCtx.city}` : ''}`;
+  } else if (scale === 'quartier' && (geoCtx.district || geoCtx.city)) {
+    geoLabel = [geoCtx.district, geoCtx.city].filter(Boolean).join(' · ');
+  } else if (geoCtx.city) {
+    geoLabel = geoCtx.city;
+  }
+  if (!geoLabel && municipalitiesInZone.length) {
+    geoLabel = municipalitiesInZone.map((m) => escapeHtml(m.name || m.commune || '')).filter(Boolean).slice(0, 3).join(', ');
+  }
+  const scaleIcons = { rue: '🛣️', quartier: '🏘️', ville: '🏙️', secteur: '🗺️' };
+  const scaleLabels = { rue: 'Échelle rue', quartier: 'Échelle quartier', ville: 'Échelle ville', secteur: 'Secteur multi-communes' };
+
+  // ─── Catégories de ressources dans la zone ────────────────────────────────
+  const schools       = resourcesInZone.filter((r) => SCHOOL_RESOURCE_TYPES.has(r.type));
+  const ehpads        = resourcesInZone.filter((r) => r.type === 'ehpad');
+  const hospitals     = resourcesInZone.filter((r) => HEALTH_URGENT_CARE_TYPES.has(r.type));
+  const fireStations  = resourcesInZone.filter((r) => FIRE_RESOURCE_TYPES.has(r.type));
+  const police        = resourcesInZone.filter((r) => SECURITY_RESOURCE_TYPES.has(r.type));
+  const hostings      = resourcesInZone.filter((r) => HOSTING_RESOURCE_TYPES.has(r.type));
+  const dangers       = resourcesInZone.filter((r) => RISK_RESOURCE_TYPES.has(r.type));
+  const transports    = resourcesInZone.filter((r) => TRANSPORT_RESOURCE_TYPES.has(r.type));
+
+  // Estimation populations vulnérables (ratios standards)
+  const childrenEstimate = schools.length > 0 ? Math.round(population * 0.12) : 0;
+  const ehpadResidents   = ehpads.length * 80; // capacité moyenne EHPAD France
+
+  // ─── Rues / quartiers OSM ─────────────────────────────────────────────────
+  const allDistricts = Array.from(new Set([
+    ...(geoCtx.district ? [geoCtx.district] : []),
+    ...streetInsights.districts,
+  ])).slice(0, 6);
+
+  // ─── Construction du rapport HTML ─────────────────────────────────────────
+  const section = (icon, title, items, emptyMsg = null) => {
+    if (!items.length && !emptyMsg) return '';
+    const content = items.length
+      ? `<ul style="margin:.3em 0 0 1.1em;padding:0">${items.map((i) => `<li>${i}</li>`).join('')}</ul>`
+      : `<span class="muted">${emptyMsg}</span>`;
+    return `<li style="margin-bottom:.6em"><strong>${icon} ${escapeHtml(title)}</strong><br>${content}</li>`;
+  };
+
+  const nameList = (arr, max = 5) => arr.slice(0, max).map((r) => `<em>${_zoneResourceName(r)}</em>`).join(', ')
+    + (arr.length > max ? ` <span class="muted">+${arr.length - max}</span>` : '');
+
+  const parts = [];
+
+  // 1. Identification de la zone
+  parts.push(`<li style="margin-bottom:.7em;padding:.5em;background:#f0f4ff;border-radius:6px">
+    <strong>${scaleIcons[scale]} ${scaleLabels[scale]}${geoLabel ? ` · ${escapeHtml(geoLabel)}` : ''}</strong><br>
+    ${zoneAreaM2 > 0 ? `Surface : <strong>${(zoneAreaM2 / 1_000_000).toFixed(2).replace('.', ',')} km²</strong> · ` : ''}
+    ${municipalitiesInZone.length} commune(s) couverte(s)${municipalitiesInZone.length ? ` (${municipalitiesInZone.slice(0, 3).map((m) => escapeHtml(m.name || m.commune || '')).filter(Boolean).join(', ')}${municipalitiesInZone.length > 3 ? '…' : ''})` : ''}
+  </li>`);
+
+  // 2. Population
+  parts.push(`<li style="margin-bottom:.6em;padding:.4em;background:#fff7e6;border-radius:6px">
+    <strong>👥 Population exposée : <span style="font-size:1.2em;color:#c05900">${population > 0 ? population.toLocaleString('fr-FR') : 'inconnue'}</span> habitants</strong><br>
+    <span class="muted">${popSource}</span><br>
+    ${childrenEstimate > 0 ? `👶 ~${childrenEstimate.toLocaleString('fr-FR')} enfants scolarisés estimés · ` : ''}
+    ${ehpadResidents > 0 ? `🧓 ~${ehpadResidents.toLocaleString('fr-FR')} résidents EHPAD (personnes à mobilité réduite)` : ''}
+  </li>`);
+
+  // 3. Dangers dans la zone
+  if (dangers.length) {
+    parts.push(section('⚠️', `DANGERS DANS LA ZONE (${dangers.length})`, [
+      dangers.map((r) => {
+        const meta = RESOURCE_TYPE_META[r.type] || {};
+        return `${meta.icon || '⚠️'} <strong>${_zoneResourceName(r)}</strong> <span class="muted">(${escapeHtml(r.address || '')})</span>`;
+      }).join('</li><li>'),
+    ]));
+  }
+
+  // 4. Secours disponibles dans la zone
+  const rescueItems = [];
+  if (fireStations.length) rescueItems.push(`🚒 <strong>Pompiers (${fireStations.length}) :</strong> ${nameList(fireStations)}`);
+  if (police.length) rescueItems.push(`🛡️ <strong>Police/Gendarmerie (${police.length}) :</strong> ${nameList(police)}`);
+  if (hospitals.length) rescueItems.push(`🏥 <strong>Hôpitaux/Cliniques (${hospitals.length}) :</strong> ${nameList(hospitals)}`);
+  parts.push(section('🚨', `Secours disponibles dans la zone`, rescueItems,
+    'Aucun service de secours détecté dans la zone — prévoir projection externe.'));
+
+  // 5. Évacuation : lieux d'accueil
+  const hostItems = [];
+  if (hostings.length) hostItems.push(`🏟️ <strong>Lieux d'accueil (${hostings.length}) :</strong> ${nameList(hostings, 6)}`);
+  if (transports.length) hostItems.push(`🚆 <strong>Nœuds transport (${transports.length}) :</strong> ${nameList(transports)}`);
+  parts.push(section('🚌', `Points d'évacuation et d'accueil`, hostItems,
+    'Aucun lieu d\'accueil ni nœud transport dans la zone — vérifier les zones adjacentes.'));
+
+  // 6. Populations vulnérables
+  const vulnItems = [];
+  if (schools.length) {
+    const byType = { creche: [], ecole_primaire: [], college: [], lycee: [], universite: [] };
+    schools.forEach((r) => { if (byType[r.type]) byType[r.type].push(r); });
+    if (byType.creche.length) vulnItems.push(`🍼 Crèches (${byType.creche.length}) : ${nameList(byType.creche)}`);
+    if (byType.ecole_primaire.length) vulnItems.push(`🧒 Écoles primaires (${byType.ecole_primaire.length}) : ${nameList(byType.ecole_primaire)}`);
+    if (byType.college.length) vulnItems.push(`🎒 Collèges (${byType.college.length}) : ${nameList(byType.college)}`);
+    if (byType.lycee.length) vulnItems.push(`📘 Lycées (${byType.lycee.length}) : ${nameList(byType.lycee)}`);
+    if (byType.universite.length) vulnItems.push(`🎓 Universités (${byType.universite.length}) : ${nameList(byType.universite)}`);
+  }
+  if (ehpads.length) vulnItems.push(`🧓 EHPAD (${ehpads.length}) : ${nameList(ehpads)} <span class="muted">(~${ehpadResidents} résidents, évacuation médicalisée requise)</span>`);
+  parts.push(section('⚡', `Populations vulnérables à évacuer en priorité`, vulnItems,
+    'Aucun établissement scolaire ni EHPAD détecté dans la zone.'));
+
+  // 7. Contexte géographique OSM
+  const geoItems = [];
+  if (allDistricts.length) geoItems.push(`🏘️ Quartiers : ${allDistricts.map(escapeHtml).join(', ')}`);
+  if (streetInsights.streets.length) {
+    geoItems.push(`🛣️ Principales rues : ${streetInsights.streets.slice(0, 8).map(escapeHtml).join(', ')}`);
+  }
+  if (geoItems.length) parts.push(section('🗺️', 'Contexte géographique (OpenStreetMap)', geoItems));
+
+  renderZoneImpactPanel(`<ul style="list-style:none;padding:0;margin:0">${parts.join('')}</ul>`);
 }
 
 async function loadIsereCommunesGeometry() {
