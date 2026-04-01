@@ -11,7 +11,7 @@ const STORAGE_KEYS = {
   externalRisksSnapshot: 'externalRisksSnapshot',
   apiInterconnectionsSnapshot: 'apiInterconnectionsSnapshot',
   homeLiveSnapshot: 'homeLiveSnapshot',
-  staticInstitutionsCache: 'staticInstitutionsCacheV2',
+  staticInstitutionsCache: 'staticInstitutionsCache',
   staticFinessCache: 'staticFinessCacheV3',
   staticTelecomCache: 'staticTelecomCacheV1',
   serviceStatusHistory: 'serviceStatusHistory',
@@ -3271,14 +3271,16 @@ async function renderPopulationByCityLayer() {
 
 async function loadIsereInstitutions() {
   if (institutionsLoaded) return institutionPointsCache;
-  // Cache localStorage valide (7j) — affichage immédiat, ne charger que si non vide
+  // Cache localStorage valide (7j) — affichage immédiat, ne charger que si non vide ET contient les nouveaux types hébergement
   const cached = readFreshSnapshot(STORAGE_KEYS.staticInstitutionsCache, STATIC_POINTS_CACHE_TTL_MS);
-  if (Array.isArray(cached) && cached.length > 0) {
+  const NEW_HOSTING_TYPES = new Set(['complexe_sportif', 'stade', 'salle_omnisports', 'palais_congres']);
+  const cacheHasNewTypes = Array.isArray(cached) && cached.some((p) => NEW_HOSTING_TYPES.has(p.type));
+  if (Array.isArray(cached) && cached.length > 0 && cacheHasNewTypes) {
     institutionPointsCache = cached;
     institutionsLoaded = true;
     return institutionPointsCache;
   }
-  // Utiliser le cache périmé immédiatement comme fallback pendant que l'API charge
+  // Utiliser le cache périmé (ou sans nouveaux types) immédiatement comme fallback pendant que l'API charge
   const staleImmediate = readSnapshot(STORAGE_KEYS.staticInstitutionsCache);
   if (Array.isArray(staleImmediate) && staleImmediate.length > 0) {
     institutionPointsCache = staleImmediate;
@@ -3300,7 +3302,8 @@ area${areaFilter}->.searchArea;
   nwr["building"~"sports_hall|stadium"](area.searchArea);
   nwr["railway"="station"](area.searchArea);
   nwr["aeroway"~"aerodrome|airport"](area.searchArea);
-  nwr["name"~"gymnase|salle des fetes|salle des fêtes|salle polyvalente|salle communale|salle municipale|salle de sport|complexe sportif|complexe omnisports|complexe municipal|palais des sports|palais omnisports|halle omnisports|salle omnisports|stade |palais des congrès|palais des congres|centre des congrès|parc des expositions|salle de concert|salle de spectacle|maison des associations|centre social|maison de quartier", i](area.searchArea);
+  nwr["name"~"gymnase|salle de sport|complexe sportif|palais des sports|salle omnisports|stade|arena", i](area.searchArea);
+  nwr["name"~"salle des fetes|salle polyvalente|salle communale|salle municipale|salle de concert|palais des congres|parc des expositions|maison des associations|centre social", i](area.searchArea);
 );
 out center tags;`;
 
@@ -3312,7 +3315,7 @@ out center tags;`;
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
           body: buildQuery(areaFilter),
-        }));
+        }, 95000));
         const payload = await parseJsonResponse(response, `overpass-institutions-${areaFilter}`);
         const elements = Array.isArray(payload?.elements) ? payload.elements : [];
         const seenIds = new Set();
