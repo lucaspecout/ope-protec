@@ -2035,15 +2035,25 @@ function applyFloodZoneLayer() {
     }
     return;
   }
-  if (floodZoneWmsLayer) return;
-  // WMS Géorisques : zones d'aléa PPRI approuvées et prescrites (colorées par niveau fort/moyen/faible)
-  // Rouge/rose = aléa fort · Orange = aléa moyen · Bleu = aléa faible
+  if (floodZoneWmsLayer) {
+    floodZoneWmsLayer.bringToFront();
+    return;
+  }
+  // Créer un pane dédié au-dessus des markers (overlayPane = 400) mais sous les popups (700)
+  if (!leafletMap.getPane('floodZonePane')) {
+    const pane = leafletMap.createPane('floodZonePane');
+    pane.style.zIndex = 450;
+    pane.style.pointerEvents = 'none';
+  }
+  // Couches WMS Géorisques : PPRI approuvés + prescrits (colorés par niveau d'aléa côté serveur)
+  // Rouge = aléa fort · Orange = aléa moyen · Bleu = aléa faible
   floodZoneWmsLayer = window.L.tileLayer.wms('https://georisques.gouv.fr/services', {
-    layers: 'PPRN_ZONE_ALEA_RISQINOND_APPROUV,PPRN_ZONE_ALEA_RISQINOND_PRESCRIT',
+    layers: 'PPRN_COMMUNE_RISQINOND_APPROUV,PPRN_COMMUNE_RISQINOND_PRESCRIT',
     format: 'image/png',
     transparent: true,
     version: '1.3.0',
     opacity: 0.65,
+    pane: 'floodZonePane',
     attribution: '&copy; État / Géorisques — Zones inondables PPRI Isère',
   }).addTo(leafletMap);
 }
@@ -2682,8 +2692,9 @@ function shouldDisplayBaseResourceType(type = '') {
 
 async function loadFinessIsereResources() {
   if (finessLoaded) return finessPointsCache;
+  // Cache localStorage valide (7j) — affichage immédiat, ne charger que si non vide
   const cached = readFreshSnapshot(STORAGE_KEYS.staticFinessCache, STATIC_POINTS_CACHE_TTL_MS);
-  if (Array.isArray(cached)) {
+  if (Array.isArray(cached) && cached.length > 0) {
     finessPointsCache = cached;
     finessTypeCounts = computeFinessTypeCounts(finessPointsCache);
     rebuildFinessMetaFromCache();
@@ -2691,9 +2702,12 @@ async function loadFinessIsereResources() {
     finessLoaded = true;
     return finessPointsCache;
   }
+  let backendPending = false;
   try {
-    const payload = await api('/api/finess/isere/resources?limit=20000', { cacheTtlMs: STATIC_POINTS_CACHE_TTL_MS });
+    // Cache court (2 min) pour pouvoir reessayer rapidement si le backend charge encore
+    const payload = await api('/api/finess/isere/resources?limit=20000', { cacheTtlMs: 2 * 60 * 1000 });
     const resources = Array.isArray(payload?.resources) ? payload.resources : [];
+    backendPending = resources.length === 0 && payload?.status !== 'online';
     const dynamicTypeMeta = new Map();
     FINESS_DYNAMIC_RESOURCE_TYPES.clear();
     finessPointsCache = resources
@@ -2733,7 +2747,10 @@ async function loadFinessIsereResources() {
       if (!HEALTH_RESOURCE_TYPES.has(type)) FINESS_DYNAMIC_RESOURCE_TYPES.add(type);
     });
     syncFinessHealthFilterOptions();
-    saveSnapshot(STORAGE_KEYS.staticFinessCache, finessPointsCache);
+    // Ne sauvegarder en localStorage que si on a de vraies données
+    if (finessPointsCache.length > 0) {
+      saveSnapshot(STORAGE_KEYS.staticFinessCache, finessPointsCache);
+    }
   } catch {
     const staleCached = readSnapshot(STORAGE_KEYS.staticFinessCache);
     finessPointsCache = Array.isArray(staleCached) ? staleCached : [];
@@ -2741,7 +2758,20 @@ async function loadFinessIsereResources() {
     rebuildFinessMetaFromCache();
     syncFinessHealthFilterOptions();
   }
-  finessLoaded = true;
+  if (finessPointsCache.length > 0) {
+    finessLoaded = true;
+  } else {
+    // Données vides : le backend est probablement en train de charger le CSV FINESS
+    // Planifier un seul retry automatique dans 90s pour ne pas bloquer les interactions
+    finessLoaded = true; // bloquer les appels répétés pendant le délai
+    const retryDelay = backendPending ? 90 * 1000 : 3 * 60 * 1000;
+    setTimeout(async () => {
+      finessLoaded = false;
+      apiGetCache.delete(getRequestCacheKey('/api/finess/isere/resources?limit=20000', {}));
+      await loadFinessIsereResources();
+      if (finessPointsCache.length > 0) renderResources();
+    }, retryDelay);
+  }
   return finessPointsCache;
 }
 
@@ -2926,11 +2956,17 @@ async function renderPopulationByCityLayer() {
 
 async function loadIsereInstitutions() {
   if (institutionsLoaded) return institutionPointsCache;
+  // Cache localStorage valide (7j) — affichage immédiat, ne charger que si non vide
   const cached = readFreshSnapshot(STORAGE_KEYS.staticInstitutionsCache, STATIC_POINTS_CACHE_TTL_MS);
-  if (Array.isArray(cached)) {
+  if (Array.isArray(cached) && cached.length > 0) {
     institutionPointsCache = cached;
     institutionsLoaded = true;
     return institutionPointsCache;
+  }
+  // Utiliser le cache périmé immédiatement comme fallback pendant que l'API charge
+  const staleImmediate = readSnapshot(STORAGE_KEYS.staticInstitutionsCache);
+  if (Array.isArray(staleImmediate) && staleImmediate.length > 0) {
+    institutionPointsCache = staleImmediate;
   }
   const areaQueries = [
     '["boundary"="administrative"]["admin_level"="6"]["ref:INSEE"="38"]',
@@ -2999,14 +3035,25 @@ out center tags;`;
     }
     if (points.length) break;
   }
-  institutionPointsCache = points;
-  if (institutionPointsCache.length) {
+  if (points.length > 0) {
+    institutionPointsCache = points;
     saveSnapshot(STORAGE_KEYS.staticInstitutionsCache, institutionPointsCache);
+    institutionsLoaded = true;
   } else {
+    // Overpass n'a rien retourné : utiliser le cache périmé si disponible
     const staleCached = readSnapshot(STORAGE_KEYS.staticInstitutionsCache);
-    if (Array.isArray(staleCached)) institutionPointsCache = staleCached;
+    if (Array.isArray(staleCached) && staleCached.length > 0) {
+      institutionPointsCache = staleCached;
+    }
+    // Planifier un retry automatique dans 2 min (Overpass peut être temporairement surchargé)
+    institutionsLoaded = true; // bloquer les appels répétés pendant le délai
+    setTimeout(async () => {
+      institutionsLoaded = false;
+      const prev = institutionPointsCache.length;
+      await loadIsereInstitutions();
+      if (institutionPointsCache.length > prev) renderResources();
+    }, 2 * 60 * 1000);
   }
-  institutionsLoaded = true;
   return institutionPointsCache;
 }
 
