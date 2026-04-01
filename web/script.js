@@ -190,6 +190,7 @@ let mapZoneImpactLayer = null;
 let mapZoneImpactSelection = null;
 let mapZoneImpactDrawHandler = null;
 let mapZoneImpactComputationSeq = 0;
+let mapZoneImpactReportData = null; // stocke les données brutes pour l'export
 const mapPointVisibilityOverrides = new Map();
 const resourceVisibilityOverrides = new Map();
 let pendingMapPointCoords = null;
@@ -1992,7 +1993,168 @@ async function computeZoneImpact() {
   }
   if (geoItems.length) parts.push(section('🗺️', 'Contexte géographique (OpenStreetMap)', geoItems));
 
-  renderZoneImpactPanel(`<ul style="list-style:none;padding:0;margin:0">${parts.join('')}</ul>`);
+  // Stocker les données brutes pour l'export
+  mapZoneImpactReportData = {
+    generatedAt: new Date(),
+    scale, geoLabel, geoCtx, zoneAreaM2, population, popSource,
+    childrenEstimate, ehpadResidents,
+    municipalitiesInZone, resourcesInZone,
+    schools, ehpads, hospitals, fireStations, police, hostings, dangers, transports,
+    allDistricts, streetInsights,
+  };
+
+  const actionBar = `<div style="display:flex;gap:.5em;margin-top:.7em;flex-wrap:wrap">
+    <button id="zone-impact-export-btn" type="button" class="map-btn-lite" style="background:#1971c2;color:#fff;border:none;padding:.4em .9em;border-radius:6px;cursor:pointer;font-size:.82rem">📄 Exporter le rapport</button>
+    <button id="zone-impact-clear-btn" type="button" class="ghost map-btn-lite" style="padding:.4em .9em;border-radius:6px;font-size:.82rem">🗑️ Effacer la zone</button>
+  </div>`;
+
+  renderZoneImpactPanel(`<ul style="list-style:none;padding:0;margin:0">${parts.join('')}</ul>${actionBar}`);
+
+  document.getElementById('zone-impact-export-btn')?.addEventListener('click', exportZoneImpactReport);
+  document.getElementById('zone-impact-clear-btn')?.addEventListener('click', clearZoneImpactSelection);
+}
+
+function exportZoneImpactReport() {
+  const d = mapZoneImpactReportData;
+  if (!d) return;
+
+  const scaleIcons = { rue: '🛣️', quartier: '🏘️', ville: '🏙️', secteur: '🗺️' };
+  const scaleLabels = { rue: 'Échelle rue', quartier: 'Échelle quartier', ville: 'Échelle ville', secteur: 'Secteur multi-communes' };
+  const now = d.generatedAt;
+  const dateStr = now.toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  const timeStr = now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+
+  const toText = (s) => String(s || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  const priorityText = (p) => ({ critical: 'CRITIQUE', vital: 'VITAL', risk: 'À RISQUE', standard: 'Standard' }[p] || 'Standard');
+  const resourceTable = (title, icon, arr) => {
+    if (!arr.length) return `<p class="empty">${icon} <em>Aucun(e) détecté(e) dans la zone.</em></p>`;
+    return `<h3>${icon} ${toText(title)} (${arr.length})</h3>
+    <table>
+      <thead><tr><th>Nom</th><th>Adresse</th><th>Priorité</th></tr></thead>
+      <tbody>${arr.map((r) => `<tr>
+        <td>${toText(r.name || 'Sans nom')}</td>
+        <td>${toText(r.address || '–')}</td>
+        <td class="tag-${r.priority || 'standard'}">${priorityText(r.priority)}</td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+  };
+
+  const schoolsByType = { creche: [], ecole_primaire: [], college: [], lycee: [], universite: [] };
+  d.schools.forEach((r) => { if (schoolsByType[r.type]) schoolsByType[r.type].push(r); });
+
+  const html = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Rapport d'impact terrain – ${toText(d.geoLabel || 'Zone analysée')}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; font-size: 11pt; color: #1a1a2e; background: #fff; padding: 2cm; }
+  h1 { font-size: 18pt; color: #132f63; margin-bottom: .3em; }
+  h2 { font-size: 13pt; color: #1971c2; margin: 1.4em 0 .4em; border-bottom: 2px solid #d3e0f8; padding-bottom: .2em; }
+  h3 { font-size: 11pt; color: #333; margin: 1em 0 .3em; }
+  .meta { font-size: 9.5pt; color: #555; margin-bottom: 1.2em; }
+  .badge-zone { display: inline-block; background: #eef2ff; border: 1px solid #c7d7fa; border-radius: 6px; padding: .2em .7em; font-size: 10pt; font-weight: bold; margin-bottom: .5em; }
+  .pop-block { background: #fff7e6; border-left: 4px solid #f08c00; padding: .5em .8em; margin: .5em 0 1em; border-radius: 0 6px 6px 0; }
+  .pop-block .pop-num { font-size: 22pt; font-weight: bold; color: #c05900; }
+  .danger-block { background: #fff0f0; border-left: 4px solid #e03131; padding: .5em .8em; margin: .5em 0 1em; border-radius: 0 6px 6px 0; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: .8em; font-size: 10pt; }
+  thead { background: #eef2ff; }
+  th { text-align: left; padding: .35em .5em; font-weight: bold; border: 1px solid #d3e0f8; }
+  td { padding: .3em .5em; border: 1px solid #e8eef8; vertical-align: top; }
+  tr:nth-child(even) td { background: #f8faff; }
+  .empty { color: #888; font-style: italic; font-size: 10pt; margin: .2em 0 .8em; }
+  .tag-critical { color: #e03131; font-weight: bold; }
+  .tag-vital { color: #1971c2; font-weight: bold; }
+  .tag-risk { color: #f08c00; font-weight: bold; }
+  .footer { margin-top: 2em; font-size: 8.5pt; color: #888; border-top: 1px solid #ddd; padding-top: .5em; }
+  .communes-list { font-size: 10pt; color: #444; }
+  @media print {
+    body { padding: 1.2cm; }
+    h2 { page-break-after: avoid; }
+    table { page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+
+<div class="badge-zone">${scaleIcons[d.scale] || '🗺️'} ${scaleLabels[d.scale] || 'Zone'}${d.geoLabel ? ` · ${toText(d.geoLabel)}` : ''}</div>
+<h1>Rapport d'impact terrain</h1>
+<p class="meta">
+  Généré le <strong>${dateStr}</strong> à <strong>${timeStr}</strong> · Département de l'Isère (38)<br>
+  OPE-Protec · Préfecture de l'Isère · Usage opérationnel réservé aux services habilités
+</p>
+
+<h2>1. Identification de la zone</h2>
+<table>
+  <tbody>
+    <tr><th style="width:35%">Échelle détectée</th><td>${scaleIcons[d.scale]} ${scaleLabels[d.scale]}${d.geoLabel ? ` — ${toText(d.geoLabel)}` : ''}</td></tr>
+    ${d.zoneAreaM2 > 0 ? `<tr><th>Surface</th><td><strong>${(d.zoneAreaM2 / 1_000_000).toFixed(2).replace('.', ',')} km²</strong> (${Math.round(d.zoneAreaM2).toLocaleString('fr-FR')} m²)</td></tr>` : ''}
+    <tr><th>Communes intersectées</th><td class="communes-list">${d.municipalitiesInZone.map((m) => toText(m.name || m.commune || '')).filter(Boolean).join(', ') || 'Non déterminées'}</td></tr>
+    ${d.geoCtx.city ? `<tr><th>Ville / commune centre</th><td>${toText(d.geoCtx.city)}${d.geoCtx.postcode ? ` (${toText(d.geoCtx.postcode)})` : ''}</td></tr>` : ''}
+    ${d.geoCtx.district ? `<tr><th>Quartier</th><td>${toText(d.geoCtx.district)}</td></tr>` : ''}
+    ${d.geoCtx.street ? `<tr><th>Rue / voie</th><td>${toText(d.geoCtx.street)}</td></tr>` : ''}
+    ${d.allDistricts.length ? `<tr><th>Quartiers OSM</th><td>${d.allDistricts.map(toText).join(', ')}</td></tr>` : ''}
+    ${d.streetInsights.streets.length ? `<tr><th>Principales rues</th><td>${d.streetInsights.streets.slice(0, 10).map(toText).join(', ')}</td></tr>` : ''}
+  </tbody>
+</table>
+
+<h2>2. Population exposée</h2>
+<div class="pop-block">
+  <div class="pop-num">${d.population > 0 ? d.population.toLocaleString('fr-FR') : '?'} habitants</div>
+  <div style="font-size:9.5pt;color:#666;margin-top:.2em">${toText(d.popSource)}</div>
+  ${d.childrenEstimate > 0 ? `<div style="margin-top:.4em">👶 Enfants scolarisés estimés : <strong>~${d.childrenEstimate.toLocaleString('fr-FR')}</strong></div>` : ''}
+  ${d.ehpadResidents > 0 ? `<div>🧓 Résidents EHPAD (mobilité réduite) : <strong>~${d.ehpadResidents.toLocaleString('fr-FR')}</strong></div>` : ''}
+</div>
+
+<h2>3. Dangers dans la zone</h2>
+${d.dangers.length ? `<div class="danger-block">
+  <strong>⚠️ ${d.dangers.length} site(s) dangereux détecté(s) — plan d'évacuation à adapter</strong>
+</div>
+<table>
+  <thead><tr><th>Nom</th><th>Type</th><th>Adresse</th></tr></thead>
+  <tbody>${d.dangers.map((r) => `<tr>
+    <td>${toText(r.name || 'Sans nom')}</td>
+    <td>${toText((RESOURCE_TYPE_META[r.type] || {}).label || r.type)}</td>
+    <td>${toText(r.address || '–')}</td>
+  </tr>`).join('')}</tbody>
+</table>` : '<p class="empty">⚠️ Aucun site dangereux détecté dans la zone.</p>'}
+
+<h2>4. Secours disponibles dans la zone</h2>
+${resourceTable('Casernes de pompiers', '🚒', d.fireStations)}
+${resourceTable('Police / Gendarmerie', '🛡️', d.police)}
+${resourceTable('Hôpitaux et cliniques', '🏥', d.hospitals)}
+
+<h2>5. Points d'évacuation et d'accueil</h2>
+${resourceTable("Lieux d'accueil hébergeables", '🏟️', d.hostings)}
+${resourceTable('Nœuds de transport', '🚆', d.transports)}
+
+<h2>6. Populations vulnérables — évacuation prioritaire</h2>
+${schoolsByType.creche.length ? resourceTable('Crèches', '🍼', schoolsByType.creche) : ''}
+${schoolsByType.ecole_primaire.length ? resourceTable('Écoles primaires', '🧒', schoolsByType.ecole_primaire) : ''}
+${schoolsByType.college.length ? resourceTable('Collèges', '🎒', schoolsByType.college) : ''}
+${schoolsByType.lycee.length ? resourceTable('Lycées', '📘', schoolsByType.lycee) : ''}
+${schoolsByType.universite.length ? resourceTable('Universités', '🎓', schoolsByType.universite) : ''}
+${d.ehpads.length ? resourceTable('EHPAD (évacuation médicalisée requise)', '🧓', d.ehpads) : ''}
+${!d.schools.length && !d.ehpads.length ? '<p class="empty">Aucun établissement scolaire ni EHPAD détecté dans la zone.</p>' : ''}
+
+<div class="footer">
+  Rapport généré automatiquement par OPE-Protec · Sources : INSEE, geo.api.gouv.fr, FINESS data.gouv.fr, OpenStreetMap, Géorisques<br>
+  Les données de population sont des estimations — se référer aux données communales officielles pour les décisions définitives.<br>
+  Document à usage opérationnel interne · ${dateStr} ${timeStr}
+</div>
+
+</body>
+</html>`;
+
+  const win = window.open('', '_blank');
+  if (!win) { setMapFeedback('Veuillez autoriser les popups pour exporter le rapport.', true); return; }
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  // Lancer l'impression automatiquement après chargement
+  win.addEventListener('load', () => win.print());
 }
 
 async function loadIsereCommunesGeometry() {
