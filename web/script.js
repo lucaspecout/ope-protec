@@ -2768,8 +2768,10 @@ async function loadFinessIsereResources() {
     setTimeout(async () => {
       finessLoaded = false;
       apiGetCache.delete(getRequestCacheKey('/api/finess/isere/resources?limit=20000', {}));
+      _finessLoadInFlight = true;
       await loadFinessIsereResources();
-      if (finessPointsCache.length > 0) renderResources();
+      _finessLoadInFlight = false;
+      if (finessPointsCache.length > 0) _drawResourceMarkers();
     }, retryDelay);
   }
   return finessPointsCache;
@@ -3050,8 +3052,10 @@ out center tags;`;
     setTimeout(async () => {
       institutionsLoaded = false;
       const prev = institutionPointsCache.length;
+      _institutionsLoadInFlight = true;
       await loadIsereInstitutions();
-      if (institutionPointsCache.length > prev) renderResources();
+      _institutionsLoadInFlight = false;
+      if (institutionPointsCache.length > prev) _drawResourceMarkers();
     }, 2 * 60 * 1000);
   }
   return institutionPointsCache;
@@ -3168,7 +3172,10 @@ async function loadTelecomPoints() {
     setTimeout(async () => {
       telecomLoaded = false;
       apiGetCache.delete(getRequestCacheKey('/external/isere/risks', {}));
-      await renderResources();
+      _telecomLoadInFlight = true;
+      await loadTelecomPoints();
+      _telecomLoadInFlight = false;
+      if (telecomPointsCache.length > 0) _drawResourceMarkers();
     }, 3 * 60 * 1000);
   } else {
     telecomLoaded = true;
@@ -3209,12 +3216,31 @@ function syncTelecomFilterState() {
   if (!telecomToggle?.checked) telecomTypeFilter.value = 'all';
 }
 
-async function renderResources() {
-  await Promise.all([loadIsereInstitutions(), loadFinessIsereResources(), loadTelecomPoints()]);
+// ─── Flags anti double-lancement des loaders statiques ───────────────────────
+let _institutionsLoadInFlight = false;
+let _finessLoadInFlight = false;
+let _telecomLoadInFlight = false;
+
+/** Retourne true si au moins un loader de données statiques est encore en cours. */
+function _staticDataLoading() {
+  return _institutionsLoadInFlight || _finessLoadInFlight || _telecomLoadInFlight;
+}
+
+/**
+ * Rendu synchrone des ressources depuis le cache actuel.
+ * N'attend aucune requête réseau. Appelée dès que le cache change.
+ */
+function _drawResourceMarkers() {
   syncFinessHealthFilterOptions();
   const resources = getDisplayedResources();
   const priorityLabel = { critical: 'critique', vital: 'vital', risk: 'à risque', standard: 'standard' };
   const markerColor = { critical: '#e03131', vital: '#1971c2', risk: '#f08c00', standard: '#2f9e44' };
+
+  let emptyMsg = '<li>Aucune ressource avec ces filtres.</li>';
+  if (resources.length === 0 && _staticDataLoading()) {
+    emptyMsg = '<li class="muted">⏳ Chargement des données en cours… les points apparaîtront automatiquement.</li>';
+  }
+
   setHtml('resources-list', resources.map((r) => {
     const meta = RESOURCE_TYPE_META[r.type] || { label: r.type.replace(/_/g, ' '), icon: '📍' };
     const statusLabel = r.active ? 'affichée' : 'masquée';
@@ -3226,7 +3252,8 @@ async function renderResources() {
       <a href="${escapeHtml(r.source || '#')}" target="_blank" rel="noreferrer">Source</a>
       ${toggleButton}
     </li>`;
-  }).join('') || '<li>Aucune ressource avec ces filtres.</li>');
+  }).join('') || emptyMsg);
+
   mapStats.resources = resources.length;
   updateMapSummary();
   if (!resourceLayer) return;
@@ -3242,7 +3269,51 @@ async function renderResources() {
       .bindPopup(`<strong>${meta.icon} ${r.name}</strong><br>Type: ${meta.label}<br>Niveau: ${priorityLabel[r.priority] || 'standard'}<br>Adresse: ${r.address}<br>${escapeHtml(r.info || '')}${formatFinessDetailsHtml(r)}<br><a href="${escapeHtml(r.source || '#')}" target="_blank" rel="noreferrer">Source publique</a>`)
       .addTo(resourceLayer);
   });
-  setMapFeedback(`${resources.length} ressource(s) affichée(s).`);
+
+  if (resources.length > 0) {
+    setMapFeedback(`${resources.length} ressource(s) affichée(s).`);
+  } else if (_staticDataLoading()) {
+    setMapFeedback('Chargement des données cartographiques en cours…');
+  } else {
+    setMapFeedback('Aucune ressource avec ces filtres.');
+  }
+}
+
+/**
+ * Lance les loaders statiques (institutions, FINESS, télécom) en arrière-plan.
+ * Chaque loader, une fois terminé, redessine les marqueurs automatiquement.
+ * Anti-doublon : jamais deux chargements simultanés du même dataset.
+ */
+function _ensureStaticDataLoaded() {
+  if (!institutionsLoaded && !_institutionsLoadInFlight) {
+    _institutionsLoadInFlight = true;
+    loadIsereInstitutions()
+      .then(() => { _institutionsLoadInFlight = false; _drawResourceMarkers(); })
+      .catch(() => { _institutionsLoadInFlight = false; });
+  }
+  if (!finessLoaded && !_finessLoadInFlight) {
+    _finessLoadInFlight = true;
+    loadFinessIsereResources()
+      .then(() => { _finessLoadInFlight = false; _drawResourceMarkers(); })
+      .catch(() => { _finessLoadInFlight = false; });
+  }
+  if (!telecomLoaded && !_telecomLoadInFlight) {
+    _telecomLoadInFlight = true;
+    loadTelecomPoints()
+      .then(() => { _telecomLoadInFlight = false; _drawResourceMarkers(); })
+      .catch(() => { _telecomLoadInFlight = false; });
+  }
+}
+
+/**
+ * Point d'entrée principal pour afficher les ressources sur la carte.
+ * 1. Rendu immédiat depuis le cache (0 ms d'attente pour l'utilisateur).
+ * 2. Lance les loaders manquants en arrière-plan — quand ils arrivent,
+ *    les marqueurs se mettent à jour automatiquement sans action utilisateur.
+ */
+function renderResources() {
+  _drawResourceMarkers();
+  _ensureStaticDataLoaded();
 }
 
 function toggleResourceActive(resourceId = '') {
@@ -6726,6 +6797,9 @@ async function refreshAll(forceRefresh = false) {
     const optionalFailures = failures.filter(({ config }) => config.optional);
 
     renderResources();
+    // Pré-chauffer les données statiques (OSM, FINESS, Télécom) en arrière-plan
+    // dès le démarrage, pour qu'elles soient prêtes quand l'utilisateur ouvre la carte.
+    _ensureStaticDataLoaded();
 
     if (!blockingFailures.length) {
       finishStartupQueue();
@@ -7453,11 +7527,28 @@ function bindAppInteractions() {
     }
   });
 
+  // Filtres qui n'affectent que les ressources (rendu immédiat, pas de re-fetch réseau)
+  const RESOURCE_ONLY_FILTERS = new Set([
+    'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type',
+    'filter-resources-schools', 'filter-resources-schools-type',
+    'filter-resources-security', 'filter-resources-security-type',
+    'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type',
+    'filter-resources-transport', 'filter-resources-transport-type',
+    'filter-resources-health', 'filter-resources-health-type',
+    'filter-resources-telecom', 'filter-resources-telecom-type',
+    'filter-resources-active',
+  ]);
   ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
+      if (RESOURCE_ONLY_FILTERS.has(id)) {
+        // Rendu immédiat depuis le cache + lancement background si besoin
+        renderResources();
+        return;
+      }
+      // Filtres globaux (hydro, pcs, trafic, caméras) → tout re-rendre
       renderStations(cachedVigicruesPayload);
       await renderMunicipalitiesOnMap(cachedMunicipalities);
-      await renderResources();
+      renderResources();
       await renderPopulationByCityLayer();
       await renderTrafficOnMap();
     });
