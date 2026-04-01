@@ -11,7 +11,7 @@ const STORAGE_KEYS = {
   externalRisksSnapshot: 'externalRisksSnapshot',
   apiInterconnectionsSnapshot: 'apiInterconnectionsSnapshot',
   homeLiveSnapshot: 'homeLiveSnapshot',
-  staticInstitutionsCache: 'staticInstitutionsCache',
+  staticInstitutionsCache: 'staticInstitutionsCacheV2',
   staticFinessCache: 'staticFinessCacheV3',
   staticTelecomCache: 'staticTelecomCacheV1',
   serviceStatusHistory: 'serviceStatusHistory',
@@ -48,9 +48,13 @@ const PANEL_TITLES = {
 const RESOURCE_TYPE_META = {
   poste_commandement: { label: 'Poste de commandement', icon: '🛰️' },
   gymnase: { label: 'Gymnase', icon: '🏟️' },
+  complexe_sportif: { label: 'Complexe sportif', icon: '🏋️' },
+  stade: { label: 'Stade', icon: '🏟️' },
+  salle_omnisports: { label: 'Salle omnisports / palais des sports', icon: '🏆' },
   centre_culturel: { label: 'Centre culturel', icon: '🏛️' },
-  salle_spectacle_public: { label: 'Salle de spectacle public', icon: '🎭' },
-  salle_fetes: { label: 'Salle des fêtes', icon: '🎪' },
+  salle_spectacle_public: { label: 'Salle de spectacle / concert', icon: '🎭' },
+  palais_congres: { label: 'Palais des congrès / convention', icon: '🏢' },
+  salle_fetes: { label: 'Salle des fêtes / polyvalente', icon: '🎪' },
   hopital: { label: 'Hôpital', icon: '🏥' },
   hopital_public: { label: 'Centre hospitalier public', icon: '🏥' },
   hopital_prive: { label: 'Hôpital / établissement privé', icon: '🏥' },
@@ -553,7 +557,7 @@ const FINESS_DYNAMIC_RESOURCE_TYPES = new Set();
 const RISK_RESOURCE_TYPES = new Set(['lieu_risque', 'centrale_nucleaire', 'energie']);
 const TRANSPORT_RESOURCE_TYPES = new Set(['transport', 'transport_gare_sncf', 'transport_gare_routiere', 'transport_aeroport']);
 const COMMAND_RESOURCE_TYPES = new Set(['poste_commandement']);
-const HOSTING_RESOURCE_TYPES = new Set(['gymnase', 'centre_culturel', 'salle_spectacle_public', 'salle_fetes']);
+const HOSTING_RESOURCE_TYPES = new Set(['gymnase', 'complexe_sportif', 'stade', 'salle_omnisports', 'centre_culturel', 'salle_spectacle_public', 'palais_congres', 'salle_fetes']);
 const TELECOM_RESOURCE_TYPES = new Set(['anfr_antenna', 'arcep_mobile_outage']);
 
 const ISERE_BOUNDARY_STYLE = { color: '#163a87', weight: 2, fillColor: '#63c27d', fillOpacity: 0.2 };
@@ -2932,9 +2936,19 @@ function classifyInstitutionPoint(element = {}) {
   if (railway === 'station') return 'transport_gare_sncf';
   if (aeroway === 'aerodrome' || aeroway === 'airport') return 'transport_aeroport';
   if (leisure === 'sports_hall' || building === 'sports_hall') return 'gymnase';
-  if (name.includes('gymnase') || name.includes('complexe sportif')) return 'gymnase';
+  if (amenity === 'concert_hall' || amenity === 'events_venue') return 'salle_spectacle_public';
+  if (amenity === 'convention_centre') return 'palais_congres';
+  if (leisure === 'stadium' || building === 'stadium') return 'stade';
+  if (leisure === 'sports_centre') return 'complexe_sportif';
+  if (leisure === 'ice_rink' || leisure === 'velodrome') return 'complexe_sportif';
+  if (name.includes('gymnase') || name.includes('salle de sport')) return 'gymnase';
+  if (name.includes('complexe sportif') || name.includes('complexe omnisports') || name.includes('complexe municipal')) return 'complexe_sportif';
+  if (name.includes('stade') || name.includes('arena ') || name.includes(' arena')) return 'stade';
+  if (name.includes('palais des sports') || name.includes('palais omnisports') || name.includes('halle omnisports') || name.includes('salle omnisports')) return 'salle_omnisports';
+  if (name.includes('palais des congrès') || name.includes('palais des congres') || name.includes('centre des congrès') || name.includes('centre des congres') || name.includes('parc des expositions') || name.includes('palais de la foire')) return 'palais_congres';
+  if (name.includes('salle de concert') || name.includes('salle de spectacle') || name.includes('théâtre') || name.includes('theatre')) return 'salle_spectacle_public';
   if (name.includes('maison des associations') || name.includes('centre social') || name.includes('maison de quartier')) return 'centre_culturel';
-  if (name.includes('salle des fêtes') || name.includes('salle des fetes') || name.includes('salle polyvalente')) return 'salle_fetes';
+  if (name.includes('salle des fêtes') || name.includes('salle des fetes') || name.includes('salle polyvalente') || name.includes('salle communale') || name.includes('salle municipale')) return 'salle_fetes';
   return null;
 }
 
@@ -3278,15 +3292,15 @@ async function loadIsereInstitutions() {
     'https://overpass-api.de/api/interpreter',
     'https://overpass.kumi.systems/api/interpreter',
   ];
-  const buildQuery = (areaFilter) => `[out:json][timeout:70];
+  const buildQuery = (areaFilter) => `[out:json][timeout:90];
 area${areaFilter}->.searchArea;
 (
-  nwr["amenity"~"school|college|university|kindergarten|police|fire_station|bus_station|community_centre|arts_centre|theatre|social_facility"](area.searchArea);
-  nwr["leisure"="sports_hall"](area.searchArea);
-  nwr["building"="sports_hall"](area.searchArea);
+  nwr["amenity"~"school|college|university|kindergarten|police|fire_station|bus_station|community_centre|arts_centre|theatre|social_facility|concert_hall|events_venue|convention_centre"](area.searchArea);
+  nwr["leisure"~"sports_hall|sports_centre|stadium|ice_rink|velodrome"](area.searchArea);
+  nwr["building"~"sports_hall|stadium"](area.searchArea);
   nwr["railway"="station"](area.searchArea);
   nwr["aeroway"~"aerodrome|airport"](area.searchArea);
-  nwr["name"~"gymnase|salle des fetes|salle des fêtes|salle polyvalente|maison des associations|centre social", i](area.searchArea);
+  nwr["name"~"gymnase|salle des fetes|salle des fêtes|salle polyvalente|salle communale|salle municipale|salle de sport|complexe sportif|complexe omnisports|complexe municipal|palais des sports|palais omnisports|halle omnisports|salle omnisports|stade |palais des congrès|palais des congres|centre des congrès|parc des expositions|salle de concert|salle de spectacle|maison des associations|centre social|maison de quartier", i](area.searchArea);
 );
 out center tags;`;
 
