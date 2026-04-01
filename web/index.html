@@ -631,95 +631,71 @@
           <div class="map-panel-head">
             <div>
               <h3>Carte stratégique Isère</h3>
-              <p class="muted">Vue opérationnelle accessible avec actions rapides, filtres simplifiés et raccourcis d'analyse.</p>
+              <p class="muted">Vue opérationnelle — filtres, ressources terrain et analyse de zone.</p>
             </div>
             <div class="map-quick-actions" role="group" aria-label="Actions rapides carte">
               <button id="map-focus-crisis" type="button" class="ghost">🎯 Focus crise</button>
-              <button id="map-reset-filters" type="button" class="ghost">↺ Réinitialiser filtres</button>
-              <button id="map-toolbar-collapse-toggle" type="button" class="ghost" aria-expanded="true" aria-controls="map-controls-panel">📌 Ranger menu carte</button>
+              <button id="map-reset-filters" type="button" class="ghost">↺ Réinitialiser</button>
+              <button id="map-toolbar-collapse-toggle" type="button" class="ghost" aria-expanded="true" aria-controls="map-controls-panel">◀ Filtres</button>
               <button id="map-toolbar-fullscreen-toggle" type="button" class="ghost" aria-pressed="false">⛶ Plein écran</button>
             </div>
           </div>
+
           <div class="map-workspace">
-            <div class="map-canvas-wrap">
-              <div id="isere-map-leaflet" class="leaflet-map" aria-label="Carte interactive Isère"></div>
-              <button
-                id="map-controls-toggle"
-                class="map-controls-toggle"
-                type="button"
-                aria-expanded="true"
-                aria-controls="map-controls-panel"
-                title="Ranger les options de la carte" aria-label="Ranger les options de la carte"
-              >
-                🧰
-              </button>
-              <button
-                id="map-fullscreen-toggle"
-                class="map-fullscreen-toggle"
-                type="button"
-                aria-pressed="false"
-                title="Passer la carte en plein écran"
-                aria-label="Passer la carte en plein écran"
-              >
-                ⛶
-              </button>
-            </div>
-            <aside id="map-controls-panel" class="map-controls" aria-label="Options de la carte">
-              <div class="map-toolbar map-toolbar--compact">
+
+            <!-- ── Panneau filtres GAUCHE ── -->
+            <aside id="map-controls-panel" class="map-controls" aria-label="Filtres et outils carte">
+
+              <!-- Recherche & navigation -->
+              <div class="filter-group filter-group--search">
                 <div class="map-search-inline">
                   <input id="map-search" type="search" placeholder="Adresse, ville, lieu…" aria-label="Recherche sur la carte" />
-                  <button id="map-search-btn" type="button" class="map-btn-lite">Rechercher</button>
-                  <button id="map-search-clear" type="button" class="ghost map-btn-lite">Effacer</button>
+                  <button id="map-search-btn" type="button" class="map-btn-lite">🔍</button>
+                  <button id="map-search-clear" type="button" class="ghost map-btn-lite">✕</button>
                 </div>
-                <div class="map-inline-actions">
-                  <button id="map-fit-btn" type="button" class="ghost map-btn-lite">Tout voir</button>
+                <div class="map-nav-btns">
+                  <button id="map-fit-btn" type="button" class="ghost map-btn-lite">🗺️ Tout voir</button>
                   <button id="map-locate-btn" type="button" class="ghost map-btn-lite">📍 Me localiser</button>
-                  <button id="map-add-point-btn" type="button" class="ghost map-btn-lite" aria-pressed="false" data-requires-edit>➕ Créer un POI</button>
-                  <button id="map-zone-impact-start" type="button" class="ghost map-btn-lite">🧭 Analyser une zone</button>
-                  <button id="map-zone-impact-clear" type="button" class="ghost map-btn-lite">🧹 Effacer analyse</button>
                 </div>
-                <select id="map-basemap-select" aria-label="Choisir le fond de carte">
-                  <option value="osm">Fond standard (OSM)</option>
-                  <option value="satellite">Vue satellite</option>
-                  <option value="topo">Relief (topographique)</option>
-                  <option value="light">Fond clair (lisible)</option>
-                  <option value="population">Population légale (fond thématique)</option>
-                  <option value="ign">IGN (Plan IGN v2)</option>
-                </select>
+              </div>
 
-                <div class="map-inline-actions map-inline-actions--stacked" data-requires-edit>
-                  <div class="map-bulk-controls">
-                    <input id="map-annotation-color" type="color" value="#d7263d" aria-label="Couleur annotation" />
-                    <select id="map-annotation-weight" aria-label="Épaisseur annotation">
-                      <option value="2">Trait fin</option>
-                      <option value="3" selected>Trait normal</option>
-                      <option value="5">Trait épais</option>
-                    </select>
-                  </div>
-                  <button id="map-annotation-clear-btn" type="button" class="ghost map-btn-lite">🧽 Effacer toutes mes annotations locales</button>
+              <!-- Fond de carte -->
+              <details class="filter-group" open>
+                <summary class="filter-group__title">🗺️ Fond de carte</summary>
+                <div class="filter-group__body">
+                  <select id="map-basemap-select" aria-label="Choisir le fond de carte">
+                    <option value="osm">Fond standard (OSM)</option>
+                    <option value="satellite">Vue satellite</option>
+                    <option value="topo">Relief (topographique)</option>
+                    <option value="light">Fond clair (lisible)</option>
+                    <option value="population">Population légale</option>
+                    <option value="ign">IGN (Plan IGN v2)</option>
+                  </select>
                 </div>
-                <div class="map-inline-actions map-inline-actions--stacked">
-                  <div class="map-bulk-controls">
-                    <select id="poi-target-category-filter" aria-label="Filtrer les POI par catégorie">
-                      <option value="all">POI perso: afficher tout</option>
-                      <option value="incident">Incidents</option>
-                      <option value="evacuation">Évacuations</option>
-                      <option value="water">Risque eau</option>
-                      <option value="roadblock">Barrages</option>
-                      <option value="medical">Médical</option>
-                      <option value="logistics">Logistique</option>
-                      <option value="command">Commandement</option>
-                      <option value="poi">POI</option>
-                      <option value="autre">Autres</option>
-                    </select>
-                    <button id="poi-target-toggle-btn" type="button" class="ghost map-btn-lite">Masquer tous les POI</button>
-                  </div>
-                </div>
-                <div class="map-toggle-grid">
-                  <label><input id="filter-hydro" type="checkbox" checked /> Vigicrues</label>
+              </details>
+
+              <!-- Alertes & Surveillance -->
+              <details class="filter-group" open>
+                <summary class="filter-group__title">🌊 Alertes &amp; Surveillance</summary>
+                <div class="filter-group__body map-toggle-grid">
+                  <label><input id="filter-hydro" type="checkbox" checked /> Vigicrues (stations crues)</label>
                   <label><input id="filter-pcs" type="checkbox" checked /> Communes PCS</label>
-                  <label><input id="filter-resources-command" type="checkbox" checked /> Centres de commandement</label>
-                  <label><input id="filter-resources-hosting" type="checkbox" /> Lieux d'accueil hébergeables
+                  <label>
+                    <input id="filter-flood-zones" type="checkbox" />
+                    Zones inondables PPRI Isère
+                    <small class="filter-legend">🟥 Fort &nbsp;🟧 Moyen &nbsp;🟦 Faible · Géorisques</small>
+                  </label>
+                </div>
+              </details>
+
+              <!-- Ressources opérationnelles -->
+              <details class="filter-group" open>
+                <summary class="filter-group__title">🏢 Ressources opérationnelles</summary>
+                <div class="filter-group__body map-toggle-grid">
+                  <label><input id="filter-resources-command" type="checkbox" checked /> 🛰️ Centres de commandement</label>
+
+                  <div class="filter-subgroup">
+                    <label><input id="filter-resources-hosting" type="checkbox" /> 🏟️ Lieux d'accueil hébergeables</label>
                     <select id="filter-resources-hosting-type" aria-label="Filtrer les lieux d'accueil hébergeables">
                       <option value="all">Tous les types</option>
                       <option value="gymnase">Gymnases</option>
@@ -731,8 +707,10 @@
                       <option value="palais_congres">Palais des congrès / salons</option>
                       <option value="salle_fetes">Salles des fêtes / polyvalentes</option>
                     </select>
-                  </label>
-                  <label><input id="filter-resources-schools" type="checkbox" /> Ecoles
+                  </div>
+
+                  <div class="filter-subgroup">
+                    <label><input id="filter-resources-schools" type="checkbox" /> 🎒 Écoles</label>
                     <select id="filter-resources-schools-type" aria-label="Filtrer les établissements scolaires">
                       <option value="all">Tous les types</option>
                       <option value="ecole_primaire">Écoles primaires</option>
@@ -741,100 +719,195 @@
                       <option value="universite">Universités</option>
                       <option value="creche">Crèches</option>
                     </select>
-                  </label>
-                  <label><input id="filter-resources-security" type="checkbox" /> Police
+                  </div>
+
+                  <div class="filter-subgroup">
+                    <label><input id="filter-resources-security" type="checkbox" /> 👮 Police &amp; Gendarmerie</label>
                     <select id="filter-resources-security-type" aria-label="Filtrer les forces de sécurité">
                       <option value="all">Tous les types</option>
                       <option value="gendarmerie">Gendarmeries</option>
                       <option value="commissariat_police_nationale">Commissariats (police nationale)</option>
                       <option value="police_municipale">Police municipale</option>
                     </select>
-                  </label>
-                  <label><input id="filter-resources-fire" type="checkbox" /> Casernes de pompiers (Isère)</label>
-                  <label><input id="filter-resources-risks" type="checkbox" /> Sites sensibles
-                    <select id="filter-resources-risks-type" aria-label="Filtrer les sites sensibles">
-                      <option value="all">Tous les types</option>
-                      <option value="lieu_risque">Seveso</option>
-                      <option value="centrale_nucleaire">Nucléaire</option>
-                      <option value="energie">Barrages</option>
+                  </div>
+
+                  <label><input id="filter-resources-fire" type="checkbox" /> 🚒 Casernes de pompiers</label>
+
+                  <div class="filter-subgroup">
+                    <label><input id="filter-resources-health" type="checkbox" /> 🏥 Santé FINESS (Isère)</label>
+                    <select id="filter-resources-health-type" aria-label="Filtrer les établissements de santé">
+                      <option value="all">Toutes les catégories FINESS</option>
                     </select>
-                  </label>
-                  <label><input id="filter-resources-transport" type="checkbox" /> Transports
+                  </div>
+
+                  <div class="filter-subgroup">
+                    <label><input id="filter-resources-transport" type="checkbox" /> 🚉 Transports</label>
                     <select id="filter-resources-transport-type" aria-label="Filtrer les transports">
                       <option value="all">Tous les types</option>
                       <option value="transport_gare_sncf">Gares SNCF</option>
                       <option value="transport_gare_routiere">Gares routières</option>
                       <option value="transport_aeroport">Aéroports</option>
                     </select>
-                  </label>
-                  <label><input id="filter-resources-health" type="checkbox" /> FINESS stratégique santé (Isère 38)
-                    <select id="filter-resources-health-type" aria-label="Filtrer les établissements de santé">
-                      <option value="all">Toutes les catégories stratégiques FINESS (Isère)</option>
-                    </select>
-                  </label>
-                  <label><input id="filter-resources-telecom" type="checkbox" /> Télécom (ANFR + sites mobiles indisponibles)
+                  </div>
+
+                  <div class="filter-subgroup">
+                    <label><input id="filter-resources-telecom" type="checkbox" /> 📡 Télécom (ANFR)</label>
                     <select id="filter-resources-telecom-type" aria-label="Filtrer les ressources télécom" disabled>
                       <option value="all">Tous les types</option>
                       <option value="anfr_antenna">Antennes ANFR</option>
                       <option value="arcep_mobile_outage">Sites indisponibles ARCEP</option>
                     </select>
-                  </label>
-                  <label><input id="filter-traffic-incidents" type="checkbox" checked /> Itinisère + Bison Futé Isère (données trafic)
-                    <select id="filter-bison-type" aria-label="Filtrer les événements trafic (Itinisère + Bison Futé Isère)">
-                      <option value="all" selected>Tout (Itinisère + Bison Futé)</option>
-                      <option value="itinisere">Itinisère (tout)</option>
-                      <option value="alea">Aléas routiers (accidents + dangers)</option>
-                      <option value="accident">Accidents</option>
-                      <option value="danger">Dangers</option>
+                  </div>
+
+                  <div class="filter-subgroup">
+                    <label><input id="filter-resources-risks" type="checkbox" /> ⚠️ Sites sensibles</label>
+                    <select id="filter-resources-risks-type" aria-label="Filtrer les sites sensibles">
+                      <option value="all">Tous les types</option>
+                      <option value="lieu_risque">Seveso</option>
+                      <option value="centrale_nucleaire">Nucléaire</option>
+                      <option value="energie">Barrages</option>
                     </select>
-                  </label>
-                  <label><input id="filter-cameras" type="checkbox" checked /> Camera</label>
-                  <label><input id="filter-google-traffic-flow" type="checkbox" /> Trafic continu (style Google Maps)</label>
-                  <label><input id="filter-flood-zones" type="checkbox" /> Zones inondables PPRI Isère
-                    <small style="display:block;color:#666;font-size:.75em;margin-top:.15em">🟥 Aléa fort &nbsp;🟧 Aléa moyen &nbsp;🟦 Aléa faible · Source Géorisques</small>
-                  </label>
+                  </div>
                 </div>
-                
-              </div>
-              <p id="map-feedback" class="muted"></p>
+              </details>
+
+              <!-- Trafic & Mobilité -->
+              <details class="filter-group">
+                <summary class="filter-group__title">🚦 Trafic &amp; Mobilité</summary>
+                <div class="filter-group__body map-toggle-grid">
+                  <label><input id="filter-cameras" type="checkbox" checked /> 📷 Caméras terrain</label>
+                  <label><input id="filter-traffic-incidents" type="checkbox" checked /> 🚨 Itinisère + Bison Futé</label>
+                  <select id="filter-bison-type" aria-label="Filtrer les événements trafic">
+                    <option value="all" selected>Tout (Itinisère + Bison Futé)</option>
+                    <option value="itinisere">Itinisère (tout)</option>
+                    <option value="alea">Aléas routiers</option>
+                    <option value="accident">Accidents</option>
+                    <option value="danger">Dangers</option>
+                  </select>
+                  <label><input id="filter-google-traffic-flow" type="checkbox" /> 🛣️ Trafic continu (style Google Maps)</label>
+                </div>
+              </details>
+
+              <!-- Outils terrain -->
+              <details class="filter-group">
+                <summary class="filter-group__title">🛠️ Outils terrain</summary>
+                <div class="filter-group__body">
+                  <div class="filter-tool-row">
+                    <button id="map-zone-impact-start" type="button" class="ghost map-btn-lite">🧭 Analyser une zone</button>
+                    <button id="map-zone-impact-clear" type="button" class="ghost map-btn-lite">🧹 Effacer analyse</button>
+                    <button id="map-add-point-btn" type="button" class="ghost map-btn-lite" aria-pressed="false" data-requires-edit>➕ Créer un POI</button>
+                  </div>
+                  <div class="filter-tool-row" style="margin-top:.4rem" data-requires-edit>
+                    <input id="map-annotation-color" type="color" value="#d7263d" aria-label="Couleur annotation" style="width:36px;height:33px;padding:2px;border-radius:6px" />
+                    <select id="map-annotation-weight" aria-label="Épaisseur annotation">
+                      <option value="2">Trait fin</option>
+                      <option value="3" selected>Trait normal</option>
+                      <option value="5">Trait épais</option>
+                    </select>
+                    <button id="map-annotation-clear-btn" type="button" class="ghost map-btn-lite">🧽 Effacer annotations</button>
+                  </div>
+                  <div class="filter-tool-row" style="margin-top:.4rem">
+                    <select id="poi-target-category-filter" aria-label="Filtrer les POI par catégorie">
+                      <option value="all">POI : afficher tout</option>
+                      <option value="incident">Incidents</option>
+                      <option value="evacuation">Évacuations</option>
+                      <option value="water">Risque eau</option>
+                      <option value="roadblock">Barrages</option>
+                      <option value="medical">Médical</option>
+                      <option value="logistics">Logistique</option>
+                      <option value="command">Commandement</option>
+                      <option value="poi">POI</option>
+                      <option value="autre">Autres</option>
+                    </select>
+                    <button id="poi-target-toggle-btn" type="button" class="ghost map-btn-lite">Masquer POI</button>
+                  </div>
+                </div>
+              </details>
+
+              <!-- Feedback & coordonnées -->
+              <p id="map-feedback" class="muted map-feedback-bar"></p>
               <div id="map-selected-location" class="map-selected-location" hidden>
-                <p class="muted">Coordonnées sélectionnées: <strong id="map-selected-coords">-</strong></p>
-                <a id="map-open-google-maps" class="ghost map-btn-lite" href="#" target="_blank" rel="noreferrer noopener">🗺️ Ouvrir dans Google Maps</a>
+                <p class="muted">📍 <strong id="map-selected-coords">-</strong></p>
+                <a id="map-open-google-maps" class="ghost map-btn-lite" href="#" target="_blank" rel="noreferrer noopener">🗺️ Google Maps</a>
               </div>
+
+              <!-- Liste ressources -->
+              <details class="filter-group">
+                <summary class="filter-group__title">📋 Ressources affichées</summary>
+                <div class="filter-group__body">
+                  <ul id="resources-list" class="list compact resources-sidebar-list"></ul>
+                </div>
+              </details>
+
+            </aside>
+
+            <!-- ── Carte DROITE ── -->
+            <div class="map-canvas-area">
+              <div class="map-canvas-wrap">
+                <div id="isere-map-leaflet" class="leaflet-map" aria-label="Carte interactive Isère"></div>
+                <button
+                  id="map-controls-toggle"
+                  class="map-controls-toggle"
+                  type="button"
+                  aria-expanded="true"
+                  aria-controls="map-controls-panel"
+                  title="Afficher / masquer les filtres"
+                  aria-label="Afficher / masquer les filtres"
+                >🧰</button>
+                <button
+                  id="map-fullscreen-toggle"
+                  class="map-fullscreen-toggle"
+                  type="button"
+                  aria-pressed="false"
+                  title="Plein écran"
+                  aria-label="Passer la carte en plein écran"
+                >⛶</button>
+              </div>
+
+              <!-- Statistiques résumé -->
               <div class="map-summary" aria-live="polite">
-                <article><p>Stations</p><strong id="map-summary-stations">0</strong></article>
-                <article><p>PCS</p><strong id="map-summary-pcs">0</strong></article>
-                <article><p>Ressources</p><strong id="map-summary-resources">0</strong></article>
-                <article><p>Points</p><strong id="map-summary-custom">0</strong></article>
-                <article><p>Trafic</p><strong id="map-summary-traffic">0</strong></article>
+                <article><p>🌊 Stations</p><strong id="map-summary-stations">0</strong></article>
+                <article><p>🏛️ PCS</p><strong id="map-summary-pcs">0</strong></article>
+                <article><p>📍 Ressources</p><strong id="map-summary-resources">0</strong></article>
+                <article><p>🗂️ Points perso</p><strong id="map-summary-custom">0</strong></article>
+                <article><p>🚦 Trafic</p><strong id="map-summary-traffic">0</strong></article>
               </div>
+
+              <!-- Analyse de zone -->
               <div id="map-zone-impact-panel" class="map-zone-impact" aria-live="polite">
-                <h4>Impact terrain sur zone sélectionnée</h4>
-                <p class="muted">Tracez un rectangle ou un polygone pour estimer la population exposée, les ressources mobilisables et la vulnérabilité locale (sources État + données opérationnelles).</p>
+                <h4>Impact terrain · zone sélectionnée</h4>
+                <p class="muted">Tracez un rectangle ou un polygone pour estimer la population exposée et les ressources mobilisables.</p>
                 <ul id="map-zone-impact-list" class="list compact">
                   <li>Aucune zone d'analyse active.</li>
                 </ul>
               </div>
-            </aside>
+            </div>
           </div>
+
+          <!-- Données opérationnelles détaillées -->
           <div class="map-layout">
-            <div>
-              <p>Niveau météo <strong id="meteo-level">-</strong></p>
-              <p>Niveau hydrologique <strong id="river-level">-</strong></p>
-              <h4>Points opérationnels personnalisés</h4>
-              <ul id="custom-points-list" class="list practical"></ul>
-              <h4>Annotations tactiques synchronisées</h4>
-              <ul id="map-annotations-list" class="list practical"></ul>
-              <div class="legend">
-                <span class="badge green">Vert</span>
-                <span class="badge yellow">Jaune</span>
-                <span class="badge orange">Orange</span>
-                <span class="badge red">Rouge</span>
-              </div>
-              <h4>Communes avec PCS</h4>
-              <ul id="pcs-list" class="list practical"></ul>
-              <h4>Alertes mobilité Itinisère</h4>
-              <ul id="itinerary-list" class="list practical"></ul>
+            <div class="map-data-col">
+              <p class="muted">Météo <strong id="meteo-level">-</strong> &nbsp;·&nbsp; Hydrologie <strong id="river-level">-</strong></p>
+              <details class="filter-group" open>
+                <summary class="filter-group__title">🛰️ Points opérationnels personnalisés</summary>
+                <div class="filter-group__body"><ul id="custom-points-list" class="list practical"></ul></div>
+              </details>
+              <details class="filter-group">
+                <summary class="filter-group__title">✏️ Annotations tactiques</summary>
+                <div class="filter-group__body"><ul id="map-annotations-list" class="list practical"></ul></div>
+              </details>
+            </div>
+            <div class="map-data-col">
+              <details class="filter-group" open>
+                <summary class="filter-group__title">🏛️ Communes avec PCS</summary>
+                <div class="filter-group__body"><ul id="pcs-list" class="list practical"></ul></div>
+              </details>
+            </div>
+            <div class="map-data-col">
+              <details class="filter-group" open>
+                <summary class="filter-group__title">🚨 Alertes mobilité Itinisère</summary>
+                <div class="filter-group__body"><ul id="itinerary-list" class="list practical"></ul></div>
+              </details>
             </div>
           </div>
         </section>
