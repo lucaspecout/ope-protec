@@ -8080,6 +8080,7 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
   setActivePanel(localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel');
   hydrateUiFromLocalCache();
   await loadIsereBoundary();
+  renderStations(cachedVigicruesPayload);
   syncLogScopeFields();
   syncLogOtherFields();
 
