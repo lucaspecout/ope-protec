@@ -1083,7 +1083,7 @@ function georisquesDocumentUrl(doc, commune) {
   return buildGeorisquesCommuneUrl(commune);
 }
 
-function showHome() { setVisibility(homeView, true); setVisibility(loginView, false); setVisibility(appView, false); }
+function showHome() { showLogin(); }
 function showLogin() { setVisibility(homeView, false); setVisibility(loginView, true); setVisibility(appView, false); setVisibility(passwordForm, false); setVisibility(loginForm, true); }
 function showApp() { setVisibility(homeView, false); setVisibility(loginView, false); setVisibility(appView, true); }
 
@@ -7920,7 +7920,7 @@ function logout() {
   if (photoCameraRefreshTimer) clearInterval(photoCameraRefreshTimer);
   stopMapAnnotationsSync();
   finishStartupQueue();
-  showHome();
+  showLogin();
 }
 
 function startAutoRefresh() {
@@ -8315,18 +8315,13 @@ document.getElementById('event-form')?.addEventListener('submit', async (event) 
 })();
 
 (async function bootstrap() {
-  updateApiQueueVisual();
-  bindHomeInteractions();
   bindAppInteractions();
-  startHomeLiveRefresh();
   startApiPanelAutoRefresh();
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
-    loadHomeLiveStatus();
     if (token) refreshAll(false);
   });
   window.addEventListener('focus', () => {
-    loadHomeLiveStatus();
     if (token) refreshAll(false);
   });
 
@@ -8340,7 +8335,7 @@ document.getElementById('event-form')?.addEventListener('submit', async (event) 
     // ignore cache parsing issues
   }
 
-  if (!token) return showHome();
+  if (!token) return showLogin();
   try {
     currentUser = await api('/auth/me');
     await initializeAuthenticatedSession({ runRefreshInBackground: true });

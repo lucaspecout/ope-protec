@@ -16,102 +16,7 @@
     Connexion perdue — l'application fonctionne en mode hors-ligne. Les données affichées peuvent ne plus être à jour.
   </div>
   <main class="shell">
-    <section id="home-view" class="home-wrap">
-      <header class="home-topbar panel">
-        <div class="brand">
-          <div class="brand-logo" aria-hidden="true">
-            <span class="brand-logo__ring"></span>
-            <span class="brand-logo__triangle"></span>
-          </div>
-          <div class="brand-copy">
-            <p class="tag">Protection Civile · Isère</p>
-            <strong>CRISIS38</strong>
-            <p class="brand-motto">Aider · Secourir · Former</p>
-          </div>
-        </div>
-        <button id="mobile-menu-btn" class="menu-toggle" type="button" aria-expanded="false" aria-controls="home-nav">☰</button>
-        <nav id="home-nav" class="home-nav">
-          <a href="#home-features">Fonctionnalités</a>
-          <button id="open-login-btn" type="button">Espace sécurisé</button>
-        </nav>
-      </header>
-
-      <section class="home-hero panel">
-        <div class="hero-main">
-          <p class="tag">Poste de commandement numérique · Protection civile</p>
-          <h1>Protection civile de l’Isère : coordination et action sur le terrain</h1>
-          <p class="lead">CRISIS38 soutient la protection civile de l’Isère en centralisant l’alerte météo, le suivi des crues, la coordination des communes et le déclenchement des actions terrain.</p>
-          <div class="hero-actions">
-            <button id="hero-login-btn" type="button">Accéder à l’espace sécurisé</button>
-            <button id="scroll-actions-btn" type="button" class="ghost">Consulter les indicateurs</button>
-          </div>
-          <div class="hero-badges">
-            <span>🛰️ Données temps réel</span>
-            <span>🏛️ Coordination intercommunale</span>
-            <span>🚨 Suivi multi-risques</span>
-          </div>
-        </div>
-
-        <article class="hero-status panel">
-          <h3>Données temps réel · Isère</h3>
-          <div class="status-grid">
-            <p>Niveau météo <strong id="home-meteo-state">-</strong></p>
-            <p>Niveau crues <strong id="home-river-state">-</strong></p>
-            <p>Risque global <strong id="home-global-risk">-</strong></p>
-            <p>Communes en crise <strong id="home-crisis-count">0</strong></p>
-            <p>Sismicité max <strong id="home-seismic-state">-</strong></p>
-            <p>Docs inondation <strong id="home-flood-docs">0</strong></p>
-          </div>
-          <h4>Situation météo en cours</h4>
-          <ul id="home-meteo-situation" class="list compact"></ul>
-          <p class="muted" id="home-live-updated">Dernière mise à jour: -</p>
-          <p class="error" id="home-live-error"></p>
-          <div id="api-queue-visual" class="api-queue-visual" aria-live="polite">
-            <p class="muted"><strong>File d’attente API</strong> · <span id="api-queue-summary">En attente d'initialisation…</span></p>
-            <div class="api-queue-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-              <span id="api-queue-progress-bar"></span>
-            </div>
-            <p class="muted" id="api-queue-current">Aucune tâche en cours.</p>
-          </div>
-        </article>
-      </section>
-
-      <section id="home-features" class="home-guest-layout">
-        <article class="panel home-guest-overview">
-          <div class="home-guest-overview__head">
-            <div>
-              <p class="tag">Mode non connecté</p>
-              <h3>Vue synthèse Isère</h3>
-              <p class="muted">Un seul écran clair pour suivre l'essentiel sans doublons.</p>
-            </div>
-            <span class="home-guest-pill">Live public</span>
-          </div>
-          <div class="home-situation-values">
-            <p><span>Météo</span><strong id="home-indication-meteo">-</strong></p>
-            <p><span>Crues</span><strong id="home-indication-crues">-</strong></p>
-            <p><span>Risque global</span><strong id="home-indication-global">-</strong></p>
-            <p><span>Communes en crise</span><strong id="home-indication-crisis">0</strong></p>
-            <p><span>Sismicité max</span><strong id="home-indication-seismic">-</strong></p>
-            <p><span>Événements voirie</span><strong id="home-indication-traffic">0</strong></p>
-            <p><span>Inondation (docs)</span><strong id="home-indication-flood-docs">0</strong></p>
-            <p><span>Bison Futé (38)</span><strong id="home-indication-bison">-</strong></p>
-            <p><span>Qualité de l'air</span><strong id="home-indication-atmo">-</strong></p>
-            <p><span>Itinisère</span><strong id="home-indication-itinisere">-</strong></p>
-          </div>
-        </article>
-
-        <article class="panel home-guest-focus">
-          <h3>Mobilité du jour</h3>
-          <p>Bison Futé départ/arrivée <strong id="home-feature-bison-isere">-</strong></p>
-          <p>Statut Itinisère <strong id="home-feature-itinisere-status">-</strong></p>
-          <p>Événements en cours <strong id="home-feature-itinisere-events">0</strong></p>
-          <p class="muted">Les valeurs restent stables même si un flux remonte temporairement « inconnu ».</p>
-        </article>
-      </section>
-
-    </section>
-
-    <section id="login-view" class="auth-wrap hidden" hidden>
+    <section id="login-view" class="auth-wrap">
       <form id="login-form" class="panel auth-card" method="post" action="#" autocomplete="off">
         <p class="tag">Protection Civile · Isère</p>
         <h1>Connexion CRISIS38</h1>
@@ -119,7 +24,6 @@
         <label>Identifiant<input name="username" required /></label>
         <label>Mot de passe<input name="password" type="password" required /></label>
         <button type="submit">Connexion sécurisée</button>
-        <button id="back-home-btn" type="button" class="ghost">Retour accueil</button>
         <p id="login-error" class="error"></p>
         <details id="login-error-debug-wrap" class="login-error-debug hidden">
           <summary>Détails techniques de connexion</summary>
