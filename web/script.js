@@ -3313,6 +3313,18 @@ async function loadIsereInstitutions() {
   const staleImmediate = readSnapshot(STORAGE_KEYS.staticInstitutionsCache);
   if (Array.isArray(staleImmediate) && staleImmediate.length > 0) {
     institutionPointsCache = staleImmediate;
+  } else {
+    // Migration des anciennes clés de cache (avant V3) pour éviter un rechargement complet
+    for (const oldKey of ['staticInstitutionsCache', 'staticInstitutionsCacheV2']) {
+      try {
+        const raw = JSON.parse(localStorage.getItem(oldKey) || 'null');
+        const oldData = raw?.payload || (Array.isArray(raw) ? raw : null);
+        if (Array.isArray(oldData) && oldData.length > 0) {
+          institutionPointsCache = oldData;
+          break;
+        }
+      } catch (_) { /* ignore */ }
+    }
   }
   const areaQueries = [
     '["boundary"="administrative"]["admin_level"="6"]["ref:INSEE"="38"]',
@@ -3659,8 +3671,8 @@ function _ensureStaticDataLoaded() {
  *    les marqueurs se mettent à jour automatiquement sans action utilisateur.
  */
 function renderResources() {
-  _drawResourceMarkers();
   _ensureStaticDataLoaded();
+  _drawResourceMarkers();
 }
 
 function toggleResourceActive(resourceId = '') {
