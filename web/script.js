@@ -1328,11 +1328,6 @@ function hydrateUiFromLocalCache() {
     loadUsers(cachedUsersSnapshot);
   }
 
-  const homeLiveSnapshot = readSnapshot(STORAGE_KEYS.homeLiveSnapshot);
-  if (homeLiveSnapshot && typeof homeLiveSnapshot === 'object') {
-    cachedHomeLiveSnapshot = homeLiveSnapshot;
-    renderHomeLiveStatus(cachedHomeLiveSnapshot);
-  }
 }
 
 function clonePayload(payload) {
