@@ -4663,12 +4663,20 @@ def _fetch_georisques_isere_summary_live(commune_names: list[str] | None = None)
             code = str(commune.get("codeInsee") or "")
             if code not in monitored_flood_documents:
                 continue
+            direct_url = (
+                doc.get("urlDocument")
+                or doc.get("url_document")
+                or doc.get("lienDocument")
+                or doc.get("lien_document")
+                or None
+            )
             monitored_flood_documents[code].append(
                 {
                     "code": doc.get("idGaspar"),
                     "title": doc.get("libelle"),
                     "river_basin": doc.get("libBassinRisques"),
                     "published_at": (commune.get("aleas") or [{}])[0].get("dateDiffusion"),
+                    "url": direct_url,
                 }
             )
 

@@ -12,7 +12,19 @@
       "WebFetch(domain:www.isere.gouv.fr)",
       "Read(//c/Users/pencout/OneDrive - Alma/Documents/opeprotec/ope-protec/web/**)",
       "WebFetch(domain:www.sogefi-sig.com)",
-      "WebFetch(domain:api.gouv.fr)"
+      "WebFetch(domain:api.gouv.fr)",
+      "WebFetch(domain:opendata.isere.fr)",
+      "WebFetch(domain:www.sdis38.fr)",
+      "WebFetch(domain:georisques.gouv.fr)",
+      "WebFetch(domain:portail-api.meteofrance.fr)",
+      "WebFetch(domain:confluence-meteofrance.atlassian.net)",
+      "WebFetch(domain:www.data.gouv.fr)",
+      "WebFetch(domain:meteo.data.gouv.fr)",
+      "WebFetch(domain:public-api.meteofrance.fr)",
+      "WebFetch(domain:bdnb.io)",
+      "WebFetch(domain:infoterre.brgm.fr)",
+      "WebFetch(domain:www.itinisere.fr)",
+      "WebFetch(domain:www.irma-grenoble.com)"
     ]
   }
 }

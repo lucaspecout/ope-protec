@@ -1052,19 +1052,18 @@ function buildGeorisquesApiSearchUrl(doc, commune) {
   if (!codeInsee) return null;
 
   const title = String(doc?.title || doc?.libelle_azi || '').trim().toUpperCase();
-  const code = String(doc?.code || doc?.idGaspar || doc?.code_national_azi || '').trim();
-  const params = new URLSearchParams({ code_insee: codeInsee });
 
-  if (title === 'DICRIM') return `https://www.georisques.gouv.fr/api/v1/gaspar/dicrim?${params.toString()}`;
-  if (title === 'TIM') return `https://www.georisques.gouv.fr/api/v1/gaspar/tim?${params.toString()}`;
-  if (title.includes('RISQUE')) return `https://www.georisques.gouv.fr/api/v1/gaspar/risques?${params.toString()}`;
+  // DICRIM — page officielle Géorisques (pas l'endpoint JSON)
+  if (title === 'DICRIM') return `https://www.georisques.gouv.fr/DICRIM/${encodeURIComponent(codeInsee)}`;
 
-  // Les endpoints pprn/pprm/pprt ne sont plus exposés en GET sur l'API publique v1.
-  // On bascule vers la fiche risque de la commune (plus stable) pour éviter les liens 404.
+  // TIM & informations risques → fiche commune Géorisques
+  if (title === 'TIM' || title.includes('RISQUE') || title.includes('INFORMATION')) return buildGeorisquesCommuneUrl(commune);
+
+  // PPRN/PPRM/PPRT → fiche commune (les endpoints PPR n'ont pas de page publique directe)
   if (title === 'PPRN' || title === 'PPRM' || title === 'PPRT') return buildGeorisquesCommuneUrl(commune);
 
-  if (code) params.set('code_national_azi', code);
-  return `https://www.georisques.gouv.fr/api/v1/gaspar/azi?${params.toString()}`;
+  // AZI et autres → fiche commune par défaut
+  return buildGeorisquesCommuneUrl(commune);
 }
 
 function georisquesDocumentUrl(doc, commune) {
