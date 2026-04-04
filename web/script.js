@@ -275,6 +275,21 @@ function keepPreviousArray(previousValue, nextValue) {
   return Array.isArray(previousValue) ? previousValue : [];
 }
 
+/**
+ * Fusionne un slot de service en préservant TOUTES les données précédentes si le
+ * prochain état est "pending" — seul le champ `status` est mis à jour.
+ * Cela évite que les alertes/compteurs disparaissent pendant une mise à jour en cours.
+ * @param {object} prev  Données actuelles du service (snapshot précédent)
+ * @param {object} next  Données reçues depuis l'API
+ * @param {function} merge  Fonction de fusion normale à appliquer quand next n'est pas pending
+ */
+function mergeServiceSlot(prev, next, merge) {
+  if (next?.status === 'pending' && Object.keys(prev).length > 0) {
+    return { ...prev, status: 'pending' };
+  }
+  return merge(prev, next);
+}
+
 function isUnknownStatusValue(value) {
   if (value === undefined || value === null) return true;
   const text = String(value).trim().toLowerCase();
@@ -452,12 +467,12 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
         },
       },
     },
-    sncf_isere: {
-      ...prevSncf,
-      ...nextSncf,
-      alerts_total: keepPreviousValue(prevSncf.alerts_total, nextSncf.alerts_total),
-      alerts: keepPreviousArray(prevSncf.alerts, nextSncf.alerts),
-    },
+    sncf_isere: mergeServiceSlot(prevSncf, nextSncf, (p, n) => ({
+      ...p,
+      ...n,
+      alerts_total: keepPreviousValue(p.alerts_total, n.alerts_total),
+      alerts: keepPreviousArray(p.alerts, n.alerts),
+    })),
     vigieau: {
       ...prevVigieau,
       ...nextVigieau,
@@ -482,15 +497,15 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
       stations_total: keepPreviousValue(prevAnfr.stations_total, nextAnfr.stations_total),
       average_support_height_m: keepPreviousValue(prevAnfr.average_support_height_m, nextAnfr.average_support_height_m),
     },
-    arcep_isere: {
-      ...prevArcep,
-      ...nextArcep,
-      outages_total: keepPreviousValue(prevArcep.outages_total, nextArcep.outages_total),
-      communes_total: keepPreviousValue(prevArcep.communes_total, nextArcep.communes_total),
-      voice_impacted_total: keepPreviousValue(prevArcep.voice_impacted_total, nextArcep.voice_impacted_total),
-      data_impacted_total: keepPreviousValue(prevArcep.data_impacted_total, nextArcep.data_impacted_total),
-      top_operators: keepPreviousArray(prevArcep.top_operators, nextArcep.top_operators),
-    },
+    arcep_isere: mergeServiceSlot(prevArcep, nextArcep, (p, n) => ({
+      ...p,
+      ...n,
+      outages_total: keepPreviousValue(p.outages_total, n.outages_total),
+      communes_total: keepPreviousValue(p.communes_total, n.communes_total),
+      voice_impacted_total: keepPreviousValue(p.voice_impacted_total, n.voice_impacted_total),
+      data_impacted_total: keepPreviousValue(p.data_impacted_total, n.data_impacted_total),
+      top_operators: keepPreviousArray(p.top_operators, n.top_operators),
+    })),
     apic_isere: {
       ...prevApic,
       ...nextApic,
