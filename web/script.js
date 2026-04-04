@@ -269,7 +269,9 @@ function keepPreviousValue(previousValue, nextValue) {
 }
 
 function keepPreviousArray(previousValue, nextValue) {
-  if (Array.isArray(nextValue)) return nextValue;
+  // On ne remplace les données précédentes que si le nouveau tableau est non-vide.
+  // Un tableau vide signifie un état "pending" ou une erreur temporaire, pas l'absence réelle de données.
+  if (Array.isArray(nextValue) && nextValue.length > 0) return nextValue;
   return Array.isArray(previousValue) ? previousValue : [];
 }
 
@@ -2786,12 +2788,15 @@ function renderStations(vigicruesPayload = []) {
   });
 
   // Supprimer les marqueurs qui ne sont plus dans les données
-  hydroMarkersByCode.forEach((marker, code) => {
-    if (!incomingCodes.has(code)) {
-      hydroLayer.removeLayer(marker);
-      hydroMarkersByCode.delete(code);
-    }
-  });
+  // Uniquement si on a reçu un jeu de données réel (non vide) — évite de tout supprimer en état pending.
+  if (incomingCodes.size > 0) {
+    hydroMarkersByCode.forEach((marker, code) => {
+      if (!incomingCodes.has(code)) {
+        hydroLayer.removeLayer(marker);
+        hydroMarkersByCode.delete(code);
+      }
+    });
+  }
 
   // --- Tronçons : diff ---
   const incomingTroncons = new Set();
@@ -2821,12 +2826,14 @@ function renderStations(vigicruesPayload = []) {
     }
   });
 
-  hydroLinesByCode.forEach((line, code) => {
-    if (!incomingTroncons.has(code)) {
-      hydroLineLayer.removeLayer(line);
-      hydroLinesByCode.delete(code);
-    }
-  });
+  if (incomingTroncons.size > 0) {
+    hydroLinesByCode.forEach((line, code) => {
+      if (!incomingTroncons.has(code)) {
+        hydroLineLayer.removeLayer(line);
+        hydroLinesByCode.delete(code);
+      }
+    });
+  }
 
   mapStats.stations = stationsWithPoints.length;
   updateMapSummary();
