@@ -500,6 +500,19 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
       alerts_total: keepPreviousValue(prevVigicruesFlash.alerts_total, nextVigicruesFlash.alerts_total),
       alerts: keepPreviousArray(prevVigicruesFlash.alerts, nextVigicruesFlash.alerts),
     },
+    prefecture_isere: {
+      ...(previous.prefecture_isere || {}),
+      ...(next.prefecture_isere || {}),
+      // Conserver les articles précédents si le flux est temporairement vide ou en erreur
+      items: keepPreviousArray((previous.prefecture_isere || {}).items, (next.prefecture_isere || {}).items),
+      articles: keepPreviousArray((previous.prefecture_isere || {}).articles, (next.prefecture_isere || {}).articles),
+    },
+    dauphine_isere: {
+      ...(previous.dauphine_isere || {}),
+      ...(next.dauphine_isere || {}),
+      items: keepPreviousArray((previous.dauphine_isere || {}).items, (next.dauphine_isere || {}).items),
+      articles: keepPreviousArray((previous.dauphine_isere || {}).articles, (next.dauphine_isere || {}).articles),
+    },
   };
 }
 

@@ -427,10 +427,16 @@ def _refresh_one_service(key: str) -> None:
         if key not in jobs:
             return
         fetcher, fallback = jobs[key]
+        # Sauvegarder les données courantes avant la tentative de fetch,
+        # pour les préserver si le service est temporairement indisponible.
+        with _external_risks_snapshot_lock:
+            prev_slot = deepcopy((_external_risks_snapshot.get("payload") or {}).get(key)) or {}
         try:
             result = fetcher()
         except Exception as exc:
-            result = dict(fallback)
+            # Conserver les données précédentes (articles, alertes…) :
+            # seul le statut et l'erreur sont mis à jour.
+            result = prev_slot if prev_slot else dict(fallback)
             result["status"] = "unavailable"
             result["error"] = str(exc)
             result["updated_at"] = utc_timestamp()
