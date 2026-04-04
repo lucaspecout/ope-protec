@@ -6211,6 +6211,56 @@ function buildSitrepMapSvg(title, points = [], lines = [], options = {}) {
   </figure>`;
 }
 
+// ---------------------------------------------------------------------------
+// Helpers couleur niveau de risque pour le SITREP
+// ---------------------------------------------------------------------------
+function sitrepLevelColor(level) {
+  const l = String(level || '').toLowerCase();
+  if (l === 'rouge') return '#c62828';
+  if (l === 'orange') return '#e65100';
+  if (l === 'jaune') return '#f9a825';
+  if (l === 'vert') return '#2e7d32';
+  return '#546e7a';
+}
+function sitrepLevelBg(level) {
+  const l = String(level || '').toLowerCase();
+  if (l === 'rouge') return '#ffebee';
+  if (l === 'orange') return '#fff3e0';
+  if (l === 'jaune') return '#fffde7';
+  if (l === 'vert') return '#e8f5e9';
+  return '#f5f5f5';
+}
+function sitrepLevelBadge(level) {
+  const l = normalizeLevel(level || 'inconnu');
+  const color = sitrepLevelColor(l);
+  const bg = sitrepLevelBg(l);
+  return `<span style="display:inline-block;padding:1px 8px;border-radius:4px;font-size:11px;font-weight:700;background:${bg};color:${color};border:1px solid ${color}33;text-transform:uppercase;letter-spacing:.04em">${escapeHtml(l)}</span>`;
+}
+function sitrepRow(cells, bold = false) {
+  return `<tr>${cells.map((c) => `<td style="padding:5px 8px;border-bottom:1px solid #e8eaed;${bold ? 'font-weight:600;' : ''}vertical-align:top">${c}</td>`).join('')}</tr>`;
+}
+function sitrepTh(cells) {
+  return `<tr>${cells.map((c) => `<th style="padding:5px 8px;background:#f0f4f8;border-bottom:2px solid #c8d6e5;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#3d5a80">${c}</th>`).join('')}</tr>`;
+}
+function sitrepTable(headers, rows, note = '') {
+  if (!rows.length) return `<p style="color:#78909c;font-size:12px;margin:4px 0 12px">Aucune donnée disponible.</p>`;
+  return `<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:${note ? '4px' : '14px'}">${sitrepTh(headers)}${rows.join('')}</table>${note ? `<p style="color:#78909c;font-size:11px;margin:0 0 12px">${note}</p>` : ''}`;
+}
+function sitrepSection(title, content, icon = '') {
+  return `<section style="margin-bottom:18px;page-break-inside:avoid">
+    <h2 style="margin:0 0 8px;font-size:14px;font-weight:700;color:#1a2e47;border-left:4px solid #1565c0;padding-left:10px;letter-spacing:.01em">${icon ? icon + ' ' : ''}${title}</h2>
+    ${content}
+  </section>`;
+}
+function sitrepKpiCard(label, value, level = '') {
+  const color = level ? sitrepLevelColor(normalizeLevel(level)) : '#1565c0';
+  const bg = level ? sitrepLevelBg(normalizeLevel(level)) : '#e3f0ff';
+  return `<div style="border:1px solid ${color}33;border-radius:6px;padding:10px 12px;background:${bg}">
+    <div style="font-size:10px;color:#546e7a;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">${escapeHtml(label)}</div>
+    <div style="font-size:18px;font-weight:800;color:${color};line-height:1.1">${typeof value === 'string' ? escapeHtml(value) : value}</div>
+  </div>`;
+}
+
 function buildSitrepHtml() {
   const dashboard = cachedDashboardSnapshot && Object.keys(cachedDashboardSnapshot).length
     ? cachedDashboardSnapshot
@@ -6219,192 +6269,216 @@ function buildSitrepHtml() {
     ? cachedExternalRisksSnapshot
     : (readSnapshot(STORAGE_KEYS.externalRisksSnapshot) || {});
 
-  const meteo = externalRisks?.meteo_france || {};
-  const vigicrues = externalRisks?.vigicrues || {};
-  const prefecture = Array.isArray(externalRisks?.prefecture_isere?.items) ? sortPrefectureItemsByRecency(externalRisks.prefecture_isere.items).slice(0, 5) : [];
-  const atmo = externalRisks?.atmo_aura || {};
-  const bison = externalRisks?.bison_fute?.today?.isere || {};
-  const vigieau = Array.isArray(externalRisks?.vigieau?.alerts) ? externalRisks.vigieau.alerts.slice(0, 5) : [];
-  const sncf = Array.isArray(externalRisks?.sncf_isere?.alerts) ? externalRisks.sncf_isere.alerts.slice(0, 5) : [];
-  const logs = Array.isArray(cachedLogs) && cachedLogs.length ? cachedLogs.slice(0, 8) : (Array.isArray(dashboard.latest_logs) ? dashboard.latest_logs.slice(0, 8) : []);
+  // ── Sources de données ──────────────────────────────────────────────────
+  const meteo        = externalRisks?.meteo_france || {};
+  const vigicrues    = externalRisks?.vigicrues || {};
+  const atmo         = externalRisks?.atmo_aura || {};
+  const bison        = externalRisks?.bison_fute?.today?.isere || {};
+  const sncf         = externalRisks?.sncf_isere || {};
+  const vigieau      = externalRisks?.vigieau || {};
+  const apic         = externalRisks?.apic_isere || {};
+  const vigiFlash    = externalRisks?.vigicrues_flash_isere || {};
+  const electricity  = externalRisks?.electricity_isere || {};
+  const arcep        = externalRisks?.arcep_isere || {};
+  const prefData     = externalRisks?.prefecture_isere || {};
+  const dauphineData = externalRisks?.dauphine_isere || {};
 
-  const meteoItems = Array.isArray(meteo.current_alerts) && meteo.current_alerts.length
-    ? meteo.current_alerts.map((alert) => {
-      const details = Array.isArray(alert.details) && alert.details.length ? ` (${escapeHtml(alert.details.slice(0, 2).join(' · '))})` : '';
-      return `<strong>${escapeHtml(alert.phenomenon || 'Phénomène')}</strong> : ${escapeHtml(normalizeLevel(alert.level || 'inconnu'))}${details}`;
-    })
-    : [escapeHtml(sanitizeMeteoInformation(meteo.info_state) || 'Aucune vigilance significative signalée.')];
+  const prefItems    = Array.isArray(prefData.items) ? sortPrefectureItemsByRecency(prefData.items).slice(0, 6) : [];
+  const dauphItems   = Array.isArray(dauphineData.items) ? sortPrefectureItemsByRecency(dauphineData.items).slice(0, 4) : [];
+  const vigieauAlerts = Array.isArray(vigieau.alerts) ? vigieau.alerts.slice(0, 8) : [];
+  const sncfAlerts   = Array.isArray(sncf.alerts) ? sncf.alerts.slice(0, 8) : [];
+  const apicAlerts   = Array.isArray(apic.alerts) ? apic.alerts.slice(0, 5) : [];
+  const flashAlerts  = Array.isArray(vigiFlash.alerts) ? vigiFlash.alerts.slice(0, 5) : [];
+  const allStations  = Array.isArray(vigicrues.stations) ? vigicrues.stations : [];
+  const alertStations = allStations.filter((s) => ['orange', 'rouge'].includes(stationStatusLevel(s)));
+  const troncons     = Array.isArray(vigicrues.troncons) ? vigicrues.troncons : [];
+  const logs = Array.isArray(cachedLogs) && cachedLogs.length ? cachedLogs : (Array.isArray(dashboard.latest_logs) ? dashboard.latest_logs : []);
 
-  const vigicruesItems = Array.isArray(vigicrues.stations) && vigicrues.stations.length
-    ? vigicrues.stations.slice(0, 6).map((station) => {
-      const level = normalizeLevel(station.level || station.vigilance || vigicrues.water_alert_level || 'inconnu');
-      return `<strong>${escapeHtml(station.station || station.name || 'Station')}</strong> · niveau ${escapeHtml(level)}`;
-    })
-    : ['Aucune station prioritaire transmise.'];
+  // ── Calculs globaux ─────────────────────────────────────────────────────
+  const now          = new Date();
+  const generatedAt  = safeDateToLocale(Date.now(), { dateStyle: 'full', timeStyle: 'short' });
+  const vigilance    = normalizeLevel(dashboard.vigilance || meteo.level || 'vert');
+  const crues        = normalizeLevel(dashboard.crues || vigicrues.water_alert_level || 'vert');
+  const globalRisk   = normalizeLevel(dashboard.global_risk || 'vert');
+  const crisisCount  = Number(dashboard.communes_crise ?? 0);
+  const globalColor  = sitrepLevelColor(globalRisk);
+  const globalBg     = sitrepLevelBg(globalRisk);
 
-  const prefectureItems = prefecture.map((item) => `<strong>${escapeHtml(item.title || 'Actualité')}</strong>${item.published_at ? ` · ${escapeHtml(item.published_at)}` : ''}`);
-  const vigieauItems = vigieau.map((item) => `<strong>${escapeHtml(item.level || 'Restriction')}</strong> · ${escapeHtml(item.zone || item.title || 'Isère')}`);
-  const sncfItems = sncf.map((item) => `<strong>${escapeHtml(item.type || 'Alerte')}</strong> · ${escapeHtml(item.title || 'Incident réseau')}`);
-  const now = new Date();
-  const detailedLogItems = logs.map((log) => {
-    const at = safeDateToLocale(log.event_time || log.created_at || Date.now());
-    const municipalityName = log.municipality_id ? getMunicipalityName(log.municipality_id) : 'Non précisée';
-    return {
-      when: new Date(log.event_time || log.created_at || Date.now()),
-      html: `<strong>${escapeHtml(at)}</strong> · ${escapeHtml(log.event_type || 'Évènement')} · ${escapeHtml(normalizeLevel(log.danger_level || 'vert'))}<br/>Commune concernée: <strong>${escapeHtml(municipalityName)}</strong> · Portée: ${escapeHtml(formatLogScope(log))}<br/>Statut: ${escapeHtml(LOG_STATUS_LABEL[String(log.status || 'nouveau')] || 'Nouveau')} · Lieu: ${escapeHtml(log.location || 'non précisé')}<br/>Source: ${escapeHtml(log.source || 'non précisée')} · Responsable: ${escapeHtml(log.assigned_to || 'non assigné')}<br/>Description: ${escapeHtml(log.description || 'Aucune description')} · Actions: ${escapeHtml(log.actions_taken || 'Aucune')}`,
-    };
-  });
-  const logItemsToday = detailedLogItems.filter((entry) => isSameDayLocal(entry.when, now)).map((entry) => entry.html);
-  const logItemsYesterday = detailedLogItems.filter((entry) => isPreviousDayLocal(entry.when, now)).map((entry) => entry.html);
-
-  const generatedAt = safeDateToLocale(Date.now(), { dateStyle: 'full', timeStyle: 'short' });
-  const crisisCount = Number(dashboard.communes_crise ?? 0);
-  const globalRisk = escapeHtml(normalizeLevel(dashboard.global_risk || meteo.level || 'vert'));
-  const weatherLevel = escapeHtml(normalizeLevel(meteo.level || dashboard.vigilance || 'vert'));
-  const waterStations = Array.isArray(vigicrues.stations) ? vigicrues.stations : [];
-  const nonGreenWaterStations = waterStations.filter((station) => ['jaune', 'orange', 'rouge'].includes(stationStatusLevel(station)));
-  const waterSummary = nonGreenWaterStations.length
-    ? `Stations eau à surveiller: ${nonGreenWaterStations.map((station) => `${station.station || station.name || station.code || 'Station'} (${stationStatusLevel(station)})`).join(', ')}`
-    : `Toutes les stations eau sont vertes · score global ${escapeHtml(normalizeLevel(vigicrues.water_alert_level || globalRisk || 'vert'))}`;
   const crisisMunicipalities = (Array.isArray(cachedMunicipalityRecords) ? cachedMunicipalityRecords : [])
-    .filter((municipality) => municipality.crisis_mode)
-    .map((municipality) => municipality.name)
-    .filter(Boolean);
-  const crisisMunicipalityLabel = crisisMunicipalities.length ? crisisMunicipalities.join(', ') : 'Aucune commune en crise';
-  const allPoints = [
-    ...RESOURCE_POINTS,
-    ...(Array.isArray(cachedStations) ? cachedStations.filter((station) => station.lat != null && station.lon != null) : []),
-    ...(Array.isArray(mapPoints) ? mapPoints.filter((point) => point.lat != null && point.lon != null) : []),
-  ];
-  const crisisPoints = (Array.isArray(cachedMunicipalityRecords) ? cachedMunicipalityRecords : [])
-    .filter((municipality) => municipality.crisis_mode && municipality.lat != null && municipality.lon != null)
-    .map((municipality) => ({ lat: municipality.lat, lon: municipality.lon, color: '#e03131' }));
-  const itinisereTrafficPoints = Array.isArray(cachedItinisereEvents)
-    ? [...cachedItinisereEvents, ...(Array.isArray(cachedBisonLiveEvents) ? cachedBisonLiveEvents : [])]
-      .filter((event) => (event.lat != null && event.lon != null) || (event.position?.lat != null && event.position?.lon != null))
-      .map((event) => ({ lat: event.lat ?? event.position?.lat, lon: event.lon ?? event.position?.lon, color: '#d9480f' }))
-    : [];
-  const itinisereRoadLines = Object.values(ITINISERE_ROAD_CORRIDORS).map((corridor) => ({
-    color: '#f76707',
-    weight: 2.5,
-    points: corridor.map((coord) => ({ lat: coord[0], lon: coord[1] })),
-  }));
-  const operationalCards = [
-    { label: 'Alertes météo actives', value: Array.isArray(meteo.current_alerts) ? meteo.current_alerts.length : 0 },
-    { label: 'Stations Vigicrues suivies', value: waterStations.length },
-    { label: 'Restrictions eau', value: vigieau.length },
-    { label: 'Évènements trafic Isère', value: itinisereTrafficPoints.length },
-    { label: 'Alertes SNCF', value: sncf.length },
-    { label: 'Actualités Préfecture', value: prefecture.length },
-  ];
-  const vigilance = normalizeLevel(dashboard.vigilance || meteo.level || 'vert');
-  const crues = normalizeLevel(dashboard.crues || vigicrues.water_alert_level || 'vert');
-  const bisonDeparture = normalizeLevel(bison.departure || 'inconnu');
-  const bisonReturn = normalizeLevel(bison.return || 'inconnu');
-  const bisonCombinedLevel = riskRank(bisonReturn) > riskRank(bisonDeparture) ? bisonReturn : bisonDeparture;
-  const apicAlerts = Number(externalRisks?.apic_isere?.alerts_total ?? (externalRisks?.apic_isere?.alerts || []).length);
-  const vigicruesFlashAlerts = Number(externalRisks?.vigicrues_flash_isere?.alerts_total ?? (externalRisks?.vigicrues_flash_isere?.alerts || []).length);
-  const orangeOrRedLogsCount = logs.filter((log) => ['orange', 'rouge'].includes(normalizeLevel(log.danger_level))).length;
-  const overviewCards = [
-    { label: 'Vigilance météo', value: vigilance },
-    { label: 'Niveau crues', value: crues },
-    { label: 'Risque global', value: globalRisk },
-    { label: 'Communes en crise', value: String(crisisCount) },
-    { label: 'Bison Futé (départ / retour)', value: `${bisonDeparture} / ${bisonReturn}` },
-    { label: 'Alertes APIC', value: String(apicAlerts) },
-    { label: 'Alertes Vigicrues Flash', value: String(vigicruesFlashAlerts) },
-    { label: 'Main courante orange / rouge', value: String(orangeOrRedLogsCount) },
-  ];
-  const overviewRisks = buildCriticalRisksMarkup(dashboard, externalRisks);
+    .filter((m) => m.crisis_mode).map((m) => m.name).filter(Boolean);
+
+  const logsAll = logs.slice(0, 20);
+  const logsToday     = logsAll.filter((l) => isSameDayLocal(new Date(l.event_time || l.created_at || Date.now()), now));
+  const logsYesterday = logsAll.filter((l) => isPreviousDayLocal(new Date(l.event_time || l.created_at || Date.now()), now));
+  const logsAlert     = logsAll.filter((l) => ['orange', 'rouge'].includes(normalizeLevel(l.danger_level)));
+
+  // ── HTML de chaque section ──────────────────────────────────────────────
+
+  // KPI header (3 colonnes + 2 colonnes)
+  const kpiTop = `
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:14px">
+      ${sitrepKpiCard('Vigilance météo', sitrepLevelBadge(vigilance), vigilance)}
+      ${sitrepKpiCard('Niveau crues', sitrepLevelBadge(crues), crues)}
+      ${sitrepKpiCard('Risque global', sitrepLevelBadge(globalRisk), globalRisk)}
+      ${sitrepKpiCard('Communes en crise', String(crisisCount), crisisCount > 0 ? 'rouge' : 'vert')}
+      ${sitrepKpiCard('Stations en alerte', String(alertStations.length), alertStations.length > 0 ? (alertStations.some((s) => stationStatusLevel(s) === 'rouge') ? 'rouge' : 'orange') : 'vert')}
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:16px">
+      ${sitrepKpiCard('APIC pluie intense', String(Number(apic.alerts_total ?? apicAlerts.length)))}
+      ${sitrepKpiCard('Vigicrues Flash', String(Number(vigiFlash.alerts_total ?? flashAlerts.length)))}
+      ${sitrepKpiCard('Restrictions eau', String(vigieauAlerts.length))}
+      ${sitrepKpiCard('Alertes SNCF', String(sncfAlerts.length))}
+      ${sitrepKpiCard('Qualité air', escapeHtml(String(atmo?.today?.label || atmo?.today?.index || '—')))}
+      ${sitrepKpiCard('MCO orange/rouge', String(logsAlert.length), logsAlert.length > 0 ? 'orange' : 'vert')}
+    </div>`;
+
+  // Météo
+  const meteoAlerts = Array.isArray(meteo.current_alerts) && meteo.current_alerts.length
+    ? meteo.current_alerts.map((a) => {
+        const lvl = normalizeLevel(a.level || 'inconnu');
+        const details = Array.isArray(a.details) && a.details.length ? a.details.slice(0, 2).join(' · ') : '';
+        return sitrepRow([sitrepLevelBadge(lvl), `<strong>${escapeHtml(a.phenomenon || '—')}</strong>`, escapeHtml(details || a.description || '—')]);
+      })
+    : null;
+  const meteoHtml = meteoAlerts
+    ? sitrepTable(['Niveau', 'Phénomène', 'Détail'], meteoAlerts)
+    : `<p style="color:#2e7d32;font-size:12px">✔ Aucune vigilance active · ${escapeHtml(sanitizeMeteoInformation(meteo.info_state) || 'Situation normale.')}</p>`;
+  const meteoSection = sitrepSection('Météo-France · Vigilance', meteoHtml + (meteo.bulletin_title ? `<p style="font-size:11px;color:#546e7a;margin-top:4px">Bulletin : ${escapeHtml(meteo.bulletin_title)}</p>` : ''), '🌦');
+
+  // Vigicrues tronçons
+  const tronconsRows = troncons.map((t) => {
+    const lvl = normalizeLevel(t.level || 'vert');
+    return sitrepRow([escapeHtml(t.name || t.code || '—'), sitrepLevelBadge(lvl), String(Array.isArray(t.stations) ? t.stations.length : '—')]);
+  });
+  const tronconsHtml = sitrepTable(['Tronçon', 'Niveau', 'Stations'], tronconsRows, `${allStations.length} station(s) suivie(s) au total`);
+
+  // Stations en alerte
+  const alertRows = alertStations.sort((a, b) => riskRank(stationStatusLevel(b)) - riskRank(stationStatusLevel(a))).map((s) => {
+    const lvl = stationStatusLevel(s);
+    const delta = s.delta_m != null ? (s.delta_m >= 0 ? `+${Number(s.delta_m).toFixed(2)} m` : `${Number(s.delta_m).toFixed(2)} m`) : '—';
+    return sitrepRow([
+      sitrepLevelBadge(lvl),
+      `<strong>${escapeHtml(s.station || s.code || '—')}</strong>`,
+      escapeHtml(s.river || '—'),
+      `${s.height_m != null ? Number(s.height_m).toFixed(2) + ' m' : '—'}`,
+      delta,
+    ]);
+  });
+  const alertStationsHtml = alertRows.length
+    ? sitrepTable(['Niveau', 'Station', 'Cours d\'eau', 'Hauteur', 'Variation'], alertRows)
+    : `<p style="color:#2e7d32;font-size:12px">✔ Aucune station en alerte orange ou rouge.</p>`;
+  const vigicruesSection = sitrepSection('Vigicrues · Hydrologie Isère', tronconsHtml + alertStationsHtml, '💧');
+
+  // APIC + Vigicrues Flash
+  const apicRows = apicAlerts.map((a) => sitrepRow([sitrepLevelBadge(a.level || 'jaune'), escapeHtml(a.zone || a.title || '—'), escapeHtml(a.description || '—')]));
+  const flashRows = flashAlerts.map((a) => sitrepRow([sitrepLevelBadge(a.level || 'orange'), escapeHtml(a.zone || a.title || '—'), escapeHtml(a.description || '—')]));
+  const alertsSection = sitrepSection('Alertes spéciales', [
+    apicAlerts.length ? `<p style="font-size:11px;font-weight:700;margin:0 0 4px;color:#546e7a">APIC — Pluies intenses</p>${sitrepTable(['Niveau', 'Zone', 'Description'], apicRows)}` : '',
+    flashAlerts.length ? `<p style="font-size:11px;font-weight:700;margin:0 0 4px;color:#546e7a">Vigicrues Flash — Crues rapides</p>${sitrepTable(['Niveau', 'Zone', 'Description'], flashRows)}` : '',
+    !apicAlerts.length && !flashAlerts.length ? '<p style="color:#2e7d32;font-size:12px">✔ Aucune alerte spéciale active.</p>' : '',
+  ].join(''), '🚨');
+
+  // Trafic
+  const sncfRows = sncfAlerts.map((a) => sitrepRow([escapeHtml(a.type || '—'), `<strong>${escapeHtml(a.title || '—')}</strong>`, escapeHtml(a.line || a.description || '—')]));
+  const bisonDep = normalizeLevel(bison.departure || 'inconnu');
+  const bisonRet = normalizeLevel(bison.return || 'inconnu');
+  const bisonHtml = `<div style="display:flex;gap:16px;margin-bottom:8px">
+    <div>Départ Isère : ${sitrepLevelBadge(bisonDep)}</div>
+    <div>Retour Isère : ${sitrepLevelBadge(bisonRet)}</div>
+  </div>`;
+  const trafficSection = sitrepSection('Trafic & Transport', bisonHtml + (sncfAlerts.length
+    ? sitrepTable(['Type', 'Incident', 'Ligne / Détail'], sncfRows)
+    : '<p style="color:#2e7d32;font-size:12px">✔ Aucune alerte SNCF en Isère.</p>'), '🚦');
+
+  // Vigieau
+  const vigieauRows = vigieauAlerts.map((a) => sitrepRow([sitrepLevelBadge(a.level || 'jaune'), escapeHtml(a.zone || '—'), escapeHtml(a.usages || a.title || '—')]));
+  const vigieauSection = sitrepSection('Vigieau · Restrictions eau', vigieauAlerts.length
+    ? sitrepTable(['Niveau', 'Zone', 'Usages concernés'], vigieauRows)
+    : '<p style="color:#2e7d32;font-size:12px">✔ Aucune restriction eau en vigueur.</p>', '💧');
+
+  // Électricité + ARCEP
+  const elecBadge = sitrepLevelBadge(normalizeLevel(electricity.level || 'vert'));
+  const elecHtml = `<p style="font-size:12px">${elecBadge} Réseau RTE · Marge: <strong>${electricity.supply_margin_mw != null ? electricity.supply_margin_mw + ' MW' : '—'}</strong>${electricity.error ? ` · <span style="color:#c62828">${escapeHtml(electricity.error)}</span>` : ''}</p>`;
+  const arcepHtml = `<p style="font-size:12px">Sites mobiles indisponibles : <strong>${Number(arcep.outages_total ?? 0)}</strong> · Communes impactées : <strong>${Number(arcep.communes_total ?? 0)}</strong> · Voix : ${Number(arcep.voice_impacted_total ?? 0)} · Data : ${Number(arcep.data_impacted_total ?? 0)}</p>`;
+  const reseauxSection = sitrepSection('Réseaux critiques', elecHtml + arcepHtml, '⚡');
+
+  // Préfecture + Dauphiné
+  const prefRows = prefItems.map((item) => sitrepRow([escapeHtml(item.published_at || '—'), `<strong>${escapeHtml(item.title || '—')}</strong>`]));
+  const dauphRows = dauphItems.map((item) => sitrepRow([escapeHtml(item.published_at || '—'), `<strong>${escapeHtml(item.title || '—')}</strong>`]));
+  const newsSection = sitrepSection('Informations institutionnelles', [
+    prefItems.length ? `<p style="font-size:11px;font-weight:700;margin:0 0 4px;color:#546e7a">Préfecture de l'Isère</p>${sitrepTable(['Date', 'Actualité'], prefRows)}` : '<p style="font-size:12px;color:#78909c">Aucune actualité Préfecture.</p>',
+    dauphItems.length ? `<p style="font-size:11px;font-weight:700;margin:0 0 4px;color:#546e7a">Le Dauphiné Libéré · Isère</p>${sitrepTable(['Date', 'Article'], dauphRows)}` : '',
+  ].join(''), '📰');
+
+  // Main courante
+  const logRow = (log) => {
+    const at     = safeDateToLocale(log.event_time || log.created_at || Date.now(), { dateStyle: 'short', timeStyle: 'short' });
+    const lvl    = normalizeLevel(log.danger_level || 'vert');
+    const mun    = log.municipality_id ? getMunicipalityName(log.municipality_id) : (log.location || '—');
+    const desc   = String(log.description || '—').slice(0, 80);
+    return sitrepRow([escapeHtml(at), sitrepLevelBadge(lvl), escapeHtml(log.event_type || '—'), escapeHtml(mun), escapeHtml(desc)]);
+  };
+  const logHeaders = ['Horodatage', 'Niveau', 'Type', 'Commune / Lieu', 'Description'];
+  const mcoTodayHtml = logsToday.length ? sitrepTable(logHeaders, logsToday.map(logRow)) : '<p style="color:#78909c;font-size:12px">Aucun évènement ce jour.</p>';
+  const mcoYestHtml  = logsYesterday.length ? sitrepTable(logHeaders, logsYesterday.map(logRow)) : '<p style="color:#78909c;font-size:12px">Aucun évènement la veille.</p>';
+  const mcoAlertHtml = logsAlert.length ? `<p style="font-size:11px;font-weight:700;color:#e65100;margin:4px 0">⚠ ${logsAlert.length} évènement(s) orange/rouge en cours :</p>${sitrepTable(logHeaders, logsAlert.map(logRow))}` : '';
+  const mcoSection = sitrepSection('Main courante opérationnelle', mcoAlertHtml + `<p style="font-size:11px;font-weight:700;margin:8px 0 4px;color:#546e7a">Aujourd'hui (J0)</p>` + mcoTodayHtml + `<p style="font-size:11px;font-weight:700;margin:8px 0 4px;color:#546e7a">Veille (J-1)</p>` + mcoYestHtml, '📋');
+
+  // Communes en crise
+  const crisisMuniHtml = crisisMunicipalities.length
+    ? `<p style="font-size:12px"><strong>${crisisMunicipalities.join(' · ')}</strong></p>`
+    : `<p style="color:#2e7d32;font-size:12px">✔ Aucune commune en mode crise activé.</p>`;
+  const crisisSection = sitrepSection('Communes en crise', crisisMuniHtml, '🏛');
 
   return `<!doctype html>
 <html lang="fr">
 <head>
-<meta charset="utf-8" />
-<title>SITREP Isère</title>
+<meta charset="utf-8"/>
+<title>SITREP Isère · ${escapeHtml(generatedAt)}</title>
 <style>
-  @page { size: A4; margin: 16mm; }
-  body { font-family: Inter, Arial, sans-serif; color: #0f1c2f; margin: 0; }
-  .header { border: 3px solid #f39200; border-radius: 14px; padding: 14px 16px; background: linear-gradient(135deg, #fff7ec, #ffffff); }
-  .badge { display: inline-block; background: #0d4b8e; color: #fff; border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 700; }
-  h1 { margin: 8px 0 4px; color: #0d4b8e; font-size: 24px; }
-  h2 { margin: 16px 0 8px; color: #0d4b8e; font-size: 18px; border-bottom: 2px solid #f39200; padding-bottom: 4px; }
-  p { margin: 4px 0; line-height: 1.4; }
-  .kpi { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
-  .card { border: 1px solid #d8e4f5; border-radius: 10px; padding: 10px; background: #f8fbff; }
-  .card strong { display: block; font-size: 20px; margin-top: 4px; }
-  ul { margin: 6px 0 0; padding-left: 18px; }
-  li { margin-bottom: 5px; }
-  .muted { color: #53627a; font-size: 12px; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @page { size: A4; margin: 14mm 14mm 18mm; }
+  * { box-sizing: border-box; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: #1a2e47; margin: 0; line-height: 1.45; }
+  p { margin: 0 0 4px; }
+  table { border-collapse: collapse; }
+  section { page-break-inside: avoid; }
 </style>
 </head>
 <body>
-  <header class="header">
-    <span class="badge">Protection Civile · Isère (38)</span>
-    <h1>SITREP quotidien · Conditions météo & points d'intérêt</h1>
-    <p><strong>Émis le :</strong> ${escapeHtml(generatedAt)}</p>
-    <p class="muted">Document opérationnel d'aide à la décision.</p>
-    <div class="kpi">
-      <article class="card"><p>Niveau météo</p><strong>${weatherLevel}</strong></article>
-      <article class="card"><p>Risque global</p><strong>${globalRisk}</strong></article>
-      <article class="card"><p>Communes en crise</p><strong>${escapeHtml(String(crisisCount))}</strong></article>
-    </div>
-  </header>
-  <section>
-    <h2>Vue d'ensemble opérationnelle</h2>
-    <div class="kpi">
-      ${overviewCards.map((card) => `<article class="card"><p>${escapeHtml(card.label)}</p><strong>${escapeHtml(String(card.value))}</strong></article>`).join('')}
-    </div>
-    <p><strong>Risque mobilité dominant :</strong> ${escapeHtml(bisonCombinedLevel)}</p>
-    <ul>${overviewRisks}</ul>
-  </section>
-  <section>
-    <h2>Situation météo du jour</h2>
-    <ul>${toSitrepBulletItems(meteoItems)}</ul>
-  </section>
-  <section>
-    <h2>Indicateurs consolidés SITREP</h2>
-    <div class="kpi">
-      ${operationalCards.map((card) => `<article class="card"><p>${escapeHtml(card.label)}</p><strong>${escapeHtml(String(card.value))}</strong></article>`).join('')}
-    </div>
-  </section>
-  <section class="grid">
-    <div>
-      <h2>Hydrologie & mobilité</h2>
-      <p><strong>Vigicrues :</strong> ${escapeHtml(normalizeLevel(vigicrues.water_alert_level || 'inconnu'))}</p>
-      <ul>${toSitrepBulletItems(vigicruesItems)}</ul>
-      <p><strong>Bison Futé (38)</strong> · Départs: ${escapeHtml(normalizeLevel(bison.departure || 'inconnu'))} · Retours: ${escapeHtml(normalizeLevel(bison.return || 'inconnu'))}</p>
-      <p><strong>Qualité de l'air:</strong> ${escapeHtml(String(atmo?.today?.label || normalizeLevel(atmo?.today?.level || 'inconnu')).toLowerCase())}</p>
-    </div>
-    <div>
-      <h2>Infos institutionnelles</h2>
-      <ul>${toSitrepBulletItems(prefectureItems, 'Aucune actualité Préfecture.')}</ul>
-    </div>
-  </section>
-  <section class="grid">
-    <div>
-      <h2>Restrictions eau</h2>
-      <p><strong>${waterSummary}</strong></p>
-      <ul>${toSitrepBulletItems(vigieauItems, 'Aucune restriction Vigieau remontée.')}</ul>
-    </div>
-    <div>
-      <h2>Alertes SNCF</h2>
-      <ul>${toSitrepBulletItems(sncfItems, 'Aucune alerte SNCF accidents/travaux en Isère.')}</ul>
-    </div>
-  </section>
-  <section>
-    <h2>Main courante opérationnelle du jour</h2>
-    <ul>${toSitrepBulletItems(logItemsToday, 'Aucun évènement aujourd\'hui.')}</ul>
-  </section>
-  <section>
-    <h2>Main courante opérationnelle de veille (J-1)</h2>
-    <ul>${toSitrepBulletItems(logItemsYesterday, 'Aucun évènement sur la veille.')}</ul>
-  </section>
-  <section>
-    <h2>Communes en crise</h2>
-    <p><strong>${escapeHtml(crisisMunicipalityLabel)}</strong></p>
-  </section>
+
+<!-- ══ EN-TÊTE ════════════════════════════════════════════════════════════ -->
+<div style="border:3px solid ${globalColor};border-radius:8px;padding:12px 16px;background:${globalBg};margin-bottom:16px;display:flex;justify-content:space-between;align-items:flex-start">
+  <div>
+    <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#546e7a;margin-bottom:2px">Protection Civile · Département de l'Isère (38)</div>
+    <div style="font-size:20px;font-weight:800;color:#1a2e47;margin-bottom:4px">SITREP · Situation de référence</div>
+    <div style="font-size:12px;color:#3d5a80">Émis le <strong>${escapeHtml(generatedAt)}</strong> · Document opérationnel d'aide à la décision</div>
+  </div>
+  <div style="text-align:right;flex-shrink:0;margin-left:16px">
+    <div style="font-size:11px;color:#546e7a;margin-bottom:4px">Risque global</div>
+    <div style="font-size:28px;font-weight:900;color:${globalColor};text-transform:uppercase;letter-spacing:.04em">${globalRisk}</div>
+  </div>
+</div>
+
+<!-- ══ KPI ════════════════════════════════════════════════════════════════ -->
+${kpiTop}
+
+<!-- ══ SECTIONS ══════════════════════════════════════════════════════════ -->
+${meteoSection}
+${vigicruesSection}
+${alertsSection}
+${trafficSection}
+${vigieauSection}
+${reseauxSection}
+${newsSection}
+${mcoSection}
+${crisisSection}
+
+<!-- ══ PIED DE PAGE ══════════════════════════════════════════════════════ -->
+<div style="border-top:1px solid #c8d6e5;margin-top:20px;padding-top:8px;display:flex;justify-content:space-between;font-size:10px;color:#78909c">
+  <span>CRISIS38 · Protection Civile Isère · Document généré automatiquement</span>
+  <span>Visa opérationnel : ________________________</span>
+</div>
+
 </body>
 </html>`;
 }
