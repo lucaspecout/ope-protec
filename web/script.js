@@ -167,6 +167,9 @@ let leafletMap = null;
 let boundaryLayer = null;
 let hydroLayer = null;
 let hydroLineLayer = null;
+// Index des marqueurs/polylines existants pour mise à jour sans clearLayers
+const hydroMarkersByCode = new Map();
+const hydroLinesByCode = new Map();
 let pcsBoundaryLayer = null;
 let pcsLayer = null;
 let resourceLayer = null;
@@ -2729,48 +2732,103 @@ function renderStations(vigicruesPayload = []) {
     : (Array.isArray(vigicruesPayload?.stations) ? vigicruesPayload.stations : []);
   const troncons = Array.isArray(vigicruesPayload?.troncons) ? vigicruesPayload.troncons : [];
   cachedStations = stations;
-  const visible = document.getElementById('filter-hydro')?.checked ?? true;
+
+  // Mise à jour de la liste latérale (toujours, même sans carte)
   setHtml('hydro-stations-list', stations.slice(0, 40).map((s) => {
     const statusLevel = stationStatusLevel(s);
     return `<li><strong>${s.station || s.code}</strong> · ${s.river || ''} · <span style="color:${levelColor(statusLevel)}">${statusLevel}</span> · Contrôle: ${escapeHtml(s.control_status || 'inconnu')} · ${s.height_m} m</li>`;
   }).join('') || '<li>Aucune station.</li>');
+
   if (!hydroLayer || !hydroLineLayer) return;
-  hydroLayer.clearLayers();
-  hydroLineLayer.clearLayers();
+
+  const visible = document.getElementById('filter-hydro')?.checked ?? true;
+
   if (!visible) {
+    // Filtre désactivé : retirer tous les marqueurs de la carte sans détruire les Maps
+    hydroMarkersByCode.forEach((marker) => hydroLayer.removeLayer(marker));
+    hydroMarkersByCode.clear();
+    hydroLinesByCode.forEach((line) => hydroLineLayer.removeLayer(line));
+    hydroLinesByCode.clear();
     mapStats.stations = 0;
     updateMapSummary();
     return;
   }
 
+  // --- Stations : diff — on ne touche qu'à ce qui a changé ---
   const stationsWithPoints = stations
     .map((s) => {
       const coords = normalizeMapCoordinates(s.lat, s.lon);
       return coords ? { ...s, ...coords } : null;
     })
     .filter(Boolean);
-  mapStats.stations = stationsWithPoints.length;
+
+  const incomingCodes = new Set();
   stationsWithPoints.forEach((s) => {
+    const code = String(s.code || '');
+    if (!code) return;
+    incomingCodes.add(code);
     const statusLevel = stationStatusLevel(s);
     const counter = ({ vert: 'V', jaune: 'J', orange: 'O', rouge: 'R' }[statusLevel] || 'V');
-    window.L.marker([s.lat, s.lon], { icon: vigicruesStationIcon(statusLevel, counter) })
-      .bindPopup(`<strong>${s.station || s.code}</strong><br>${s.river || ''}<br>Département: Isère (38)<br>Statut: ${statusLevel}<br>Contrôle station: ${escapeHtml(s.control_status || 'inconnu')}<br>Hauteur: ${s.height_m} m`)
-      .addTo(hydroLayer);
+    const popupContent = `<strong>${escapeHtml(s.station || s.code)}</strong><br>${escapeHtml(s.river || '')}<br>Département: Isère (38)<br>Statut: ${escapeHtml(statusLevel)}<br>Contrôle station: ${escapeHtml(s.control_status || 'inconnu')}<br>Hauteur: ${s.height_m} m`;
+
+    if (hydroMarkersByCode.has(code)) {
+      // Marqueur déjà présent : mettre à jour l'icône et le popup sans flash
+      const existing = hydroMarkersByCode.get(code);
+      existing.setIcon(vigicruesStationIcon(statusLevel, counter));
+      existing.setPopupContent(popupContent);
+    } else {
+      // Nouveau marqueur
+      const marker = window.L.marker([s.lat, s.lon], { icon: vigicruesStationIcon(statusLevel, counter) })
+        .bindPopup(popupContent)
+        .addTo(hydroLayer);
+      hydroMarkersByCode.set(code, marker);
+    }
   });
 
+  // Supprimer les marqueurs qui ne sont plus dans les données
+  hydroMarkersByCode.forEach((marker, code) => {
+    if (!incomingCodes.has(code)) {
+      hydroLayer.removeLayer(marker);
+      hydroMarkersByCode.delete(code);
+    }
+  });
+
+  // --- Tronçons : diff ---
+  const incomingTroncons = new Set();
   troncons.forEach((troncon) => {
+    const code = String(troncon.code || '');
+    if (!code) return;
     const polyline = Array.isArray(troncon?.polyline) ? troncon.polyline : [];
     if (!polyline.length) return;
     const points = polyline
       .map((point) => Array.isArray(point) && point.length >= 2 ? normalizeMapCoordinates(point[0], point[1]) : null)
       .filter(Boolean);
     if (points.length < 2) return;
+    incomingTroncons.add(code);
     const level = normalizeLevel(troncon.level || 'vert');
-    window.L.polyline(points.map((point) => [point.lat, point.lon]), { color: levelColor(level), weight: 6, opacity: 0.9 })
-      .bindPopup(`<strong>${escapeHtml(troncon.name || 'Tronçon Isère')}</strong><br>Code: ${escapeHtml(troncon.code || 'N/A')}<br>Niveau: ${escapeHtml(level)}${troncon.rss ? `<br><a href="${escapeHtml(troncon.rss)}" target="_blank" rel="noopener noreferrer">Flux RSS</a>` : ''}`)
-      .addTo(hydroLineLayer);
+    const popupContent = `<strong>${escapeHtml(troncon.name || 'Tronçon Isère')}</strong><br>Code: ${escapeHtml(code)}<br>Niveau: ${escapeHtml(level)}${troncon.rss ? `<br><a href="${escapeHtml(troncon.rss)}" target="_blank" rel="noopener noreferrer">Flux RSS</a>` : ''}`;
+
+    if (hydroLinesByCode.has(code)) {
+      // Mettre à jour la couleur et le popup sans recréer la polyline
+      const existing = hydroLinesByCode.get(code);
+      existing.setStyle({ color: levelColor(level), weight: 6, opacity: 0.9 });
+      existing.setPopupContent(popupContent);
+    } else {
+      const line = window.L.polyline(points.map((point) => [point.lat, point.lon]), { color: levelColor(level), weight: 6, opacity: 0.9 })
+        .bindPopup(popupContent)
+        .addTo(hydroLineLayer);
+      hydroLinesByCode.set(code, line);
+    }
   });
 
+  hydroLinesByCode.forEach((line, code) => {
+    if (!incomingTroncons.has(code)) {
+      hydroLineLayer.removeLayer(line);
+      hydroLinesByCode.delete(code);
+    }
+  });
+
+  mapStats.stations = stationsWithPoints.length;
   updateMapSummary();
   setMapFeedback(`${stations.length} station(s) Vigicrues Isère chargée(s).`);
 }
