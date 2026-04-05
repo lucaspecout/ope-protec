@@ -6043,7 +6043,6 @@ function renderSituationOverview() {
   const vigicruesFlashAlerts = Number(externalRisks?.vigicrues_flash_isere?.alerts_total ?? (externalRisks?.vigicrues_flash_isere?.alerts || []).length);
   const sncfAlerts = Number(externalRisks?.sncf_isere?.alerts_total ?? (externalRisks?.sncf_isere?.alerts || []).length);
   const arcepOutages = Number(externalRisks?.arcep_isere?.outages_total ?? 0);
-  const orangeOrRedLogsCount = activeLogs.filter((log) => ['orange', 'rouge'].includes(normalizeLevel(log.danger_level))).length;
   const mobilityCards = [
     { key: 'bison', label: 'Bison Futé (38) · Départ / Arrivée', value: `${bisonDeparture} / ${bisonReturn}`, info: 'Tendance Isère départ / arrivée', css: bisonCombinedLevel },
     { key: 'sncf', label: 'SNCF · alertes Isère', value: `${sncfAlerts}`, info: 'Accidents / travaux de voie', css: sncfAlerts > 0 ? 'orange' : 'vert' },
@@ -6257,7 +6256,7 @@ function sitrepKpiCard(label, value, level = '') {
   const bg = level ? sitrepLevelBg(normalizeLevel(level)) : '#e3f0ff';
   return `<div style="border:1px solid ${color}33;border-radius:6px;padding:10px 12px;background:${bg}">
     <div style="font-size:10px;color:#546e7a;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">${escapeHtml(label)}</div>
-    <div style="font-size:18px;font-weight:800;color:${color};line-height:1.1">${typeof value === 'string' ? escapeHtml(value) : value}</div>
+    <div style="font-size:18px;font-weight:800;color:${color};line-height:1.1">${value}</div>
   </div>`;
 }
 
