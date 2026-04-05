@@ -472,6 +472,7 @@ _ISERE_OPENDATA_CACHE_TTL_SECONDS = 1800
 _ANFR_ISERE_CACHE_TTL_SECONDS = 43200
 _ARCEP_ISERE_CACHE_TTL_SECONDS = 900
 _HUBEAU_GROUNDWATER_CACHE_TTL_SECONDS = 10800
+_AVALANCHE_ISERE_CACHE_TTL_SECONDS = 3600
 _APIC_ISERE_CACHE_TTL_SECONDS = 300
 _VIGICRUES_FLASH_ISERE_CACHE_TTL_SECONDS = 300
 _ISERE_BOUNDARY_CACHE_TTL_SECONDS = 21600
@@ -618,6 +619,8 @@ _arcep_isere_cache_lock = Lock()
 _arcep_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _hubeau_groundwater_cache_lock = Lock()
 _hubeau_groundwater_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_avalanche_isere_cache_lock = Lock()
+_avalanche_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _apic_isere_cache_lock = Lock()
 _apic_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _vigicrues_flash_isere_cache_lock = Lock()
@@ -3422,6 +3425,145 @@ def fetch_isere_opendata_resilience(force_refresh: bool = False, limit: int = 80
         ttl_seconds=_ISERE_OPENDATA_CACHE_TTL_SECONDS,
         force_refresh=force_refresh,
         loader=loader,
+    )
+
+
+# ── Massifs avalanche Isère ─────────────────────────────────────────────────
+
+_ISERE_MASSIFS = [
+    {
+        "nom": "Belledonne",
+        "communes_cle": ["Chamrousse", "Saint-Martin-d'Uriage", "La Combe-de-Lancey"],
+        "altitude_max": 2978,
+        "bra_url": "https://www.meteofrance.com/meteo-montagne/alpes-du-nord/belledonne",
+        "secteurs": ["Chamrousse", "Sept-Laux", "Pleynet", "Crête de Belledonne"],
+    },
+    {
+        "nom": "Chartreuse",
+        "communes_cle": ["Saint-Pierre-de-Chartreuse", "Sarcenas", "Entremont-le-Vieux"],
+        "altitude_max": 2082,
+        "bra_url": "https://www.meteofrance.com/meteo-montagne/alpes-du-nord/chartreuse",
+        "secteurs": ["Massif de Chartreuse", "Plateau du Vercors nord", "Prairies de la Chartreuse"],
+    },
+    {
+        "nom": "Vercors",
+        "communes_cle": ["Villard-de-Lans", "Autrans-Méaudre en Vercors", "Corrençon-en-Vercors"],
+        "altitude_max": 2341,
+        "bra_url": "https://www.meteofrance.com/meteo-montagne/alpes-du-nord/vercors",
+        "secteurs": ["Plateau du Vercors", "Hauts Plateaux", "Coulmes"],
+    },
+    {
+        "nom": "Oisans",
+        "communes_cle": ["La Grave", "Bourg-d'Oisans", "Huez"],
+        "altitude_max": 4102,
+        "bra_url": "https://www.meteofrance.com/meteo-montagne/alpes-du-nord/oisans",
+        "secteurs": ["Grandes Rousses", "Ecrins", "Meije-Galibier", "La Grave"],
+    },
+    {
+        "nom": "Taillefer",
+        "communes_cle": ["La Morte", "Ornon", "Lavaldens"],
+        "altitude_max": 2857,
+        "bra_url": "https://www.meteofrance.com/meteo-montagne/alpes-du-nord/taillefer",
+        "secteurs": ["Massif du Taillefer", "Lacs Fourchu", "Obiou"],
+    },
+]
+
+
+def _parse_bra_risk_from_html(html: str) -> int | None:
+    """Extrait le niveau de risque (1-5) depuis la page HTML Météo-France BRA."""
+    patterns = [
+        r'risque(?:\s+maximal)?\s*(?:d\'avalanche)?\s*[:\-]?\s*(\d)',
+        r'"risqueMaximal"\s*:\s*(\d)',
+        r'"level"\s*:\s*(\d)',
+        r'niveau\s+(\d)\s+(?:sur\s+5|d\'avalanche)',
+        r'class="[^"]*risque-(\d)',
+        r'data-risque="(\d)"',
+        r'bra-niveau-(\d)',
+        r'risk_level["\s:=]+(\d)',
+    ]
+    for pat in patterns:
+        m = re.search(pat, html, re.IGNORECASE)
+        if m:
+            val = int(m.group(1))
+            if 1 <= val <= 5:
+                return val
+    return None
+
+
+def _fetch_bra_risk_level(massif_url: str) -> int | None:
+    """Tente de récupérer le niveau BRA depuis la page Météo-France."""
+    try:
+        req = Request(massif_url, headers={
+            "User-Agent": "Mozilla/5.0 (compatible; ope-protec/1.0)",
+            "Accept-Language": "fr-FR,fr;q=0.9",
+        })
+        with urlopen(req, timeout=10) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+        return _parse_bra_risk_from_html(html)
+    except Exception:
+        return None
+
+
+_BRA_RISK_LABELS = {
+    1: "Faible",
+    2: "Limité",
+    3: "Marqué",
+    4: "Fort",
+    5: "Très fort",
+}
+_BRA_RISK_COLORS = {
+    1: "vert",
+    2: "jaune",
+    3: "orange",
+    4: "rouge",
+    5: "violet",
+}
+
+
+def _fetch_avalanche_isere_live() -> dict[str, Any]:
+    saison_active = 11 <= datetime.utcnow().month or datetime.utcnow().month <= 4
+    massifs_out = []
+    max_level = 0
+
+    for massif in _ISERE_MASSIFS:
+        risk_level = None
+        if saison_active:
+            risk_level = _fetch_bra_risk_level(massif["bra_url"])
+        massifs_out.append({
+            "nom": massif["nom"],
+            "altitude_max": massif["altitude_max"],
+            "bra_url": massif["bra_url"],
+            "secteurs": massif["secteurs"],
+            "niveau_bra": risk_level,
+            "niveau_label": _BRA_RISK_LABELS.get(risk_level, "Hors saison" if not saison_active else "Indisponible"),
+            "niveau_couleur": _BRA_RISK_COLORS.get(risk_level, "gris"),
+            "pprn_approuve": True,  # tous ces massifs ont des PPRN avalanche approuvés en Isère
+        })
+        if risk_level and risk_level > max_level:
+            max_level = risk_level
+
+    niveau_global = _BRA_RISK_COLORS.get(max_level, "gris") if max_level else ("gris" if not saison_active else "inconnu")
+
+    return {
+        "service": "Risque Avalanche — Massifs Isère",
+        "status": "online",
+        "source": "https://www.meteofrance.com/meteo-montagne/alpes-du-nord",
+        "saison_active": saison_active,
+        "massifs_total": len(_ISERE_MASSIFS),
+        "niveau_global": niveau_global,
+        "niveau_max_bra": max_level or None,
+        "massifs": massifs_out,
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+def fetch_avalanche_isere(force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_avalanche_isere_cache,
+        lock=_avalanche_isere_cache_lock,
+        ttl_seconds=_AVALANCHE_ISERE_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=_fetch_avalanche_isere_live,
     )
 
 

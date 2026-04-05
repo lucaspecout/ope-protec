@@ -74,6 +74,7 @@ from .services import (
     fetch_vigicrues_isere,
     fetch_vigicrues_flash_isere_alerts,
     fetch_vigieau_restrictions,
+    fetch_avalanche_isere,
     generate_pdf_report,
     resolve_commune_insee_code,
     vigicrues_geojson_from_stations,
@@ -871,6 +872,7 @@ def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str])
         "finess_isere": (lambda: fetch_finess_isere_resources(force_refresh=refresh), {"status": "pending", "resources": [], "resources_total": 0}),
         "groundwater_isere": (lambda: fetch_hubeau_isere_groundwater(force_refresh=refresh), {"status": "pending", "stations": [], "stations_total": 0, "trend_summary": {"hausse": 0, "baisse": 0, "stable": 0}}),
         "isere_opendata": (lambda: fetch_isere_opendata_resilience(force_refresh=refresh), {"status": "pending", "datasets": [], "totals": {"food_aid_points": 0, "health_centers": 0, "schools": 0}, "insights": []}),
+        "avalanche_isere": (lambda: fetch_avalanche_isere(force_refresh=refresh), {"status": "pending", "massifs": [], "massifs_total": 0, "niveau_global": "gris", "saison_active": False}),
     }
 
 

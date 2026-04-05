@@ -16,6 +16,7 @@ const STORAGE_KEYS = {
   staticTelecomCache: 'staticTelecomCacheV1',
   staticMontagneCache: 'staticMontagneCacheV1',
   staticHelipadCache: 'staticHelipadCacheV1',
+  staticBarrageCache: 'staticBarrageCacheV1',
   serviceStatusHistory: 'serviceStatusHistory',
 };
 const AUTO_REFRESH_MS = 45000;
@@ -189,7 +190,7 @@ let mapFloodOverlayLayer = null;
 let googleTrafficFlowLayer = null;
 let floodZoneWmsLayer = null;
 let avalancheZoneWmsLayer = null;
-let barrageWmsLayer = null;
+let barrageMarkerLayer = null;
 let montagneLayer = null;
 let helipadLayer = null;
 let userLocationMarker = null;
@@ -539,6 +540,16 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
       items: keepPreviousArray((previous.dauphine_isere || {}).items, (next.dauphine_isere || {}).items),
       articles: keepPreviousArray((previous.dauphine_isere || {}).articles, (next.dauphine_isere || {}).articles),
     },
+    avalanche_isere: mergeServiceSlot(
+      previous.avalanche_isere || {},
+      next.avalanche_isere || {},
+      (p, n) => ({
+        ...p,
+        ...n,
+        massifs: keepPreviousArray(p.massifs, n.massifs),
+        niveau_global: keepPreviousValue(p.niveau_global, n.niveau_global),
+      }),
+    ),
   };
 }
 
@@ -2407,41 +2418,79 @@ function applyAvalancheZoneLayer() {
     pane.style.zIndex = 440;
     pane.style.pointerEvents = 'none';
   }
-  // CLPA (Carte de Localisation des Phénomènes d'Avalanche) — Géorisques WMS
+  // Communes avec PPRN Avalanche approuvé/prescrit — couches communales Géorisques WMS
+  // PPRN_COMMUNE_AVALANCHE_APPROUV : communes couvertes par un PPR avalanche approuvé (orange vif)
+  // PPRN_ZONE_AVALANCHE : zones d'aléa détaillées (visibles au zoom 12+, complément)
   avalancheZoneWmsLayer = window.L.tileLayer.wms('https://georisques.gouv.fr/services', {
-    layers: 'CLPA_ZONE_EXPOSITION',
+    layers: 'PPRN_COMMUNE_AVALANCHE_APPROUV,PPRN_COMMUNE_AVALANCHE_PRESCRIT,PPRN_ZONE_AVALANCHE',
     format: 'image/png',
     transparent: true,
     version: '1.3.0',
-    opacity: 0.60,
+    opacity: 0.65,
     pane: 'avalanchePane',
-    attribution: '&copy; État / Géorisques — Zones avalanche CLPA Isère',
+    attribution: '&copy; État / Géorisques — Zones PPR avalanche',
   }).addTo(leafletMap);
 }
 
-function applyBarrageLayer() {
-  if (!leafletMap || typeof window.L === 'undefined') return;
+function renderBarrageLayer() {
+  if (!barrageMarkerLayer || !leafletMap) return;
   const enabled = document.getElementById('filter-barrages')?.checked ?? false;
   if (!enabled) {
-    if (barrageWmsLayer) { leafletMap.removeLayer(barrageWmsLayer); barrageWmsLayer = null; }
+    if (leafletMap.hasLayer(barrageMarkerLayer)) leafletMap.removeLayer(barrageMarkerLayer);
     return;
   }
-  if (barrageWmsLayer) { barrageWmsLayer.bringToFront(); return; }
-  if (!leafletMap.getPane('barragePane')) {
-    const pane = leafletMap.createPane('barragePane');
-    pane.style.zIndex = 445;
-    pane.style.pointerEvents = 'none';
+  if (!leafletMap.hasLayer(barrageMarkerLayer)) barrageMarkerLayer.addTo(leafletMap);
+  barrageMarkerLayer.clearLayers();
+  barragePointsCache.forEach((pt) => {
+    const icon = window.L.divIcon({
+      className: '',
+      html: `<span style="font-size:20px;line-height:1;filter:drop-shadow(0 1px 2px #0006)">🏗️</span>`,
+      iconSize: [24, 24],
+      iconAnchor: [12, 12],
+    });
+    const marker = window.L.marker([pt.lat, pt.lon], { icon });
+    const rows = [
+      pt.name !== 'Barrage' ? `<b>${escapeHtml(pt.name)}</b>` : '',
+      pt.capacity ? `Capacité : ${escapeHtml(String(pt.capacity))}` : '',
+      pt.operator ? `Exploitant : ${escapeHtml(pt.operator)}` : '',
+      pt.ele ? `Altitude : ${escapeHtml(String(pt.ele))} m` : '',
+    ].filter(Boolean).join('<br>');
+    marker.bindPopup(`<div style="min-width:160px"><b>🏗️ Barrage</b><hr style="margin:4px 0">${rows || 'Ouvrage hydraulique'}</div>`);
+    barrageMarkerLayer.addLayer(marker);
+  });
+}
+
+async function loadBarragePoints() {
+  if (barrageLoaded) return barragePointsCache;
+  const cached = readFreshSnapshot(STORAGE_KEYS.staticBarrageCache, STATIC_POINTS_CACHE_TTL_MS);
+  if (Array.isArray(cached) && cached.length > 0) {
+    barragePointsCache = cached;
+    barrageLoaded = true;
+    return barragePointsCache;
   }
-  // Barrages hydrauliques et zones submersibles aval — Géorisques WMS
-  barrageWmsLayer = window.L.tileLayer.wms('https://georisques.gouv.fr/services', {
-    layers: 'BARRAGES_ISOHYPSES',
-    format: 'image/png',
-    transparent: true,
-    version: '1.3.0',
-    opacity: 0.70,
-    pane: 'barragePane',
-    attribution: '&copy; État / Géorisques — Barrages hydrauliques Isère',
-  }).addTo(leafletMap);
+  const query = `[out:json][timeout:60];
+area["boundary"="administrative"]["admin_level"="6"]["ref:INSEE"="38"]->.searchArea;
+(
+  nwr["waterway"="dam"](area.searchArea);
+  nwr["man_made"="dam"](area.searchArea);
+  nwr["waterway"="weir"](area.searchArea);
+);
+out center tags;`;
+  const elements = await _overpassFetch(query);
+  barragePointsCache = elements.map((el) => {
+    const lat = Number(el.lat ?? el.center?.lat);
+    const lon = Number(el.lon ?? el.center?.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    const tags = el.tags || {};
+    const name = String(tags.name || '').trim() || 'Barrage';
+    const capacity = tags['capacity:persons'] || tags.volume || null;
+    const ele = tags.ele || tags.elevation || null;
+    const operator = tags.operator || null;
+    return { id: `osm-${el.type}-${el.id}`, lat, lon, name, capacity, ele, operator, osmId: el.id, osmType: el.type };
+  }).filter(Boolean);
+  if (barragePointsCache.length > 0) saveSnapshot(STORAGE_KEYS.staticBarrageCache, barragePointsCache);
+  barrageLoaded = true;
+  return barragePointsCache;
 }
 
 function initMap() {
@@ -2467,6 +2516,7 @@ function initMap() {
   populationLayer = window.L.layerGroup().addTo(leafletMap);
   montagneLayer = window.L.layerGroup(); // ajouté à la carte uniquement si filtre activé
   helipadLayer = window.L.layerGroup();
+  barrageMarkerLayer = window.L.layerGroup();
   leafletMap.on('click', onMapClickAddPoint);
   leafletMap.on('click', handleOsmDetailsClick);
   leafletMap.on('popupopen', refreshPhotoCameraImages);
@@ -3800,6 +3850,9 @@ let _montagneLoadInFlight = false;
 let helipadPointsCache = [];
 let helipadLoaded = false;
 let _helipadLoadInFlight = false;
+let barragePointsCache = [];
+let barrageLoaded = false;
+let _barrageLoadInFlight = false;
 
 async function _overpassFetch(query) {
   const endpoints = [
@@ -3975,6 +4028,12 @@ function _ensureStaticDataLoaded() {
     loadHelipadPoints()
       .then(() => { _helipadLoadInFlight = false; renderHelipadLayer(); })
       .catch(() => { _helipadLoadInFlight = false; });
+  }
+  if (document.getElementById('filter-barrages')?.checked && !barrageLoaded && !_barrageLoadInFlight) {
+    _barrageLoadInFlight = true;
+    loadBarragePoints()
+      .then(() => { _barrageLoadInFlight = false; renderBarrageLayer(); })
+      .catch(() => { _barrageLoadInFlight = false; });
   }
 }
 
@@ -6840,6 +6899,32 @@ function renderVigicruesFlashAlerts(vigicruesFlash = {}) {
   }).join('') || '<li>Aucune alerte Vigicrues Flash en cours sur l’Isère.</li>');
 }
 
+function renderAvalancheIsere(avalanche = {}) {
+  const massifs = Array.isArray(avalanche?.massifs) ? avalanche.massifs : [];
+  const niveau = avalanche?.niveau_global || 'gris';
+  const saison = avalanche?.saison_active ?? false;
+  const niveauMax = avalanche?.niveau_max_bra;
+  const BRA_COLORS = { vert: '#388e3c', jaune: '#f9a825', orange: '#ef6c00', rouge: '#c62828', violet: '#6a1b9a', gris: '#757575' };
+  const BRA_LABELS = { 1: 'Faible', 2: 'Limité', 3: 'Marqué', 4: 'Fort', 5: 'Très fort' };
+  const statusLabel = !saison ? 'Hors saison' : niveauMax ? `Niveau max BRA : ${BRA_LABELS[niveauMax] || niveauMax}` : 'Bulletins non disponibles';
+  setRiskText('avalanche-status', `${avalanche.status || 'inconnu'} · ${statusLabel}`, niveau === 'gris' ? 'vert' : niveau);
+  setText('avalanche-info', `${massifs.length} massif(s) de l'Isère · ${saison ? 'saison active' : 'hors saison'}`);
+  setHtml('avalanche-massifs-list', massifs.length ? massifs.map((m) => {
+    const color = BRA_COLORS[m.niveau_couleur] || BRA_COLORS.gris;
+    const niveauBadge = m.niveau_bra
+      ? `<span style="display:inline-block;background:${color};color:#fff;border-radius:3px;padding:0 5px;font-size:11px;font-weight:700">${BRA_LABELS[m.niveau_bra] || m.niveau_bra}</span>`
+      : `<span style="font-size:11px;color:#888">${escapeHtml(m.niveau_label || 'Hors saison')}</span>`;
+    const secteurs = Array.isArray(m.secteurs) && m.secteurs.length
+      ? `<br><small style="color:#666"><strong>Secteurs :</strong> ${escapeHtml(m.secteurs.join(', '))}</small>`
+      : '';
+    const altMax = m.altitude_max ? ` · ${m.altitude_max} m` : '';
+    const braLink = String(m.bra_url || '').startsWith('http')
+      ? `<br><a href="${m.bra_url}" target="_blank" rel="noreferrer" style="font-size:11px">→ Bulletin Météo-France</a>`
+      : '';
+    return `<li><strong>${escapeHtml(m.nom)}</strong>${altMax} · ${niveauBadge} · PPRN approuvé${secteurs}${braLink}</li>`;
+  }).join('') : '<li>Données massifs indisponibles.</li>');
+}
+
 function setServiceInfoWithSource(targetId, label, sourceCandidate) {
   const safeLabel = escapeHtml(String(label || '').trim() || '-');
   const safeSource = String(sourceCandidate || '').trim();
@@ -7154,6 +7239,7 @@ function renderExternalRisks(data = {}) {
   renderVigicruesFlashAlerts(vigicruesFlash);
   renderVigieauAlerts(vigieau);
   renderElectricityStatus(electricity);
+  renderAvalancheIsere(mergedData?.avalanche_isere || {});
   const atmoToday = atmo?.today || {};
   const atmoLevel = normalizeLevel(atmoToday.level || 'inconnu');
   const atmoLabelRaw = String(atmoToday.label || atmoLevel || 'inconnu').toLowerCase();
@@ -7817,7 +7903,16 @@ function bindAppInteractions() {
   document.getElementById('filter-google-traffic-flow')?.addEventListener('change', () => applyGoogleTrafficFlowOverlay());
   document.getElementById('filter-flood-zones')?.addEventListener('change', () => applyFloodZoneLayer());
   document.getElementById('filter-avalanche-zones')?.addEventListener('change', () => applyAvalancheZoneLayer());
-  document.getElementById('filter-barrages')?.addEventListener('change', () => applyBarrageLayer());
+  document.getElementById('filter-barrages')?.addEventListener('change', () => {
+    if (!barrageLoaded && !_barrageLoadInFlight) {
+      _barrageLoadInFlight = true;
+      loadBarragePoints()
+        .then(() => { _barrageLoadInFlight = false; renderBarrageLayer(); })
+        .catch(() => { _barrageLoadInFlight = false; });
+    } else {
+      renderBarrageLayer();
+    }
+  });
   document.getElementById('filter-montagne')?.addEventListener('change', () => {
     if (!montagneLoaded && !_montagneLoadInFlight) {
       _montagneLoadInFlight = true;
