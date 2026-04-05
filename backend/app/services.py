@@ -3428,133 +3428,147 @@ def fetch_isere_opendata_resilience(force_refresh: bool = False, limit: int = 80
     )
 
 
-# ── Massifs avalanche Isère ─────────────────────────────────────────────────
+# ── Massifs avalanche Isère (BRA Météo-France via GDSS) ─────────────────────
 
-_ISERE_MASSIFS = [
-    {
-        "nom": "Belledonne",
-        "communes_cle": ["Chamrousse", "Saint-Martin-d'Uriage", "La Combe-de-Lancey"],
-        "altitude_max": 2978,
-        "bra_url": "https://www.meteofrance.com/meteo-montagne/alpes-du-nord/belledonne",
-        "secteurs": ["Chamrousse", "Sept-Laux", "Pleynet", "Crête de Belledonne"],
-    },
-    {
-        "nom": "Chartreuse",
-        "communes_cle": ["Saint-Pierre-de-Chartreuse", "Sarcenas", "Entremont-le-Vieux"],
-        "altitude_max": 2082,
-        "bra_url": "https://www.meteofrance.com/meteo-montagne/alpes-du-nord/chartreuse",
-        "secteurs": ["Massif de Chartreuse", "Plateau du Vercors nord", "Prairies de la Chartreuse"],
-    },
-    {
-        "nom": "Vercors",
-        "communes_cle": ["Villard-de-Lans", "Autrans-Méaudre en Vercors", "Corrençon-en-Vercors"],
-        "altitude_max": 2341,
-        "bra_url": "https://www.meteofrance.com/meteo-montagne/alpes-du-nord/vercors",
-        "secteurs": ["Plateau du Vercors", "Hauts Plateaux", "Coulmes"],
-    },
-    {
-        "nom": "Oisans",
-        "communes_cle": ["La Grave", "Bourg-d'Oisans", "Huez"],
-        "altitude_max": 4102,
-        "bra_url": "https://www.meteofrance.com/meteo-montagne/alpes-du-nord/oisans",
-        "secteurs": ["Grandes Rousses", "Ecrins", "Meije-Galibier", "La Grave"],
-    },
-    {
-        "nom": "Taillefer",
-        "communes_cle": ["La Morte", "Ornon", "Lavaldens"],
-        "altitude_max": 2857,
-        "bra_url": "https://www.meteofrance.com/meteo-montagne/alpes-du-nord/taillefer",
-        "secteurs": ["Massif du Taillefer", "Lacs Fourchu", "Obiou"],
-    },
+# OPP IDs depuis mf_map_layers_v2_sub_zone sur la page risques-avalanche Alpes du Nord
+# Seuls les massifs présents en Isère (38)
+_ISERE_MASSIFS_BRA = [
+    {"opp_id": 7,  "nom": "Chartreuse",     "alt_max": 2082, "secteurs": ["Massif de Chartreuse", "Gorges du Guiers"]},
+    {"opp_id": 8,  "nom": "Belledonne",     "alt_max": 2978, "secteurs": ["Chamrousse", "Sept-Laux", "Pleynet"]},
+    {"opp_id": 12, "nom": "Grandes-Rousses","alt_max": 3491, "secteurs": ["Alpe d'Huez", "Les 2 Alpes", "Glacier de Sarenne"]},
+    {"opp_id": 14, "nom": "Vercors",        "alt_max": 2341, "secteurs": ["Villard-de-Lans", "Hauts Plateaux", "Coulmes"]},
+    {"opp_id": 15, "nom": "Oisans",         "alt_max": 4102, "secteurs": ["La Grave", "Meije-Galibier", "Écrins"]},
 ]
 
-
-def _parse_bra_risk_from_html(html: str) -> int | None:
-    """Extrait le niveau de risque (1-5) depuis la page HTML Météo-France BRA."""
-    patterns = [
-        r'risque(?:\s+maximal)?\s*(?:d\'avalanche)?\s*[:\-]?\s*(\d)',
-        r'"risqueMaximal"\s*:\s*(\d)',
-        r'"level"\s*:\s*(\d)',
-        r'niveau\s+(\d)\s+(?:sur\s+5|d\'avalanche)',
-        r'class="[^"]*risque-(\d)',
-        r'data-risque="(\d)"',
-        r'bra-niveau-(\d)',
-        r'risk_level["\s:=]+(\d)',
-    ]
-    for pat in patterns:
-        m = re.search(pat, html, re.IGNORECASE)
-        if m:
-            val = int(m.group(1))
-            if 1 <= val <= 5:
-                return val
-    return None
+_BRA_RISK_LABELS = {1: "Faible", 2: "Limité", 3: "Marqué", 4: "Fort", 5: "Très fort"}
+_BRA_RISK_COLORS = {1: "vert", 2: "jaune", 3: "orange", 4: "rouge", 5: "violet"}
+_BRA_GDSS_BASE = "https://rwg.meteofrance.com/gdss/v1/metronome_bra/blob"
+_BRA_PAGE_URL = "https://meteofrance.com/meteo-montagne/alpes-du-nord/risques-avalanche"
 
 
-def _fetch_bra_risk_level(massif_url: str) -> int | None:
-    """Tente de récupérer le niveau BRA depuis la page Météo-France."""
+def _bra_get_mfsession_token() -> str:
+    """Récupère le token JWT depuis le cookie mfsession de Météo-France (ROT13 sur le cookie brut)."""
+    req = Request(_BRA_PAGE_URL, headers={
+        "User-Agent": "Mozilla/5.0 (compatible; ope-protec/1.0)",
+        "Accept-Language": "fr-FR,fr;q=0.9",
+    })
+    with urlopen(req, timeout=15) as resp:
+        cookies = resp.headers.get_all("Set-Cookie") or []
+    for cookie in cookies:
+        if "mfsession=" in cookie:
+            raw = cookie.split("mfsession=")[1].split(";")[0]
+            return "".join(
+                chr((ord(c) - (65 if c <= "Z" else 97) + 13) % 26 + (65 if c <= "Z" else 97))
+                if c.isalpha() else c
+                for c in raw
+            )
+    raise ValueError("Cookie mfsession introuvable sur la page BRA Météo-France")
+
+
+def _bra_fetch_massif_xml(opp_id: int, token: str) -> dict[str, Any] | None:
+    """Récupère et parse le BRA XML d'un massif via l'API GDSS Météo-France."""
+    import xml.etree.ElementTree as XMLTree
+    url = (
+        f"{_BRA_GDSS_BASE}?token={token}"
+        f"&sort-results-by=-blob_creation_time"
+        f"&blob_filename=BRA_{opp_id}.xml"
+    )
+    req = Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (compatible; ope-protec/1.0)",
+        "Authorization": f"Bearer {token}",
+    })
     try:
-        req = Request(massif_url, headers={
-            "User-Agent": "Mozilla/5.0 (compatible; ope-protec/1.0)",
-            "Accept-Language": "fr-FR,fr;q=0.9",
-        })
-        with urlopen(req, timeout=10) as resp:
-            html = resp.read().decode("utf-8", errors="replace")
-        return _parse_bra_risk_from_html(html)
+        with urlopen(req, timeout=12) as resp:
+            raw = resp.read()
     except Exception:
         return None
-
-
-_BRA_RISK_LABELS = {
-    1: "Faible",
-    2: "Limité",
-    3: "Marqué",
-    4: "Fort",
-    5: "Très fort",
-}
-_BRA_RISK_COLORS = {
-    1: "vert",
-    2: "jaune",
-    3: "orange",
-    4: "rouge",
-    5: "violet",
-}
+    try:
+        root = XMLTree.fromstring(raw.decode("utf-8", errors="replace"))
+    except Exception:
+        return None
+    if root.tag != "BULLETINS_NEIGE_AVALANCHE":
+        return None
+    # Premier élément RISQUE sans attribut DATE = bulletin courant
+    risque_maxi: int | None = None
+    commentaire = ""
+    evol = ""
+    for elem in root.iter("RISQUE"):
+        if "DATE" not in elem.attrib:
+            val = elem.get("RISQUEMAXI", "")
+            if val.isdigit():
+                risque_maxi = int(val)
+            commentaire = elem.get("COMMENTAIRE", "")
+            evol = elem.get("EVOLURISQUE1", "") or elem.get("EVOLURISQUE2", "")
+            break
+    return {
+        "massif": root.get("MASSIF", ""),
+        "date_bulletin": root.get("DATEBULLETIN", "")[:10],
+        "date_echeance": root.get("DATEECHEANCE", "")[:10],
+        "niveau_bra": risque_maxi,
+        "commentaire": commentaire,
+        "evolution": evol,
+    }
 
 
 def _fetch_avalanche_isere_live() -> dict[str, Any]:
-    saison_active = 11 <= datetime.utcnow().month or datetime.utcnow().month <= 4
+    try:
+        token = _bra_get_mfsession_token()
+    except Exception as exc:
+        return {
+            "service": "Risque Avalanche — Massifs Isère (BRA)",
+            "status": "unavailable",
+            "source": _BRA_PAGE_URL,
+            "error": f"Impossible d'obtenir le token Météo-France: {exc}",
+            "massifs": [],
+            "massifs_total": len(_ISERE_MASSIFS_BRA),
+            "niveau_global": "gris",
+            "niveau_max_bra": None,
+            "saison_active": True,
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+
     massifs_out = []
     max_level = 0
+    errors = []
 
-    for massif in _ISERE_MASSIFS:
-        risk_level = None
-        if saison_active:
-            risk_level = _fetch_bra_risk_level(massif["bra_url"])
+    for massif_def in _ISERE_MASSIFS_BRA:
+        bra = _bra_fetch_massif_xml(massif_def["opp_id"], token)
+        niveau = bra["niveau_bra"] if bra else None
         massifs_out.append({
-            "nom": massif["nom"],
-            "altitude_max": massif["altitude_max"],
-            "bra_url": massif["bra_url"],
-            "secteurs": massif["secteurs"],
-            "niveau_bra": risk_level,
-            "niveau_label": _BRA_RISK_LABELS.get(risk_level, "Hors saison" if not saison_active else "Indisponible"),
-            "niveau_couleur": _BRA_RISK_COLORS.get(risk_level, "gris"),
-            "pprn_approuve": True,  # tous ces massifs ont des PPRN avalanche approuvés en Isère
+            "nom": massif_def["nom"],
+            "opp_id": massif_def["opp_id"],
+            "alt_max": massif_def["alt_max"],
+            "secteurs": massif_def["secteurs"],
+            "bra_url": f"https://meteofrance.com/meteo-montagne/alpes-du-nord/{massif_def['nom'].lower().replace('-', '-')}",
+            "niveau_bra": niveau,
+            "niveau_label": _BRA_RISK_LABELS.get(niveau, "Indisponible"),
+            "niveau_couleur": _BRA_RISK_COLORS.get(niveau, "gris"),
+            "commentaire": bra.get("commentaire", "") if bra else "",
+            "date_bulletin": bra.get("date_bulletin", "") if bra else "",
+            "date_echeance": bra.get("date_echeance", "") if bra else "",
         })
-        if risk_level and risk_level > max_level:
-            max_level = risk_level
+        if not bra:
+            errors.append(massif_def["nom"])
+        if niveau and niveau > max_level:
+            max_level = niveau
 
-    niveau_global = _BRA_RISK_COLORS.get(max_level, "gris") if max_level else ("gris" if not saison_active else "inconnu")
+    niveau_global = _BRA_RISK_COLORS.get(max_level, "gris") if max_level else "gris"
+    status = "online" if not errors else ("partial" if len(errors) < len(_ISERE_MASSIFS_BRA) else "unavailable")
 
-    return {
-        "service": "Risque Avalanche — Massifs Isère",
-        "status": "online",
-        "source": "https://www.meteofrance.com/meteo-montagne/alpes-du-nord",
-        "saison_active": saison_active,
-        "massifs_total": len(_ISERE_MASSIFS),
+    result: dict[str, Any] = {
+        "service": "Risque Avalanche — Massifs Isère (BRA)",
+        "status": status,
+        "source": _BRA_PAGE_URL,
+        "massifs_total": len(_ISERE_MASSIFS_BRA),
         "niveau_global": niveau_global,
         "niveau_max_bra": max_level or None,
+        "saison_active": True,
         "massifs": massifs_out,
         "updated_at": datetime.utcnow().isoformat() + "Z",
     }
+    if errors:
+        result["errors"] = errors
+    return result
 
 
 def fetch_avalanche_isere(force_refresh: bool = False) -> dict[str, Any]:

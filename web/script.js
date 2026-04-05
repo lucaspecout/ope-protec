@@ -6308,11 +6308,21 @@ function renderSituationOverview() {
       }${alertCount > 6 ? `<li class="muted">… et ${alertCount - 6} autre(s)</li>` : ''}</ul>`
     : `<p class="muted" style="font-size:0.82em;margin-top:4px">Aucune station en alerte</p>`;
 
+  const _braRiskLabels = { 1: 'Faible', 2: 'Limité', 3: 'Marqué', 4: 'Fort', 5: 'Très fort' };
+  const avalancheData = externalRisks?.avalanche_isere || {};
+  const avalancheNiveauMax = Number(avalancheData.niveau_max_bra ?? 0);
+  const avalancheCouleur = String(avalancheData.niveau_global || 'gris');
+  const avalancheLabel = avalancheNiveauMax > 0
+    ? `${_braRiskLabels[avalancheNiveauMax] || String(avalancheNiveauMax)} (${avalancheNiveauMax}/5)`
+    : 'Indisponible';
+  const avalancheMassifCount = Number(avalancheData.massifs_total ?? (avalancheData.massifs || []).length);
+
   const kpiCards = [
     { key: 'meteo', label: 'Vigilance météo', value: vigilance, info: 'Source Météo-France', css: normalizeLevel(vigilance) },
     { key: 'crues', label: 'Niveau crues', value: crues, info: `Tronçons AN11/12/20 · ${alertCount} station(s) en alerte`, css: normalizeLevel(crues), detail: cruesAlertHtml },
     { key: 'global-risk', label: 'Risque global', value: globalRisk, info: 'Calcul consolidé', css: normalizeLevel(globalRisk) },
     { key: 'communes-crise', label: 'Communes en crise', value: String(crisisCount), info: 'PCS actif', css: crisisCount > 0 ? 'rouge' : 'vert' },
+    { key: 'avalanche', label: '❄️ Risque avalanche Isère', value: avalancheLabel, info: `BRA Météo-France · ${avalancheMassifCount} massif(s)`, css: avalancheCouleur },
   ];
   const bisonDeparture = normalizeLevel(externalRisks?.bison_fute?.today?.isere?.departure || 'inconnu');
   const bisonReturn = normalizeLevel(externalRisks?.bison_fute?.today?.isere?.return || 'inconnu');

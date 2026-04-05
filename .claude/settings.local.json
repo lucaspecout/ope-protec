@@ -85,7 +85,8 @@
       "Bash(curl -s -w '\\\\n%{http_code}' 'https://portail-api.meteofrance.fr/public/BRA/1.0/bulletin?massif=belledonne&date=2026-04-05' -H 'User-Agent: ope-protec/1.0')",
       "Bash(curl -s -w '\\\\n%{http_code}' https://portail-api.meteofrance.fr/public/BRA/1.0/massifs -H 'User-Agent: ope-protec/1.0')",
       "Bash(curl -s \"https://georisques.gouv.fr/api/v1/gaspar/risques?code_insee=38175&page=1&page_size=50\")",
-      "Bash(python3 -c \" import sys, json d = json.load\\(sys.stdin\\) data = d.get\\('data'\\) or [] for c in data[:1]: print\\('Commune:', c.get\\('libelle_commune'\\)\\) for r in c.get\\('risques_detail',[]\\): if 'Aval' in r.get\\('libelle_risque_long',''\\) or 'aval' in r.get\\('libelle_risque_long',''\\): print\\(' AVALANCHE:', r\\) \")"
+      "Bash(python3 -c \" import sys, json d = json.load\\(sys.stdin\\) data = d.get\\('data'\\) or [] for c in data[:1]: print\\('Commune:', c.get\\('libelle_commune'\\)\\) for r in c.get\\('risques_detail',[]\\): if 'Aval' in r.get\\('libelle_risque_long',''\\) or 'aval' in r.get\\('libelle_risque_long',''\\): print\\(' AVALANCHE:', r\\) \")",
+      "WebFetch(domain:meteofrance.com)"
     ]
   }
 }

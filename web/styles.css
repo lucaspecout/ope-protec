@@ -297,6 +297,8 @@ label { display: block; margin-bottom: .8rem; }
 .situation-tile .kpi-value.jaune { color: #f2c500; }
 .situation-tile .kpi-value.orange { color: #b46a00; }
 .situation-tile .kpi-value.rouge { color: #c22f43; }
+.situation-tile .kpi-value.violet { color: #6a1b9a; }
+.situation-tile .kpi-value.gris { color: #757575; }
 .situation-tile .muted { margin: 0; font-size: .95rem; font-weight: 500; color: var(--muted); }
 .situation-tile--interactive { cursor: pointer; transition: transform .15s ease, box-shadow .15s ease; }
 .situation-tile--interactive:hover,
