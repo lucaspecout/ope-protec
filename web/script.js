@@ -14,6 +14,8 @@ const STORAGE_KEYS = {
   staticInstitutionsCache: 'staticInstitutionsCacheV3',
   staticFinessCache: 'staticFinessCacheV3',
   staticTelecomCache: 'staticTelecomCacheV1',
+  staticMontagneCache: 'staticMontagneCacheV1',
+  staticHelipadCache: 'staticHelipadCacheV1',
   serviceStatusHistory: 'serviceStatusHistory',
 };
 const AUTO_REFRESH_MS = 45000;
@@ -186,6 +188,10 @@ let mapTileLayer = null;
 let mapFloodOverlayLayer = null;
 let googleTrafficFlowLayer = null;
 let floodZoneWmsLayer = null;
+let avalancheZoneWmsLayer = null;
+let barrageWmsLayer = null;
+let montagneLayer = null;
+let helipadLayer = null;
 let userLocationMarker = null;
 let mapAddPointMode = false;
 let mapPoints = [];
@@ -2388,6 +2394,56 @@ function applyFloodZoneLayer() {
   }).addTo(leafletMap);
 }
 
+function applyAvalancheZoneLayer() {
+  if (!leafletMap || typeof window.L === 'undefined') return;
+  const enabled = document.getElementById('filter-avalanche-zones')?.checked ?? false;
+  if (!enabled) {
+    if (avalancheZoneWmsLayer) { leafletMap.removeLayer(avalancheZoneWmsLayer); avalancheZoneWmsLayer = null; }
+    return;
+  }
+  if (avalancheZoneWmsLayer) { avalancheZoneWmsLayer.bringToFront(); return; }
+  if (!leafletMap.getPane('avalanchePane')) {
+    const pane = leafletMap.createPane('avalanchePane');
+    pane.style.zIndex = 440;
+    pane.style.pointerEvents = 'none';
+  }
+  // CLPA (Carte de Localisation des Phénomènes d'Avalanche) — Géorisques WMS
+  avalancheZoneWmsLayer = window.L.tileLayer.wms('https://georisques.gouv.fr/services', {
+    layers: 'CLPA_ZONE_EXPOSITION',
+    format: 'image/png',
+    transparent: true,
+    version: '1.3.0',
+    opacity: 0.60,
+    pane: 'avalanchePane',
+    attribution: '&copy; État / Géorisques — Zones avalanche CLPA Isère',
+  }).addTo(leafletMap);
+}
+
+function applyBarrageLayer() {
+  if (!leafletMap || typeof window.L === 'undefined') return;
+  const enabled = document.getElementById('filter-barrages')?.checked ?? false;
+  if (!enabled) {
+    if (barrageWmsLayer) { leafletMap.removeLayer(barrageWmsLayer); barrageWmsLayer = null; }
+    return;
+  }
+  if (barrageWmsLayer) { barrageWmsLayer.bringToFront(); return; }
+  if (!leafletMap.getPane('barragePane')) {
+    const pane = leafletMap.createPane('barragePane');
+    pane.style.zIndex = 445;
+    pane.style.pointerEvents = 'none';
+  }
+  // Barrages hydrauliques et zones submersibles aval — Géorisques WMS
+  barrageWmsLayer = window.L.tileLayer.wms('https://georisques.gouv.fr/services', {
+    layers: 'BARRAGES_ISOHYPSES',
+    format: 'image/png',
+    transparent: true,
+    version: '1.3.0',
+    opacity: 0.70,
+    pane: 'barragePane',
+    attribution: '&copy; État / Géorisques — Barrages hydrauliques Isère',
+  }).addTo(leafletMap);
+}
+
 function initMap() {
   if (leafletMap || typeof window.L === 'undefined') return;
   leafletMap = window.L.map('isere-map-leaflet', { zoomControl: true }).setView([45.2, 5.72], 9);
@@ -2409,6 +2465,8 @@ function initMap() {
   photoCameraLayer = window.L.layerGroup().addTo(leafletMap);
   institutionLayer = window.L.layerGroup().addTo(leafletMap);
   populationLayer = window.L.layerGroup().addTo(leafletMap);
+  montagneLayer = window.L.layerGroup(); // ajouté à la carte uniquement si filtre activé
+  helipadLayer = window.L.layerGroup();
   leafletMap.on('click', onMapClickAddPoint);
   leafletMap.on('click', handleOsmDetailsClick);
   leafletMap.on('popupopen', refreshPhotoCameraImages);
@@ -3735,6 +3793,157 @@ function _drawResourceMarkers() {
  * Chaque loader, une fois terminé, redessine les marqueurs automatiquement.
  * Anti-doublon : jamais deux chargements simultanés du même dataset.
  */
+// ── Refuges de montagne (OSM) ───────────────────────────────────────────────
+let montagnePointsCache = [];
+let montagneLoaded = false;
+let _montagneLoadInFlight = false;
+let helipadPointsCache = [];
+let helipadLoaded = false;
+let _helipadLoadInFlight = false;
+
+async function _overpassFetch(query) {
+  const endpoints = [
+    'https://overpass-api.de/api/interpreter',
+    'https://overpass.kumi.systems/api/interpreter',
+  ];
+  for (const endpoint of endpoints) {
+    try {
+      const resp = await queueApiRequest(() => fetchWithTimeout(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+        body: query,
+      }, 60000));
+      const data = await parseJsonResponse(resp, endpoint);
+      if (Array.isArray(data?.elements) && data.elements.length > 0) return data.elements;
+    } catch { /* essayer l'endpoint suivant */ }
+  }
+  return [];
+}
+
+async function loadMontagnePoints() {
+  if (montagneLoaded) return montagnePointsCache;
+  const cached = readFreshSnapshot(STORAGE_KEYS.staticMontagneCache, STATIC_POINTS_CACHE_TTL_MS);
+  if (Array.isArray(cached) && cached.length > 0) {
+    montagnePointsCache = cached;
+    montagneLoaded = true;
+    return montagnePointsCache;
+  }
+  const query = `[out:json][timeout:60];
+area["boundary"="administrative"]["admin_level"="6"]["ref:INSEE"="38"]->.searchArea;
+(
+  nwr["tourism"="alpine_hut"](area.searchArea);
+  nwr["tourism"="wilderness_hut"](area.searchArea);
+  nwr["amenity"="shelter"]["shelter_type"="basic_hut"](area.searchArea);
+  nwr["emergency"="mountain_rescue"](area.searchArea);
+  nwr["man_made"="tower"]["tower:type"="watchtower"](area.searchArea);
+);
+out center tags;`;
+  const elements = await _overpassFetch(query);
+  montagnePointsCache = elements.map((el) => {
+    const lat = Number(el.lat ?? el.center?.lat);
+    const lon = Number(el.lon ?? el.center?.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    const tags = el.tags || {};
+    const name = String(tags.name || '').trim() || 'Refuge';
+    const capacity = tags.capacity || tags['capacity:persons'] || null;
+    const ele = tags.ele || tags.elevation || null;
+    const operator = tags.operator || tags.network || null;
+    const type = tags.emergency === 'mountain_rescue' ? 'rescue'
+      : tags.tourism === 'wilderness_hut' ? 'wilderness'
+      : tags.amenity === 'shelter' ? 'shelter'
+      : 'refuge';
+    return { id: `osm-${el.type}-${el.id}`, lat, lon, name, capacity, ele, operator, type, osmId: el.id, osmType: el.type };
+  }).filter(Boolean);
+  if (montagnePointsCache.length > 0) saveSnapshot(STORAGE_KEYS.staticMontagneCache, montagnePointsCache);
+  montagneLoaded = true;
+  return montagnePointsCache;
+}
+
+async function loadHelipadPoints() {
+  if (helipadLoaded) return helipadPointsCache;
+  const cached = readFreshSnapshot(STORAGE_KEYS.staticHelipadCache, STATIC_POINTS_CACHE_TTL_MS);
+  if (Array.isArray(cached) && cached.length > 0) {
+    helipadPointsCache = cached;
+    helipadLoaded = true;
+    return helipadPointsCache;
+  }
+  const query = `[out:json][timeout:60];
+area["boundary"="administrative"]["admin_level"="6"]["ref:INSEE"="38"]->.searchArea;
+(
+  nwr["aeroway"="helipad"](area.searchArea);
+  nwr["aeroway"="aerodrome"](area.searchArea);
+  nwr["aeroway"="airport"](area.searchArea);
+);
+out center tags;`;
+  const elements = await _overpassFetch(query);
+  helipadPointsCache = elements.map((el) => {
+    const lat = Number(el.lat ?? el.center?.lat);
+    const lon = Number(el.lon ?? el.center?.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    const tags = el.tags || {};
+    const name = String(tags.name || '').trim() || 'Héliport';
+    const aeroway = tags.aeroway || 'helipad';
+    const icao = tags.icao || tags['ref:ICAO'] || null;
+    const smur = /smur|samu|hôpital|hopital|chu|chg|clinic/i.test(name + (tags.operator || ''));
+    return { id: `osm-${el.type}-${el.id}`, lat, lon, name, aeroway, icao, smur, operator: tags.operator || null, osmId: el.id, osmType: el.type };
+  }).filter(Boolean);
+  if (helipadPointsCache.length > 0) saveSnapshot(STORAGE_KEYS.staticHelipadCache, helipadPointsCache);
+  helipadLoaded = true;
+  return helipadPointsCache;
+}
+
+function renderMontagneLayer() {
+  if (!montagneLayer || !leafletMap) return;
+  const enabled = document.getElementById('filter-montagne')?.checked ?? false;
+  if (!enabled) {
+    if (leafletMap.hasLayer(montagneLayer)) leafletMap.removeLayer(montagneLayer);
+    return;
+  }
+  if (!leafletMap.hasLayer(montagneLayer)) montagneLayer.addTo(leafletMap);
+  montagneLayer.clearLayers();
+  montagnePointsCache.forEach((pt) => {
+    const emoji = pt.type === 'rescue' ? '🆘' : pt.type === 'shelter' ? '⛺' : '🛖';
+    const icon = window.L.divIcon({
+      className: '',
+      html: `<span style="font-size:20px;line-height:1;filter:drop-shadow(0 1px 2px #0006)">${emoji}</span>`,
+      iconSize: [24, 24],
+      iconAnchor: [12, 12],
+    });
+    const capacityStr = pt.capacity ? ` · ${pt.capacity} places` : '';
+    const eleStr = pt.ele ? ` · ${pt.ele} m` : '';
+    const operatorStr = pt.operator ? `<br>Gestionnaire : ${escapeHtml(pt.operator)}` : '';
+    const popup = `<strong>${escapeHtml(pt.name)}</strong><br>Type : ${escapeHtml(pt.type)}${eleStr}${capacityStr}${operatorStr}<br><a href="https://www.openstreetmap.org/${pt.osmType}/${pt.osmId}" target="_blank" rel="noreferrer">OpenStreetMap</a>`;
+    window.L.marker([pt.lat, pt.lon], { icon }).bindPopup(popup).addTo(montagneLayer);
+  });
+  setMapFeedback(`${montagnePointsCache.length} refuge(s) / site(s) montagne chargé(s).`);
+}
+
+function renderHelipadLayer() {
+  if (!helipadLayer || !leafletMap) return;
+  const enabled = document.getElementById('filter-helipads')?.checked ?? false;
+  if (!enabled) {
+    if (leafletMap.hasLayer(helipadLayer)) leafletMap.removeLayer(helipadLayer);
+    return;
+  }
+  if (!leafletMap.hasLayer(helipadLayer)) helipadLayer.addTo(leafletMap);
+  helipadLayer.clearLayers();
+  helipadPointsCache.forEach((pt) => {
+    const emoji = pt.aeroway === 'helipad' ? '🚁' : '✈️';
+    const icon = window.L.divIcon({
+      className: '',
+      html: `<span style="font-size:20px;line-height:1;filter:drop-shadow(0 1px 2px #0006)">${emoji}</span>`,
+      iconSize: [24, 24],
+      iconAnchor: [12, 12],
+    });
+    const smurBadge = pt.smur ? ' <span style="color:#c62828;font-weight:700">[SMUR/SAMU]</span>' : '';
+    const icaoStr = pt.icao ? `<br>Code OACI : ${escapeHtml(pt.icao)}` : '';
+    const operatorStr = pt.operator ? `<br>Opérateur : ${escapeHtml(pt.operator)}` : '';
+    const popup = `<strong>${escapeHtml(pt.name)}</strong>${smurBadge}<br>Type : ${escapeHtml(pt.aeroway)}${icaoStr}${operatorStr}<br><a href="https://www.openstreetmap.org/${pt.osmType}/${pt.osmId}" target="_blank" rel="noreferrer">OpenStreetMap</a>`;
+    window.L.marker([pt.lat, pt.lon], { icon }).bindPopup(popup).addTo(helipadLayer);
+  });
+  setMapFeedback(`${helipadPointsCache.length} héliport(s) / aérodrome(s) chargé(s).`);
+}
+
 function _ensureStaticDataLoaded() {
   if (!institutionsLoaded && !_institutionsLoadInFlight) {
     _institutionsLoadInFlight = true;
@@ -3753,6 +3962,19 @@ function _ensureStaticDataLoaded() {
     loadTelecomPoints()
       .then(() => { _telecomLoadInFlight = false; _drawResourceMarkers(); })
       .catch(() => { _telecomLoadInFlight = false; });
+  }
+  // Chargement différé des couches montagne uniquement si les filtres sont activés
+  if (document.getElementById('filter-montagne')?.checked && !montagneLoaded && !_montagneLoadInFlight) {
+    _montagneLoadInFlight = true;
+    loadMontagnePoints()
+      .then(() => { _montagneLoadInFlight = false; renderMontagneLayer(); })
+      .catch(() => { _montagneLoadInFlight = false; });
+  }
+  if (document.getElementById('filter-helipads')?.checked && !helipadLoaded && !_helipadLoadInFlight) {
+    _helipadLoadInFlight = true;
+    loadHelipadPoints()
+      .then(() => { _helipadLoadInFlight = false; renderHelipadLayer(); })
+      .catch(() => { _helipadLoadInFlight = false; });
   }
 }
 
@@ -7594,6 +7816,28 @@ function bindAppInteractions() {
   document.getElementById('map-basemap-select')?.addEventListener('change', async (event) => { applyBasemap(event.target.value); await renderPopulationByCityLayer(); });
   document.getElementById('filter-google-traffic-flow')?.addEventListener('change', () => applyGoogleTrafficFlowOverlay());
   document.getElementById('filter-flood-zones')?.addEventListener('change', () => applyFloodZoneLayer());
+  document.getElementById('filter-avalanche-zones')?.addEventListener('change', () => applyAvalancheZoneLayer());
+  document.getElementById('filter-barrages')?.addEventListener('change', () => applyBarrageLayer());
+  document.getElementById('filter-montagne')?.addEventListener('change', () => {
+    if (!montagneLoaded && !_montagneLoadInFlight) {
+      _montagneLoadInFlight = true;
+      loadMontagnePoints()
+        .then(() => { _montagneLoadInFlight = false; renderMontagneLayer(); })
+        .catch(() => { _montagneLoadInFlight = false; });
+    } else {
+      renderMontagneLayer();
+    }
+  });
+  document.getElementById('filter-helipads')?.addEventListener('change', () => {
+    if (!helipadLoaded && !_helipadLoadInFlight) {
+      _helipadLoadInFlight = true;
+      loadHelipadPoints()
+        .then(() => { _helipadLoadInFlight = false; renderHelipadLayer(); })
+        .catch(() => { _helipadLoadInFlight = false; });
+    } else {
+      renderHelipadLayer();
+    }
+  });
   document.getElementById('filter-resources-telecom')?.addEventListener('change', () => {
     syncTelecomFilterState();
     renderResources();
