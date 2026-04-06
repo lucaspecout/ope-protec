@@ -2202,8 +2202,30 @@ def _itinisere_category(title: str, description: str) -> str:
     return "trafic"
 
 
+_ROAD_ALIASES_PY: dict[str, str] = {
+    "D532": "D1532", "RD532": "D1532", "CD532": "D1532",
+    "RD520": "D520", "CD520": "D520",
+    "RD525": "D525", "CD525": "D525",
+    "RD531": "D531", "CD531": "D531",
+    "RD512": "D512", "CD512": "D512",
+    "RD91": "D91", "CD91": "D91",
+    "RD94": "D94", "CD94": "D94",
+    "RD15": "D15", "CD15": "D15",
+    "RD1090": "D1090", "CD1090": "D1090",
+    "RD1091": "D1091", "CD1091": "D1091",
+    "RD1075": "D1075", "CD1075": "D1075",
+}
+
 def _itinisere_extract_roads(text: str) -> list[str]:
-    roads = {road.upper() for road in re.findall(r"\b([ADNMCR]\d{1,4})\b", text or "")}
+    # Capture: D15, D 15, RD15, CD15, D1075, D520B, N85, A48, etc.
+    raw = re.findall(r"\b(?:(?:RD|CD|RN)\s*)?([ADNR]\s*\d{1,4}[A-Z]?)\b", text or "", flags=re.IGNORECASE)
+    roads: set[str] = set()
+    for r in raw:
+        code = re.sub(r"\s+", "", r).upper()
+        code = re.sub(r"^R([DN])", r"\1", code)   # RD15 → D15, RN85 → N85
+        if re.match(r"^[ADN]\d{1,4}[A-Z]?$", code):
+            resolved = _ROAD_ALIASES_PY.get(code, code)
+            roads.add(resolved)
     return sorted(roads)
 
 
