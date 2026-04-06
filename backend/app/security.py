@@ -5,7 +5,9 @@ from passlib.context import CryptContext
 
 from .config import settings
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# 10 rounds = recommandation OWASP minimale, ~4x plus rapide que 12 (défaut passlib)
+# Sur un serveur moderne : ~70ms vs ~300ms au login
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=10)
 
 
 def hash_password(password: str) -> str:
@@ -14,6 +16,14 @@ def hash_password(password: str) -> str:
 
 def verify_password(password: str, hashed: str) -> bool:
     return pwd_context.verify(password, hashed)
+
+
+def warmup_crypto() -> None:
+    """Pré-chauffe bcrypt au démarrage pour éviter la latence sur la première connexion."""
+    try:
+        pwd_context.verify("warmup", pwd_context.hash("warmup"))
+    except Exception:
+        pass
 
 
 def create_access_token(subject: str) -> str:

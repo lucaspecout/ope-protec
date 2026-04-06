@@ -7930,10 +7930,12 @@ async function loadOperationsBootstrap(forceRefresh = false) {
     saveSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot, payload.external_risks);
   }
 
-  await loadMunicipalities(payload.municipalities || []);
-  await loadEvents(payload.events || null);
-  await loadLogs(payload.logs || []);
-  if (canManageUsers()) await loadUsers(payload.users || []);
+  await Promise.all([
+    loadMunicipalities(payload.municipalities || []),
+    loadEvents(payload.events || null),
+    loadLogs(payload.logs || []),
+    canManageUsers() ? loadUsers(payload.users || []) : Promise.resolve(),
+  ]);
 
   const perf = payload.perf || {};
   const duration = Number(perf.backend_duration_ms || 0);
@@ -8933,17 +8935,31 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
   showApp();
   setActivePanel(localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel');
   hydrateUiFromLocalCache();
-  await loadIsereBoundary();
-  renderStations(cachedVigicruesPayload);
   syncLogScopeFields();
   syncLogOtherFields();
 
-  const refreshPromise = refreshAll().catch((error) => {
-    document.getElementById('dashboard-error').textContent = `Actualisation différée: ${sanitizeErrorMessage(error.message)}`;
-  });
+  // Chargement initial en une seule requête groupée (boundary + bootstrap en parallèle)
+  // Le bootstrap retourne dashboard + risques + communes + events + logs en un seul aller-retour
+  const bootstrapPromise = (async () => {
+    try {
+      const [, bootstrapPayload] = await Promise.all([
+        loadIsereBoundary(),
+        loadOperationsBootstrap(false),
+      ]);
+      renderStations(cachedVigicruesPayload);
+      return bootstrapPayload;
+    } catch (error) {
+      document.getElementById('dashboard-error').textContent = `Chargement initial: ${sanitizeErrorMessage(error.message)}`;
+      // Fallback sur refreshAll si le bootstrap échoue
+      await loadIsereBoundary().catch(() => {});
+      renderStations(cachedVigicruesPayload);
+    }
+  })();
 
-  if (!runRefreshInBackground) await refreshPromise;
+  if (!runRefreshInBackground) await bootstrapPromise;
+  else bootstrapPromise.catch(() => {});
 
+  // Après le bootstrap, les refreshes live tournent en arrière-plan
   startAutoRefresh();
   startLiveEventsRefresh();
   startMapAnnotationsSync();

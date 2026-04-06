@@ -50,7 +50,7 @@ from .schemas import (
     WeatherAlertCreate,
     WeatherAlertOut,
 )
-from .security import create_access_token, hash_password, verify_password
+from .security import create_access_token, hash_password, verify_password, warmup_crypto
 from .services import (
     fetch_institutions_isere,
     fetch_bison_fute_live_events,
@@ -460,6 +460,9 @@ def _service_loop(key: str, interval: int) -> None:
 
 @app.on_event("startup")
 def startup_warmup_external_sources() -> None:
+    # Préchauffer bcrypt en arrière-plan pour que la première connexion soit rapide.
+    Thread(target=warmup_crypto, daemon=True).start()
+
     # Initialiser le snapshot avec les valeurs par défaut ("pending") pour que le
     # frontend affiche un état cohérent dès le premier poll, avant la fin des fetches.
     initial_jobs = build_external_risks_fetch_jobs(refresh=False, pcs_commune_names=[])
