@@ -512,30 +512,27 @@ _INSTITUTIONS_ISERE_CACHE_TTL_SECONDS = 86400  # 24h
 
 _INSTITUTIONS_ISERE_BBOX = "44.70,4.70,45.95,6.60"
 
-# Requête Overpass — infra critique, filtrée sur l'aire administrative Isère (dept 38)
-# area["ref:INSEE"="38"]["admin_level"="6"] = frontière exacte du département Isère
-_INSTITUTIONS_CRITICAL_QUERY = """[out:json][timeout:120];
-area["ref:INSEE"="38"]["admin_level"="6"]->.isere;
+# Requête Overpass bbox Isère — infra critique sécurité/secours/éducation/transport
+_INSTITUTIONS_CRITICAL_QUERY = f"""[out:json][timeout:90];
 (
-  nwr["amenity"="school"](area.isere);
-  nwr["amenity"="college"](area.isere);
-  nwr["amenity"="university"](area.isere);
-  nwr["amenity"="kindergarten"](area.isere);
-  nwr["amenity"="police"](area.isere);
-  nwr["amenity"="fire_station"](area.isere);
-  nwr["amenity"="bus_station"](area.isere);
-  nwr["railway"="station"](area.isere);
-  nwr["aeroway"~"aerodrome|airport"](area.isere);
+  nwr["amenity"="school"]({_INSTITUTIONS_ISERE_BBOX});
+  nwr["amenity"="college"]({_INSTITUTIONS_ISERE_BBOX});
+  nwr["amenity"="university"]({_INSTITUTIONS_ISERE_BBOX});
+  nwr["amenity"="kindergarten"]({_INSTITUTIONS_ISERE_BBOX});
+  nwr["amenity"="police"]({_INSTITUTIONS_ISERE_BBOX});
+  nwr["amenity"="fire_station"]({_INSTITUTIONS_ISERE_BBOX});
+  nwr["amenity"="bus_station"]({_INSTITUTIONS_ISERE_BBOX});
+  nwr["railway"="station"]({_INSTITUTIONS_ISERE_BBOX});
+  nwr["aeroway"~"aerodrome|airport"]({_INSTITUTIONS_ISERE_BBOX});
 );
 out center tags;"""
 
-# Requête Overpass — équipements hébergement/accueil, filtrée sur l'aire administrative Isère
-_INSTITUTIONS_FACILITIES_QUERY = """[out:json][timeout:120];
-area["ref:INSEE"="38"]["admin_level"="6"]->.isere;
+# Requête Overpass bbox Isère — équipements hébergement/accueil
+_INSTITUTIONS_FACILITIES_QUERY = f"""[out:json][timeout:90];
 (
-  nwr["amenity"~"community_centre|arts_centre|theatre|cinema|concert_hall|events_venue|convention_centre|social_facility"](area.isere);
-  nwr["leisure"~"sports_hall|sports_centre|stadium|ice_rink"](area.isere);
-  nwr["building"~"sports_hall|stadium|civic|gymnasium"](area.isere);
+  nwr["amenity"~"community_centre|arts_centre|theatre|cinema|concert_hall|events_venue|convention_centre|social_facility"]({_INSTITUTIONS_ISERE_BBOX});
+  nwr["leisure"~"sports_hall|sports_centre|stadium|ice_rink"]({_INSTITUTIONS_ISERE_BBOX});
+  nwr["building"~"sports_hall|stadium|civic|gymnasium"]({_INSTITUTIONS_ISERE_BBOX});
 );
 out center tags;"""
 
