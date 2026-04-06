@@ -1255,22 +1255,27 @@ def fetch_isere_boundary_geojson() -> dict[str, Any]:
         except Exception:
             pass
 
-    # 2. Téléchargement réseau (une seule fois, puis sauvegarde sur disque)
-    try:
-        data = _http_get_json(source_url)
-        geometry = data.get("geometry", {})
-        if geometry.get("type") not in {"Polygon", "MultiPolygon"}:
-            raise ValueError("Format géométrique inattendu")
+    # 2. Téléchargement réseau en arrière-plan — on retourne le fallback IMMÉDIATEMENT
+    # La géométrie réelle sera disponible au prochain appel (après que le thread background ait fini)
+    def _fetch_and_cache_boundary():
         try:
-            _ISERE_BOUNDARY_DISK_PATH.write_text(json.dumps({"geometry": geometry}), "utf-8")
+            data = _http_get_json(source_url, timeout=15)
+            geometry = data.get("geometry", {})
+            if geometry.get("type") not in {"Polygon", "MultiPolygon"}:
+                return
+            try:
+                _ISERE_BOUNDARY_DISK_PATH.write_text(json.dumps({"geometry": geometry}), "utf-8")
+            except Exception:
+                pass
+            with _isere_boundary_cache_lock:
+                _isere_boundary_cache["geometry"] = geometry
+                _isere_boundary_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_ISERE_BOUNDARY_CACHE_TTL_SECONDS)
         except Exception:
             pass
-        with _isere_boundary_cache_lock:
-            _isere_boundary_cache["geometry"] = geometry
-            _isere_boundary_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_ISERE_BOUNDARY_CACHE_TTL_SECONDS)
-        return {"status": "online", "source": source_url, "geometry": geometry, "updated_at": datetime.utcnow().isoformat() + "Z"}
-    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
-        return {"status": "degraded", "source": source_url, "error": str(exc), "geometry": _FALLBACK_GEOMETRY}
+
+    from threading import Thread as _Thread
+    _Thread(target=_fetch_and_cache_boundary, daemon=True).start()
+    return {"status": "degraded", "source": source_url, "geometry": _FALLBACK_GEOMETRY}
 
 
 def _vigicrues_level_from_delta(delta_m: float) -> str:

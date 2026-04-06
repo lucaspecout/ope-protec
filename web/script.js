@@ -3025,8 +3025,8 @@ async function loadIsereBoundary() {
     return;
   }
 
-  // Premier chargement : requête backend
-  const data = await api('/public/isere-map', { cacheTtlMs: 7 * 24 * 60 * 60 * 1000 });
+  // Premier chargement : requête backend (timeout court — le backend répond immédiatement)
+  const data = await api('/public/isere-map', { cacheTtlMs: 7 * 24 * 60 * 60 * 1000, timeoutMs: 5000, maxRetries: 0 });
   isereBoundaryGeometry = data?.geometry || null;
   if (boundaryLayer) leafletMap.removeLayer(boundaryLayer);
   boundaryLayer = window.L.geoJSON({ type: 'Feature', geometry: data.geometry }, { style: ISERE_BOUNDARY_STYLE }).addTo(leafletMap);
@@ -8976,10 +8976,12 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
   showApp();
   setActivePanel(localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel');
   hydrateUiFromLocalCache();
-  await loadIsereBoundary();
-  renderStations(cachedVigicruesPayload);
+  initMap();
   syncLogScopeFields();
   syncLogOtherFields();
+
+  // Charger la boundary et les données en parallèle — rien n'est bloquant
+  loadIsereBoundary().then(() => renderStations(cachedVigicruesPayload)).catch(() => {});
 
   const refreshPromise = refreshAll().catch((error) => {
     document.getElementById('dashboard-error').textContent = `Actualisation différée: ${sanitizeErrorMessage(error.message)}`;
