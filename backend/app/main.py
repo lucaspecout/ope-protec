@@ -50,7 +50,7 @@ from .schemas import (
     WeatherAlertCreate,
     WeatherAlertOut,
 )
-from .security import create_access_token, hash_password, verify_password, warmup_crypto
+from .security import create_access_token, hash_password, verify_password, verify_and_upgrade, warmup_crypto
 from .services import (
     fetch_institutions_isere,
     fetch_bison_fute_live_events,
@@ -788,8 +788,15 @@ def delete_user(user_id: int, db: Session = Depends(get_db), actor: User = Depen
 @app.post("/auth/login", response_model=Token)
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == form_data.username).first()
-    if not user or not verify_password(form_data.password, user.hashed_password):
+    if not user:
         raise HTTPException(401, "Utilisateur ou mot de passe incorrect")
+    ok, new_hash = verify_and_upgrade(form_data.password, user.hashed_password)
+    if not ok:
+        raise HTTPException(401, "Utilisateur ou mot de passe incorrect")
+    # Upgrade silencieux du hash vers 10 rounds si nécessaire (était 12 par défaut)
+    if new_hash:
+        user.hashed_password = new_hash
+        db.commit()
     return {
         "access_token": create_access_token(user.username),
         "token_type": "bearer",

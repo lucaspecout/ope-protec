@@ -18,6 +18,12 @@ def verify_password(password: str, hashed: str) -> bool:
     return pwd_context.verify(password, hashed)
 
 
+def verify_and_upgrade(password: str, hashed: str) -> tuple[bool, str | None]:
+    """Vérifie le mot de passe et retourne le nouveau hash si upgrade nécessaire (12→10 rounds)."""
+    ok, new_hash = pwd_context.verify_and_update(password, hashed)
+    return ok, new_hash
+
+
 def warmup_crypto() -> None:
     """Pré-chauffe bcrypt au démarrage pour éviter la latence sur la première connexion."""
     try:
