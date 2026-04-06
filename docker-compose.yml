@@ -45,6 +45,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   web:
     build:
@@ -54,7 +60,7 @@ services:
     mem_limit: 512m
     depends_on:
       api:
-        condition: service_started
+        condition: service_healthy
     ports:
       - "1182:80"
 

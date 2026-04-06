@@ -810,6 +810,15 @@ def auth_me(user: User = Depends(get_current_user)):
     return user
 
 
+@app.post("/auth/renew")
+def auth_renew(user: User = Depends(get_current_user)):
+    """Renouvelle le JWT sans redemander le mot de passe (token valide requis)."""
+    return {
+        "access_token": create_access_token(user.username),
+        "token_type": "bearer",
+    }
+
+
 @app.post("/auth/change-password")
 def change_password(payload: PasswordChangeRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     if not verify_password(payload.current_password, user.hashed_password):

@@ -8827,9 +8827,30 @@ function logout() {
   showLogin();
 }
 
+let tokenRenewTimer = null;
+const TOKEN_RENEW_INTERVAL_MS = 4 * 60 * 60 * 1000; // renouveler toutes les 4h (token valide 24h)
+
+async function renewToken() {
+  if (!token) return;
+  try {
+    const result = await api('/auth/renew', {
+      method: 'POST',
+      highPriority: true,
+      timeoutMs: 8000,
+      maxRetries: 1,
+    });
+    if (result?.access_token) {
+      token = result.access_token;
+      localStorage.setItem(STORAGE_KEYS.token, token);
+    }
+  } catch { /* silencieux — le token actuel reste valide encore longtemps */ }
+}
+
 function startAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
+  if (tokenRenewTimer) clearInterval(tokenRenewTimer);
   refreshTimer = setInterval(() => token && refreshAll(true), AUTO_REFRESH_MS);
+  tokenRenewTimer = setInterval(renewToken, TOKEN_RENEW_INTERVAL_MS);
 }
 
 async function refreshLiveEvents() {
@@ -9251,15 +9272,39 @@ document.getElementById('event-form')?.addEventListener('submit', async (event) 
   }
 
   if (!token) return showLogin();
-  try {
-    currentUser = await api('/auth/me', { highPriority: true, timeoutMs: 5000, maxRetries: 0 });
-    await initializeAuthenticatedSession({ runRefreshInBackground: true });
-  } catch (error) {
-    if (Number(error?.status) === 401) {
-      logout();
-      return;
+
+  // Reconnexion avec retry — l'API peut mettre quelques secondes à démarrer après Docker
+  let bootstrapAttempt = 0;
+  const MAX_BOOTSTRAP_RETRIES = 5;
+  const bootstrapRetryDelays = [2000, 3000, 5000, 8000, 10000];
+
+  async function tryBootstrap() {
+    try {
+      currentUser = await api('/auth/me', { highPriority: true });
+      await initializeAuthenticatedSession({ runRefreshInBackground: true });
+    } catch (error) {
+      if (Number(error?.status) === 401) {
+        logout();
+        return;
+      }
+      // API pas encore prête (502 / HTML / timeout) → réessayer
+      const isApiNotReady = !error?.status || error?.status >= 500
+        || String(error?.message || '').includes('HTML')
+        || String(error?.message || '').includes('Délai');
+
+      if (isApiNotReady && bootstrapAttempt < MAX_BOOTSTRAP_RETRIES) {
+        const delay = bootstrapRetryDelays[bootstrapAttempt] || 10000;
+        bootstrapAttempt++;
+        setLoginError(`Démarrage du serveur en cours… nouvelle tentative dans ${Math.round(delay / 1000)}s (${bootstrapAttempt}/${MAX_BOOTSTRAP_RETRIES})`);
+        showLogin();
+        setTimeout(tryBootstrap, delay);
+        return;
+      }
+
+      setLoginError(`Session conservée mais API indisponible: ${sanitizeErrorMessage(error?.message || 'erreur inconnue')}`, buildLoginDebugDetails(error, currentUser?.username || 'session existante'));
+      showLogin();
     }
-    setLoginError(`Session conservée mais API indisponible: ${sanitizeErrorMessage(error?.message || 'erreur inconnue')}`, buildLoginDebugDetails(error, currentUser?.username || 'session existante'));
-    showLogin();
   }
+
+  tryBootstrap();
 })();
