@@ -3423,87 +3423,158 @@ def _get_isere_commune_centers(force_refresh: bool = False) -> dict[str, tuple[f
     )
 
 
+def _finess_batch_geocode(candidates: list[dict]) -> dict[str, tuple[float, float]]:
+    """
+    Géocode en une seule requête CSV vers api-adresse.data.gouv.fr/search/csv/.
+    candidates : liste de {'key': str, 'q': str, 'postcode': str, 'citycode': str}
+    Retourne dict key → (lat, lon).
+    """
+    if not candidates:
+        return {}
+    import io as _io
+    # Construire le CSV d'entrée
+    lines = ["id,adresse,postcode,citycode"]
+    for i, c in enumerate(candidates):
+        q = str(c.get("q") or "").replace('"', " ").replace("\n", " ")
+        pc = str(c.get("postcode") or "")
+        cc = str(c.get("citycode") or "")
+        lines.append(f'{i},"{q}",{pc},{cc}')
+    csv_body = "\n".join(lines).encode("utf-8")
+
+    url = "https://api-adresse.data.gouv.fr/search/csv/"
+    try:
+        req = Request(url, data=csv_body, headers={
+            "Content-Type": "text/csv; charset=utf-8",
+            "User-Agent": "ope-protec/1.0",
+        }, method="POST")
+        with urlopen(req, timeout=60) as resp:
+            result_csv = resp.read().decode("utf-8", errors="ignore")
+    except Exception:
+        return {}
+
+    results: dict[str, tuple[float, float]] = {}
+    reader = csv.DictReader(_io.StringIO(result_csv))
+    for row in reader:
+        try:
+            idx = int(row.get("id", -1))
+        except (ValueError, TypeError):
+            continue
+        if idx < 0 or idx >= len(candidates):
+            continue
+        try:
+            lat = float(row.get("latitude") or row.get("result_latitude") or "")
+            lon = float(row.get("longitude") or row.get("result_longitude") or "")
+        except (ValueError, TypeError):
+            continue
+        score_str = row.get("result_score") or row.get("score") or "0"
+        try:
+            score = float(score_str)
+        except ValueError:
+            score = 0.0
+        if score >= 0.4 and -90 <= lat <= 90 and -180 <= lon <= 180:
+            results[candidates[idx]["key"]] = (lat, lon)
+    return results
+
+
 def _fetch_finess_isere_resources_live(limit: int = 5000) -> dict[str, Any]:
     csv_url = _FINESS_ISERE_STABLE_CSV_URL
     request = Request(csv_url, headers={"User-Agent": "ope-protec/1.0"})
-    csv_bytes = _http_get_with_retries(request=request, timeout=45)
+    csv_bytes = _http_get_with_retries(request=request, timeout=60)
     decoded = csv_bytes.decode("utf-8", errors="ignore").splitlines()
-    rows = csv.reader(decoded, delimiter=";")
-    next(rows, None)  # ligne métadonnées
+    rows_raw = list(csv.reader(decoded, delimiter=";"))
+    if rows_raw:
+        rows_raw = rows_raw[1:]  # sauter l'en-tête
 
-    commune_center_cache: dict[str, tuple[float, float] | None] = {}
-    geocode_cache: dict[str, tuple[float, float] | None] = {}
+    # Précharger les centres de communes Isère (1 seul appel API)
     centers_by_code = _get_isere_commune_centers()
-    points: list[dict[str, Any]] = []
-    hospitals_total = 0
-    chu_total = 0
-    medecins_total = 0
-    hospitals_public_total = 0
-    hospitals_private_total = 0
-    ehpad_total = 0
-    clinics_total = 0
+
+    # --- Passe 1 : filtrer les lignes stratégiques Isère ---
+    strategic_rows: list[tuple[list[str], str, str]] = []  # (row, kind, category_label)
+    hospitals_total = chu_total = medecins_total = 0
+    hospitals_public_total = hospitals_private_total = ehpad_total = clinics_total = 0
     categories: dict[str, int] = {}
     max_points = max(200, min(limit, _FINESS_ISERE_MAX_LIMIT))
-    for row in rows:
+
+    for row in rows_raw:
         if len(row) < 22 or row[13].strip() != "38":
             continue
         kind, category_label = _finess_isere_kind(row)
-        normalized_blob = f" {_normalize_finess_text(' '.join((str(row[3] if len(row) > 3 else ''), str(row[4] if len(row) > 4 else ''), str(row[19] if len(row) > 19 else ''), str(row[20] if len(row) > 20 else ''), str(row[21] if len(row) > 21 else ''))))} "
-        if not _finess_isere_is_strategic(kind=kind, category_label=category_label, normalized_blob=normalized_blob):
-            continue
-        if kind == "hopital":
-            hospitals_total += 1
-        if kind == "chu":
-            chu_total += 1
-        if kind == "medecin":
-            medecins_total += 1
-        if kind == "hopital_public":
-            hospitals_public_total += 1
-        if kind == "hopital_prive":
-            hospitals_private_total += 1
-        if kind == "clinique":
-            clinics_total += 1
-        if kind == "ehpad":
-            ehpad_total += 1
-        if len(points) >= max_points:
-            continue
+        if kind == "hopital":      hospitals_total += 1
+        if kind == "chu":          chu_total += 1
+        if kind == "medecin":      medecins_total += 1
+        if kind == "hopital_public":   hospitals_public_total += 1
+        if kind == "hopital_prive":    hospitals_private_total += 1
+        if kind == "clinique":     clinics_total += 1
+        if kind == "ehpad":        ehpad_total += 1
+        strategic_rows.append((row, kind, category_label))
 
+    # --- Passe 2 : résoudre coords par code commune INSEE (instantané, pas d'appel réseau) ---
+    # Pour les établissements sans coords par code, préparer batch geocoding
+    pre_resolved: dict[int, tuple[float, float]] = {}  # index → coords
+    batch_candidates: list[dict] = []
+    batch_idx_map: list[int] = []  # position dans batch → index dans strategic_rows
+
+    for i, (row, kind, category_label) in enumerate(strategic_rows):
         postal_code, city = _extract_city_from_finess_address_line(row[15] if len(row) > 15 else "")
-        if not city:
-            continue
-        location_type = kind
-        location_label = category_label
-        categories[location_label] = categories.get(location_label, 0) + 1
         code_commune = _normalize_finess_commune_code(
             row[12] if len(row) > 12 else "",
             row[13] if len(row) > 13 else "",
         )
-        address_parts = [row[7] if len(row) > 7 else "", row[8] if len(row) > 8 else "", row[9] if len(row) > 9 else "", row[15] if len(row) > 15 else ""]
-        full_address = re.sub(r"\s+", " ", " ".join(part for part in address_parts if part).strip())
-        geocode_key = "|".join((full_address.lower(), postal_code or "", code_commune or ""))
-        if geocode_key not in geocode_cache:
-            geocode_cache[geocode_key] = _finess_precise_geocode(
-                query=full_address or f"{category_label} {city}",
-                postcode=postal_code or None,
-                citycode=code_commune or None,
-            )
-        coords = geocode_cache.get(geocode_key)
-        if not coords:
-            coords = centers_by_code.get(code_commune) if code_commune else None
-        if not coords:
+        # Essai immédiat par code commune INSEE
+        coords = centers_by_code.get(code_commune) if code_commune else None
+        if coords:
+            pre_resolved[i] = coords
+        else:
+            address_parts = [row[7] if len(row) > 7 else "", row[8] if len(row) > 8 else "", row[9] if len(row) > 9 else "", row[15] if len(row) > 15 else ""]
+            full_address = re.sub(r"\s+", " ", " ".join(p for p in address_parts if p).strip())
+            batch_candidates.append({"key": str(i), "q": full_address or f"{category_label} {city}", "postcode": postal_code or "", "citycode": code_commune or ""})
+            batch_idx_map.append(i)
+
+    # Batch geocoding en une seule requête pour les non-résolus
+    batch_results: dict[str, tuple[float, float]] = {}
+    if batch_candidates:
+        # Traiter par tranches de 500 (limite API)
+        CHUNK = 500
+        for start in range(0, len(batch_candidates), CHUNK):
+            chunk = batch_candidates[start:start + CHUNK]
+            chunk_results = _finess_batch_geocode(chunk)
+            # Remettre les clés à l'index global
+            for c, result_coords in chunk_results.items():
+                original_idx = batch_idx_map[start + int(c)]
+                batch_results[str(original_idx)] = result_coords
+
+    # --- Passe 3 : construire les points ---
+    points: list[dict[str, Any]] = []
+    commune_center_cache: dict[str, tuple[float, float] | None] = {}
+
+    for i, (row, kind, category_label) in enumerate(strategic_rows):
+        if len(points) >= max_points:
+            break
+        postal_code, city = _extract_city_from_finess_address_line(row[15] if len(row) > 15 else "")
+        if not city:
+            continue
+        categories[category_label] = categories.get(category_label, 0) + 1
+
+        # Résolution coords : pre_resolved > batch_results > commune name fallback
+        coords = pre_resolved.get(i) or batch_results.get(str(i))
+        if not coords and city:
             if city not in commune_center_cache:
                 commune_center_cache[city] = _finess_commune_center(city)
             coords = commune_center_cache.get(city)
         if not coords:
             continue
+
         lat, lon = coords
+        code_commune = _normalize_finess_commune_code(row[12] if len(row) > 12 else "", row[13] if len(row) > 13 else "")
+        address_parts = [row[7] if len(row) > 7 else "", row[8] if len(row) > 8 else "", row[9] if len(row) > 9 else "", row[15] if len(row) > 15 else ""]
+        full_address = re.sub(r"\s+", " ", " ".join(p for p in address_parts if p).strip())
         points.append(
             {
                 "id": f"finess-{row[1] if len(row) > 1 else len(points)}",
                 "name": str((row[4] if len(row) > 4 else "") or (row[3] if len(row) > 3 else "")).strip() or "Établissement FINESS",
                 "short_name": str(row[3] if len(row) > 3 else "").strip() or "",
-                "type": location_type,
-                "category": location_label,
+                "type": kind,
+                "category": category_label,
                 "health_kind": kind,
                 "health_category": category_label,
                 "lat": lat,
