@@ -3737,8 +3737,8 @@ async function renderPopulationByCityLayer() {
   });
 }
 
-// Bbox stricte du département Isère — filtre tout point hors département
-const ISERE_BBOX = { latMin: 44.70, latMax: 45.95, lonMin: 4.70, lonMax: 6.60 };
+// Bbox du département Isère — légèrement élargie pour ne pas perdre les communes aux frontières
+const ISERE_BBOX = { latMin: 44.50, latMax: 46.00, lonMin: 4.60, lonMax: 6.70 };
 function filterIserePoints(points) {
   if (!Array.isArray(points)) return [];
   return points.filter((p) => {
@@ -9027,7 +9027,7 @@ loginForm.addEventListener('submit', async (event) => {
       return;
     }
 
-    currentUser = await api('/auth/me');
+    currentUser = await api('/auth/me', { highPriority: true, timeoutMs: 5000, maxRetries: 0 });
     await initializeAuthenticatedSession({ runRefreshInBackground: true });
   } catch (error) {
     setLoginError(error.message, buildLoginDebugDetails(error, username));
@@ -9223,11 +9223,10 @@ document.getElementById('event-form')?.addEventListener('submit', async (event) 
 
 (async function bootstrap() {
   _loadGeocodeCache();
-  // Purger le cache OSM s'il est vide ou ne contient pas d'écoles/casernes (données inutilisables)
+  // Vérification légère du cache institutions — on le garde même s'il est petit
   try {
     const cachedInst = readSnapshot(STORAGE_KEYS.staticInstitutionsCache);
-    if (!Array.isArray(cachedInst) || cachedInst.length < 50
-      || !cachedInst.some((p) => ['ecole_primaire', 'caserne_pompier', 'gendarmerie'].includes(p.type))) {
+    if (!Array.isArray(cachedInst) || cachedInst.length === 0) {
       localStorage.removeItem(STORAGE_KEYS.staticInstitutionsCache);
     }
   } catch (_) { /* ignore */ }
@@ -9253,7 +9252,7 @@ document.getElementById('event-form')?.addEventListener('submit', async (event) 
 
   if (!token) return showLogin();
   try {
-    currentUser = await api('/auth/me');
+    currentUser = await api('/auth/me', { highPriority: true, timeoutMs: 5000, maxRetries: 0 });
     await initializeAuthenticatedSession({ runRefreshInBackground: true });
   } catch (error) {
     if (Number(error?.status) === 401) {
