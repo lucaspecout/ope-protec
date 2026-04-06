@@ -268,6 +268,7 @@ let telecomLoaded = false;
 let cachedHomeLiveSnapshot = {};
 let lastRenderedExternalRisksSignature = null;
 let lastRenderedApiInterconnectionsSignature = null;
+let lastRenderedGeorisquesSignature = null;
 
 function keepPreviousValue(previousValue, nextValue) {
   if (nextValue === undefined || nextValue === null) return previousValue;
@@ -419,6 +420,8 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
   const prevBison = previous.bison_fute || {};
   const nextBison = next.bison_fute || {};
   const prevSncf = previous.sncf_isere || {};
+  const prevGeorisques = previous.georisques || {};
+  const nextGeorisques = next.georisques || {};
   const nextSncf = next.sncf_isere || {};
   const prevVigieau = previous.vigieau || {};
   const nextVigieau = next.vigieau || {};
@@ -539,6 +542,27 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
       ...(next.dauphine_isere || {}),
       items: keepPreviousArray((previous.dauphine_isere || {}).items, (next.dauphine_isere || {}).items),
       articles: keepPreviousArray((previous.dauphine_isere || {}).articles, (next.dauphine_isere || {}).articles),
+    },
+    georisques: {
+      ...prevGeorisques,
+      ...nextGeorisques,
+      status: keepPreviousValue(prevGeorisques.status, nextGeorisques.status),
+      highest_seismic_zone_label: keepPreviousValue(prevGeorisques.highest_seismic_zone_label, nextGeorisques.highest_seismic_zone_label),
+      flood_documents_total: keepPreviousValue(prevGeorisques.flood_documents_total, nextGeorisques.flood_documents_total),
+      ppr_total: keepPreviousValue(prevGeorisques.ppr_total, nextGeorisques.ppr_total),
+      ground_movements_total: keepPreviousValue(prevGeorisques.ground_movements_total, nextGeorisques.ground_movements_total),
+      cavities_total: keepPreviousValue(prevGeorisques.cavities_total, nextGeorisques.cavities_total),
+      communes_with_radon_moderate_or_high: keepPreviousValue(prevGeorisques.communes_with_radon_moderate_or_high, nextGeorisques.communes_with_radon_moderate_or_high),
+      dicrim_total: keepPreviousValue(prevGeorisques.dicrim_total, nextGeorisques.dicrim_total),
+      tim_total: keepPreviousValue(prevGeorisques.tim_total, nextGeorisques.tim_total),
+      risques_information_total: keepPreviousValue(prevGeorisques.risques_information_total, nextGeorisques.risques_information_total),
+      monitored_communes: keepPreviousArray(prevGeorisques.monitored_communes, nextGeorisques.monitored_communes),
+      monitored_municipalities: keepPreviousArray(prevGeorisques.monitored_municipalities, nextGeorisques.monitored_municipalities),
+      communes: keepPreviousArray(prevGeorisques.communes, nextGeorisques.communes),
+      recent_ground_movements: keepPreviousArray(prevGeorisques.recent_ground_movements, nextGeorisques.recent_ground_movements),
+      movement_types: (nextGeorisques.movement_types && Object.keys(nextGeorisques.movement_types).length > 0) ? nextGeorisques.movement_types : (prevGeorisques.movement_types || {}),
+      radon_distribution: nextGeorisques.radon_distribution || prevGeorisques.radon_distribution || null,
+      ppr_categories: nextGeorisques.ppr_categories || prevGeorisques.ppr_categories || null,
     },
     avalanche_isere: mergeServiceSlot(
       previous.avalanche_isere || {},
@@ -5940,6 +5964,13 @@ function renderGeorisquesPcsRisks(monitored = []) {
 }
 
 function renderGeorisquesDetails(georisques = {}) {
+  const sig = JSON.stringify([
+    georisques.status, georisques.highest_seismic_zone_label, georisques.flood_documents_total,
+    georisques.ppr_total, georisques.ground_movements_total, georisques.cavities_total,
+    georisques.monitored_communes?.length, georisques.monitored_municipalities?.length, georisques.communes?.length,
+  ]);
+  if (sig === lastRenderedGeorisquesSignature) return;
+  lastRenderedGeorisquesSignature = sig;
   const monitored = georisques.monitored_communes || georisques.monitored_municipalities || georisques.communes || [];
   const errorDetails = Array.isArray(georisques.errors) ? georisques.errors.filter(Boolean) : [];
   const movementTypes = georisques.movement_types && typeof georisques.movement_types === 'object' ? georisques.movement_types : {};
