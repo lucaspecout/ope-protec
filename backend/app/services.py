@@ -2232,48 +2232,43 @@ def _itinisere_is_public_transport_event(title: str, description: str) -> bool:
 def _itinisere_is_isere_event(title: str, description: str, roads: list[str] | None = None, locations: list[str] | None = None) -> bool:
     text = f"{title} {description} {' '.join(locations or [])}".lower()
     isere_tokens = (
-        "isère",
-        "isere",
-        "grenoble",
-        "voiron",
-        "vienne",
-        "bourgoin",
-        "pontcharra",
-        "la mure",
-        "rives",
-        "le touvet",
-        "villard-de-lans",
+        "isère", "isere", "38",
+        "grenoble", "voiron", "vienne", "bourgoin", "pontcharra",
+        "la mure", "rives", "le touvet", "villard-de-lans", "vizille",
+        "corps", "tullins", "moirans", "meylan", "domène", "sassenage",
+        "échirolles", "echirolles", "pont-de-claix", "claix", "seyssins",
+        "crolles", "allevard", "la tour-du-pin", "saint-marcellin",
+        "belledonne", "vercors", "oisans", "chartreuse", "matheysine",
+        "bourg-d'oisans", "lautaret", "galibier", "chambon", "ornon",
+        "alpe d'huez", "deux alpes", "chamrousse",
     )
     if any(token in text for token in isere_tokens):
         return True
 
     isere_roads = {
-        "A41",
-        "A43",
-        "A48",
-        "A49",
-        "N85",
-        "N87",
-        "D1075",
-        "D1090",
-        "D1532",
-        "D520",
+        "A41", "A48", "A49", "A43", "A480", "A7", "A516",
+        "N85", "N87", "N75",
+        "D1075", "D1090", "D1091", "D1532", "D520", "D525", "D531",
+        "D518", "D526", "D111", "D523", "D524", "D530",
     }
     return bool(set(roads or []) & isere_roads)
 
 
 def _itinisere_is_road_closure_pass_or_camera_event(title: str, description: str, category: str, roads: list[str] | None = None) -> bool:
+    """Keep any road-relevant disruption: closures, works, accidents, incidents, passes, cameras."""
+    # Any event with detected road codes is kept
+    if roads:
+        return True
     text = f"{title} {description}".lower()
-    closure_tokens = ("fermet", "route coup", "interdit", "barr", "réouvert", "reouvert", "ouvert")
-    pass_tokens = ("col ", "cols ", "col du", "col de", "col des")
-    camera_tokens = ("caméra", "camera", "webcam", "vidéo", "video")
-    works_tokens = ("travaux", "chantier", "basculement", "alternat", "neutralis")
-
-    has_closure_signal = category == "fermeture" or any(token in text for token in closure_tokens)
-    has_pass_signal = any(token in text for token in pass_tokens)
-    has_camera_signal = any(token in text for token in camera_tokens)
-    has_road_works_signal = category == "travaux" and (bool(roads) or any(token in text for token in works_tokens))
-    return has_closure_signal or has_pass_signal or has_camera_signal or has_road_works_signal
+    keep_tokens = (
+        "fermet", "route coup", "interdit", "barr", "réouvert", "reouvert", "ouvert",
+        "col ", "cols ", "col du", "col de", "col des",
+        "caméra", "camera", "webcam",
+        "travaux", "chantier", "basculement", "alternat", "neutralis",
+        "accident", "collision", "carambolage", "obstacle", "panne",
+        "verglas", "neige", "intemp", "crue", "glissement",
+    )
+    return any(token in text for token in keep_tokens)
 
 
 def _itinisere_extract_locations(*chunks: str) -> list[str]:
@@ -2332,9 +2327,9 @@ def _itinisere_severity(title: str, description: str, category: str) -> str:
     text = f"{title} {description}".lower()
     if any(token in text for token in ("route coup", "fermet", "interdit", "impossible", "bloqu", "suspendu", "annul")):
         return "rouge"
-    if any(token in text for token in ("accident", "collision", "fort", "gros ralent", "très perturb", "dév")):
+    if any(token in text for token in ("accident", "collision", "carambolage", "fort", "gros ralent", "très perturb", "dév")) or category == "incident":
         return "orange"
-    if category in {"travaux", "incident", "évènement"} or any(token in text for token in ("travaux", "chantier", "retard", "ralenti", "manifest")):
+    if category in {"travaux", "évènement"} or any(token in text for token in ("travaux", "chantier", "retard", "ralenti", "manifest", "alternat")):
         return "jaune"
     return "vert"
 
@@ -2411,6 +2406,62 @@ def _itinisere_insights(events: list[dict[str, Any]]) -> dict[str, Any]:
         "top_roads": [{"road": road, "count": count} for road, count in top_roads],
     }
 
+def _cityway_fetch_isere_disruptions() -> list[dict[str, Any]]:
+    """Try the Cityway crowdsourcing API (Isère bbox). Returns list of events with lat/lon or []."""
+    url = "https://api.ppp38v2.cityway.fr/api/crowdsourcing/v1/GetRoadDisruptionsByBoundingBox/json"
+    params = (
+        "BottomLeftLatitude=44.70&BottomLeftLongitude=4.70"
+        "&UpperRightLatitude=45.95&UpperRightLongitude=6.55&Lang=fr"
+    )
+    full_url = f"{url}?{params}"
+    try:
+        raw = _http_get_text(full_url, timeout=10)
+        import json as _json
+        data = _json.loads(raw)
+        items = data if isinstance(data, list) else (data.get("Data") or data.get("data") or data.get("items") or [])
+        events: list[dict[str, Any]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            lat = item.get("Latitude") or item.get("latitude") or item.get("lat")
+            lon = item.get("Longitude") or item.get("longitude") or item.get("lon") or item.get("lng")
+            try:
+                lat = float(lat)
+                lon = float(lon)
+            except (TypeError, ValueError):
+                continue
+            if not _is_isere_coordinate(lat, lon):
+                continue
+            title = str(item.get("Title") or item.get("title") or item.get("Name") or "Perturbation").strip()
+            description = str(item.get("Description") or item.get("description") or "").strip()
+            category_raw = str(item.get("Type") or item.get("type") or item.get("DisruptionType") or "").lower()
+            category = _itinisere_category(title, description) if not category_raw else (
+                "fermeture" if "ferm" in category_raw or "clos" in category_raw
+                else "travaux" if "trav" in category_raw or "work" in category_raw
+                else "incident" if "accid" in category_raw or "incid" in category_raw
+                else _itinisere_category(title, description)
+            )
+            roads = _itinisere_extract_roads(f"{title} {description}")
+            events.append({
+                "title": title,
+                "description": description[:550],
+                "published_at": str(item.get("StartDate") or item.get("start_date") or ""),
+                "link": str(item.get("Link") or item.get("Url") or "https://www.itinisere.fr"),
+                "roads": roads,
+                "category": category,
+                "severity": _itinisere_severity(title, description, category),
+                "period_start": str(item.get("StartDate") or ""),
+                "period_end": str(item.get("EndDate") or item.get("end_date") or ""),
+                "locations": _itinisere_extract_locations(title, description),
+                "lat": lat,
+                "lon": lon,
+                "source_api": "cityway",
+            })
+        return events
+    except Exception:
+        return []
+
+
 def _fetch_itinisere_disruptions_live(limit: int = 60) -> dict[str, Any]:
     source = "https://www.itinisere.fr/fr/rss/Disruptions"
     try:
@@ -2475,6 +2526,24 @@ def _fetch_itinisere_disruptions_live(limit: int = 60) -> dict[str, Any]:
                     "locations": locations,
                 }
             )
+        # Merge Cityway events (have lat/lon) — add only those not already in RSS
+        cityway_events = _cityway_fetch_isere_disruptions()
+        rss_titles = {e["title"].lower()[:60] for e in events}
+        for cw_event in cityway_events:
+            if cw_event["title"].lower()[:60] not in rss_titles:
+                if not _itinisere_is_public_transport_event(cw_event["title"], cw_event["description"]):
+                    events.append(cw_event)
+
+        # Also enrich RSS events that match a Cityway event with coordinates
+        cityway_by_title = {e["title"].lower()[:60]: e for e in cityway_events}
+        for event in events:
+            if event.get("lat") is None:
+                match = cityway_by_title.get(event["title"].lower()[:60])
+                if match and match.get("lat") is not None:
+                    event["lat"] = match["lat"]
+                    event["lon"] = match["lon"]
+                    event["source_api"] = "cityway"
+
         insights = _itinisere_insights(events)
         insights["severity_breakdown"] = {
             level: len([event for event in events if event.get("severity") == level])
@@ -2490,6 +2559,23 @@ def _fetch_itinisere_disruptions_live(limit: int = 60) -> dict[str, Any]:
             "updated_at": datetime.utcnow().isoformat() + "Z",
         }
     except (ET.ParseError, HTTPError, URLError, TimeoutError, ValueError) as exc:
+        # If RSS fails, try Cityway only
+        cityway_events = _cityway_fetch_isere_disruptions()
+        if cityway_events:
+            insights = _itinisere_insights(cityway_events)
+            insights["severity_breakdown"] = {
+                level: len([e for e in cityway_events if e.get("severity") == level])
+                for level in ("rouge", "orange", "jaune", "vert")
+            }
+            return {
+                "service": "Itinisère",
+                "status": "degraded_rss",
+                "source": "cityway",
+                "events": cityway_events,
+                "events_total": len(cityway_events),
+                "insights": insights,
+                "updated_at": datetime.utcnow().isoformat() + "Z",
+            }
         return {
             "service": "Itinisère",
             "status": "degraded",

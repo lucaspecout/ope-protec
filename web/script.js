@@ -611,17 +611,170 @@ const HOSTING_RESOURCE_TYPES = new Set(['gymnase', 'complexe_sportif', 'stade', 
 const TELECOM_RESOURCE_TYPES = new Set(['anfr_antenna', 'arcep_mobile_outage']);
 
 const ISERE_BOUNDARY_STYLE = { color: '#163a87', weight: 2, fillColor: '#63c27d', fillOpacity: 0.2 };
-const TRAFFIC_COMMUNES = ['Grenoble', 'Voiron', 'Vienne', 'Bourgoin-Jallieu', 'Pont-de-Claix', 'Meylan', 'Échirolles', 'L\'Isle-d\'Abeau', 'Saint-Martin-d\'Hères', 'La Tour-du-Pin', 'Rives', 'Sassenage', 'Crolles', 'Tullins'];
+const TRAFFIC_COMMUNES = [
+  'Grenoble', 'Voiron', 'Vienne', 'Bourgoin-Jallieu', 'Pont-de-Claix', 'Meylan',
+  'Échirolles', "L'Isle-d'Abeau", 'Saint-Martin-d\'Hères', 'La Tour-du-Pin', 'Rives',
+  'Sassenage', 'Crolles', 'Tullins', 'Vizille', 'Pontcharra', 'La Mure', 'Corps',
+  'Domène', 'Voreppe', 'Moirans', 'Saint-Marcellin', 'Le Touvet', 'Goncelin',
+  'Allevard', 'Claix', 'Échirolles', 'Fontaine', 'Saint-Égrève', 'Seyssins',
+  'Jarrie', 'Vif', 'Uriage', 'Chamrousse', 'La Terrasse', 'Chapareillan',
+  'Renage', 'Chabons', 'Virieu', 'Morestel', 'Crémieu', 'Roussillon',
+  'Villard-de-Lans', 'Autrans', 'La Chapelle-en-Vercors', 'Monestier-de-Clermont',
+  'Clelles', 'Corps', 'Roybon', 'Vinay', 'Chatte', 'Saint-Antoine-l\'Abbaye',
+  'Rochetaillée', 'Le Bourg-d\'Oisans', 'Livet-et-Gavet', 'Mizoën', 'La Grave',
+  'Eybens', 'Gières', 'Saint-Nizier-du-Moucherotte', 'Sarcenas', 'Le Sappey',
+  'Pont-Évêque', 'Jardin', 'Saint-Clair-du-Rhône', 'Saint-Jean-de-Bournay',
+  'La Rochette', 'Seiglières',
+];
 const ITINISERE_ROAD_CORRIDORS = {
-  A41: [[45.1885, 5.7245], [45.3656, 5.9494]],
-  A48: [[45.1885, 5.7245], [45.3667, 5.5906]],
-  A49: [[45.0541, 5.0536], [45.1885, 5.7245]],
-  A43: [[45.5866, 5.2732], [45.529, 5.96]],
-  A7: [[45.5265, 4.8746], [45.3647, 4.7896]],
-  N85: [[45.1885, 5.7245], [44.9134, 5.7861]],
-  N87: [[45.1487, 5.7169], [45.1885, 5.7245]],
-  D1075: [[45.1885, 5.7245], [44.9134, 5.7861]],
-  D1090: [[45.1885, 5.7245], [45.3608, 5.9234]],
+  // Autoroutes — points intermédiaires réels
+  A41:  [[45.201, 5.786], [45.240, 5.830], [45.279, 5.883], [45.350, 5.995], [45.429, 6.018], [45.500, 6.100]],
+  A48:  [[45.188, 5.724], [45.240, 5.686], [45.297, 5.649], [45.339, 5.552], [45.356, 5.498], [45.448, 5.399], [45.520, 5.290]],
+  A49:  [[45.188, 5.724], [45.230, 5.629], [45.285, 5.530], [45.299, 5.477], [45.230, 5.390], [45.149, 5.317]],
+  A43:  [[45.490, 5.190], [45.537, 5.235], [45.587, 5.270], [45.587, 5.344], [45.566, 5.440]],
+  A480: [[45.120, 5.697], [45.143, 5.705], [45.160, 5.712], [45.188, 5.724]],
+  A516: [[45.188, 5.724], [45.175, 5.680], [45.152, 5.662]],
+  A7:   [[45.552, 4.879], [45.525, 4.877], [45.430, 4.830], [45.365, 4.790]],
+  // Routes nationales
+  N85:  [[45.188, 5.724], [45.079, 5.773], [45.059, 5.714], [44.960, 5.758], [44.900, 5.785], [44.835, 5.859], [44.816, 5.959]],
+  N87:  [[45.149, 5.717], [45.188, 5.724], [45.260, 5.700], [45.360, 5.450], [45.450, 5.180], [45.525, 4.876]],
+  N75:  [[45.188, 5.724], [45.079, 5.773], [44.900, 5.785]],
+  // Départementales principales
+  D1075: [[45.188, 5.724], [45.079, 5.773], [44.960, 5.758], [44.900, 5.785]],
+  D1090: [[45.188, 5.724], [45.076, 5.883], [45.054, 6.034], [44.999, 6.200], [45.035, 6.404]],
+  D1091: [[45.079, 5.773], [45.076, 5.883], [45.114, 6.005], [45.054, 6.034], [44.999, 6.200], [45.035, 6.404]],
+  D1532: [[45.188, 5.724], [45.280, 5.620], [45.339, 5.552], [45.356, 5.498], [45.448, 5.399], [45.500, 5.360], [45.567, 5.270]],
+  D520:  [[45.188, 5.724], [45.204, 5.853], [45.250, 5.832], [45.300, 5.818], [45.340, 5.808]],
+  D520B: [[45.300, 5.800], [45.340, 5.808]],
+  D525:  [[45.340, 5.808], [45.356, 5.870], [45.356, 5.992], [45.282, 6.074]],
+  D525A: [[45.282, 6.074], [45.260, 6.120]],
+  D526:  [[45.054, 6.034], [45.080, 6.050], [45.114, 6.005]],
+  D531:  [[45.188, 5.724], [45.150, 5.660], [45.109, 5.553], [45.071, 5.490], [45.050, 5.470]],
+  D518:  [[45.079, 5.773], [44.960, 5.758], [44.900, 5.785], [44.870, 5.780], [44.837, 5.780]],
+  D111:  [[45.155, 5.870], [45.150, 5.900], [45.130, 5.930]],
+  D523:  [[45.188, 5.724], [45.150, 5.750], [45.114, 5.755]],
+  D524:  [[45.114, 5.755], [45.090, 5.800], [45.050, 5.820]],
+  D530:  [[45.188, 5.724], [45.170, 5.650], [45.140, 5.580]],
+  D5:    [[45.525, 4.876], [45.499, 5.133], [45.567, 5.270]],
+  D75:   [[45.363, 5.630], [45.400, 5.620], [45.450, 5.600]],
+};
+
+// Lieux connus en Isère avec coordonnées exactes (pour éviter le géocodage)
+const ITINISERE_KNOWN_LOCATIONS = {
+  'col du lautaret': { lat: 45.0346, lon: 6.4042 },
+  'lautaret': { lat: 45.0346, lon: 6.4042 },
+  'col du galibier': { lat: 45.0603, lon: 6.4055 },
+  'galibier': { lat: 45.0603, lon: 6.4055 },
+  'tunnel du chambon': { lat: 44.9989, lon: 6.2004 },
+  'chambon': { lat: 44.9989, lon: 6.2004 },
+  'lac du chambon': { lat: 44.9919, lon: 6.1893 },
+  'bourg d\'oisans': { lat: 45.0537, lon: 6.0341 },
+  "bourg d'oisans": { lat: 45.0537, lon: 6.0341 },
+  'le bourg d\'oisans': { lat: 45.0537, lon: 6.0341 },
+  "le bourg d'oisans": { lat: 45.0537, lon: 6.0341 },
+  'oisans': { lat: 45.0537, lon: 6.0341 },
+  'col de la croix de fer': { lat: 45.2261, lon: 6.1987 },
+  'croix de fer': { lat: 45.2261, lon: 6.1987 },
+  'col du coq': { lat: 45.3098, lon: 5.9694 },
+  'col de porte': { lat: 45.2658, lon: 5.7815 },
+  'col de vence': { lat: 45.2047, lon: 5.7745 },
+  'col ornon': { lat: 44.9792, lon: 5.8973 },
+  'col d\'ornon': { lat: 44.9792, lon: 5.8973 },
+  "col d'ornon": { lat: 44.9792, lon: 5.8973 },
+  'col du glandon': { lat: 45.2389, lon: 6.1700 },
+  'glandon': { lat: 45.2389, lon: 6.1700 },
+  'col de la madeleine': { lat: 45.4386, lon: 6.3570 },
+  'alpe d\'huez': { lat: 45.0910, lon: 6.0706 },
+  "alpe d'huez": { lat: 45.0910, lon: 6.0706 },
+  'les deux alpes': { lat: 45.0124, lon: 6.1279 },
+  'deux alpes': { lat: 45.0124, lon: 6.1279 },
+  'villard-de-lans': { lat: 45.0716, lon: 5.5535 },
+  'villard de lans': { lat: 45.0716, lon: 5.5535 },
+  'autrans': { lat: 45.1751, lon: 5.5458 },
+  'méaudre': { lat: 45.1310, lon: 5.5176 },
+  'gorges de la bourne': { lat: 45.0900, lon: 5.5300 },
+  'la chapelle-en-vercors': { lat: 44.9710, lon: 5.4175 },
+  'monestier-de-clermont': { lat: 44.9189, lon: 5.6357 },
+  'clelles': { lat: 44.8150, lon: 5.6395 },
+  'corps': { lat: 44.8164, lon: 5.9594 },
+  'la mure': { lat: 44.8999, lon: 5.7850 },
+  'vizille': { lat: 45.0786, lon: 5.7728 },
+  'jarrie': { lat: 45.0997, lon: 5.7511 },
+  'vif': { lat: 45.0583, lon: 5.6720 },
+  'claix': { lat: 45.1196, lon: 5.6939 },
+  'pont-de-claix': { lat: 45.1247, lon: 5.7004 },
+  'pont de claix': { lat: 45.1247, lon: 5.7004 },
+  'échirolles': { lat: 45.1434, lon: 5.7186 },
+  'echirolles': { lat: 45.1434, lon: 5.7186 },
+  'grenoble': { lat: 45.1885, lon: 5.7245 },
+  'meylan': { lat: 45.2046, lon: 5.7895 },
+  'gières': { lat: 45.1851, lon: 5.7874 },
+  'domène': { lat: 45.2032, lon: 5.8529 },
+  'uriage': { lat: 45.1345, lon: 5.8178 },
+  'chamrousse': { lat: 45.1199, lon: 5.8873 },
+  'le sappey': { lat: 45.2340, lon: 5.7745 },
+  'sarcenas': { lat: 45.2697, lon: 5.7654 },
+  'saint-nizier-du-moucherotte': { lat: 45.1709, lon: 5.6369 },
+  'sassenage': { lat: 45.2020, lon: 5.6794 },
+  'seyssins': { lat: 45.1558, lon: 5.6900 },
+  'seyssinet': { lat: 45.1693, lon: 5.6862 },
+  'fontaine': { lat: 45.1929, lon: 5.6876 },
+  'saint-egreve': { lat: 45.2298, lon: 5.6853 },
+  'saint-égrève': { lat: 45.2298, lon: 5.6853 },
+  'voreppe': { lat: 45.2974, lon: 5.6485 },
+  'moirans': { lat: 45.3387, lon: 5.5517 },
+  'voiron': { lat: 45.3620, lon: 5.5900 },
+  'rives': { lat: 45.3550, lon: 5.4975 },
+  'renage': { lat: 45.4118, lon: 5.4310 },
+  'tullins': { lat: 45.2987, lon: 5.4773 },
+  'saint-marcellin': { lat: 45.1487, lon: 5.3170 },
+  'chatte': { lat: 45.1260, lon: 5.2869 },
+  'vienne': { lat: 45.5248, lon: 4.8765 },
+  'pont-évêque': { lat: 45.5394, lon: 4.9119 },
+  'pont evêque': { lat: 45.5394, lon: 4.9119 },
+  'condrieu': { lat: 45.4679, lon: 4.7740 },
+  'givors': { lat: 45.5894, lon: 4.7672 },
+  'bourgoin-jallieu': { lat: 45.5869, lon: 5.2701 },
+  'bourgoin': { lat: 45.5869, lon: 5.2701 },
+  "l'isle-d'abeau": { lat: 45.6149, lon: 5.2279 },
+  "isle d'abeau": { lat: 45.6149, lon: 5.2279 },
+  'saint-jean-de-bournay': { lat: 45.4994, lon: 5.1331 },
+  'la tour-du-pin': { lat: 45.5667, lon: 5.4412 },
+  'la tour du pin': { lat: 45.5667, lon: 5.4412 },
+  'virieu': { lat: 45.5122, lon: 5.4796 },
+  'morestel': { lat: 45.6699, lon: 5.4683 },
+  'crémieu': { lat: 45.7283, lon: 5.2561 },
+  'chabons': { lat: 45.4478, lon: 5.3994 },
+  'châbons': { lat: 45.4478, lon: 5.3994 },
+  'pontcharra': { lat: 45.4293, lon: 6.0175 },
+  'crolles': { lat: 45.2785, lon: 5.8832 },
+  'goncelin': { lat: 45.3502, lon: 5.9952 },
+  'le touvet': { lat: 45.3437, lon: 5.9495 },
+  'la terrasse': { lat: 45.3202, lon: 5.9382 },
+  'chapareillan': { lat: 45.4337, lon: 5.9986 },
+  'allevard': { lat: 45.3930, lon: 6.0762 },
+  'la rochette': { lat: 45.4365, lon: 6.1048 },
+  'saint-jean-de-moirans': { lat: 45.3403, lon: 5.5665 },
+  'vinay': { lat: 45.2172, lon: 5.3157 },
+  'roybon': { lat: 45.2571, lon: 5.2537 },
+  'saint-antoine-l\'abbaye': { lat: 45.1603, lon: 5.1941 },
+  'rochetaillée': { lat: 45.1144, lon: 6.0052 },
+  'rochetaillee': { lat: 45.1144, lon: 6.0052 },
+  'mizoën': { lat: 44.9935, lon: 6.2159 },
+  'mizoen': { lat: 44.9935, lon: 6.2159 },
+  'la grave': { lat: 45.0451, lon: 6.3075 },
+  'le monetier': { lat: 44.9783, lon: 6.5073 },
+  'seiglières': { lat: 45.1547, lon: 5.8699 },
+  'seiglieres': { lat: 45.1547, lon: 5.8699 },
+  'livet-et-gavet': { lat: 45.0659, lon: 5.9743 },
+  'le péage-de-roussillon': { lat: 45.3762, lon: 4.8110 },
+  'roussillon': { lat: 45.3722, lon: 4.8161 },
+  'saint-clair-du-rhône': { lat: 45.4337, lon: 4.7655 },
+  'jardin': { lat: 45.4717, lon: 4.8676 },
+  'eybens': { lat: 45.1565, lon: 5.7475 },
+  'herbeys': { lat: 45.1303, lon: 5.7855 },
+  'bresson': { lat: 45.1248, lon: 5.7380 },
+  'brié-et-angonnes': { lat: 45.1232, lon: 5.7735 },
 };
 const BISON_CORRIDORS = [
   { name: 'A43 · Axe Lyon ⇄ Chambéry', points: [[45.5866, 5.2732], [45.7257, 5.9191]] },
@@ -4428,11 +4581,14 @@ function trafficPopupDetails(point = {}, sourceLabel = '', trafficType = '') {
   const periodEnd = point.period_end || point.end_at || point.validity_end || '';
   const scope = [point.direction, point.carriageway, point.lane_status].filter(Boolean).join(' · ');
   const restriction = point.vehicle_restriction || point.mobility || '';
+  const precisionEmoji = { source: '📍', exact: '📍', commune: '🏘️', mairie: '🏛️', adresse: '🏠', localité: '🗺️', 'axe+commune': '🛣️', axe: '🛣️', estimée: '⚠️' };
+  const precisionKey = point.precision || 'estimée';
+  const precisionIcon = precisionEmoji[precisionKey] || '⚠️';
   return `<strong>${escapeHtml(point.title || 'Évènement circulation Isère')}</strong><br/>
     <span class="badge neutral">${escapeHtml(sourceLabel)} · ${escapeHtml(trafficType)} · ${escapeHtml(level)}</span><br/>
     ${escapeHtml(point.description || 'Aucun détail complémentaire fourni.')}<br/>
     Axe(s): ${escapeHtml(roads)}<br/>
-    Localisation: ${escapeHtml(locations)} (${escapeHtml(point.precision || 'estimée')})<br/>
+    ${precisionIcon} Localisation: ${escapeHtml(locations)} <em>(précision: ${escapeHtml(precisionKey)})</em><br/>
     Catégorie: ${escapeHtml(category)}${reference ? `<br/>Référence: ${escapeHtml(String(reference))}` : ''}${periodStart || periodEnd ? `<br/>Période: ${escapeHtml(periodStart ? safeDateToLocale(periodStart) : '?')} → ${escapeHtml(periodEnd ? safeDateToLocale(periodEnd) : '?')}` : ''}${scope ? `<br/>Sens/voies: ${escapeHtml(scope)}` : ''}${restriction ? `<br/>Véhicules concernés: ${escapeHtml(restriction)}` : ''}${point.mandatory ? '<br/>Mesure obligatoire: oui' : ''}${publishedAt ? `<br/>Mis à jour: ${escapeHtml(safeDateToLocale(publishedAt))}` : ''}${coords ? `<br/>Coordonnées: ${coords.lat.toFixed(5)}, ${coords.lon.toFixed(5)}` : ''}<br/>
     <a href="${escapeHtml(point.link || '#')}" target="_blank" rel="noreferrer">Voir la source officielle</a>`;
 }
@@ -4479,10 +4635,49 @@ async function geocodeRoadWithContext(road = '', contextHints = []) {
   return null;
 }
 
+const _GEOCODE_LS_KEY = 'itinisereGeocodeCacheV2';
+const _GEOCODE_LS_TTL_MS = 7 * 24 * 3600 * 1000; // 7 jours
+
+function _loadGeocodeCache() {
+  try {
+    const raw = localStorage.getItem(_GEOCODE_LS_KEY);
+    if (!raw) return;
+    const store = JSON.parse(raw);
+    const now = Date.now();
+    let changed = false;
+    Object.entries(store).forEach(([k, entry]) => {
+      if (entry && entry.expires_at && entry.expires_at > now) {
+        trafficGeocodeCache.set(k, entry.value ?? null);
+      } else {
+        changed = true; // expired
+      }
+    });
+    if (changed) _saveGeocodeCache();
+  } catch { /* ignore */ }
+}
+
+function _saveGeocodeCache() {
+  try {
+    const store = {};
+    trafficGeocodeCache.forEach((value, key) => {
+      store[key] = { value, expires_at: Date.now() + _GEOCODE_LS_TTL_MS };
+    });
+    localStorage.setItem(_GEOCODE_LS_KEY, JSON.stringify(store));
+  } catch { /* quota dépassé — silencieux */ }
+}
+
 async function geocodeTrafficLabel(label) {
   const key = String(label || '').trim().toLowerCase();
   if (!key) return null;
+  // 1. Table des lieux connus — résultat instantané
+  const known = lookupKnownLocation(key);
+  if (known && isPointInIsere(known)) {
+    trafficGeocodeCache.set(key, known);
+    return known;
+  }
+  // 2. Cache en mémoire (chargé depuis localStorage au démarrage)
   if (trafficGeocodeCache.has(key)) return trafficGeocodeCache.get(key);
+  // 3. API communes (réseau)
   try {
     const communeUrl = `https://geo.api.gouv.fr/communes?nom=${encodeURIComponent(label)}&fields=centre,codeDepartement&codeDepartement=38&limit=1`;
     const communeResponse = await queueApiRequest(() => fetchWithTimeout(communeUrl));
@@ -4492,13 +4687,13 @@ async function geocodeTrafficLabel(label) {
       const point = { lat: Number(center[1]), lon: Number(center[0]), precision: 'commune' };
       if (isPointInIsere(point)) {
         trafficGeocodeCache.set(key, point);
+        _saveGeocodeCache();
         return point;
       }
     }
-  } catch {
-    // fallback nominatim
-  }
+  } catch { /* fallback nominatim */ }
 
+  // 4. Nominatim
   try {
     const nominatimUrl = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(`${label}, Isère, France`)}`;
     const response = await queueApiRequest(() => fetchWithTimeout(nominatimUrl, { headers: { Accept: 'application/json' } }));
@@ -4507,9 +4702,11 @@ async function geocodeTrafficLabel(label) {
     const point = first ? { lat: Number(first.lat), lon: Number(first.lon), precision: 'adresse' } : null;
     if (!isPointInIsere(point || {})) {
       trafficGeocodeCache.set(key, null);
+      _saveGeocodeCache();
       return null;
     }
     trafficGeocodeCache.set(key, point);
+    _saveGeocodeCache();
     return point;
   } catch {
     trafficGeocodeCache.set(key, null);
@@ -4685,6 +4882,17 @@ function spreadOverlappingTrafficPoints(points = []) {
   return points;
 }
 
+function lookupKnownLocation(text = '') {
+  const lowered = text.toLowerCase().replace(/\s+/g, ' ').trim();
+  if (ITINISERE_KNOWN_LOCATIONS[lowered]) return { ...ITINISERE_KNOWN_LOCATIONS[lowered], precision: 'exact' };
+  // Try partial match — scan all tokens in text against known locations keys
+  const keys = Object.keys(ITINISERE_KNOWN_LOCATIONS);
+  for (const key of keys) {
+    if (lowered.includes(key)) return { ...ITINISERE_KNOWN_LOCATIONS[key], precision: 'exact' };
+  }
+  return null;
+}
+
 async function buildItinisereMapPoints(events = []) {
   const points = [];
   for (const event of events.slice(0, 80)) {
@@ -4708,18 +4916,45 @@ async function buildItinisereMapPoints(events = []) {
     let precision = 'estimée';
     let communeAnchor = null;
 
+    // 1. Coordonnées directes depuis l'API (Cityway ou Bison Futé)
     const providedCoords = normalizeMapCoordinates(event.lat, event.lon);
     if (isBisonEvent && !providedCoords) continue;
-    if (providedCoords && !roads.length) {
+    if (providedCoords) {
       position = providedCoords;
       anchor = locations[0] || roads[0] || 'Itinisère';
       precision = 'source';
     }
-    if (!position && providedCoords) {
-      position = providedCoords;
-      anchor = locations[0] || roads[0] || 'Itinisère';
-      precision = 'source';
+
+    // 2. Lookup dans la table des lieux connus (avant tout géocodage réseau)
+    if (!position) {
+      const knownFromTitle = lookupKnownLocation(event.title || '');
+      if (knownFromTitle && isPointInIsere(knownFromTitle)) {
+        position = knownFromTitle;
+        anchor = event.title || 'Lieu connu';
+        precision = 'exact';
+      }
     }
+    if (!position) {
+      const knownFromText = lookupKnownLocation(fullText);
+      if (knownFromText && isPointInIsere(knownFromText)) {
+        position = knownFromText;
+        anchor = 'Lieu connu';
+        precision = 'exact';
+      }
+    }
+    if (!position) {
+      for (const hint of candidateLocationHints) {
+        const knownFromHint = lookupKnownLocation(hint);
+        if (knownFromHint && isPointInIsere(knownFromHint)) {
+          position = knownFromHint;
+          anchor = hint;
+          precision = 'exact';
+          break;
+        }
+      }
+    }
+
+    // 3. Géocodage réseau (géo API communes + Nominatim)
     if (!position) {
       for (const location of candidateLocationHints) {
         position = await geocodeTrafficLabel(location);
@@ -8837,6 +9072,7 @@ document.getElementById('event-form')?.addEventListener('submit', async (event) 
 })();
 
 (async function bootstrap() {
+  _loadGeocodeCache();
   bindAppInteractions();
   startApiPanelAutoRefresh();
   document.addEventListener('visibilitychange', () => {
