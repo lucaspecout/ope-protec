@@ -131,7 +131,14 @@
       "Bash(curl -s \"https://www.data.gouv.fr/api/1/datasets/evenements-routiers-sur-le-reseau-routier-national-non-concede/\")",
       "Bash(python -c ':*)",
       "Bash(node --check web/script.js)",
-      "Bash(node.exe --check web/script.js)"
+      "Bash(node.exe --check web/script.js)",
+      "Bash(cp /tmp/main_pol.py backend/app/main.py)",
+      "Bash(cp /tmp/services_pol.py backend/app/services.py)",
+      "Bash(cp /tmp/script_pol.js web/script.js)",
+      "Bash(cp /tmp/models_pol.py backend/app/models.py)",
+      "Bash(cp /tmp/security_pol.py backend/app/security.py)",
+      "Bash(printf 'FROM python:3.12-slim\\\\n\\\\nWORKDIR /app\\\\nCOPY requirements.txt .\\\\nRUN pip install --no-cache-dir -r requirements.txt\\\\nCOPY app ./app\\\\nEXPOSE 8000\\\\nCMD [\"gunicorn\", \"app.main:app\", \"-k\", \"uvicorn.workers.UvicornWorker\", \"--bind\", \"0.0.0.0:8000\", \"--workers\", \"3\", \"--timeout\", \"60\", \"--keep-alive\", \"5\", \"--access-logfile\", \"-\", \"--error-logfile\", \"-\"]\\\\n')",
+      "Bash(printf 'CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";\\\\n')"
     ]
   }
 }

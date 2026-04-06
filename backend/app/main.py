@@ -81,11 +81,7 @@ from .services import (
     vigicrues_geojson_from_stations,
 )
 
-try:
-    Base.metadata.create_all(bind=engine)
-except Exception:
-    # Race condition entre les workers gunicorn : la table a déjà été créée par un autre worker
-    pass
+Base.metadata.create_all(bind=engine)
 Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
 
 
@@ -174,13 +170,6 @@ with engine.begin() as conn:
             municipality_id INTEGER REFERENCES municipalities(id) ON DELETE SET NULL,
             created_by_id INTEGER NOT NULL REFERENCES users(id),
             created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        )
-    """))
-    conn.execute(text("""
-        CREATE TABLE IF NOT EXISTS system_cache (
-            key VARCHAR(120) PRIMARY KEY,
-            value TEXT NOT NULL,
-            updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
         )
     """))
 
@@ -471,9 +460,8 @@ def _service_loop(key: str, interval: int) -> None:
 
 @app.on_event("startup")
 def startup_warmup_external_sources() -> None:
-    # Préchauffer bcrypt + contour Isère en arrière-plan (login instantané dès le démarrage)
+    # Préchauffer bcrypt en arrière-plan pour que la première connexion soit rapide.
     Thread(target=warmup_crypto, daemon=True).start()
-    Thread(target=fetch_isere_boundary_geojson, daemon=True).start()
 
     # Initialiser le snapshot avec les valeurs par défaut ("pending") pour que le
     # frontend affiche un état cohérent dès le premier poll, avant la fin des fetches.
@@ -819,15 +807,6 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
 @app.get("/auth/me", response_model=UserOut)
 def auth_me(user: User = Depends(get_current_user)):
     return user
-
-
-@app.post("/auth/renew")
-def auth_renew(user: User = Depends(get_current_user)):
-    """Renouvelle le JWT sans redemander le mot de passe (token valide requis)."""
-    return {
-        "access_token": create_access_token(user.username),
-        "token_type": "bearer",
-    }
 
 
 @app.post("/auth/change-password")

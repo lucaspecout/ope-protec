@@ -34,7 +34,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: always
-    mem_limit: 2g
+    mem_limit: 1g
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/veille
       REDIS_URL: redis://redis:6379/0
@@ -45,12 +45,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
 
   web:
     build:
@@ -60,7 +54,7 @@ services:
     mem_limit: 512m
     depends_on:
       api:
-        condition: service_healthy
+        condition: service_started
     ports:
       - "1182:80"
 

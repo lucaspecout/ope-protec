@@ -2998,35 +2998,7 @@ function setSidebarCollapsed(collapsed) {
 
 async function loadIsereBoundary() {
   initMap();
-
-  // Charger depuis le cache localStorage d'abord (le contour Isère ne change jamais)
-  const BOUNDARY_LS_KEY = 'isereBoundaryGeometryV1';
-  const BOUNDARY_LS_TTL = 7 * 24 * 60 * 60 * 1000; // 7 jours
-  let geometry = null;
-  try {
-    const cached = JSON.parse(localStorage.getItem(BOUNDARY_LS_KEY) || 'null');
-    if (cached?.geometry && cached?.ts && (Date.now() - cached.ts) < BOUNDARY_LS_TTL) {
-      geometry = cached.geometry;
-    }
-  } catch { /* ignore */ }
-
-  if (geometry) {
-    // Afficher immédiatement depuis le cache local — aucune requête réseau
-    isereBoundaryGeometry = geometry;
-    if (boundaryLayer) leafletMap.removeLayer(boundaryLayer);
-    boundaryLayer = window.L.geoJSON({ type: 'Feature', geometry }, { style: ISERE_BOUNDARY_STYLE }).addTo(leafletMap);
-    leafletMap.fitBounds(boundaryLayer.getBounds(), { padding: [16, 16] });
-    // Rafraîchir le cache en arrière-plan silencieusement
-    api('/public/isere-map', { cacheTtlMs: 7 * 24 * 60 * 60 * 1000 }).then((data) => {
-      if (data?.geometry) {
-        try { localStorage.setItem(BOUNDARY_LS_KEY, JSON.stringify({ geometry: data.geometry, ts: Date.now() })); } catch { /* ignore */ }
-      }
-    }).catch(() => {});
-    return;
-  }
-
-  // Premier chargement : requête backend (timeout court — le backend répond immédiatement)
-  const data = await api('/public/isere-map', { cacheTtlMs: 7 * 24 * 60 * 60 * 1000, timeoutMs: 5000, maxRetries: 0 });
+  const data = await api('/public/isere-map');
   isereBoundaryGeometry = data?.geometry || null;
   if (boundaryLayer) leafletMap.removeLayer(boundaryLayer);
   boundaryLayer = window.L.geoJSON({ type: 'Feature', geometry: data.geometry }, { style: ISERE_BOUNDARY_STYLE }).addTo(leafletMap);
@@ -3034,8 +3006,6 @@ async function loadIsereBoundary() {
   const mapSourceNode = document.getElementById('map-source');
   if (mapSourceNode) mapSourceNode.textContent = `Source carte: ${data.source}`;
   setMapFeedback('Fond de carte et contour Isère chargés.');
-  // Sauvegarder pour les prochaines connexions
-  try { localStorage.setItem(BOUNDARY_LS_KEY, JSON.stringify({ geometry: data.geometry, ts: Date.now() })); } catch { /* ignore */ }
 }
 
 function isPointInRing(point, ring = []) {
@@ -3737,8 +3707,8 @@ async function renderPopulationByCityLayer() {
   });
 }
 
-// Bbox du département Isère — légèrement élargie pour ne pas perdre les communes aux frontières
-const ISERE_BBOX = { latMin: 44.50, latMax: 46.00, lonMin: 4.60, lonMax: 6.70 };
+// Bbox stricte du département Isère — filtre tout point hors département
+const ISERE_BBOX = { latMin: 44.70, latMax: 45.95, lonMin: 4.70, lonMax: 6.60 };
 function filterIserePoints(points) {
   if (!Array.isArray(points)) return [];
   return points.filter((p) => {
@@ -8827,30 +8797,9 @@ function logout() {
   showLogin();
 }
 
-let tokenRenewTimer = null;
-const TOKEN_RENEW_INTERVAL_MS = 4 * 60 * 60 * 1000; // renouveler toutes les 4h (token valide 24h)
-
-async function renewToken() {
-  if (!token) return;
-  try {
-    const result = await api('/auth/renew', {
-      method: 'POST',
-      highPriority: true,
-      timeoutMs: 8000,
-      maxRetries: 1,
-    });
-    if (result?.access_token) {
-      token = result.access_token;
-      localStorage.setItem(STORAGE_KEYS.token, token);
-    }
-  } catch { /* silencieux — le token actuel reste valide encore longtemps */ }
-}
-
 function startAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
-  if (tokenRenewTimer) clearInterval(tokenRenewTimer);
   refreshTimer = setInterval(() => token && refreshAll(true), AUTO_REFRESH_MS);
-  tokenRenewTimer = setInterval(renewToken, TOKEN_RENEW_INTERVAL_MS);
 }
 
 async function refreshLiveEvents() {
@@ -8997,12 +8946,10 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
   showApp();
   setActivePanel(localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel');
   hydrateUiFromLocalCache();
-  initMap();
+  await loadIsereBoundary();
+  renderStations(cachedVigicruesPayload);
   syncLogScopeFields();
   syncLogOtherFields();
-
-  // Charger la boundary et les données en parallèle — rien n'est bloquant
-  loadIsereBoundary().then(() => renderStations(cachedVigicruesPayload)).catch(() => {});
 
   const refreshPromise = refreshAll().catch((error) => {
     document.getElementById('dashboard-error').textContent = `Actualisation différée: ${sanitizeErrorMessage(error.message)}`;
@@ -9048,7 +8995,7 @@ loginForm.addEventListener('submit', async (event) => {
       return;
     }
 
-    currentUser = await api('/auth/me', { highPriority: true, timeoutMs: 5000, maxRetries: 0 });
+    currentUser = await api('/auth/me');
     await initializeAuthenticatedSession({ runRefreshInBackground: true });
   } catch (error) {
     setLoginError(error.message, buildLoginDebugDetails(error, username));
@@ -9244,10 +9191,11 @@ document.getElementById('event-form')?.addEventListener('submit', async (event) 
 
 (async function bootstrap() {
   _loadGeocodeCache();
-  // Vérification légère du cache institutions — on le garde même s'il est petit
+  // Purger le cache OSM s'il est vide ou ne contient pas d'écoles/casernes (données inutilisables)
   try {
     const cachedInst = readSnapshot(STORAGE_KEYS.staticInstitutionsCache);
-    if (!Array.isArray(cachedInst) || cachedInst.length === 0) {
+    if (!Array.isArray(cachedInst) || cachedInst.length < 50
+      || !cachedInst.some((p) => ['ecole_primaire', 'caserne_pompier', 'gendarmerie'].includes(p.type))) {
       localStorage.removeItem(STORAGE_KEYS.staticInstitutionsCache);
     }
   } catch (_) { /* ignore */ }
@@ -9272,39 +9220,15 @@ document.getElementById('event-form')?.addEventListener('submit', async (event) 
   }
 
   if (!token) return showLogin();
-
-  // Reconnexion avec retry — l'API peut mettre quelques secondes à démarrer après Docker
-  let bootstrapAttempt = 0;
-  const MAX_BOOTSTRAP_RETRIES = 5;
-  const bootstrapRetryDelays = [2000, 3000, 5000, 8000, 10000];
-
-  async function tryBootstrap() {
-    try {
-      currentUser = await api('/auth/me', { highPriority: true });
-      await initializeAuthenticatedSession({ runRefreshInBackground: true });
-    } catch (error) {
-      if (Number(error?.status) === 401) {
-        logout();
-        return;
-      }
-      // API pas encore prête (502 / HTML / timeout) → réessayer
-      const isApiNotReady = !error?.status || error?.status >= 500
-        || String(error?.message || '').includes('HTML')
-        || String(error?.message || '').includes('Délai');
-
-      if (isApiNotReady && bootstrapAttempt < MAX_BOOTSTRAP_RETRIES) {
-        const delay = bootstrapRetryDelays[bootstrapAttempt] || 10000;
-        bootstrapAttempt++;
-        setLoginError(`Démarrage du serveur en cours… nouvelle tentative dans ${Math.round(delay / 1000)}s (${bootstrapAttempt}/${MAX_BOOTSTRAP_RETRIES})`);
-        showLogin();
-        setTimeout(tryBootstrap, delay);
-        return;
-      }
-
-      setLoginError(`Session conservée mais API indisponible: ${sanitizeErrorMessage(error?.message || 'erreur inconnue')}`, buildLoginDebugDetails(error, currentUser?.username || 'session existante'));
-      showLogin();
+  try {
+    currentUser = await api('/auth/me');
+    await initializeAuthenticatedSession({ runRefreshInBackground: true });
+  } catch (error) {
+    if (Number(error?.status) === 401) {
+      logout();
+      return;
     }
+    setLoginError(`Session conservée mais API indisponible: ${sanitizeErrorMessage(error?.message || 'erreur inconnue')}`, buildLoginDebugDetails(error, currentUser?.username || 'session existante'));
+    showLogin();
   }
-
-  tryBootstrap();
 })();

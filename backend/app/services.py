@@ -26,8 +26,7 @@ from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .models import Municipality, OperationalLog, WeatherAlert, SystemCache
-from .database import SessionLocal
+from .models import Municipality, OperationalLog, WeatherAlert
 
 
 def cleanup_old_weather_alerts(db: Session) -> int:
@@ -476,8 +475,7 @@ _HUBEAU_GROUNDWATER_CACHE_TTL_SECONDS = 10800
 _AVALANCHE_ISERE_CACHE_TTL_SECONDS = 3600
 _APIC_ISERE_CACHE_TTL_SECONDS = 300
 _VIGICRUES_FLASH_ISERE_CACHE_TTL_SECONDS = 300
-_ISERE_BOUNDARY_CACHE_TTL_SECONDS = 86400 * 7  # 7 jours — le contour Isère ne change jamais
-_ISERE_BOUNDARY_DISK_PATH = Path(__file__).parent / "isere_boundary_cache.json"
+_ISERE_BOUNDARY_CACHE_TTL_SECONDS = 21600
 _AURA_AIRCRAFT_CACHE_TTL_SECONDS = 45
 
 _vigicrues_cache_lock = Lock()
@@ -686,9 +684,9 @@ def _fetch_institutions_isere_live() -> dict[str, Any]:
         })
 
     if not points:
-        raise RuntimeError("Overpass n'a retourné aucun résultat — serveurs surchargés ou hors-ligne")
+        raise RuntimeError("Overpass n'a retourné aucun établissement pour l'Isère")
     return {
-        "status": "online" if len(points) >= 10 else "partial",
+        "status": "online",
         "count": len(points),
         "points": points,
         "updated_at": datetime.utcnow().isoformat() + "Z",
@@ -1229,80 +1227,32 @@ def fetch_meteo_france_isere(force_refresh: bool = False) -> dict[str, Any]:
         }
 
 
-_BOUNDARY_DB_KEY = "isere_boundary_geojson"
-
-def _boundary_load_from_db() -> dict | None:
-    """Charge le contour depuis PostgreSQL (volume persistant)."""
-    try:
-        db = SessionLocal()
-        try:
-            row = db.query(SystemCache).filter(SystemCache.key == _BOUNDARY_DB_KEY).first()
-            if row:
-                return json.loads(row.value)
-        finally:
-            db.close()
-    except Exception:
-        pass
-    return None
-
-def _boundary_save_to_db(geometry: dict) -> None:
-    """Sauvegarde le contour en base PostgreSQL."""
-    try:
-        db = SessionLocal()
-        try:
-            row = db.query(SystemCache).filter(SystemCache.key == _BOUNDARY_DB_KEY).first()
-            value = json.dumps(geometry)
-            if row:
-                row.value = value
-                row.updated_at = datetime.utcnow()
-            else:
-                db.add(SystemCache(key=_BOUNDARY_DB_KEY, value=value))
-            db.commit()
-        finally:
-            db.close()
-    except Exception:
-        pass
-
 def fetch_isere_boundary_geojson() -> dict[str, Any]:
     source_url = "https://france-geojson.gregoiredavid.fr/repo/departements/38-isere/departement-38-isere.geojson"
-    _FALLBACK_GEOMETRY: dict[str, Any] = {
-        "type": "Polygon",
-        "coordinates": [[
-            [5.09, 45.07], [5.63, 45.61], [6.45, 45.28], [6.35, 44.84], [5.73, 44.63], [5.15, 44.82], [5.09, 45.07],
-        ]],
-    }
+    try:
+        data = _http_get_json(source_url)
+        geometry = data.get("geometry", {})
+        if geometry.get("type") not in {"Polygon", "MultiPolygon"}:
+            raise ValueError("Format géométrique inattendu")
 
-    # 1. Cache mémoire (le plus rapide)
-    with _isere_boundary_cache_lock:
-        cached_geometry = _isere_boundary_cache.get("geometry")
-        if cached_geometry and datetime.utcnow() < (_isere_boundary_cache.get("expires_at") or datetime.min):
-            return {"status": "online", "source": "memory", "geometry": cached_geometry, "updated_at": datetime.utcnow().isoformat() + "Z"}
-
-    # 2. Cache PostgreSQL — volume persistant, survit aux redémarrages Docker
-    db_geometry = _boundary_load_from_db()
-    if db_geometry and db_geometry.get("type") in {"Polygon", "MultiPolygon"}:
-        with _isere_boundary_cache_lock:
-            _isere_boundary_cache["geometry"] = db_geometry
-            _isere_boundary_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_ISERE_BOUNDARY_CACHE_TTL_SECONDS)
-        return {"status": "online", "source": "database", "geometry": db_geometry, "updated_at": datetime.utcnow().isoformat() + "Z"}
-
-    # 3. Téléchargement réseau en arrière-plan — retourne le fallback IMMÉDIATEMENT
-    def _fetch_and_cache_boundary():
-        try:
-            data = _http_get_json(source_url, timeout=15)
-            geometry = data.get("geometry", {})
-            if geometry.get("type") not in {"Polygon", "MultiPolygon"}:
-                return
-            _boundary_save_to_db(geometry)
-            with _isere_boundary_cache_lock:
-                _isere_boundary_cache["geometry"] = geometry
-                _isere_boundary_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_ISERE_BOUNDARY_CACHE_TTL_SECONDS)
-        except Exception:
-            pass
-
-    from threading import Thread as _Thread
-    _Thread(target=_fetch_and_cache_boundary, daemon=True).start()
-    return {"status": "degraded", "source": source_url, "geometry": _FALLBACK_GEOMETRY}
+        return {
+            "status": "online",
+            "source": source_url,
+            "geometry": geometry,
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
+        return {
+            "status": "degraded",
+            "source": source_url,
+            "error": str(exc),
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[
+                    [5.09, 45.07], [5.63, 45.61], [6.45, 45.28], [6.35, 44.84], [5.73, 44.63], [5.15, 44.82], [5.09, 45.07],
+                ]],
+            },
+        }
 
 
 def _vigicrues_level_from_delta(delta_m: float) -> str:
