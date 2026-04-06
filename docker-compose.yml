@@ -34,7 +34,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: always
-    mem_limit: 1g
+    mem_limit: 2g
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/veille
       REDIS_URL: redis://redis:6379/0
