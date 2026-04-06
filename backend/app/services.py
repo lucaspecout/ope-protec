@@ -512,27 +512,31 @@ _INSTITUTIONS_ISERE_CACHE_TTL_SECONDS = 86400  # 24h
 
 _INSTITUTIONS_ISERE_BBOX = "44.70,4.70,45.95,6.60"
 
-# Requête Overpass bbox Isère — infra critique sécurité/secours/éducation/transport
-_INSTITUTIONS_CRITICAL_QUERY = f"""[out:json][timeout:90];
+# Requête Overpass bbox Isère — nodes uniquement (rapide, couvre ~95% des établissements)
+# On récupère aussi les ways/relations pour les bâtiments importants (gares, stades…)
+_INSTITUTIONS_CRITICAL_QUERY = f"""[out:json][timeout:60];
 (
-  nwr["amenity"="school"]({_INSTITUTIONS_ISERE_BBOX});
-  nwr["amenity"="college"]({_INSTITUTIONS_ISERE_BBOX});
-  nwr["amenity"="university"]({_INSTITUTIONS_ISERE_BBOX});
-  nwr["amenity"="kindergarten"]({_INSTITUTIONS_ISERE_BBOX});
-  nwr["amenity"="police"]({_INSTITUTIONS_ISERE_BBOX});
-  nwr["amenity"="fire_station"]({_INSTITUTIONS_ISERE_BBOX});
-  nwr["amenity"="bus_station"]({_INSTITUTIONS_ISERE_BBOX});
-  nwr["railway"="station"]({_INSTITUTIONS_ISERE_BBOX});
-  nwr["aeroway"~"aerodrome|airport"]({_INSTITUTIONS_ISERE_BBOX});
+  node["amenity"="school"]({_INSTITUTIONS_ISERE_BBOX});
+  node["amenity"="college"]({_INSTITUTIONS_ISERE_BBOX});
+  node["amenity"="university"]({_INSTITUTIONS_ISERE_BBOX});
+  node["amenity"="kindergarten"]({_INSTITUTIONS_ISERE_BBOX});
+  node["amenity"="police"]({_INSTITUTIONS_ISERE_BBOX});
+  node["amenity"="fire_station"]({_INSTITUTIONS_ISERE_BBOX});
+  node["amenity"="bus_station"]({_INSTITUTIONS_ISERE_BBOX});
+  node["railway"="station"]({_INSTITUTIONS_ISERE_BBOX});
+  node["aeroway"~"aerodrome|airport"]({_INSTITUTIONS_ISERE_BBOX});
+  way["amenity"~"school|college|university|police|fire_station"]({_INSTITUTIONS_ISERE_BBOX});
+  way["railway"="station"]({_INSTITUTIONS_ISERE_BBOX});
 );
 out center tags;"""
 
-# Requête Overpass bbox Isère — équipements hébergement/accueil
-_INSTITUTIONS_FACILITIES_QUERY = f"""[out:json][timeout:90];
+# Requête Overpass bbox Isère — équipements hébergement/accueil (nodes uniquement)
+_INSTITUTIONS_FACILITIES_QUERY = f"""[out:json][timeout:60];
 (
-  nwr["amenity"~"community_centre|arts_centre|theatre|cinema|concert_hall|events_venue|convention_centre|social_facility"]({_INSTITUTIONS_ISERE_BBOX});
-  nwr["leisure"~"sports_hall|sports_centre|stadium|ice_rink"]({_INSTITUTIONS_ISERE_BBOX});
-  nwr["building"~"sports_hall|stadium|civic|gymnasium"]({_INSTITUTIONS_ISERE_BBOX});
+  node["amenity"~"community_centre|arts_centre|theatre|cinema|concert_hall|events_venue|convention_centre|social_facility"]({_INSTITUTIONS_ISERE_BBOX});
+  node["leisure"~"sports_hall|sports_centre|stadium|ice_rink"]({_INSTITUTIONS_ISERE_BBOX});
+  way["amenity"~"community_centre|theatre|cinema|social_facility"]({_INSTITUTIONS_ISERE_BBOX});
+  way["leisure"~"sports_hall|sports_centre|stadium"]({_INSTITUTIONS_ISERE_BBOX});
 );
 out center tags;"""
 
@@ -587,16 +591,24 @@ def _classify_institution_osm(tags: dict) -> str | None:
     return None
 
 
+_OVERPASS_ENDPOINTS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.openstreetmap.fr/api/interpreter",
+    "https://overpass.openstreetmap.ru/api/interpreter",
+]
+
 def _overpass_fetch_institutions(query: str) -> list[dict]:
-    endpoints = [
-        "https://overpass-api.de/api/interpreter",
-        "https://overpass.kumi.systems/api/interpreter",
-    ]
-    for endpoint in endpoints:
+    import json as _json
+    for endpoint in _OVERPASS_ENDPOINTS:
         try:
-            req = Request(endpoint, data=query.encode("utf-8"), headers={"Content-Type": "text/plain;charset=UTF-8"}, method="POST")
-            with urlopen(req, timeout=95) as resp:
-                import json as _json
+            req = Request(
+                endpoint,
+                data=query.encode("utf-8"),
+                headers={"Content-Type": "text/plain;charset=UTF-8"},
+                method="POST",
+            )
+            with urlopen(req, timeout=120) as resp:
                 data = _json.loads(resp.read().decode("utf-8"))
             elements = data.get("elements") or []
             if elements:
@@ -671,8 +683,10 @@ def _fetch_institutions_isere_live() -> dict[str, Any]:
             "dynamic": True,
         })
 
+    if not points:
+        raise RuntimeError("Overpass n'a retourné aucun établissement pour l'Isère")
     return {
-        "status": "online" if points else "empty",
+        "status": "online",
         "count": len(points),
         "points": points,
         "updated_at": datetime.utcnow().isoformat() + "Z",

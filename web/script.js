@@ -11,7 +11,7 @@ const STORAGE_KEYS = {
   externalRisksSnapshot: 'externalRisksSnapshot',
   apiInterconnectionsSnapshot: 'apiInterconnectionsSnapshot',
   homeLiveSnapshot: 'homeLiveSnapshot',
-  staticInstitutionsCache: 'staticInstitutionsCacheV4',
+  staticInstitutionsCache: 'staticInstitutionsCacheV3',
   staticFinessCache: 'staticFinessCacheV3',
   staticTelecomCache: 'staticTelecomCacheV1',
   staticMontagneCache: 'staticMontagneCacheV1',
@@ -3742,11 +3742,7 @@ async function loadIsereInstitutions() {
 
   // 3. Appel backend /api/institutions/isere (Overpass côté serveur, cache 24h)
   try {
-    let payload = await api('/api/institutions/isere', { cacheTtlMs: 24 * 60 * 60 * 1000 });
-    // Si le backend retourne 0 points (cache vide ou erreur Overpass), forcer un refresh
-    if (!Array.isArray(payload?.points) || payload.points.length === 0) {
-      payload = await api('/api/institutions/isere?refresh=true', { bypassCache: true, cacheTtlMs: 0 });
-    }
+    const payload = await api('/api/institutions/isere', { cacheTtlMs: 24 * 60 * 60 * 1000 });
     const points = filterIserePoints(Array.isArray(payload?.points) ? payload.points : []);
     if (points.length > 0) {
       institutionPointsCache = points;
