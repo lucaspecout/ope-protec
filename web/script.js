@@ -11,7 +11,7 @@ const STORAGE_KEYS = {
   externalRisksSnapshot: 'externalRisksSnapshot',
   apiInterconnectionsSnapshot: 'apiInterconnectionsSnapshot',
   homeLiveSnapshot: 'homeLiveSnapshot',
-  staticInstitutionsCache: 'staticInstitutionsCacheV3',
+  staticInstitutionsCache: 'staticInstitutionsCacheV4',
   staticFinessCache: 'staticFinessCacheV3',
   staticTelecomCache: 'staticTelecomCacheV1',
   staticMontagneCache: 'staticMontagneCacheV1',
@@ -3707,22 +3707,35 @@ async function renderPopulationByCityLayer() {
   });
 }
 
+// Bbox stricte du département Isère — filtre tout point hors département
+const ISERE_BBOX = { latMin: 44.70, latMax: 45.95, lonMin: 4.70, lonMax: 6.60 };
+function filterIserePoints(points) {
+  if (!Array.isArray(points)) return [];
+  return points.filter((p) => {
+    const lat = Number(p.lat);
+    const lon = Number(p.lon);
+    return lat >= ISERE_BBOX.latMin && lat <= ISERE_BBOX.latMax
+        && lon >= ISERE_BBOX.lonMin && lon <= ISERE_BBOX.lonMax;
+  });
+}
+
 async function loadIsereInstitutions() {
   if (institutionsLoaded) return institutionPointsCache;
 
   // 1. Cache localStorage valide (24h) avec données réelles
   const cached = readFreshSnapshot(STORAGE_KEYS.staticInstitutionsCache, STATIC_POINTS_CACHE_TTL_MS);
-  const cacheIsUsable = Array.isArray(cached) && cached.length >= 20
-    && cached.some((p) => ['ecole_primaire', 'caserne_pompier', 'gendarmerie', 'police_municipale', 'commissariat_police_nationale'].includes(p.type));
+  const filteredCached = filterIserePoints(cached);
+  const cacheIsUsable = filteredCached.length >= 20
+    && filteredCached.some((p) => ['ecole_primaire', 'caserne_pompier', 'gendarmerie', 'police_municipale', 'commissariat_police_nationale'].includes(p.type));
   if (cacheIsUsable) {
-    institutionPointsCache = cached;
+    institutionPointsCache = filteredCached;
     institutionsLoaded = true;
     return institutionPointsCache;
   }
 
   // 2. Stale cache → affichage immédiat pendant que le backend charge
-  const staleImmediate = readSnapshot(STORAGE_KEYS.staticInstitutionsCache);
-  if (Array.isArray(staleImmediate) && staleImmediate.length > 0) {
+  const staleImmediate = filterIserePoints(readSnapshot(STORAGE_KEYS.staticInstitutionsCache));
+  if (staleImmediate.length > 0) {
     institutionPointsCache = staleImmediate;
     _drawResourceMarkers();
   }
@@ -3730,7 +3743,7 @@ async function loadIsereInstitutions() {
   // 3. Appel backend /api/institutions/isere (Overpass côté serveur, cache 24h)
   try {
     const payload = await api('/api/institutions/isere', { cacheTtlMs: 24 * 60 * 60 * 1000 });
-    const points = Array.isArray(payload?.points) ? payload.points : [];
+    const points = filterIserePoints(Array.isArray(payload?.points) ? payload.points : []);
     if (points.length > 0) {
       institutionPointsCache = points;
       saveSnapshot(STORAGE_KEYS.staticInstitutionsCache, points);
