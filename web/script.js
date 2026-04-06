@@ -3685,131 +3685,46 @@ async function renderPopulationByCityLayer() {
 
 async function loadIsereInstitutions() {
   if (institutionsLoaded) return institutionPointsCache;
-  // Cache localStorage valide (7j) — le cache doit contenir des écoles ou casernes pour être valide
+
+  // 1. Cache localStorage valide (24h) avec données réelles
   const cached = readFreshSnapshot(STORAGE_KEYS.staticInstitutionsCache, STATIC_POINTS_CACHE_TTL_MS);
-  const cacheIsUsable = Array.isArray(cached) && cached.length >= 50
-    && cached.some((p) => ['ecole_primaire', 'caserne_pompier', 'gendarmerie'].includes(p.type));
+  const cacheIsUsable = Array.isArray(cached) && cached.length >= 20
+    && cached.some((p) => ['ecole_primaire', 'caserne_pompier', 'gendarmerie', 'police_municipale', 'commissariat_police_nationale'].includes(p.type));
   if (cacheIsUsable) {
     institutionPointsCache = cached;
     institutionsLoaded = true;
     return institutionPointsCache;
   }
-  // Cache périmé ou insuffisant → affichage immédiat du stale pendant que Overpass charge
+
+  // 2. Stale cache → affichage immédiat pendant que le backend charge
   const staleImmediate = readSnapshot(STORAGE_KEYS.staticInstitutionsCache);
   if (Array.isArray(staleImmediate) && staleImmediate.length > 0) {
     institutionPointsCache = staleImmediate;
-    _drawResourceMarkers(); // afficher ce qu'on a déjà pendant le chargement
+    _drawResourceMarkers();
   }
-  // Bbox fixe Isère (plus fiable qu'un area query qui peut échouer)
-  // On découpe en 2 requêtes pour éviter les timeouts : infra critique + équipements
-  const ISERE_BBOX = '44.70,4.70,45.95,6.60';
-  const overpassEndpoints = [
-    'https://overpass-api.de/api/interpreter',
-    'https://overpass.kumi.systems/api/interpreter',
-  ];
 
-  // Requête 1 : établissements à enjeu opérationnel (école, police, pompier, transport)
-  const queryCritical = `[out:json][timeout:90];
-(
-  nwr["amenity"="school"](${ISERE_BBOX});
-  nwr["amenity"="college"](${ISERE_BBOX});
-  nwr["amenity"="university"](${ISERE_BBOX});
-  nwr["amenity"="kindergarten"](${ISERE_BBOX});
-  nwr["amenity"="police"](${ISERE_BBOX});
-  nwr["amenity"="fire_station"](${ISERE_BBOX});
-  nwr["amenity"="bus_station"](${ISERE_BBOX});
-  nwr["railway"="station"](${ISERE_BBOX});
-  nwr["aeroway"~"aerodrome|airport"](${ISERE_BBOX});
-);
-out center tags;`;
-
-  // Requête 2 : équipements d'accueil & culture (gymnases, salles, centres)
-  const queryFacilities = `[out:json][timeout:90];
-(
-  nwr["amenity"~"community_centre|arts_centre|theatre|cinema|concert_hall|events_venue|convention_centre|music_venue|social_facility"](${ISERE_BBOX});
-  nwr["leisure"~"sports_hall|sports_centre|stadium|ice_rink"](${ISERE_BBOX});
-  nwr["building"~"sports_hall|stadium|civic|gymnasium"](${ISERE_BBOX});
-);
-out center tags;`;
-
-  const runOverpassQuery = async (query, label) => {
-    for (const endpoint of overpassEndpoints) {
-      try {
-        const response = await queueApiRequest(() => fetchWithTimeout(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
-          body: query,
-        }, 90000));
-        const payload = await parseJsonResponse(response, `${endpoint}-${label}`);
-        if (Array.isArray(payload?.elements)) return payload.elements;
-      } catch { /* essayer endpoint suivant */ }
-    }
-    return [];
-  };
-
-  let points = [];
+  // 3. Appel backend /api/institutions/isere (Overpass côté serveur, cache 24h)
   try {
-    // Les deux requêtes en parallèle
-    const [criticalElements, facilityElements] = await Promise.all([
-      runOverpassQuery(queryCritical, 'critical'),
-      runOverpassQuery(queryFacilities, 'facilities'),
-    ]);
-    const allElements = [...criticalElements, ...facilityElements];
-    const seenIds = new Set();
-    points = allElements
-      .map((element) => {
-        const type = classifyInstitutionPoint(element);
-        if (!type) return null;
-        const lat = Number(element.lat ?? element.center?.lat);
-        const lon = Number(element.lon ?? element.center?.lon);
-        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-        // Vérifier que le point est bien dans l'Isère (bbox élargie légèrement)
-        if (lat < 44.65 || lat > 46.0 || lon < 4.65 || lon > 6.65) return null;
-        const id = `osm-${element.type}-${element.id}`;
-        if (seenIds.has(id)) return null;
-        seenIds.add(id);
-        const name = String(element.tags?.name || '').trim() || 'Établissement';
-        const address = [element.tags?.['addr:housenumber'], element.tags?.['addr:street'], element.tags?.['addr:city']].filter(Boolean).join(' ') || 'Adresse non renseignée';
-        const amenityTag = String(element.tags?.amenity || element.tags?.leisure || element.tags?.railway || element.tags?.aeroway || '-');
-        return {
-          id,
-          name,
-          type,
-          lat,
-          lon,
-          active: true,
-          address,
-          priority: ['caserne_pompier', 'gendarmerie', 'commissariat_police_nationale', 'transport_gare_sncf'].includes(type) ? 'vital' : 'standard',
-          info: `Source OSM · ${amenityTag}`,
-          source: `https://www.openstreetmap.org/${element.type}/${element.id}`,
-          dynamic: true,
-        };
-      })
-      .filter(Boolean);
-  } catch {
-    points = [];
-  }
-  if (points.length > 0) {
-    institutionPointsCache = points;
-    saveSnapshot(STORAGE_KEYS.staticInstitutionsCache, institutionPointsCache);
-    institutionsLoaded = true;
-  } else {
-    // Overpass n'a rien retourné : utiliser le cache périmé si disponible
-    const staleCached = readSnapshot(STORAGE_KEYS.staticInstitutionsCache);
-    if (Array.isArray(staleCached) && staleCached.length > 0) {
-      institutionPointsCache = staleCached;
+    const payload = await api('/api/institutions/isere', { cacheTtlMs: 24 * 60 * 60 * 1000 });
+    const points = Array.isArray(payload?.points) ? payload.points : [];
+    if (points.length > 0) {
+      institutionPointsCache = points;
+      saveSnapshot(STORAGE_KEYS.staticInstitutionsCache, points);
+      institutionsLoaded = true;
+      return institutionPointsCache;
     }
-    // Planifier un retry automatique dans 2 min (Overpass peut être temporairement surchargé)
-    institutionsLoaded = true; // bloquer les appels répétés pendant le délai
-    setTimeout(async () => {
-      institutionsLoaded = false;
-      const prev = institutionPointsCache.length;
-      _institutionsLoadInFlight = true;
-      await loadIsereInstitutions();
-      _institutionsLoadInFlight = false;
-      if (institutionPointsCache.length > prev) _drawResourceMarkers();
-    }, 2 * 60 * 1000);
-  }
+  } catch { /* backend indisponible → fallback stale */ }
+
+  // 4. Fallback : stale cache ou retry dans 60s
+  institutionsLoaded = true;
+  setTimeout(async () => {
+    institutionsLoaded = false;
+    _institutionsLoadInFlight = true;
+    await loadIsereInstitutions();
+    _institutionsLoadInFlight = false;
+    _drawResourceMarkers();
+  }, 60 * 1000);
+
   return institutionPointsCache;
 }
 

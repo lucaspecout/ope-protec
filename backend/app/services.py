@@ -506,6 +506,184 @@ _finess_isere_communes_lock = Lock()
 _finess_isere_communes_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 
 
+_institutions_isere_cache_lock = Lock()
+_institutions_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_INSTITUTIONS_ISERE_CACHE_TTL_SECONDS = 86400  # 24h
+
+_INSTITUTIONS_ISERE_BBOX = "44.70,4.70,45.95,6.60"
+
+# Requête Overpass bbox — infra critique sécurité/secours/éducation/transport
+_INSTITUTIONS_CRITICAL_QUERY = f"""[out:json][timeout:90];
+(
+  nwr["amenity"="school"]({_INSTITUTIONS_ISERE_BBOX});
+  nwr["amenity"="college"]({_INSTITUTIONS_ISERE_BBOX});
+  nwr["amenity"="university"]({_INSTITUTIONS_ISERE_BBOX});
+  nwr["amenity"="kindergarten"]({_INSTITUTIONS_ISERE_BBOX});
+  nwr["amenity"="police"]({_INSTITUTIONS_ISERE_BBOX});
+  nwr["amenity"="fire_station"]({_INSTITUTIONS_ISERE_BBOX});
+  nwr["amenity"="bus_station"]({_INSTITUTIONS_ISERE_BBOX});
+  nwr["railway"="station"]({_INSTITUTIONS_ISERE_BBOX});
+  nwr["aeroway"~"aerodrome|airport"]({_INSTITUTIONS_ISERE_BBOX});
+);
+out center tags;"""
+
+# Requête Overpass bbox — équipements hébergement/accueil
+_INSTITUTIONS_FACILITIES_QUERY = f"""[out:json][timeout:90];
+(
+  nwr["amenity"~"community_centre|arts_centre|theatre|cinema|concert_hall|events_venue|convention_centre|social_facility"]({_INSTITUTIONS_ISERE_BBOX});
+  nwr["leisure"~"sports_hall|sports_centre|stadium|ice_rink"]({_INSTITUTIONS_ISERE_BBOX});
+  nwr["building"~"sports_hall|stadium|civic|gymnasium"]({_INSTITUTIONS_ISERE_BBOX});
+);
+out center tags;"""
+
+
+def _classify_institution_osm(tags: dict) -> str | None:
+    amenity = str(tags.get("amenity") or "").lower()
+    leisure = str(tags.get("leisure") or "").lower()
+    building = str(tags.get("building") or "").lower()
+    name = str(tags.get("name") or "").lower()
+    railway = str(tags.get("railway") or "").lower()
+    aeroway = str(tags.get("aeroway") or "").lower()
+    police_type = str(tags.get("police") or "").lower()
+
+    if amenity == "kindergarten":
+        return "creche"
+    if amenity == "university":
+        return "universite"
+    if amenity == "college":
+        return "college"
+    if amenity == "school":
+        if "lyc" in name:
+            return "lycee"
+        if "coll" in name:
+            return "college"
+        return "ecole_primaire"
+    if amenity == "fire_station":
+        return "caserne_pompier"
+    if amenity == "police":
+        if "gendarmerie" in name or "gendarmerie" in police_type:
+            return "gendarmerie"
+        if "municipal" in name or "municipal" in police_type:
+            return "police_municipale"
+        return "commissariat_police_nationale"
+    if amenity == "bus_station":
+        return "transport_gare_routiere"
+    if railway == "station":
+        return "transport_gare_sncf"
+    if aeroway in ("aerodrome", "airport"):
+        return "transport_aeroport"
+    if amenity in ("theatre", "cinema", "music_venue", "concert_hall", "events_venue"):
+        return "salle_spectacle_public"
+    if amenity == "convention_centre":
+        return "palais_congres"
+    if leisure in ("sports_hall", "sports_centre") or building in ("sports_hall", "gymnasium"):
+        return "gymnase"
+    if leisure == "stadium" or building == "stadium":
+        return "stade"
+    if amenity in ("community_centre", "arts_centre", "social_facility"):
+        if any(token in name for token in ("foyer", "polyvalent", "fête", "fete", "salle")):
+            return "salle_fetes"
+        return "centre_culturel"
+    return None
+
+
+def _overpass_fetch_institutions(query: str) -> list[dict]:
+    endpoints = [
+        "https://overpass-api.de/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter",
+    ]
+    for endpoint in endpoints:
+        try:
+            req = Request(endpoint, data=query.encode("utf-8"), headers={"Content-Type": "text/plain;charset=UTF-8"}, method="POST")
+            with urlopen(req, timeout=95) as resp:
+                import json as _json
+                data = _json.loads(resp.read().decode("utf-8"))
+            elements = data.get("elements") or []
+            if elements:
+                return elements
+        except Exception:
+            continue
+    return []
+
+
+def _fetch_institutions_isere_live() -> dict[str, Any]:
+    import json as _json
+    from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        fut_critical = executor.submit(_overpass_fetch_institutions, _INSTITUTIONS_CRITICAL_QUERY)
+        fut_facilities = executor.submit(_overpass_fetch_institutions, _INSTITUTIONS_FACILITIES_QUERY)
+        critical_elements = fut_critical.result()
+        facility_elements = fut_facilities.result()
+
+    all_elements = critical_elements + facility_elements
+    seen_ids: set[str] = set()
+    points: list[dict[str, Any]] = []
+
+    for element in all_elements:
+        tags = element.get("tags") or {}
+        osm_type = element.get("type", "node")
+        osm_id = element.get("id", 0)
+        uid = f"osm-{osm_type}-{osm_id}"
+        if uid in seen_ids:
+            continue
+        seen_ids.add(uid)
+
+        resource_type = _classify_institution_osm(tags)
+        if not resource_type:
+            continue
+
+        lat = element.get("lat") or (element.get("center") or {}).get("lat")
+        lon = element.get("lon") or (element.get("center") or {}).get("lon")
+        try:
+            lat = float(lat)
+            lon = float(lon)
+        except (TypeError, ValueError):
+            continue
+        if not (44.65 <= lat <= 46.05 and 4.65 <= lon <= 6.65):
+            continue
+
+        name = str(tags.get("name") or "").strip() or "Établissement"
+        address_parts = [tags.get("addr:housenumber"), tags.get("addr:street"), tags.get("addr:city")]
+        address = " ".join(p for p in address_parts if p) or "Adresse non renseignée"
+        amenity_tag = str(tags.get("amenity") or tags.get("leisure") or tags.get("railway") or tags.get("aeroway") or "-")
+        priority = "vital" if resource_type in {
+            "caserne_pompier", "gendarmerie", "commissariat_police_nationale",
+            "transport_gare_sncf", "transport_aeroport",
+        } else "standard"
+
+        points.append({
+            "id": uid,
+            "name": name,
+            "type": resource_type,
+            "lat": lat,
+            "lon": lon,
+            "active": True,
+            "address": address,
+            "priority": priority,
+            "info": f"Source OSM · {amenity_tag}",
+            "source": f"https://www.openstreetmap.org/{osm_type}/{osm_id}",
+            "dynamic": True,
+        })
+
+    return {
+        "status": "online" if points else "empty",
+        "count": len(points),
+        "points": points,
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+def fetch_institutions_isere(force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_institutions_isere_cache,
+        lock=_institutions_isere_cache_lock,
+        ttl_seconds=_INSTITUTIONS_ISERE_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=_fetch_institutions_isere_live,
+    )
+
+
 _FINESS_STRATEGIC_LABEL_KEYWORDS: tuple[str, ...] = (
     "chu",
     "centre hospitalier",

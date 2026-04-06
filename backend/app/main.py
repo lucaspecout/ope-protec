@@ -52,6 +52,7 @@ from .schemas import (
 )
 from .security import create_access_token, hash_password, verify_password
 from .services import (
+    fetch_institutions_isere,
     fetch_bison_fute_live_events,
     fetch_bison_fute_traffic,
     fetch_georisques_commune_risks,
@@ -1095,6 +1096,14 @@ def interactive_map_vigieau_alerts(
     _: User = Depends(require_roles(*READ_ROLES)),
 ):
     return fetch_vigieau_restrictions(force_refresh=refresh)
+
+
+@app.get("/api/institutions/isere")
+def api_institutions_isere(
+    refresh: bool = False,
+    _: User = Depends(require_roles(*READ_ROLES)),
+):
+    return fetch_institutions_isere(force_refresh=refresh)
 
 
 @app.get("/api/finess/isere/resources")
