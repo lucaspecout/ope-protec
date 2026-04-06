@@ -460,8 +460,9 @@ def _service_loop(key: str, interval: int) -> None:
 
 @app.on_event("startup")
 def startup_warmup_external_sources() -> None:
-    # Préchauffer bcrypt en arrière-plan pour que la première connexion soit rapide.
+    # Préchauffer bcrypt + contour Isère en arrière-plan (login instantané dès le démarrage)
     Thread(target=warmup_crypto, daemon=True).start()
+    Thread(target=fetch_isere_boundary_geojson, daemon=True).start()
 
     # Initialiser le snapshot avec les valeurs par défaut ("pending") pour que le
     # frontend affiche un état cohérent dès le premier poll, avant la fin des fetches.

@@ -2998,7 +2998,35 @@ function setSidebarCollapsed(collapsed) {
 
 async function loadIsereBoundary() {
   initMap();
-  const data = await api('/public/isere-map');
+
+  // Charger depuis le cache localStorage d'abord (le contour Isère ne change jamais)
+  const BOUNDARY_LS_KEY = 'isereBoundaryGeometryV1';
+  const BOUNDARY_LS_TTL = 7 * 24 * 60 * 60 * 1000; // 7 jours
+  let geometry = null;
+  try {
+    const cached = JSON.parse(localStorage.getItem(BOUNDARY_LS_KEY) || 'null');
+    if (cached?.geometry && cached?.ts && (Date.now() - cached.ts) < BOUNDARY_LS_TTL) {
+      geometry = cached.geometry;
+    }
+  } catch { /* ignore */ }
+
+  if (geometry) {
+    // Afficher immédiatement depuis le cache local — aucune requête réseau
+    isereBoundaryGeometry = geometry;
+    if (boundaryLayer) leafletMap.removeLayer(boundaryLayer);
+    boundaryLayer = window.L.geoJSON({ type: 'Feature', geometry }, { style: ISERE_BOUNDARY_STYLE }).addTo(leafletMap);
+    leafletMap.fitBounds(boundaryLayer.getBounds(), { padding: [16, 16] });
+    // Rafraîchir le cache en arrière-plan silencieusement
+    api('/public/isere-map', { cacheTtlMs: 7 * 24 * 60 * 60 * 1000 }).then((data) => {
+      if (data?.geometry) {
+        try { localStorage.setItem(BOUNDARY_LS_KEY, JSON.stringify({ geometry: data.geometry, ts: Date.now() })); } catch { /* ignore */ }
+      }
+    }).catch(() => {});
+    return;
+  }
+
+  // Premier chargement : requête backend
+  const data = await api('/public/isere-map', { cacheTtlMs: 7 * 24 * 60 * 60 * 1000 });
   isereBoundaryGeometry = data?.geometry || null;
   if (boundaryLayer) leafletMap.removeLayer(boundaryLayer);
   boundaryLayer = window.L.geoJSON({ type: 'Feature', geometry: data.geometry }, { style: ISERE_BOUNDARY_STYLE }).addTo(leafletMap);
@@ -3006,6 +3034,8 @@ async function loadIsereBoundary() {
   const mapSourceNode = document.getElementById('map-source');
   if (mapSourceNode) mapSourceNode.textContent = `Source carte: ${data.source}`;
   setMapFeedback('Fond de carte et contour Isère chargés.');
+  // Sauvegarder pour les prochaines connexions
+  try { localStorage.setItem(BOUNDARY_LS_KEY, JSON.stringify({ geometry: data.geometry, ts: Date.now() })); } catch { /* ignore */ }
 }
 
 function isPointInRing(point, ring = []) {

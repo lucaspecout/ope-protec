@@ -475,7 +475,8 @@ _HUBEAU_GROUNDWATER_CACHE_TTL_SECONDS = 10800
 _AVALANCHE_ISERE_CACHE_TTL_SECONDS = 3600
 _APIC_ISERE_CACHE_TTL_SECONDS = 300
 _VIGICRUES_FLASH_ISERE_CACHE_TTL_SECONDS = 300
-_ISERE_BOUNDARY_CACHE_TTL_SECONDS = 21600
+_ISERE_BOUNDARY_CACHE_TTL_SECONDS = 86400 * 7  # 7 jours — le contour Isère ne change jamais
+_ISERE_BOUNDARY_DISK_PATH = Path(__file__).parent / "isere_boundary_cache.json"
 _AURA_AIRCRAFT_CACHE_TTL_SECONDS = 45
 
 _vigicrues_cache_lock = Lock()
@@ -1229,30 +1230,47 @@ def fetch_meteo_france_isere(force_refresh: bool = False) -> dict[str, Any]:
 
 def fetch_isere_boundary_geojson() -> dict[str, Any]:
     source_url = "https://france-geojson.gregoiredavid.fr/repo/departements/38-isere/departement-38-isere.geojson"
+    _FALLBACK_GEOMETRY = {
+        "type": "Polygon",
+        "coordinates": [[
+            [5.09, 45.07], [5.63, 45.61], [6.45, 45.28], [6.35, 44.84], [5.73, 44.63], [5.15, 44.82], [5.09, 45.07],
+        ]],
+    }
+
+    # 1. Cache disque — le contour ne change jamais, on lit depuis le fichier local si disponible
+    with _isere_boundary_cache_lock:
+        cached_geometry = _isere_boundary_cache.get("geometry")
+        if cached_geometry and datetime.utcnow() < (_isere_boundary_cache.get("expires_at") or datetime.min):
+            return {"status": "online", "source": "cache", "geometry": cached_geometry, "updated_at": datetime.utcnow().isoformat() + "Z"}
+
+    if _ISERE_BOUNDARY_DISK_PATH.exists():
+        try:
+            disk_data = json.loads(_ISERE_BOUNDARY_DISK_PATH.read_text("utf-8"))
+            geometry = disk_data.get("geometry") or {}
+            if geometry.get("type") in {"Polygon", "MultiPolygon"}:
+                with _isere_boundary_cache_lock:
+                    _isere_boundary_cache["geometry"] = geometry
+                    _isere_boundary_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_ISERE_BOUNDARY_CACHE_TTL_SECONDS)
+                return {"status": "online", "source": "disk", "geometry": geometry, "updated_at": datetime.utcnow().isoformat() + "Z"}
+        except Exception:
+            pass
+
+    # 2. Téléchargement réseau (une seule fois, puis sauvegarde sur disque)
     try:
         data = _http_get_json(source_url)
         geometry = data.get("geometry", {})
         if geometry.get("type") not in {"Polygon", "MultiPolygon"}:
             raise ValueError("Format géométrique inattendu")
-
-        return {
-            "status": "online",
-            "source": source_url,
-            "geometry": geometry,
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
+        try:
+            _ISERE_BOUNDARY_DISK_PATH.write_text(json.dumps({"geometry": geometry}), "utf-8")
+        except Exception:
+            pass
+        with _isere_boundary_cache_lock:
+            _isere_boundary_cache["geometry"] = geometry
+            _isere_boundary_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_ISERE_BOUNDARY_CACHE_TTL_SECONDS)
+        return {"status": "online", "source": source_url, "geometry": geometry, "updated_at": datetime.utcnow().isoformat() + "Z"}
     except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
-        return {
-            "status": "degraded",
-            "source": source_url,
-            "error": str(exc),
-            "geometry": {
-                "type": "Polygon",
-                "coordinates": [[
-                    [5.09, 45.07], [5.63, 45.61], [6.45, 45.28], [6.35, 44.84], [5.73, 44.63], [5.15, 44.82], [5.09, 45.07],
-                ]],
-            },
-        }
+        return {"status": "degraded", "source": source_url, "error": str(exc), "geometry": _FALLBACK_GEOMETRY}
 
 
 def _vigicrues_level_from_delta(delta_m: float) -> str:
