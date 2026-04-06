@@ -4668,8 +4668,8 @@ function _saveGeocodeCache() {
 
 async function geocodeTrafficLabel(label) {
   const key = String(label || '').trim().toLowerCase();
-  if (!key) return null;
-  // 1. Table des lieux connus — résultat instantané
+  if (!key || key.length < 3) return null;
+  // 1. Table des lieux connus — résultat instantané (exact match ou landmark partial)
   const known = lookupKnownLocation(key);
   if (known && isPointInIsere(known)) {
     trafficGeocodeCache.set(key, known);
@@ -4825,7 +4825,7 @@ function extractAlertDynamicHints(fullText = '') {
   };
 
   const blob = String(fullText || '');
-  const scopedMatches = [...blob.matchAll(/\b(?:sur|secteur|entre|vers|au niveau de)\s+([^\n.;:]+)/gi)];
+  const scopedMatches = [...blob.matchAll(/\b(?:sur|secteur|vers|au niveau de|à hauteur de|en direction de|depuis|jusqu'à|à partir de)\s+([^\n.;:,]+)/gi)];
   scopedMatches.forEach((match) => {
     String(match?.[1] || '')
       .split(/[,/]|\s+-\s+/)
@@ -4882,15 +4882,76 @@ function spreadOverlappingTrafficPoints(points = []) {
   return points;
 }
 
-function lookupKnownLocation(text = '') {
+// Landmarks "nommés" — cols, tunnels, sites spécifiques — sans villes génériques
+// Utilisés pour le scan de texte complet (chercher LE lieu précis d'un événement)
+const ITINISERE_LANDMARK_KEYS = new Set([
+  'col du lautaret', 'lautaret', 'col du galibier', 'galibier',
+  'tunnel du chambon', 'chambon', 'lac du chambon',
+  'col de la croix de fer', 'croix de fer', 'col du coq',
+  'col de porte', 'col de vence', 'col ornon', "col d'ornon",
+  'col du glandon', 'glandon', 'col de la madeleine',
+  "alpe d'huez", "alpe d'huez", 'les deux alpes', 'deux alpes',
+  'gorges de la bourne', 'rochetaillée', 'rochetaillee',
+  'seiglières', 'seiglieres', 'mizoën', 'mizoen',
+  'la grave', 'le monetier', 'livet-et-gavet',
+  'chamrousse', 'villard-de-lans', 'villard de lans',
+  'autrans', 'méaudre', 'la chapelle-en-vercors',
+]);
+
+// Lookup exact (clé == texte) ou partiel LANDMARK uniquement (pas de villes génériques)
+function lookupLandmark(text = '') {
   const lowered = text.toLowerCase().replace(/\s+/g, ' ').trim();
-  if (ITINISERE_KNOWN_LOCATIONS[lowered]) return { ...ITINISERE_KNOWN_LOCATIONS[lowered], precision: 'exact' };
-  // Try partial match — scan all tokens in text against known locations keys
-  const keys = Object.keys(ITINISERE_KNOWN_LOCATIONS);
-  for (const key of keys) {
-    if (lowered.includes(key)) return { ...ITINISERE_KNOWN_LOCATIONS[key], precision: 'exact' };
+  if (ITINISERE_LANDMARK_KEYS.has(lowered) && ITINISERE_KNOWN_LOCATIONS[lowered]) {
+    return { ...ITINISERE_KNOWN_LOCATIONS[lowered], name: lowered, precision: 'exact' };
+  }
+  for (const key of ITINISERE_LANDMARK_KEYS) {
+    if (lowered.includes(key) && ITINISERE_KNOWN_LOCATIONS[key]) {
+      return { ...ITINISERE_KNOWN_LOCATIONS[key], name: key, precision: 'exact' };
+    }
   }
   return null;
+}
+
+// Lookup exact sur une chaîne courte (hint spécifique, pas texte complet)
+function lookupKnownLocation(label = '') {
+  const lowered = label.toLowerCase().replace(/\s+/g, ' ').trim();
+  if (!lowered || lowered.length < 3) return null;
+  if (ITINISERE_KNOWN_LOCATIONS[lowered]) return { ...ITINISERE_KNOWN_LOCATIONS[lowered], precision: 'exact' };
+  // Partial match uniquement si le label est court (< 40 chars) pour éviter faux positifs
+  if (lowered.length < 40) {
+    for (const key of Object.keys(ITINISERE_KNOWN_LOCATIONS)) {
+      if (lowered.includes(key) && key.length >= 5) {
+        return { ...ITINISERE_KNOWN_LOCATIONS[key], precision: 'exact' };
+      }
+    }
+  }
+  return null;
+}
+
+// Extraire les deux extrémités d'un "entre A et B" et retourner le milieu géocodé
+async function resolveBetweenPattern(text = '', roads = []) {
+  const m = String(text).match(/\bentre\s+([A-ZÀ-ÖØ-Ý][\wÀ-ÖØ-öø-ÿ'\-]+(?:\s+[A-ZÀ-ÖØ-Ý][\wÀ-ÖØ-öø-ÿ'\-]+){0,3})\s+et\s+([A-ZÀ-ÖØ-Ý][\wÀ-ÖØ-öø-ÿ'\-]+(?:\s+[A-ZÀ-ÖØ-Ý][\wÀ-ÖØ-öø-ÿ'\-]+){0,3})/i);
+  if (!m) return null;
+  const [, fromLabel, toLabel] = m;
+  const [from, to] = await Promise.all([
+    geocodeTrafficLabel(fromLabel),
+    geocodeTrafficLabel(toLabel),
+  ]);
+  if (!from && !to) return null;
+  if (!from) return to;
+  if (!to) return from;
+  const midLat = (from.lat + to.lat) / 2;
+  const midLon = (from.lon + to.lon) / 2;
+  const mid = { lat: midLat, lon: midLon, precision: 'entre' };
+  // Si road corridor disponible, projeter le milieu sur le corridor
+  for (const road of roads) {
+    const corridor = ITINISERE_ROAD_CORRIDORS[road];
+    if (corridor) {
+      const projected = nearestPointOnCorridor(corridor, mid);
+      if (projected) return { ...projected, precision: 'entre', anchor: `${fromLabel} ↔ ${toLabel}` };
+    }
+  }
+  return isPointInIsere(mid) ? mid : null;
 }
 
 async function buildItinisereMapPoints(events = []) {
@@ -4925,52 +4986,107 @@ async function buildItinisereMapPoints(events = []) {
       precision = 'source';
     }
 
-    // 2. Lookup dans la table des lieux connus (avant tout géocodage réseau)
+    // 2. Landmark spécifique (col, tunnel, site nommé) dans le texte complet
+    // ⚠️ N'utilise PAS les noms de villes génériques (Grenoble, etc.)
     if (!position) {
-      const knownFromTitle = lookupKnownLocation(event.title || '');
-      if (knownFromTitle && isPointInIsere(knownFromTitle)) {
-        position = knownFromTitle;
-        anchor = event.title || 'Lieu connu';
+      const lm = lookupLandmark(fullText);
+      if (lm && isPointInIsere(lm)) {
+        position = lm;
+        anchor = lm.name || 'Lieu spécifique';
         precision = 'exact';
       }
     }
-    if (!position) {
-      const knownFromText = lookupKnownLocation(fullText);
-      if (knownFromText && isPointInIsere(knownFromText)) {
-        position = knownFromText;
-        anchor = 'Lieu connu';
-        precision = 'exact';
+
+    // 3. Construire l'ancrage commune AVANT de placer sur corridor
+    // (permet nearestPointOnCorridor sur le bon segment)
+    if (communeHints.length) {
+      for (const commune of communeHints) {
+        const pt = await geocodeClosureCommune(commune) || await geocodeTrafficLabel(commune);
+        if (pt && isPointInIsere(pt)) { communeAnchor = { ...pt, communeName: pt.communeName || commune }; break; }
       }
     }
+
+    // 4a. "entre A et B" → milieu projeté sur le corridor routier
     if (!position) {
-      for (const hint of candidateLocationHints) {
-        const knownFromHint = lookupKnownLocation(hint);
-        if (knownFromHint && isPointInIsere(knownFromHint)) {
-          position = knownFromHint;
-          anchor = hint;
-          precision = 'exact';
+      const betweenPt = await resolveBetweenPattern(fullText, roads);
+      if (betweenPt && isPointInIsere(betweenPt)) {
+        position = betweenPt;
+        anchor = betweenPt.anchor || 'Tronçon';
+        precision = betweenPt.precision || 'entre';
+      }
+    }
+
+    // 4b. Si routes connues : nearest point sur corridor avec ancrage commune
+    if (!position && roads.length) {
+      for (const road of roads) {
+        const corridor = ITINISERE_ROAD_CORRIDORS[road];
+        if (!corridor) continue;
+        if (communeAnchor) {
+          const roadPoint = nearestPointOnCorridor(corridor, communeAnchor);
+          if (roadPoint && isPointInIsere(roadPoint)) {
+            position = roadPoint;
+            anchor = `${road} · ${communeAnchor.communeName || communeHints[0] || road}`;
+            precision = 'axe+commune';
+            break;
+          }
+        }
+      }
+    }
+
+    // 5. Hints précis (localisation, adresse, lieu-dit) — PAS villes si roads déjà trouvée
+    if (!position) {
+      const specificHints = [...new Set([...locations, ...locationHints])].filter((h) => h && h.length > 3);
+      for (const hint of specificHints) {
+        const knownPt = lookupKnownLocation(hint);
+        if (knownPt && isPointInIsere(knownPt)) { position = knownPt; anchor = hint; precision = 'exact'; break; }
+        const geocodedPt = await geocodeTrafficLabel(hint);
+        if (geocodedPt && isPointInIsere(geocodedPt)) {
+          // Si event a des roads → placer sur le corridor plutôt que sur la ville
+          if (roads.length) {
+            for (const road of roads) {
+              const corridor = ITINISERE_ROAD_CORRIDORS[road];
+              if (!corridor) continue;
+              const roadPoint = nearestPointOnCorridor(corridor, geocodedPt);
+              if (roadPoint && isPointInIsere(roadPoint)) {
+                position = roadPoint; anchor = `${road} · ${hint}`; precision = 'axe+commune'; break;
+              }
+            }
+          }
+          if (!position) { position = geocodedPt; anchor = hint; precision = geocodedPt.precision || 'localité'; }
           break;
         }
       }
     }
 
-    // 3. Géocodage réseau (géo API communes + Nominatim)
+    // 6. Hints dynamiques (sur X, vers Y) si toujours rien
     if (!position) {
-      for (const location of candidateLocationHints) {
-        position = await geocodeTrafficLabel(location);
-        anchor = location;
-        if (position) {
-          precision = position.precision === 'commune' ? 'commune' : (position.precision || 'localité');
-          break;
+      for (const hint of dynamicAlertHints) {
+        const geocodedPt = await geocodeTrafficLabel(hint);
+        if (geocodedPt && isPointInIsere(geocodedPt)) {
+          position = geocodedPt; anchor = hint; precision = geocodedPt.precision || 'localité'; break;
         }
       }
     }
 
+    // 7. Milieu du corridor routier (fallback sans commune)
+    if (!position && roads.length) {
+      for (const road of roads) {
+        const corridor = ITINISERE_ROAD_CORRIDORS[road];
+        if (!corridor || !corridor.length) continue;
+        const midIdx = Math.floor(corridor.length / 2);
+        position = { lat: corridor[midIdx][0], lon: corridor[midIdx][1] };
+        anchor = `Axe ${road}`;
+        precision = 'axe';
+        break;
+      }
+    }
+
+    // 8. Fermeture avec commune (mairie)
     if (!position && isClosureEvent) {
       const closureCommuneHints = extractClosureCommuneHints(event, fullText);
       for (const commune of closureCommuneHints) {
         const communePoint = await geocodeClosureCommune(commune) || await geocodeTrafficLabel(commune);
-        if (!communePoint) continue;
+        if (!communePoint || !isPointInIsere(communePoint)) continue;
         position = { lat: communePoint.lat, lon: communePoint.lon };
         anchor = `Mairie de ${communePoint.communeName || commune}`;
         precision = 'mairie';
@@ -4978,24 +5094,11 @@ async function buildItinisereMapPoints(events = []) {
       }
     }
 
-    if (!position && communeHints.length) {
-      for (const commune of communeHints) {
-        communeAnchor = await geocodeTrafficLabel(commune);
-        if (communeAnchor) break;
-      }
-    }
-
-    if (!position) {
-      for (const road of roads) {
-        const corridor = ITINISERE_ROAD_CORRIDORS[road];
-        if (!corridor) continue;
-        const roadPoint = nearestPointOnCorridor(corridor, communeAnchor);
-        if (!roadPoint) continue;
-        position = roadPoint;
-        anchor = communeHints[0] ? `${road} · ${communeHints[0]}` : `Axe ${road}`;
-        precision = communeAnchor ? 'axe+commune' : 'axe';
-        break;
-      }
+    // 9. Commune seule (événement sans route)
+    if (!position && communeAnchor && isPointInIsere(communeAnchor)) {
+      position = { lat: communeAnchor.lat, lon: communeAnchor.lon };
+      anchor = communeAnchor.communeName || 'Commune';
+      precision = 'commune';
     }
 
     if (!position) {
