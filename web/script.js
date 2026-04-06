@@ -3392,10 +3392,11 @@ function shouldDisplayBaseResourceType(type = '') {
   }
   if (TRANSPORT_RESOURCE_TYPES.has(type)) {
     const transportEnabled = document.getElementById('filter-resources-transport')?.checked ?? false;
-    const transportTypeFilter = document.getElementById('filter-resources-transport-type')?.value || 'all';
     if (!transportEnabled) return false;
+    const transportTypeFilter = document.getElementById('filter-resources-transport-type')?.value || 'all';
     if (transportTypeFilter === 'all') return true;
-    if (type === 'transport' && transportTypeFilter === 'transport_gare_sncf') return true;
+    // 'transport' est un type générique → visible si n'importe quel sous-type est sélectionné
+    if (type === 'transport') return true;
     return transportTypeFilter === type;
   }
   if (HEALTH_RESOURCE_TYPES.has(type) || FINESS_DYNAMIC_RESOURCE_TYPES.has(type)) {
@@ -3429,8 +3430,8 @@ async function loadFinessIsereResources() {
   }
   let backendPending = false;
   try {
-    // Cache court (2 min) pour pouvoir reessayer rapidement si le backend charge encore
-    const payload = await api('/api/finess/isere/resources?limit=20000', { cacheTtlMs: 2 * 60 * 1000 });
+    // Cache 10 min — le CSV FINESS met ~30s à charger la 1ère fois; évite les appels répétés
+    const payload = await api('/api/finess/isere/resources?limit=20000', { cacheTtlMs: 10 * 60 * 1000 });
     const resources = Array.isArray(payload?.resources) ? payload.resources : [];
     backendPending = resources.length === 0 && payload?.status !== 'online';
     const dynamicTypeMeta = new Map();
@@ -3485,11 +3486,12 @@ async function loadFinessIsereResources() {
   }
   if (finessPointsCache.length > 0) {
     finessLoaded = true;
+    if (finessPointsCache.length > 0) saveSnapshot(STORAGE_KEYS.staticFinessCache, finessPointsCache);
   } else {
     // Données vides : le backend est probablement en train de charger le CSV FINESS
-    // Planifier un seul retry automatique dans 90s pour ne pas bloquer les interactions
+    // Retry progressif : 30s, puis 90s, puis abandon
     finessLoaded = true; // bloquer les appels répétés pendant le délai
-    const retryDelay = backendPending ? 90 * 1000 : 3 * 60 * 1000;
+    const retryDelay = backendPending ? 30 * 1000 : 90 * 1000;
     setTimeout(async () => {
       finessLoaded = false;
       apiGetCache.delete(getRequestCacheKey('/api/finess/isere/resources?limit=20000', {}));
@@ -3683,103 +3685,109 @@ async function renderPopulationByCityLayer() {
 
 async function loadIsereInstitutions() {
   if (institutionsLoaded) return institutionPointsCache;
-  // Cache localStorage valide (7j) — affichage immédiat, ne charger que si non vide ET contient les nouveaux types hébergement
+  // Cache localStorage valide (7j) — le cache doit contenir des écoles ou casernes pour être valide
   const cached = readFreshSnapshot(STORAGE_KEYS.staticInstitutionsCache, STATIC_POINTS_CACHE_TTL_MS);
-  // Forcer le rechargement si le cache ne contient pas encore les types hébergement élargis
-  const REQUIRED_CACHE_TYPES = new Set(['complexe_sportif', 'stade', 'salle_omnisports', 'palais_congres', 'salle_fetes']);
-  const cacheHasNewTypes = Array.isArray(cached) && REQUIRED_CACHE_TYPES.size > 0
-    && Array.from(REQUIRED_CACHE_TYPES).some((t) => cached.some((p) => p.type === t));
-  if (Array.isArray(cached) && cached.length > 0 && cacheHasNewTypes) {
+  const cacheIsUsable = Array.isArray(cached) && cached.length >= 50
+    && cached.some((p) => ['ecole_primaire', 'caserne_pompier', 'gendarmerie'].includes(p.type));
+  if (cacheIsUsable) {
     institutionPointsCache = cached;
     institutionsLoaded = true;
     return institutionPointsCache;
   }
-  // Utiliser le cache périmé (ou sans nouveaux types) immédiatement comme fallback pendant que l'API charge
+  // Cache périmé ou insuffisant → affichage immédiat du stale pendant que Overpass charge
   const staleImmediate = readSnapshot(STORAGE_KEYS.staticInstitutionsCache);
   if (Array.isArray(staleImmediate) && staleImmediate.length > 0) {
     institutionPointsCache = staleImmediate;
-  } else {
-    // Migration des anciennes clés de cache (avant V3) pour éviter un rechargement complet
-    for (const oldKey of ['staticInstitutionsCache', 'staticInstitutionsCacheV2']) {
-      try {
-        const raw = JSON.parse(localStorage.getItem(oldKey) || 'null');
-        const oldData = raw?.payload || (Array.isArray(raw) ? raw : null);
-        if (Array.isArray(oldData) && oldData.length > 0) {
-          institutionPointsCache = oldData;
-          break;
-        }
-      } catch (_) { /* ignore */ }
-    }
+    _drawResourceMarkers(); // afficher ce qu'on a déjà pendant le chargement
   }
-  const areaQueries = [
-    '["boundary"="administrative"]["admin_level"="6"]["ref:INSEE"="38"]',
-    '["boundary"="administrative"]["admin_level"="6"]["name"="Isère"]',
-    '["boundary"="administrative"]["admin_level"="6"]["name"="Isere"]',
-  ];
+  // Bbox fixe Isère (plus fiable qu'un area query qui peut échouer)
+  // On découpe en 2 requêtes pour éviter les timeouts : infra critique + équipements
+  const ISERE_BBOX = '44.70,4.70,45.95,6.60';
   const overpassEndpoints = [
     'https://overpass-api.de/api/interpreter',
     'https://overpass.kumi.systems/api/interpreter',
   ];
-  const buildQuery = (areaFilter) => `[out:json][timeout:120];
-area${areaFilter}->.searchArea;
+
+  // Requête 1 : établissements à enjeu opérationnel (école, police, pompier, transport)
+  const queryCritical = `[out:json][timeout:90];
 (
-  nwr["amenity"~"school|college|university|kindergarten|police|fire_station|bus_station|community_centre|arts_centre|theatre|social_facility|concert_hall|events_venue|convention_centre|hall|music_venue|cinema"](area.searchArea);
-  nwr["leisure"~"sports_hall|sports_centre|stadium|ice_rink|velodrome|fitness_centre"](area.searchArea);
-  nwr["building"~"sports_hall|stadium|civic|public|hall|community_centre|sports_centre|gymnasium"](area.searchArea);
-  nwr["railway"="station"](area.searchArea);
-  nwr["aeroway"~"aerodrome|airport"](area.searchArea);
-  nwr["name"~"gymnase|salle de sport|complexe sportif|palais des sports|salle omnisports|stade|arena|halle sportive|halle polyvalente|espace sportif|maison des sports", i](area.searchArea);
-  nwr["name"~"salle des fetes|salle polyvalente|salle communale|salle municipale|salle de concert|palais des congres|parc des expositions|maison des associations|centre social", i](area.searchArea);
-  nwr["name"~"foyer rural|foyer municipal|foyer communal|salle intercommunale|espace culturel|salle de spectacle|salle des associations|salle de reunion|salle d.accueil", i](area.searchArea);
-  nwr["name"~"espace omnisports|plateau sportif|terrain omnisports|salle omnisports|complexe omnisports|pôle sportif|pole sportif", i](area.searchArea);
+  nwr["amenity"="school"](${ISERE_BBOX});
+  nwr["amenity"="college"](${ISERE_BBOX});
+  nwr["amenity"="university"](${ISERE_BBOX});
+  nwr["amenity"="kindergarten"](${ISERE_BBOX});
+  nwr["amenity"="police"](${ISERE_BBOX});
+  nwr["amenity"="fire_station"](${ISERE_BBOX});
+  nwr["amenity"="bus_station"](${ISERE_BBOX});
+  nwr["railway"="station"](${ISERE_BBOX});
+  nwr["aeroway"~"aerodrome|airport"](${ISERE_BBOX});
 );
 out center tags;`;
 
-  let points = [];
-  for (const endpoint of overpassEndpoints) {
-    for (const areaFilter of areaQueries) {
+  // Requête 2 : équipements d'accueil & culture (gymnases, salles, centres)
+  const queryFacilities = `[out:json][timeout:90];
+(
+  nwr["amenity"~"community_centre|arts_centre|theatre|cinema|concert_hall|events_venue|convention_centre|music_venue|social_facility"](${ISERE_BBOX});
+  nwr["leisure"~"sports_hall|sports_centre|stadium|ice_rink"](${ISERE_BBOX});
+  nwr["building"~"sports_hall|stadium|civic|gymnasium"](${ISERE_BBOX});
+);
+out center tags;`;
+
+  const runOverpassQuery = async (query, label) => {
+    for (const endpoint of overpassEndpoints) {
       try {
         const response = await queueApiRequest(() => fetchWithTimeout(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
-          body: buildQuery(areaFilter),
-        }, 95000));
-        const payload = await parseJsonResponse(response, `overpass-institutions-${areaFilter}`);
-        const elements = Array.isArray(payload?.elements) ? payload.elements : [];
-        const seenIds = new Set();
-        points = elements
-          .map((element) => {
-            const type = classifyInstitutionPoint(element);
-            if (!type) return null;
-            const lat = Number(element.lat ?? element.center?.lat);
-            const lon = Number(element.lon ?? element.center?.lon);
-            if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-            const id = `osm-${element.type}-${element.id}`;
-            if (seenIds.has(id)) return null;
-            seenIds.add(id);
-            const name = String(element.tags?.name || '').trim() || 'Établissement';
-            const address = [element.tags?.['addr:housenumber'], element.tags?.['addr:street'], element.tags?.['addr:city']].filter(Boolean).join(' ') || 'Adresse non renseignée';
-            return {
-              id,
-              name,
-              type,
-              lat,
-              lon,
-              active: true,
-              address,
-              priority: 'standard',
-              info: `Source OSM · amenity=${String(element.tags?.amenity || '-')}`,
-              source: `https://www.openstreetmap.org/${element.type}/${element.id}`,
-              dynamic: true,
-            };
-          })
-          .filter(Boolean);
-        if (points.length) break;
-      } catch {
-        points = [];
-      }
+          body: query,
+        }, 90000));
+        const payload = await parseJsonResponse(response, `${endpoint}-${label}`);
+        if (Array.isArray(payload?.elements)) return payload.elements;
+      } catch { /* essayer endpoint suivant */ }
     }
-    if (points.length) break;
+    return [];
+  };
+
+  let points = [];
+  try {
+    // Les deux requêtes en parallèle
+    const [criticalElements, facilityElements] = await Promise.all([
+      runOverpassQuery(queryCritical, 'critical'),
+      runOverpassQuery(queryFacilities, 'facilities'),
+    ]);
+    const allElements = [...criticalElements, ...facilityElements];
+    const seenIds = new Set();
+    points = allElements
+      .map((element) => {
+        const type = classifyInstitutionPoint(element);
+        if (!type) return null;
+        const lat = Number(element.lat ?? element.center?.lat);
+        const lon = Number(element.lon ?? element.center?.lon);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+        // Vérifier que le point est bien dans l'Isère (bbox élargie légèrement)
+        if (lat < 44.65 || lat > 46.0 || lon < 4.65 || lon > 6.65) return null;
+        const id = `osm-${element.type}-${element.id}`;
+        if (seenIds.has(id)) return null;
+        seenIds.add(id);
+        const name = String(element.tags?.name || '').trim() || 'Établissement';
+        const address = [element.tags?.['addr:housenumber'], element.tags?.['addr:street'], element.tags?.['addr:city']].filter(Boolean).join(' ') || 'Adresse non renseignée';
+        const amenityTag = String(element.tags?.amenity || element.tags?.leisure || element.tags?.railway || element.tags?.aeroway || '-');
+        return {
+          id,
+          name,
+          type,
+          lat,
+          lon,
+          active: true,
+          address,
+          priority: ['caserne_pompier', 'gendarmerie', 'commissariat_police_nationale', 'transport_gare_sncf'].includes(type) ? 'vital' : 'standard',
+          info: `Source OSM · ${amenityTag}`,
+          source: `https://www.openstreetmap.org/${element.type}/${element.id}`,
+          dynamic: true,
+        };
+      })
+      .filter(Boolean);
+  } catch {
+    points = [];
   }
   if (points.length > 0) {
     institutionPointsCache = points;
@@ -9224,6 +9232,14 @@ document.getElementById('event-form')?.addEventListener('submit', async (event) 
 
 (async function bootstrap() {
   _loadGeocodeCache();
+  // Purger le cache OSM s'il est vide ou ne contient pas d'écoles/casernes (données inutilisables)
+  try {
+    const cachedInst = readSnapshot(STORAGE_KEYS.staticInstitutionsCache);
+    if (!Array.isArray(cachedInst) || cachedInst.length < 50
+      || !cachedInst.some((p) => ['ecole_primaire', 'caserne_pompier', 'gendarmerie'].includes(p.type))) {
+      localStorage.removeItem(STORAGE_KEYS.staticInstitutionsCache);
+    }
+  } catch (_) { /* ignore */ }
   bindAppInteractions();
   startApiPanelAutoRefresh();
   document.addEventListener('visibilitychange', () => {
