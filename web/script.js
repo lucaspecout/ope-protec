@@ -3897,6 +3897,7 @@ function getDisplayedResources() {
     .filter((r) => !query || `${r.name} ${r.address}`.toLowerCase().includes(query))
     .map((r) => ({ ...r, dynamic: false }));
   const dynamicResources = [...institutionPointsCache, ...finessPointsCache, ...telecomPointsCache]
+    .filter((r) => r.type)
     .filter((r) => shouldDisplayBaseResourceType(r.type))
     .filter((r) => resourceVisibilityOverrides.get(r.id) !== false)
     .filter((r) => !query || `${r.name} ${r.address}`.toLowerCase().includes(query));
@@ -3946,7 +3947,8 @@ function _drawResourceMarkers() {
   }
 
   setHtml('resources-list', resources.map((r) => {
-    const meta = RESOURCE_TYPE_META[r.type] || { label: r.type.replace(/_/g, ' '), icon: '📍' };
+    const typeKey = String(r.type || '');
+    const meta = RESOURCE_TYPE_META[typeKey] || { label: typeKey.replace(/_/g, ' ') || 'Inconnu', icon: '📍' };
     const statusLabel = r.active ? 'affichée' : 'masquée';
     const toggleButton = r.dynamic ? '' : `<button type="button" class="ghost" data-resource-toggle="${escapeHtml(r.id)}">${r.active ? 'Masquer' : 'Afficher'}</button>`;
     return `<li>
@@ -3965,7 +3967,8 @@ function _drawResourceMarkers() {
   resources.forEach((r) => {
     const coords = normalizeMapCoordinates(r.lat, r.lon);
     if (!coords) return;
-    const meta = RESOURCE_TYPE_META[r.type] || { label: r.type.replace(/_/g, ' '), icon: '📍' };
+    const typeKey = String(r.type || '');
+    const meta = RESOURCE_TYPE_META[typeKey] || { label: typeKey.replace(/_/g, ' ') || 'Inconnu', icon: '📍' };
     const markerHtml = `<span class="map-resource-icon" style="background:${markerColor[r.priority] || '#2f9e44'}">${meta.icon}</span>`;
     window.L.marker([coords.lat, coords.lon], {
       icon: window.L.divIcon({ className: 'map-resource-icon-wrap', html: markerHtml, iconSize: [24, 24], iconAnchor: [12, 12] }),

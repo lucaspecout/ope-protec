@@ -937,6 +937,7 @@ svg text { font-size: 14px; fill: #17335f; }
   box-shadow: 0 2px 7px rgba(0, 0, 0, .32);
   font-size: 13px;
   line-height: 1;
+  color: #fff;
 }
 .map-emoji-icon--traffic-closed {
   width: 18px;
