@@ -1885,21 +1885,60 @@ function ensureSocialFeedsRendered() {
   }, 4500);
 }
 
-let socialPanelRendered = false;
-function ensureSocialPanelRendered() {
-  const panel = document.getElementById('social-panel');
-  if (!panel) return;
-  if (window.twttr?.widgets?.load) {
-    window.twttr.widgets.load(panel);
-  } else if (!socialPanelRendered) {
-    // Charger le script Twitter la première fois
-    const script = document.querySelector('script[src*="platform.twitter.com"]');
-    if (script) {
-      script.addEventListener('load', () => window.twttr?.widgets?.load(panel), { once: true });
-    }
+let socialPanelLoaded = false;
+
+function renderSocialFeeds(data) {
+  const grid = document.getElementById('social-feeds-grid');
+  const status = document.getElementById('social-status');
+  if (!grid) return;
+  if (!data?.feeds?.length) {
+    grid.innerHTML = '<p class="muted">Aucun flux disponible pour le moment.</p>';
+    return;
   }
-  socialPanelRendered = true;
+  if (status) {
+    const updatedAt = data.updated_at ? new Date(data.updated_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
+    status.textContent = updatedAt ? `Mis à jour à ${updatedAt}` : '';
+  }
+  grid.innerHTML = data.feeds.map((feed) => {
+    const posts = feed.posts || [];
+    const postsHtml = posts.length
+      ? posts.map((p) => `
+          <a class="social-post" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">
+            <span class="social-post-text">${escapeHtml(p.text)}</span>
+            <span class="social-post-date">${escapeHtml(p.date_fr)}</span>
+          </a>`).join('')
+      : '<p class="muted social-post-empty">Aucun tweet récupéré pour ce compte.</p>';
+    return `
+      <div class="social-feed-card">
+        <div class="social-feed-header">
+          <span class="social-feed-icon">${escapeHtml(feed.icon)}</span>
+          <div>
+            <strong>${escapeHtml(feed.label)}</strong>
+            <a class="social-feed-link" href="${escapeHtml(feed.url)}" target="_blank" rel="noopener">@${escapeHtml(feed.handle)}</a>
+          </div>
+        </div>
+        <div class="social-posts-list">${postsHtml}</div>
+      </div>`;
+  }).join('');
 }
+
+async function loadSocialFeeds(forceRefresh = false) {
+  const status = document.getElementById('social-status');
+  if (status) status.textContent = 'Chargement des flux…';
+  try {
+    const data = await api(`/social-feeds${forceRefresh ? '?force_refresh=true' : ''}`);
+    renderSocialFeeds(data);
+    socialPanelLoaded = true;
+  } catch (e) {
+    if (status) status.textContent = `Erreur : ${sanitizeErrorMessage(e?.message || 'indisponible')}`;
+  }
+}
+
+function ensureSocialPanelRendered() {
+  if (!socialPanelLoaded) loadSocialFeeds();
+}
+
+document.getElementById('social-refresh-btn')?.addEventListener('click', () => loadSocialFeeds(true));
 
 function centerMapOnIsere() {
   if (!leafletMap) return;

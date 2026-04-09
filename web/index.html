@@ -548,66 +548,10 @@
           <div class="panel-heading">
             <h3>Réseaux sociaux · Isère</h3>
             <p class="muted">Dernières publications des acteurs institutionnels du département sur X (Twitter).</p>
+            <button id="social-refresh-btn" class="ghost" type="button">↺ Actualiser</button>
           </div>
-          <div class="social-feeds-grid">
-
-            <div class="social-feed-card">
-              <div class="social-feed-header">
-                <span class="social-feed-icon">🚆</span>
-                <div>
-                  <strong>SNCF TER AURA</strong>
-                  <a class="social-feed-link" href="https://x.com/SNCFTERAURA" target="_blank" rel="noopener">@SNCFTERAURA</a>
-                </div>
-              </div>
-              <a class="twitter-timeline" data-lang="fr" data-height="480" data-theme="light" href="https://twitter.com/SNCFTERAURA">Tweets par @SNCFTERAURA</a>
-            </div>
-
-            <div class="social-feed-card">
-              <div class="social-feed-header">
-                <span class="social-feed-icon">🚒</span>
-                <div>
-                  <strong>SDIS 38</strong>
-                  <a class="social-feed-link" href="https://x.com/sdis38" target="_blank" rel="noopener">@sdis38</a>
-                </div>
-              </div>
-              <a class="twitter-timeline" data-lang="fr" data-height="480" data-theme="light" href="https://twitter.com/sdis38">Tweets par @sdis38</a>
-            </div>
-
-            <div class="social-feed-card">
-              <div class="social-feed-header">
-                <span class="social-feed-icon">🏛️</span>
-                <div>
-                  <strong>Préfecture de l'Isère</strong>
-                  <a class="social-feed-link" href="https://x.com/Prefet38" target="_blank" rel="noopener">@Prefet38</a>
-                </div>
-              </div>
-              <a class="twitter-timeline" data-lang="fr" data-height="480" data-theme="light" href="https://twitter.com/Prefet38">Tweets par @Prefet38</a>
-            </div>
-
-            <div class="social-feed-card">
-              <div class="social-feed-header">
-                <span class="social-feed-icon">🛡️</span>
-                <div>
-                  <strong>Gendarmerie Isère</strong>
-                  <a class="social-feed-link" href="https://x.com/Gendarmerie_038" target="_blank" rel="noopener">@Gendarmerie_038</a>
-                </div>
-              </div>
-              <a class="twitter-timeline" data-lang="fr" data-height="480" data-theme="light" href="https://twitter.com/Gendarmerie_038">Tweets par @Gendarmerie_038</a>
-            </div>
-
-            <div class="social-feed-card">
-              <div class="social-feed-header">
-                <span class="social-feed-icon">🚓</span>
-                <div>
-                  <strong>Police Nationale Isère</strong>
-                  <a class="social-feed-link" href="https://x.com/PoliceNat38" target="_blank" rel="noopener">@PoliceNat38</a>
-                </div>
-              </div>
-              <a class="twitter-timeline" data-lang="fr" data-height="480" data-theme="light" href="https://twitter.com/PoliceNat38">Tweets par @PoliceNat38</a>
-            </div>
-
-          </div>
-          <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
+          <p id="social-status" class="muted"></p>
+          <div id="social-feeds-grid" class="social-feeds-grid"></div>
         </section>
 
         <section id="map-panel" class="panel view hidden" hidden>

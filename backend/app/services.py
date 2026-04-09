@@ -5776,3 +5776,106 @@ def vigicrues_geojson_from_stations(stations: list[dict[str, Any]]) -> dict[str,
         "source": "https://www.vigicrues.gouv.fr",
         "generated_at": datetime.utcnow().isoformat() + "Z",
     }
+
+
+# ---------------------------------------------------------------------------
+# Réseaux sociaux — flux RSS via Nitter (sans clé API)
+# ---------------------------------------------------------------------------
+
+_SOCIAL_ACCOUNTS = [
+    {"handle": "SNCFTERAURA", "label": "SNCF TER AURA",        "icon": "🚆"},
+    {"handle": "sdis38",      "label": "SDIS 38",               "icon": "🚒"},
+    {"handle": "Prefet38",    "label": "Préfecture de l'Isère", "icon": "🏛️"},
+    {"handle": "Gendarmerie_038", "label": "Gendarmerie Isère", "icon": "🛡️"},
+    {"handle": "PoliceNat38", "label": "Police Nationale Isère","icon": "🚓"},
+]
+
+_NITTER_INSTANCES = [
+    "https://nitter.poast.org",
+    "https://nitter.privacydev.net",
+    "https://nitter.net",
+    "https://nitter.1d4.us",
+]
+
+_social_feeds_cache_lock = Lock()
+_social_feeds_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_SOCIAL_FEEDS_TTL = 900  # 15 minutes
+
+
+def _fetch_nitter_rss(handle: str, max_items: int = 10) -> list[dict]:
+    """Tente chaque instance Nitter jusqu'à en trouver une qui répond."""
+    for base in _NITTER_INSTANCES:
+        url = f"{base}/{handle}/rss"
+        try:
+            req = Request(url, headers={
+                "User-Agent": "Mozilla/5.0 (compatible; ope-protec/1.0)",
+                "Accept": "application/rss+xml, application/xml, text/xml",
+            })
+            raw = _http_get_with_retries(request=req, timeout=12, max_retries=1)
+            root = ET.fromstring(raw)
+            ns = {"dc": "http://purl.org/dc/elements/1.1/"}
+            items = root.findall(".//item")
+            results = []
+            for item in items[:max_items]:
+                title = (item.findtext("title") or "").strip()
+                link  = (item.findtext("link")  or "").strip()
+                desc  = (item.findtext("description") or "").strip()
+                pub   = (item.findtext("pubDate") or "").strip()
+                # Nettoyer le HTML dans la description
+                desc = re.sub(r"<[^>]+>", "", unescape(desc)).strip()
+                # Parser la date
+                try:
+                    dt = parsedate_to_datetime(pub)
+                    date_iso = dt.isoformat()
+                    date_fr  = dt.strftime("%d/%m/%Y %H:%M")
+                except Exception:
+                    date_iso = ""
+                    date_fr  = pub[:16] if pub else ""
+                results.append({
+                    "title":    title,
+                    "text":     desc or title,
+                    "url":      link.replace(base, "https://x.com").replace("/SNCFTERAURA/", "/SNCFTERAURA/").strip(),
+                    "date_iso": date_iso,
+                    "date_fr":  date_fr,
+                })
+            if results:
+                return results
+        except Exception:
+            continue
+    return []
+
+
+def _fetch_social_feeds_live() -> dict[str, Any]:
+    feeds = []
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        futures = {
+            pool.submit(_fetch_nitter_rss, acc["handle"]): acc
+            for acc in _SOCIAL_ACCOUNTS
+        }
+        for future, acc in futures.items():
+            try:
+                posts = future.result(timeout=20)
+            except Exception:
+                posts = []
+            feeds.append({
+                "handle": acc["handle"],
+                "label":  acc["label"],
+                "icon":   acc["icon"],
+                "url":    f"https://x.com/{acc['handle']}",
+                "posts":  posts,
+            })
+    return {
+        "status": "ok" if any(f["posts"] for f in feeds) else "partial",
+        "feeds":  feeds,
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+def fetch_social_feeds(force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_social_feeds_cache,
+        lock=_social_feeds_cache_lock,
+        ttl_seconds=_SOCIAL_FEEDS_TTL,
+        force_refresh=force_refresh,
+        loader=_fetch_social_feeds_live,
+    )

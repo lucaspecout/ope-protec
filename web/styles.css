@@ -1241,6 +1241,45 @@ svg text { font-size: 14px; fill: #17335f; }
   text-decoration: underline;
 }
 
+.social-posts-list {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+  max-height: 520px;
+  overflow-y: auto;
+}
+
+.social-post {
+  display: block;
+  padding: .55rem .65rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+  text-decoration: none;
+  color: inherit;
+  transition: background .15s;
+}
+
+.social-post:hover { background: var(--bg); }
+
+.social-post-text {
+  display: block;
+  font-size: .88rem;
+  line-height: 1.45;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.social-post-date {
+  display: block;
+  font-size: .75rem;
+  color: var(--muted);
+  margin-top: .25rem;
+}
+
+.social-post-empty { font-size: .85rem; padding: .5rem 0; }
+
 /* --- 2026 corporate modernization pass — Protection Civile brand --- */
 :root {
   --bg: #eaf0f9;

@@ -79,6 +79,7 @@ from .services import (
     generate_pdf_report,
     resolve_commune_insee_code,
     vigicrues_geojson_from_stations,
+    fetch_social_feeds,
 )
 
 Base.metadata.create_all(bind=engine)
@@ -545,6 +546,11 @@ def public_live_status(db: Session = Depends(get_db)):
 @app.get("/public/isere-map")
 def public_isere_map():
     return fetch_isere_boundary_geojson()
+
+
+@app.get("/social-feeds")
+def social_feeds(force_refresh: bool = False, user: User = Depends(get_current_user)):
+    return fetch_social_feeds(force_refresh=force_refresh)
 
 
 @app.get("/map/points", response_model=list[MapPointOut])
