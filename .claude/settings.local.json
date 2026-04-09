@@ -153,7 +153,10 @@
       "Bash(cmd.exe /c \"docker compose build api web 2>&1\")",
       "Bash(cmd.exe /c \"docker compose build api web\")",
       "Bash(powershell.exe -Command \"& { Set-Location 'C:\\\\Users\\\\lucme\\\\Music\\\\opeprotec\\\\ope-protec'; docker compose build api web 2>&1 | Select-Object -Last 30 }\")",
-      "Bash(powershell.exe -Command \"Get-Command docker -ErrorAction SilentlyContinue; Get-ChildItem 'C:\\\\Program Files\\\\Docker' -ErrorAction SilentlyContinue | Select-Object Name\")"
+      "Bash(powershell.exe -Command \"Get-Command docker -ErrorAction SilentlyContinue; Get-ChildItem 'C:\\\\Program Files\\\\Docker' -ErrorAction SilentlyContinue | Select-Object Name\")",
+      "Bash(powershell.exe -Command \"Get-ChildItem 'C:\\\\Program Files\\\\Docker\\\\Docker\\\\resources\\\\bin\\\\' -ErrorAction SilentlyContinue | Select-Object Name; Get-ChildItem 'C:\\\\Users\\\\lucme\\\\AppData\\\\Local\\\\Docker\\\\' -ErrorAction SilentlyContinue | Select-Object Name\")",
+      "Bash(powershell.exe -Command \"where.exe docker 2>&1\")",
+      "Bash(powershell.exe -Command 'Set-Location '\\\\''C:\\\\Users\\\\lucme\\\\Music\\\\opeprotec\\\\ope-protec'\\\\''; & { $env:PATH += '\\\\'';C:\\\\Program Files\\\\Docker\\\\Docker\\\\resources\\\\bin;C:\\\\Users\\\\lucme\\\\AppData\\\\Local\\\\Docker\\\\wsl\\\\distro\\\\usr\\\\bin'\\\\''; docker compose build web 2>&1 } ')"
     ]
   }
 }

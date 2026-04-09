@@ -35,6 +35,26 @@ const API_ORIGIN_COOLDOWN_MS = 60000;
 const STATIC_POINTS_CACHE_TTL_MS = 10 * 60 * 1000;
 const TELECOM_POINTS_CACHE_TTL_MS = 10 * 60 * 1000;
 const OSM_DETAILS_MIN_ZOOM = 15;
+const FLUX_SERVICES = [
+  { key: 'meteo_france',           label: 'Météo-France',              icon: '⛅', category: 'Météo',         interval: 120,   metric: (d) => d.level ? `Vigilance ${d.level}` : `${(d.alerts || []).length} alerte(s)` },
+  { key: 'apic_isere',             label: 'APIC · Pluie intense',      icon: '🌧️', category: 'Météo',        interval: 180,   metric: (d) => `${d.alerts_total ?? 0} avertissement(s)` },
+  { key: 'vigicrues',              label: 'Vigicrues',                 icon: '🌊', category: 'Eau',           interval: 120,   metric: (d) => `${(d.stations || []).length} station(s) · niveau ${d.water_alert_level || '?'}` },
+  { key: 'vigicrues_flash_isere',  label: 'Vigicrues Flash',           icon: '⚡', category: 'Eau',           interval: 180,   metric: (d) => `${d.alerts_total ?? 0} alerte(s) crues rapides` },
+  { key: 'vigieau',                label: 'Vigieau · Restrictions eau', icon: '💧', category: 'Eau',          interval: 600,   metric: (d) => `${(d.alerts || []).length} restriction(s)` },
+  { key: 'groundwater_isere',      label: "Hub'Eau · Nappes phréatiques", icon: '🏔️', category: 'Eau',        interval: 3600,  metric: (d) => `${d.stations_total ?? 0} station(s) · ↑${d.trend_summary?.hausse ?? 0} ↓${d.trend_summary?.baisse ?? 0} =${d.trend_summary?.stable ?? 0}` },
+  { key: 'atmo_aura',              label: "Atmo AURA · Qualité de l'air", icon: '🌫️', category: 'Environnement', interval: 600, metric: (d) => d.today?.index ? `Indice ${d.today.index}${d.today.label ? ' — ' + d.today.label : ''}` : 'Indice non disponible' },
+  { key: 'georisques',             label: 'Géorisques',                icon: '🌋', category: 'Risques',       interval: 600,   metric: (d) => `${d.flood_documents_total ?? 0} doc(s) inondation · zone sismique ${d.highest_seismic_zone_label || '?'}` },
+  { key: 'itinisere',              label: 'Itinisère · Transports',    icon: '🚌', category: 'Transport',     interval: 120,   metric: (d) => `${d.events_total ?? (d.events || []).length} perturbation(s)` },
+  { key: 'bison_fute',             label: 'Bison Futé',                icon: '🚗', category: 'Transport',     interval: 300,   metric: (d) => d.today?.isere?.departure ? `Départ: ${d.today.isere.departure} · Retour: ${d.today.isere.return || '?'}` : 'Trafic non disponible' },
+  { key: 'sncf_isere',             label: 'SNCF Isère',                icon: '🚆', category: 'Transport',     interval: 120,   metric: (d) => `${(d.alerts || []).length} alerte(s) voie ferrée` },
+  { key: 'electricity_isere',      label: 'RTE · Électricité',         icon: '⚡', category: 'Énergie',       interval: 180,   metric: (d) => `${d.level || '?'} · marge ${d.supply_margin_mw ?? '-'} MW` },
+  { key: 'prefecture_isere',       label: 'Préfecture Isère',          icon: '🏛️', category: 'Actualités',   interval: 90,    metric: (d) => `${(d.items || []).length} actualité(s)` },
+  { key: 'dauphine_isere',         label: 'Dauphiné Libéré',           icon: '📰', category: 'Actualités',   interval: 180,   metric: (d) => `${(d.items || []).length} article(s)` },
+  { key: 'anfr_isere',             label: 'ANFR · Antennes mobiles',   icon: '📡', category: 'Télécom',       interval: 21600, metric: (d) => `${d.supports_total ?? 0} support(s) mobile recensés` },
+  { key: 'arcep_isere',            label: 'ARCEP · Sites mobiles',     icon: '📶', category: 'Télécom',       interval: 600,   metric: (d) => `${d.outages_total ?? 0} indisponibilité(s)` },
+  { key: 'isere_opendata',         label: 'Isère OpenData · Résilience', icon: '📊', category: 'Données',    interval: 1800,  metric: (d) => `${d.totals?.schools ?? 0} écoles · ${d.totals?.health_centers ?? 0} santé · ${d.totals?.food_aid_points ?? 0} aide alim.` },
+  { key: 'finess_isere',           label: 'FINESS · Établissements santé', icon: '🏥', category: 'Santé',    interval: 21600, metric: (d) => `${d.resources_total ?? 0} établissement(s)` },
+];
 const PANEL_TITLES = {
   'situation-panel': 'Situation opérationnelle',
   'services-panel': 'Services connectés',
@@ -267,6 +287,7 @@ let telecomLoaded = false;
 let cachedHomeLiveSnapshot = {};
 let lastRenderedExternalRisksSignature = null;
 let lastRenderedApiInterconnectionsSignature = null;
+let _currentFluxFilter = 'all';
 let lastRenderedGeorisquesSignature = null;
 
 function keepPreviousValue(previousValue, nextValue) {
@@ -1019,13 +1040,6 @@ function getMunicipalityName(municipalityId) {
   const fromCache = cachedMunicipalityRecords.find((municipality) => String(municipality.id) === id)
     || cachedMunicipalities.find((municipality) => String(municipality.id) === id);
   if (fromCache?.name) return fromCache.name;
-  try {
-    const local = JSON.parse(localStorage.getItem(STORAGE_KEYS.municipalitiesCache) || '[]');
-    const fromLocal = Array.isArray(local) ? local.find((municipality) => String(municipality.id) === id) : null;
-    if (fromLocal?.name) return fromLocal.name;
-  } catch (_) {
-    // ignore cache parsing issues
-  }
   return `#${id}`;
 }
 
@@ -1181,14 +1195,7 @@ function populateLogMunicipalityOptions(municipalities = []) {
   let source = Array.isArray(municipalities) ? municipalities : [];
   if (!source.length && Array.isArray(cachedMunicipalityRecords) && cachedMunicipalityRecords.length) source = cachedMunicipalityRecords;
   if (!source.length && Array.isArray(cachedMunicipalities) && cachedMunicipalities.length) source = cachedMunicipalities;
-  if (!source.length) {
-    try {
-      const local = JSON.parse(localStorage.getItem(STORAGE_KEYS.municipalitiesCache) || '[]');
-      if (Array.isArray(local)) source = local;
-    } catch (_) {
-      source = [];
-    }
-  }
+  if (!source.length) source = [];
 
   const createOptions = (includeEmpty = true, allLabel = 'Toutes les communes') => {
     const base = includeEmpty ? `<option value="">Sélectionnez une commune</option>` : `<option value="all">${allLabel}</option>`;
@@ -1472,7 +1479,27 @@ function formatElapsedSince(timestamp) {
 }
 
 function renderApiResyncClock() {
-  setText('api-resync-ago', formatElapsedSince(lastApiResyncAt));
+  const elapsed = formatElapsedSince(lastApiResyncAt);
+  setText('api-resync-ago', elapsed);
+  const fluxClock = document.getElementById('flux-resync-ago');
+  if (fluxClock) fluxClock.textContent = `↻ ${elapsed}`;
+  // Mise à jour live des âges individuels sans re-render complet
+  document.querySelectorAll('.flux-age[data-updated-at]').forEach((el) => {
+    const ts = Number(el.dataset.updatedAt);
+    if (!ts) return;
+    const intervalSec = Number(el.dataset.interval) || 120;
+    const ageMs = Date.now() - ts;
+    const ageSec = ageMs / 1000;
+    const svcKey = el.closest('.flux-row')?.dataset.key;
+    const state = el.closest('.flux-row')?.className?.includes('status-') ?
+      (el.closest('.flux-row').className.match(/status-(\w+)/)?.[1] || 'online') : 'online';
+    el.textContent = _fluxAgeLabel(ageMs, intervalSec, state).text;
+    el.className = 'flux-age ' + _fluxAgeLabel(ageMs, intervalSec, state).css;
+    const nextEl = el.nextElementSibling;
+    if (nextEl && nextEl.classList.contains('flux-interval')) {
+      nextEl.textContent = _fluxNextLabel(ts, intervalSec, state);
+    }
+  });
 }
 
 function normalizeApiErrorMessage(payload, status) {
@@ -1501,81 +1528,12 @@ function normalizeApiErrorMessage(payload, status) {
 }
 
 
-function saveSnapshot(key, payload) {
-  try {
-    localStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), payload }));
-  } catch (_) {
-    // ignore localStorage saturation
-  }
-}
-
-function readSnapshot(key) {
-  try {
-    const raw = JSON.parse(localStorage.getItem(key) || 'null');
-    if (!raw || typeof raw !== 'object') return null;
-    return raw.payload;
-  } catch (_) {
-    return null;
-  }
-}
-
-function readSnapshotWithMetadata(key) {
-  try {
-    const raw = JSON.parse(localStorage.getItem(key) || 'null');
-    if (!raw || typeof raw !== 'object') return null;
-    return raw;
-  } catch (_) {
-    return null;
-  }
-}
-
-function readFreshSnapshot(key, ttlMs) {
-  const snapshot = readSnapshotWithMetadata(key);
-  if (!snapshot) return null;
-  const savedAt = Number(snapshot.savedAt || 0);
-  if (!Number.isFinite(savedAt) || savedAt <= 0) return null;
-  if ((Date.now() - savedAt) > ttlMs) return null;
-  return snapshot.payload;
-}
-
-function hydrateUiFromLocalCache() {
-  const cachedDashboard = readSnapshot(STORAGE_KEYS.dashboardSnapshot);
-  if (cachedDashboard) renderDashboard(cachedDashboard);
-
-  const cachedRisks = readSnapshot(STORAGE_KEYS.externalRisksSnapshot);
-  if (cachedRisks) {
-    renderExternalRisks(cachedRisks);
-    renderApiInterconnections(cachedRisks);
-  }
-
-  try {
-    const cachedMunicipalities = JSON.parse(localStorage.getItem(STORAGE_KEYS.municipalitiesCache) || '[]');
-    if (Array.isArray(cachedMunicipalities) && cachedMunicipalities.length) {
-      loadMunicipalities(cachedMunicipalities);
-    }
-  } catch (_) {
-    // ignore malformed cache
-  }
-
-  const cachedLogsSnapshot = readSnapshot(STORAGE_KEYS.logsSnapshot);
-  if (Array.isArray(cachedLogsSnapshot) && cachedLogsSnapshot.length) {
-    cachedLogs = cachedLogsSnapshot;
-    renderLogsList();
-    renderSituationOverview();
-  }
-
-  const cachedEventsSnapshot = readSnapshot(STORAGE_KEYS.eventsSnapshot);
-  if (Array.isArray(cachedEventsSnapshot) && cachedEventsSnapshot.length) {
-    cachedEvents = cachedEventsSnapshot;
-    populateEventOptions(cachedEvents);
-  }
-
-  const cachedUsersSnapshot = readSnapshot(STORAGE_KEYS.usersSnapshot);
-  if (Array.isArray(cachedUsersSnapshot) && cachedUsersSnapshot.length && canManageUsers()) {
-    loadUsers(cachedUsersSnapshot);
-  }
-
-}
+// Données toujours servies par le serveur — aucun cache navigateur.
+function saveSnapshot(key, payload) {} // no-op intentionnel
+function readSnapshot(key) { return null; }
+function readSnapshotWithMetadata(key) { return null; }
+function readFreshSnapshot(key, ttlMs) { return null; }
+function hydrateUiFromLocalCache() {}
 
 function clonePayload(payload) {
   if (payload == null) return payload;
@@ -5346,16 +5304,10 @@ async function loadMapPoints() {
   try {
     const response = await api('/map/points');
     loadedPoints = keepPreviousArray(previousPoints, response);
-    localStorage.setItem(STORAGE_KEYS.mapPointsCache, JSON.stringify(loadedPoints));
   } catch (error) {
     usedCacheFallback = true;
-    try {
-      const cached = JSON.parse(localStorage.getItem(STORAGE_KEYS.mapPointsCache) || '[]');
-      loadedPoints = Array.isArray(cached) ? cached : [];
-    } catch (_) {
-      loadedPoints = [];
-    }
-    setMapFeedback(`Points personnalisés indisponibles (API): ${sanitizeErrorMessage(error.message)}. Affichage du cache local (${loadedPoints.length}).`, true);
+    loadedPoints = previousPoints.length ? previousPoints : [];
+    setMapFeedback(`Points personnalisés indisponibles (API): ${sanitizeErrorMessage(error.message)}.`, true);
   }
 
   mapPoints = loadedPoints
@@ -7595,69 +7547,132 @@ async function loadExternalRisks(forceRefresh = false) {
   await renderTrafficOnMap();
 }
 
+function _fluxServiceState(payload, intervalSec) {
+  const status = String(payload?.status || 'pending');
+  const updatedAt = payload?.updated_at ? new Date(payload.updated_at).getTime() : 0;
+  const ageMs = updatedAt > 0 ? (Date.now() - updatedAt) : Infinity;
+  if (status === 'pending' || status === 'idle') return { state: 'pending', updatedAt, ageMs };
+  if (status !== 'online' || payload?.error) return { state: 'error', updatedAt, ageMs };
+  if (ageMs > intervalSec * 1000 * 2.5) return { state: 'stale', updatedAt, ageMs };
+  return { state: 'online', updatedAt, ageMs };
+}
+
+function _fluxAgeLabel(ageMs, intervalSec, state) {
+  if (state === 'pending') return { text: 'en attente', css: 'unknown' };
+  if (!Number.isFinite(ageMs)) return { text: '–', css: 'unknown' };
+  const ageSec = ageMs / 1000;
+  const text = formatElapsedSince(new Date(Date.now() - ageMs).toISOString());
+  const css = ageSec < intervalSec ? 'fresh' : ageSec < intervalSec * 2.5 ? 'slow' : 'stale';
+  return { text, css };
+}
+
+function _fluxNextLabel(updatedAt, intervalSec, state) {
+  if (state === 'pending') return `↻ toutes les ${_formatInterval(intervalSec)}`;
+  if (updatedAt > 0 && state === 'online') {
+    const nextMs = (intervalSec * 1000) - (Date.now() - updatedAt);
+    if (nextMs > 0) return `↻ dans ${_formatInterval(Math.ceil(nextMs / 1000))}`;
+    return '↻ en cours...';
+  }
+  return `↻ toutes les ${_formatInterval(intervalSec)}`;
+}
+
+function _formatInterval(sec) {
+  if (sec < 60) return `${sec}s`;
+  if (sec < 3600) return `${Math.round(sec / 60)} min`;
+  return `${Math.round(sec / 3600)} h`;
+}
+
 function renderApiInterconnections(data = {}) {
   const signature = createPayloadSignature(data, ['updated_at', 'fetched_at', 'retrieved_at']);
   if (signature === lastRenderedApiInterconnectionsSignature) return false;
-
   lastRenderedApiInterconnectionsSignature = signature;
-  const services = [
-    { key: 'meteo_france', label: 'Météo-France', level: normalizeLevel(data.meteo_france?.level || 'inconnu'), details: data.meteo_france?.info_state || data.meteo_france?.bulletin_title || '-' },
-    { key: 'vigicrues', label: 'Vigicrues', level: normalizeLevel(data.vigicrues?.water_alert_level || 'inconnu'), details: `${(data.vigicrues?.stations || []).length} station(s)` },
-    { key: 'itinisere', label: 'Itinisère', level: `${data.itinisere?.events_total ?? (data.itinisere?.events || []).length} événement(s)`, details: data.itinisere?.source || '-' },
-    { key: 'bison_fute', label: 'Bison Futé', level: data.bison_fute?.today?.isere?.departure || 'inconnu', details: data.bison_fute?.source || '-' },
-    { key: 'georisques', label: 'Géorisques', level: data.georisques?.highest_seismic_zone_label || 'inconnue', details: `${data.georisques?.flood_documents_total ?? 0} document(s) inondation` },
-    { key: 'prefecture_isere', label: "Préfecture Isère · Actualités", level: `${(data.prefecture_isere?.items || []).length} actualité(s)`, details: data.prefecture_isere?.source || '-' },
-    { key: 'dauphine_isere', label: 'Le Dauphiné Libéré · Isère', level: `${(data.dauphine_isere?.items || []).length} article(s)`, details: data.dauphine_isere?.source || '-' },
-    { key: 'sncf_isere', label: 'SNCF Isère · Accidents/Travaux voies', level: `${(data.sncf_isere?.alerts || []).length} alerte(s)`, details: data.sncf_isere?.source || '-' },
-    { key: 'vigieau', label: 'Vigieau · Restrictions eau', level: `${(data.vigieau?.alerts || []).length} alerte(s)`, details: data.vigieau?.source || '-' },
-    { key: 'electricity_isere', label: 'Électricité Isère · RTE éCO2mix', level: normalizeLevel(data.electricity_isere?.level || 'inconnu'), details: `marge ${data.electricity_isere?.supply_margin_mw ?? '-'} MW` },
-    { key: 'atmo_aura', label: "Atmo AURA · Qualité de l'air", level: `indice ${data.atmo_aura?.today?.index ?? '-'}`, details: data.atmo_aura?.source || '-' },
-    { key: 'anfr_isere', label: 'ANFR · Antennes mobiles Isère', level: `${data.anfr_isere?.supports_total ?? 0} support(s)`, details: data.anfr_isere?.data_release || '-' },
-    { key: 'arcep_isere', label: 'ARCEP · Sites mobiles indisponibles', level: `${data.arcep_isere?.outages_total ?? 0} indisponibilité(s)`, details: data.arcep_isere?.resource_date || '-' },
-    { key: 'apic_isere', label: 'APIC · Avertissements pluie intense Isère', level: `${data.apic_isere?.alerts_total ?? 0} alerte(s)`, details: data.apic_isere?.source_data || data.apic_isere?.source || '-' },
-    { key: 'vigicrues_flash_isere', label: 'Vigicrues Flash · Crues rapides Isère', level: `${data.vigicrues_flash_isere?.alerts_total ?? 0} alerte(s)`, details: data.vigicrues_flash_isere?.source_data || data.vigicrues_flash_isere?.source || '-' },
+
+  // Compute state for every service
+  const now = Date.now();
+  const rows = FLUX_SERVICES.map((svc) => {
+    const payload = data[svc.key] || {};
+    const { state, updatedAt, ageMs } = _fluxServiceState(payload, svc.interval);
+    return { svc, payload, state, updatedAt, ageMs };
+  });
+
+  // Summary counts
+  const counts = { online: 0, error: 0, stale: 0, pending: 0 };
+  rows.forEach((r) => counts[r.state]++);
+
+  // Summary bar HTML
+  const summaryParts = [
+    `<span class="flux-stat ok">● ${counts.online} actif${counts.online > 1 ? 's' : ''} / ${rows.length}</span>`,
+    counts.error > 0 ? `<span class="flux-stat error">⚠ ${counts.error} erreur${counts.error > 1 ? 's' : ''}</span>` : '',
+    counts.stale > 0 ? `<span class="flux-stat stale">⏱ ${counts.stale} périmé${counts.stale > 1 ? 's' : ''}</span>` : '',
+    counts.pending > 0 ? `<span class="flux-stat pending">⋯ ${counts.pending} en attente</span>` : '',
+    `<span class="flux-stat clock" id="flux-resync-ago">↻ ${formatElapsedSince(lastApiResyncAt)}</span>`,
   ];
+  setHtml('flux-summary', summaryParts.filter(Boolean).join(''));
 
-  const cards = services.map((service) => {
-    const payload = data[service.key] || {};
-    const status = String(payload.status || 'inconnu');
-    const degraded = status !== 'online' || Boolean(payload.error);
-    const errorLabel = serviceErrorLabel(payload);
-    const updatedAt = payload.updated_at ? safeDateToLocale(payload.updated_at, { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-';
-    const rawDetails = String(service.details || '');
-    const detailsWithoutLinks = rawDetails.replace(/https?:\/\/\S+/gi, '').replace(/\s{2,}/g, ' ').trim();
-    const detailsText = detailsWithoutLinks || 'Détail disponible dans la source officielle.';
-    const sourceCandidates = [
-      payload.source_data,
-      payload.source,
-      payload.source_reseaux,
-      payload.dataset_url,
-      payload.source_url,
-      payload.link,
-    ];
-    const sourceUrl = sourceCandidates.find((candidate) => String(candidate || '').startsWith('http'));
-    const openSourceButton = sourceUrl
-      ? `<a class="ghost inline-action api-card-open-link" href="${escapeHtml(String(sourceUrl))}" target="_blank" rel="noreferrer noopener">Ouvrir</a>`
+  // Filter button counts
+  document.querySelectorAll('.flux-filter-btn').forEach((btn) => {
+    const f = btn.dataset.filter;
+    const labels = { all: 'Tous', online: 'Actifs', error: 'Erreurs', stale: 'Lents' };
+    const c = f === 'all' ? rows.length : f === 'stale' ? counts.stale + counts.pending : (counts[f] ?? 0);
+    btn.textContent = `${labels[f] || f}${c > 0 && f !== 'all' ? ` (${c})` : ''}`;
+  });
+
+  // Sort: errors first, stale second, then online sorted by oldest update, pending last
+  const ORDER = { error: 0, stale: 1, online: 2, pending: 3 };
+  const sorted = [...rows].sort((a, b) => {
+    if (ORDER[a.state] !== ORDER[b.state]) return ORDER[a.state] - ORDER[b.state];
+    return b.ageMs - a.ageMs;
+  });
+
+  // Filter
+  const filtered = sorted.filter((r) => {
+    if (_currentFluxFilter === 'all') return true;
+    if (_currentFluxFilter === 'online') return r.state === 'online';
+    if (_currentFluxFilter === 'error') return r.state === 'error';
+    if (_currentFluxFilter === 'stale') return r.state === 'stale' || r.state === 'pending';
+    return true;
+  });
+
+  // Render rows
+  const listHtml = filtered.map(({ svc, payload, state, updatedAt, ageMs }) => {
+    const metric = (() => { try { return svc.metric(payload); } catch (_) { return '–'; } })();
+    const { text: ageText, css: ageCss } = _fluxAgeLabel(ageMs, svc.interval, state);
+    const nextText = _fluxNextLabel(updatedAt, svc.interval, state);
+    const errorText = payload.error
+      ? payload.error
+      : (state === 'stale' ? 'Données périmées — le service externe répond lentement' : '');
+    const sourceCandidates = [payload.source_data, payload.source, payload.source_reseaux, payload.dataset_url, payload.source_url, payload.link];
+    const sourceUrl = sourceCandidates.find((u) => String(u || '').startsWith('http'));
+    const sourceLink = sourceUrl
+      ? `<a class="flux-source-link" href="${escapeHtml(String(sourceUrl))}" target="_blank" rel="noreferrer noopener">Source officielle ↗</a>`
       : '';
-    return `<article class="api-card"><h4>${service.label}</h4><p>Statut: <span class="${degraded ? 'ko' : 'ok'}">${status}</span></p><p>Indicateur: <strong>${escapeHtml(service.level)}</strong></p><p class="muted">${escapeHtml(detailsText)}</p>${openSourceButton ? `<p>${openSourceButton}</p>` : ''}<p class="${degraded ? 'ko' : 'muted'}">Erreur actuelle: ${escapeHtml(errorLabel)}</p><p class="muted api-card-refresh">Dernière récupération API: ${escapeHtml(updatedAt)}</p></article>`;
+
+    return `<div class="flux-row status-${state}" data-key="${escapeHtml(svc.key)}">
+      <div class="flux-dot ${state}"></div>
+      <div class="flux-row-main">
+        <div class="flux-row-title"><span class="flux-icon">${escapeHtml(svc.icon)}</span>${escapeHtml(svc.label)}<span class="flux-row-category">${escapeHtml(svc.category)}</span></div>
+        <div class="flux-row-metric">${escapeHtml(metric)}</div>
+        ${errorText ? `<div class="flux-row-error">⚠ ${escapeHtml(errorText)}</div>` : ''}
+        ${sourceLink ? `<div class="flux-row-source">${sourceLink}</div>` : ''}
+      </div>
+      <div class="flux-row-meta">
+        <span class="flux-age ${ageCss}" data-updated-at="${updatedAt || ''}" data-interval="${svc.interval}">${escapeHtml(ageText)}</span>
+        <span class="flux-interval">${escapeHtml(nextText)}</span>
+      </div>
+    </div>`;
   }).join('');
 
-  const rawBlocks = services.map((service) => {
-    const payload = data[service.key] || {};
-    return `<details class="api-raw-item"><summary>${service.label}</summary><pre>${formatApiJson(payload)}</pre></details>`;
+  setHtml('flux-service-list', listHtml || '<p class="muted" style="padding:.6rem">Aucun service dans ce filtre.</p>');
+
+  // Raw JSON (collapsed)
+  const rawBlocks = FLUX_SERVICES.map((svc) => {
+    const payload = data[svc.key] || {};
+    return `<details class="api-raw-item"><summary>${escapeHtml(svc.icon)} ${escapeHtml(svc.label)}</summary><pre>${formatApiJson(payload)}</pre></details>`;
   }).join('');
+  setHtml('api-raw-list', rawBlocks);
 
-  const activeErrors = services
-    .map((service) => ({ label: service.label, payload: data[service.key] || {} }))
-    .filter(({ payload }) => payload.status !== 'online' || payload.error)
-    .map(({ label, payload }) => `${label}: ${serviceErrorLabel(payload)}`);
-
-  setText('api-updated-at', data.updated_at ? new Date(data.updated_at).toLocaleString() : 'inconnue');
   lastApiResyncAt = data.updated_at || new Date().toISOString();
   renderApiResyncClock();
-  setText('api-error-banner', activeErrors.join(' · ') || 'Aucune erreur active sur les interconnexions.');
-  setHtml('api-service-grid', cards || '<p>Aucun service disponible.</p>');
-  setHtml('api-raw-list', rawBlocks || '<p>Aucun retour JSON disponible.</p>');
   return true;
 }
 
@@ -7747,20 +7762,13 @@ async function loadMunicipalities(preloaded = null) {
   let municipalities = [];
   if (Array.isArray(preloaded)) {
     municipalities = keepPreviousArray(previousMunicipalities, preloaded);
-    localStorage.setItem(STORAGE_KEYS.municipalitiesCache, JSON.stringify(municipalities));
   } else {
     try {
       const payload = await api('/municipalities');
       municipalities = keepPreviousArray(previousMunicipalities, payload);
-      localStorage.setItem(STORAGE_KEYS.municipalitiesCache, JSON.stringify(municipalities));
     } catch (error) {
-      try {
-        const cached = JSON.parse(localStorage.getItem(STORAGE_KEYS.municipalitiesCache) || '[]');
-        municipalities = Array.isArray(cached) ? cached : [];
-      } catch (_) {
-        municipalities = [];
-      }
-      setMapFeedback(`Liste des communes indisponible via API, affichage du cache local (${municipalities.length}).`, true);
+      municipalities = previousMunicipalities.length ? previousMunicipalities : [];
+      setMapFeedback(`Liste des communes indisponible via API (${municipalities.length} en mémoire).`, true);
     }
   }
 
@@ -8237,6 +8245,14 @@ function bindAppInteractions() {
     } catch (error) {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
     }
+  });
+  document.getElementById('flux-filters')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('.flux-filter-btn');
+    if (!btn) return;
+    _currentFluxFilter = btn.dataset.filter || 'all';
+    document.querySelectorAll('.flux-filter-btn').forEach((b) => b.classList.toggle('active', b === btn));
+    lastRenderedApiInterconnectionsSignature = null; // force re-render
+    renderApiInterconnections(cachedExternalRisksSnapshot);
   });
   document.getElementById('map-search')?.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); handleMapSearch(); } });
   document.getElementById('map-search-clear')?.addEventListener('click', () => {
@@ -9120,15 +9136,16 @@ document.getElementById('event-form')?.addEventListener('submit', async (event) 
 })();
 
 (async function bootstrap() {
+  // Purger les anciens caches navigateur — toutes les données viennent du serveur.
+  [
+    'mapPointsCache', 'municipalitiesCache', 'eventsSnapshot', 'logsSnapshot',
+    'usersSnapshot', 'dashboardSnapshot', 'externalRisksSnapshot',
+    'apiInterconnectionsSnapshot', 'homeLiveSnapshot', 'serviceStatusHistory',
+    'staticInstitutionsCacheV3', 'staticFinessCacheV3', 'staticTelecomCacheV1',
+    'staticMontagneCacheV1', 'staticHelipadCacheV1', 'staticBarrageCacheV1',
+  ].forEach((k) => { try { localStorage.removeItem(k); } catch (_) {} });
+
   _loadGeocodeCache();
-  // Purger le cache OSM s'il est vide ou ne contient pas d'écoles/casernes (données inutilisables)
-  try {
-    const cachedInst = readSnapshot(STORAGE_KEYS.staticInstitutionsCache);
-    if (!Array.isArray(cachedInst) || cachedInst.length < 50
-      || !cachedInst.some((p) => ['ecole_primaire', 'caserne_pompier', 'gendarmerie'].includes(p.type))) {
-      localStorage.removeItem(STORAGE_KEYS.staticInstitutionsCache);
-    }
-  } catch (_) { /* ignore */ }
   bindAppInteractions();
   startApiPanelAutoRefresh();
   document.addEventListener('visibilitychange', () => {
@@ -9138,16 +9155,6 @@ document.getElementById('event-form')?.addEventListener('submit', async (event) 
   window.addEventListener('focus', () => {
     if (token) refreshAll(false);
   });
-
-  try {
-    const cachedMunicipalities = JSON.parse(localStorage.getItem(STORAGE_KEYS.municipalitiesCache) || '[]');
-    if (Array.isArray(cachedMunicipalities)) {
-      populateLogMunicipalityOptions(cachedMunicipalities);
-      syncLogScopeFields();
-    }
-  } catch (_) {
-    // ignore cache parsing issues
-  }
 
   if (!token) return showLogin();
   try {

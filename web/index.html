@@ -357,19 +357,26 @@
         </section>
 
         <section id="api-panel" class="panel view hidden" hidden>
-          <div class="api-headline">
+          <div class="flux-header">
             <div>
-              <h3>Suivi des interconnexions API</h3>
-              <p class="muted">Visualisez les retours des services externes, les erreurs courantes et le détail brut des réponses.</p>
+              <h3>Flux de données — supervision en direct</h3>
+              <p class="muted">Le serveur interroge les sources en permanence en arrière-plan. Tous les utilisateurs voient les mêmes données en temps réel.</p>
             </div>
-            <button id="api-refresh-btn" type="button">Actualiser maintenant</button>
+            <button id="api-refresh-btn" type="button">Forcer actualisation</button>
           </div>
-          <p>Dernière mise à jour <strong id="api-updated-at">-</strong></p>
-          <p class="muted">Dernière resynchronisation GET API: <strong id="api-resync-ago">-</strong></p>
-          <p id="api-error-banner" class="error"></p>
-          <div id="api-service-grid" class="api-service-grid"></div>
-          <h4>Réponses JSON brutes</h4>
-          <div id="api-raw-list" class="api-raw-list"></div>
+          <div id="flux-summary" class="flux-summary"></div>
+          <div class="flux-filters" id="flux-filters">
+            <button class="flux-filter-btn active" data-filter="all">Tous</button>
+            <button class="flux-filter-btn" data-filter="online">Actifs</button>
+            <button class="flux-filter-btn" data-filter="error">Erreurs</button>
+            <button class="flux-filter-btn" data-filter="stale">Lents</button>
+          </div>
+          <div id="flux-service-list" class="flux-service-list"></div>
+          <details class="flux-raw-details">
+            <summary>Réponses JSON brutes</summary>
+            <div id="api-raw-list" class="api-raw-list"></div>
+          </details>
+          <p class="muted" style="display:none"><strong id="api-resync-ago"></strong></p>
         </section>
 
         <section id="municipalities-panel" class="panel view hidden" hidden>
