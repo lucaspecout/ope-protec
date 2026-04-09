@@ -173,3 +173,20 @@ class PublicShare(Base):
     municipality_id: Mapped[int] = mapped_column(ForeignKey("municipalities.id"))
 
     municipality = relationship("Municipality")
+
+
+class InstitutionPoint(Base):
+    """Cache persistant des points OSM (écoles, pompiers, police, transport).
+    Mis à jour en arrière-plan une fois par semaine sans jamais effacer les données existantes."""
+    __tablename__ = "institution_points"
+
+    osm_id: Mapped[str] = mapped_column(String(60), primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    type: Mapped[str] = mapped_column(String(60), nullable=False)
+    lat: Mapped[float] = mapped_column(Float, nullable=False)
+    lon: Mapped[float] = mapped_column(Float, nullable=False)
+    address: Mapped[str] = mapped_column(String(300), default="")
+    priority: Mapped[str] = mapped_column(String(20), default="standard")
+    info: Mapped[str] = mapped_column(String(200), default="")
+    source: Mapped[str] = mapped_column(String(200), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

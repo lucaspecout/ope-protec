@@ -42,7 +42,6 @@ const PANEL_TITLES = {
   'georisques-panel': 'Page Géorisques',
   'news-panel': 'Actualités Isère',
   'api-panel': 'Interconnexions API',
-  'social-panel': 'Réseaux sociaux · Isère',
   'municipalities-panel': 'Communes partenaires',
   'logs-panel': 'Main courante opérationnelle',
   'map-panel': 'Carte stratégique Isère',
@@ -145,7 +144,6 @@ let apiPanelTimer = null;
 let apiResyncTimer = null;
 let refreshAllInFlight = null;
 let photoCameraRefreshTimer = null;
-let socialFeedsFallbackTimer = null;
 let lastApiResyncAt = null;
 let isLoginSubmitting = false;
 const apiGetCache = new Map();
@@ -565,16 +563,6 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
       radon_distribution: nextGeorisques.radon_distribution || prevGeorisques.radon_distribution || null,
       ppr_categories: nextGeorisques.ppr_categories || prevGeorisques.ppr_categories || null,
     },
-    avalanche_isere: mergeServiceSlot(
-      previous.avalanche_isere || {},
-      next.avalanche_isere || {},
-      (p, n) => ({
-        ...p,
-        ...n,
-        massifs: keepPreviousArray(p.massifs, n.massifs),
-        niveau_global: keepPreviousValue(p.niveau_global, n.niveau_global),
-      }),
-    ),
   };
 }
 
@@ -1848,7 +1836,6 @@ function setActivePanel(panelId) {
   }
   if (panelId === 'logs-panel') ensureLogMunicipalitiesLoaded();
   if (panelId === 'news-panel') ensureSocialFeedsRendered();
-  if (panelId === 'social-panel') ensureSocialPanelRendered();
   if (panelId === 'api-panel' && token) {
     loadApiInterconnections(false).catch((error) => {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
@@ -1856,89 +1843,7 @@ function setActivePanel(panelId) {
   }
 }
 
-function ensureSocialFeedsRendered() {
-  const panel = document.getElementById('news-panel');
-  if (!panel) return;
-
-  panel.querySelectorAll('.twitter-timeline').forEach((timelineLink) => {
-    const card = timelineLink.closest('.social-feed-card');
-    if (!card || card.querySelector('.social-feed-fallback')) return;
-    const fallback = document.createElement('p');
-    fallback.className = 'muted social-feed-fallback hidden';
-    fallback.hidden = true;
-    fallback.textContent = 'Le flux intégré ne se charge pas sur ce navigateur. Utilisez le lien du profil ci-dessous.';
-    timelineLink.insertAdjacentElement('afterend', fallback);
-  });
-
-  if (window.twttr?.widgets?.load) {
-    window.twttr.widgets.load(panel);
-  }
-
-  if (socialFeedsFallbackTimer) window.clearTimeout(socialFeedsFallbackTimer);
-  socialFeedsFallbackTimer = window.setTimeout(() => {
-    panel.querySelectorAll('.social-feed-card').forEach((card) => {
-      const fallback = card.querySelector('.social-feed-fallback');
-      if (!fallback) return;
-      const hasEmbeddedTimeline = Boolean(card.querySelector('iframe.twitter-timeline, iframe[data-testid="twitter-timeline"]'));
-      setVisibility(fallback, !hasEmbeddedTimeline);
-    });
-  }, 4500);
-}
-
-let socialPanelLoaded = false;
-
-function renderSocialFeeds(data) {
-  const grid = document.getElementById('social-feeds-grid');
-  const status = document.getElementById('social-status');
-  if (!grid) return;
-  if (!data?.feeds?.length) {
-    grid.innerHTML = '<p class="muted">Aucun flux disponible pour le moment.</p>';
-    return;
-  }
-  if (status) {
-    const updatedAt = data.updated_at ? new Date(data.updated_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
-    status.textContent = updatedAt ? `Mis à jour à ${updatedAt}` : '';
-  }
-  grid.innerHTML = data.feeds.map((feed) => {
-    const posts = feed.posts || [];
-    const postsHtml = posts.length
-      ? posts.map((p) => `
-          <a class="social-post" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">
-            <span class="social-post-text">${escapeHtml(p.text)}</span>
-            <span class="social-post-date">${escapeHtml(p.date_fr)}</span>
-          </a>`).join('')
-      : '<p class="muted social-post-empty">Aucun tweet récupéré pour ce compte.</p>';
-    return `
-      <div class="social-feed-card">
-        <div class="social-feed-header">
-          <span class="social-feed-icon">${escapeHtml(feed.icon)}</span>
-          <div>
-            <strong>${escapeHtml(feed.label)}</strong>
-            <a class="social-feed-link" href="${escapeHtml(feed.url)}" target="_blank" rel="noopener">@${escapeHtml(feed.handle)}</a>
-          </div>
-        </div>
-        <div class="social-posts-list">${postsHtml}</div>
-      </div>`;
-  }).join('');
-}
-
-async function loadSocialFeeds(forceRefresh = false) {
-  const status = document.getElementById('social-status');
-  if (status) status.textContent = 'Chargement des flux…';
-  try {
-    const data = await api(`/social-feeds${forceRefresh ? '?force_refresh=true' : ''}`);
-    renderSocialFeeds(data);
-    socialPanelLoaded = true;
-  } catch (e) {
-    if (status) status.textContent = `Erreur : ${sanitizeErrorMessage(e?.message || 'indisponible')}`;
-  }
-}
-
-function ensureSocialPanelRendered() {
-  if (!socialPanelLoaded) loadSocialFeeds();
-}
-
-document.getElementById('social-refresh-btn')?.addEventListener('click', () => loadSocialFeeds(true));
+function ensureSocialFeedsRendered() { /* social feeds removed */ }
 
 function centerMapOnIsere() {
   if (!leafletMap) return;
@@ -6721,21 +6626,11 @@ function renderSituationOverview() {
       }${alertCount > 6 ? `<li class="muted">… et ${alertCount - 6} autre(s)</li>` : ''}</ul>`
     : `<p class="muted" style="font-size:0.82em;margin-top:4px">Aucune station en alerte</p>`;
 
-  const _braRiskLabels = { 1: 'Faible', 2: 'Limité', 3: 'Marqué', 4: 'Fort', 5: 'Très fort' };
-  const avalancheData = externalRisks?.avalanche_isere || {};
-  const avalancheNiveauMax = Number(avalancheData.niveau_max_bra ?? 0);
-  const avalancheCouleur = String(avalancheData.niveau_global || 'gris');
-  const avalancheLabel = avalancheNiveauMax > 0
-    ? `${_braRiskLabels[avalancheNiveauMax] || String(avalancheNiveauMax)} (${avalancheNiveauMax}/5)`
-    : 'Indisponible';
-  const avalancheMassifCount = Number(avalancheData.massifs_total ?? (avalancheData.massifs || []).length);
-
   const kpiCards = [
     { key: 'meteo', label: 'Vigilance météo', value: vigilance, info: 'Source Météo-France', css: normalizeLevel(vigilance) },
     { key: 'crues', label: 'Niveau crues', value: crues, info: `Tronçons AN11/12/20 · ${alertCount} station(s) en alerte`, css: normalizeLevel(crues), detail: cruesAlertHtml },
     { key: 'global-risk', label: 'Risque global', value: globalRisk, info: 'Calcul consolidé', css: normalizeLevel(globalRisk) },
     { key: 'communes-crise', label: 'Communes en crise', value: String(crisisCount), info: 'PCS actif', css: crisisCount > 0 ? 'rouge' : 'vert' },
-    { key: 'avalanche', label: '❄️ Risque avalanche Isère', value: avalancheLabel, info: `BRA Météo-France · ${avalancheMassifCount} massif(s)`, css: avalancheCouleur },
   ];
   const bisonDeparture = normalizeLevel(externalRisks?.bison_fute?.today?.isere?.departure || 'inconnu');
   const bisonReturn = normalizeLevel(externalRisks?.bison_fute?.today?.isere?.return || 'inconnu');
@@ -7322,31 +7217,7 @@ function renderVigicruesFlashAlerts(vigicruesFlash = {}) {
   }).join('') || '<li>Aucune alerte Vigicrues Flash en cours sur l’Isère.</li>');
 }
 
-function renderAvalancheIsere(avalanche = {}) {
-  const massifs = Array.isArray(avalanche?.massifs) ? avalanche.massifs : [];
-  const niveau = avalanche?.niveau_global || 'gris';
-  const saison = avalanche?.saison_active ?? false;
-  const niveauMax = avalanche?.niveau_max_bra;
-  const BRA_COLORS = { vert: '#388e3c', jaune: '#f9a825', orange: '#ef6c00', rouge: '#c62828', violet: '#6a1b9a', gris: '#757575' };
-  const BRA_LABELS = { 1: 'Faible', 2: 'Limité', 3: 'Marqué', 4: 'Fort', 5: 'Très fort' };
-  const statusLabel = !saison ? 'Hors saison' : niveauMax ? `Niveau max BRA : ${BRA_LABELS[niveauMax] || niveauMax}` : 'Bulletins non disponibles';
-  setRiskText('avalanche-status', `${avalanche.status || 'inconnu'} · ${statusLabel}`, niveau === 'gris' ? 'vert' : niveau);
-  setText('avalanche-info', `${massifs.length} massif(s) de l'Isère · ${saison ? 'saison active' : 'hors saison'}`);
-  setHtml('avalanche-massifs-list', massifs.length ? massifs.map((m) => {
-    const color = BRA_COLORS[m.niveau_couleur] || BRA_COLORS.gris;
-    const niveauBadge = m.niveau_bra
-      ? `<span style="display:inline-block;background:${color};color:#fff;border-radius:3px;padding:0 5px;font-size:11px;font-weight:700">${BRA_LABELS[m.niveau_bra] || m.niveau_bra}</span>`
-      : `<span style="font-size:11px;color:#888">${escapeHtml(m.niveau_label || 'Hors saison')}</span>`;
-    const secteurs = Array.isArray(m.secteurs) && m.secteurs.length
-      ? `<br><small style="color:#666"><strong>Secteurs :</strong> ${escapeHtml(m.secteurs.join(', '))}</small>`
-      : '';
-    const altMax = m.altitude_max ? ` · ${m.altitude_max} m` : '';
-    const braLink = String(m.bra_url || '').startsWith('http')
-      ? `<br><a href="${m.bra_url}" target="_blank" rel="noreferrer" style="font-size:11px">→ Bulletin Météo-France</a>`
-      : '';
-    return `<li><strong>${escapeHtml(m.nom)}</strong>${altMax} · ${niveauBadge} · PPRN approuvé${secteurs}${braLink}</li>`;
-  }).join('') : '<li>Données massifs indisponibles.</li>');
-}
+function renderAvalancheIsere() { /* BRA avalanche supprimé */ }
 
 function setServiceInfoWithSource(targetId, label, sourceCandidate) {
   const safeLabel = escapeHtml(String(label || '').trim() || '-');
@@ -7662,7 +7533,6 @@ function renderExternalRisks(data = {}) {
   renderVigicruesFlashAlerts(vigicruesFlash);
   renderVigieauAlerts(vigieau);
   renderElectricityStatus(electricity);
-  renderAvalancheIsere(mergedData?.avalanche_isere || {});
   const atmoToday = atmo?.today || {};
   const atmoLevel = normalizeLevel(atmoToday.level || 'inconnu');
   const atmoLabelRaw = String(atmoToday.label || atmoLevel || 'inconnu').toLowerCase();

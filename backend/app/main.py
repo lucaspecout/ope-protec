@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import Base, SessionLocal, engine, get_db
-from .models import IncidentEvent, MapAnnotation, MapPoint, Municipality, MunicipalityDocument, OperationalLog, PublicShare, RiverStation, User, WeatherAlert
+from .models import IncidentEvent, InstitutionPoint, MapAnnotation, MapPoint, Municipality, MunicipalityDocument, OperationalLog, PublicShare, RiverStation, User, WeatherAlert
 from .schemas import (
     MapAnnotationCreate,
     MapAnnotationOut,
@@ -75,11 +75,9 @@ from .services import (
     fetch_vigicrues_isere,
     fetch_vigicrues_flash_isere_alerts,
     fetch_vigieau_restrictions,
-    fetch_avalanche_isere,
     generate_pdf_report,
     resolve_commune_insee_code,
     vigicrues_geojson_from_stations,
-    fetch_social_feeds,
 )
 
 Base.metadata.create_all(bind=engine)
@@ -173,6 +171,21 @@ with engine.begin() as conn:
             created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
         )
     """))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS institution_points (
+            osm_id VARCHAR(60) PRIMARY KEY,
+            name VARCHAR(200) NOT NULL,
+            type VARCHAR(60) NOT NULL,
+            lat DOUBLE PRECISION NOT NULL,
+            lon DOUBLE PRECISION NOT NULL,
+            address VARCHAR(300) NOT NULL DEFAULT '',
+            priority VARCHAR(20) NOT NULL DEFAULT 'standard',
+            info VARCHAR(200) NOT NULL DEFAULT '',
+            source VARCHAR(200) NOT NULL DEFAULT '',
+            updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+        )
+    """))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_institution_points_type ON institution_points(type)"))
 
 
 app = FastAPI(title=settings.app_name)
@@ -548,11 +561,6 @@ def public_isere_map():
     return fetch_isere_boundary_geojson()
 
 
-@app.get("/social-feeds")
-def social_feeds(force_refresh: bool = False, user: User = Depends(get_current_user)):
-    return fetch_social_feeds(force_refresh=force_refresh)
-
-
 @app.get("/map/points", response_model=list[MapPointOut])
 def list_map_points(db: Session = Depends(get_db), user: User = Depends(require_roles(*READ_ROLES))):
     query = db.query(MapPoint)
@@ -889,7 +897,6 @@ def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str])
         "finess_isere": (lambda: fetch_finess_isere_resources(force_refresh=refresh), {"status": "pending", "resources": [], "resources_total": 0}),
         "groundwater_isere": (lambda: fetch_hubeau_isere_groundwater(force_refresh=refresh), {"status": "pending", "stations": [], "stations_total": 0, "trend_summary": {"hausse": 0, "baisse": 0, "stable": 0}}),
         "isere_opendata": (lambda: fetch_isere_opendata_resilience(force_refresh=refresh), {"status": "pending", "datasets": [], "totals": {"food_aid_points": 0, "health_centers": 0, "schools": 0}, "insights": []}),
-        "avalanche_isere": (lambda: fetch_avalanche_isere(force_refresh=refresh), {"status": "pending", "massifs": [], "massifs_total": 0, "niveau_global": "gris", "saison_active": False}),
     }
 
 

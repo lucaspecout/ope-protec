@@ -139,7 +139,16 @@
       "Bash(cp /tmp/security_pol.py backend/app/security.py)",
       "Bash(printf 'FROM python:3.12-slim\\\\n\\\\nWORKDIR /app\\\\nCOPY requirements.txt .\\\\nRUN pip install --no-cache-dir -r requirements.txt\\\\nCOPY app ./app\\\\nEXPOSE 8000\\\\nCMD [\"gunicorn\", \"app.main:app\", \"-k\", \"uvicorn.workers.UvicornWorker\", \"--bind\", \"0.0.0.0:8000\", \"--workers\", \"3\", \"--timeout\", \"60\", \"--keep-alive\", \"5\", \"--access-logfile\", \"-\", \"--error-logfile\", \"-\"]\\\\n')",
       "Bash(printf 'CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";\\\\n')",
-      "Bash(ls web/*.css)"
+      "Bash(ls web/*.css)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" --max-time 10 \"https://nitter.poast.org/sdis38/rss\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" --max-time 10 \"https://nitter.privacydev.net/sdis38/rss\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" --max-time 10 \"https://nitter.1d4.us/sdis38/rss\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" --max-time 15 \"https://rsshub.app/twitter/user/sdis38\")",
+      "Bash(curl -s -L --max-time 15 \"https://rsshub.app/twitter/user/sdis38\")",
+      "Bash(curl -s -o /dev/null -w '%{http_code}' --max-time 8 https://__TRACKED_VAR__/sdis38/rss)",
+      "Bash(curl -sL --max-time 10 \"https://xcancel.com/sdis38/rss\")",
+      "Bash(curl -sL --max-time 10 -H \"User-Agent: Mozilla/5.0 \\(X11; Linux x86_64; rv:109.0\\) Gecko/20100101 Firefox/115.0\" \"https://nitter.poast.org/sdis38/rss\")",
+      "Bash(curl -s -L --max-time 15 -H \"User-Agent: Mozilla/5.0 \\(X11; Linux x86_64; rv:120.0\\) Gecko/20100101 Firefox/120.0\" -H \"Accept: text/html,application/xhtml+xml\" -H \"Accept-Language: fr-FR,fr;q=0.9\" \"https://twitter.com/sdis38\")"
     ]
   }
 }

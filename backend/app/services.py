@@ -12,7 +12,7 @@ import re
 import unicodedata
 from random import uniform
 from time import sleep
-from threading import Lock
+from threading import Lock, Thread
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote_plus, unquote, urlencode, urlparse
@@ -26,6 +26,7 @@ from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from .config import settings
+from .database import SessionLocal
 from .models import Municipality, OperationalLog, WeatherAlert
 
 
@@ -693,14 +694,152 @@ def _fetch_institutions_isere_live() -> dict[str, Any]:
     }
 
 
+_INSTITUTIONS_DB_REFRESH_DAYS = 7  # Rafraîchissement hebdomadaire
+_institutions_bg_refresh_running = False
+_institutions_bg_refresh_lock = Lock()
+
+
+def _institutions_save_to_db(points: list[dict[str, Any]]) -> None:
+    """Upsert les points dans la DB — ne supprime jamais les existants."""
+    from .models import InstitutionPoint
+    try:
+        db = SessionLocal()
+        try:
+            now = datetime.utcnow()
+            for p in points:
+                existing = db.get(InstitutionPoint, p["id"])
+                if existing:
+                    existing.name = p["name"]
+                    existing.type = p["type"]
+                    existing.lat = p["lat"]
+                    existing.lon = p["lon"]
+                    existing.address = p["address"]
+                    existing.priority = p["priority"]
+                    existing.info = p["info"]
+                    existing.source = p["source"]
+                    existing.updated_at = now
+                else:
+                    db.add(InstitutionPoint(
+                        osm_id=p["id"],
+                        name=p["name"],
+                        type=p["type"],
+                        lat=p["lat"],
+                        lon=p["lon"],
+                        address=p["address"],
+                        priority=p["priority"],
+                        info=p["info"],
+                        source=p["source"],
+                        updated_at=now,
+                    ))
+            db.commit()
+        finally:
+            db.close()
+    except Exception:
+        pass
+
+
+def _institutions_load_from_db() -> list[dict[str, Any]] | None:
+    """Charge les points depuis la DB. Retourne None si vide."""
+    from .models import InstitutionPoint
+    try:
+        db = SessionLocal()
+        try:
+            rows = db.query(InstitutionPoint).all()
+            if not rows:
+                return None
+            return [
+                {
+                    "id": r.osm_id,
+                    "name": r.name,
+                    "type": r.type,
+                    "lat": r.lat,
+                    "lon": r.lon,
+                    "active": True,
+                    "address": r.address,
+                    "priority": r.priority,
+                    "info": r.info,
+                    "source": r.source,
+                    "dynamic": True,
+                    "updated_at": r.updated_at.isoformat() + "Z" if r.updated_at else None,
+                }
+                for r in rows
+            ]
+        finally:
+            db.close()
+    except Exception:
+        return None
+
+
+def _institutions_bg_refresh() -> None:
+    """Récupère les données Overpass en arrière-plan et met à jour la DB (sans effacer)."""
+    global _institutions_bg_refresh_running
+    with _institutions_bg_refresh_lock:
+        if _institutions_bg_refresh_running:
+            return
+        _institutions_bg_refresh_running = True
+    try:
+        live = _fetch_institutions_isere_live()
+        points = live.get("points") or []
+        if points:
+            _institutions_save_to_db(points)
+            # Mettre aussi à jour le cache mémoire
+            with _institutions_isere_cache_lock:
+                _institutions_isere_cache["payload"] = live
+                _institutions_isere_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_INSTITUTIONS_ISERE_CACHE_TTL_SECONDS)
+    except Exception:
+        pass
+    finally:
+        _institutions_bg_refresh_running = False
+
+
 def fetch_institutions_isere(force_refresh: bool = False) -> dict[str, Any]:
-    return _cached_external_payload(
-        cache=_institutions_isere_cache,
-        lock=_institutions_isere_cache_lock,
-        ttl_seconds=_INSTITUTIONS_ISERE_CACHE_TTL_SECONDS,
-        force_refresh=force_refresh,
-        loader=_fetch_institutions_isere_live,
-    )
+    """
+    Stratégie :
+    1. Cache mémoire (expire en 24h)
+    2. DB PostgreSQL (persistant, mis à jour 1x/semaine en arrière-plan)
+    3. Si DB vide → fetch Overpass immédiat + sauvegarde DB
+    """
+    # 1. Cache mémoire
+    with _institutions_isere_cache_lock:
+        if not force_refresh and _institutions_isere_cache["payload"] and datetime.utcnow() < _institutions_isere_cache["expires_at"]:
+            return _institutions_isere_cache["payload"]
+
+    # 2. Charger depuis la DB
+    db_points = _institutions_load_from_db()
+    if db_points:
+        # Vérifier si une mise à jour hebdomadaire est nécessaire
+        oldest = min((p.get("updated_at") or "") for p in db_points) if db_points else ""
+        needs_refresh = force_refresh
+        if oldest:
+            try:
+                age_days = (datetime.utcnow() - datetime.fromisoformat(oldest.rstrip("Z"))).days
+                if age_days >= _INSTITUTIONS_DB_REFRESH_DAYS:
+                    needs_refresh = True
+            except Exception:
+                pass
+        if needs_refresh:
+            Thread(target=_institutions_bg_refresh, daemon=True).start()
+
+        result = {
+            "status": "online",
+            "count": len(db_points),
+            "points": db_points,
+            "updated_at": db_points[0].get("updated_at") if db_points else datetime.utcnow().isoformat() + "Z",
+        }
+        with _institutions_isere_cache_lock:
+            _institutions_isere_cache["payload"] = result
+            _institutions_isere_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_INSTITUTIONS_ISERE_CACHE_TTL_SECONDS)
+        return result
+
+    # 3. DB vide → fetch immédiat depuis Overpass + sauvegarde
+    live = _fetch_institutions_isere_live()
+    points = live.get("points") or []
+    if points:
+        _institutions_save_to_db(points)
+    with _institutions_isere_cache_lock:
+        _institutions_isere_cache["payload"] = live
+        _institutions_isere_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_INSTITUTIONS_ISERE_CACHE_TTL_SECONDS)
+    return live
 
 
 _FINESS_STRATEGIC_LABEL_KEYWORDS: tuple[str, ...] = (

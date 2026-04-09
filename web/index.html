@@ -53,7 +53,6 @@
           <button class="menu-btn" data-target="meteo-panel" data-icon="🌤️"><span class="menu-label">Météo semaine</span></button>
           <button class="menu-btn" data-target="georisques-panel" data-icon="🌍"><span class="menu-label">Page Géorisques</span></button>
           <button class="menu-btn" data-target="news-panel" data-icon="📰"><span class="menu-label">Actualités</span></button>
-          <button class="menu-btn" data-target="social-panel" data-icon="📣"><span class="menu-label">Réseaux sociaux</span></button>
           <button class="menu-btn" data-target="municipalities-panel" data-icon="🏛️"><span class="menu-label">Communes</span></button>
           <button class="menu-btn" data-target="logs-panel" data-icon="📝"><span class="menu-label">Main courante</span></button>
           <button class="menu-btn" data-target="map-panel" data-icon="🗺️"><span class="menu-label">Carte Isère</span></button>
@@ -201,14 +200,6 @@
               <p id="vigicrues-flash-status" class="service-status">-</p>
               <p id="vigicrues-flash-info" class="muted"></p>
             </article>
-            <article class="service-card">
-              <div class="service-card__head">
-                <h4>❄️ Avalanche · Massifs Isère (BRA)</h4>
-                <a href="https://www.meteofrance.com/meteo-montagne/alpes-du-nord" target="_blank" rel="noreferrer">BRA Météo-France</a>
-              </div>
-              <p id="avalanche-status" class="service-status">-</p>
-              <p id="avalanche-info" class="muted"></p>
-            </article>
           </div>
           <div class="services-lists">
             <article class="tile">
@@ -262,10 +253,6 @@
             <article class="tile">
               <h4>Vigicrues Flash · Alertes crues rapides Isère</h4>
               <ul id="vigicrues-flash-list" class="list"></ul>
-            </article>
-            <article class="tile">
-              <h4>❄️ Avalanche · Massifs Isère (BRA)</h4>
-              <ul id="avalanche-massifs-list" class="list"></ul>
             </article>
           </div>
         </section>
@@ -542,16 +529,6 @@
             </thead>
             <tbody id="news-categories-table-body"></tbody>
           </table>
-        </section>
-
-        <section id="social-panel" class="panel view hidden" hidden>
-          <div class="panel-heading">
-            <h3>Réseaux sociaux · Isère</h3>
-            <p class="muted">Dernières publications des acteurs institutionnels du département sur X (Twitter).</p>
-            <button id="social-refresh-btn" class="ghost" type="button">↺ Actualiser</button>
-          </div>
-          <p id="social-status" class="muted"></p>
-          <div id="social-feeds-grid" class="social-feeds-grid"></div>
         </section>
 
         <section id="map-panel" class="panel view hidden" hidden>
