@@ -25,9 +25,52 @@ from reportlab.pdfgen import canvas
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
+import redis as _redis_lib
+
 from .config import settings
 from .database import SessionLocal
 from .models import Municipality, OperationalLog, WeatherAlert
+
+# ---------------------------------------------------------------------------
+# Cache Redis partagé entre tous les workers gunicorn
+# ---------------------------------------------------------------------------
+try:
+    _redis: _redis_lib.Redis = _redis_lib.from_url(settings.redis_url, decode_responses=True, socket_connect_timeout=2)
+    _redis.ping()
+    _REDIS_OK = True
+except Exception:
+    _redis = None  # type: ignore[assignment]
+    _REDIS_OK = False
+
+_REDIS_KEY_PREFIX = "svc:"
+
+
+def _redis_get(key: str) -> dict[str, Any] | None:
+    if not _REDIS_OK or _redis is None:
+        return None
+    try:
+        raw = _redis.get(_REDIS_KEY_PREFIX + key)
+        return json.loads(raw) if raw else None
+    except Exception:
+        return None
+
+
+def _redis_set(key: str, data: dict[str, Any], ttl_seconds: int) -> None:
+    if not _REDIS_OK or _redis is None:
+        return
+    try:
+        _redis.setex(_REDIS_KEY_PREFIX + key, ttl_seconds, json.dumps(data, default=str))
+    except Exception:
+        pass
+
+
+def _redis_delete(key: str) -> None:
+    if not _REDIS_OK or _redis is None:
+        return
+    try:
+        _redis.delete(_REDIS_KEY_PREFIX + key)
+    except Exception:
+        pass
 
 
 def cleanup_old_weather_alerts(db: Session) -> int:
@@ -454,7 +497,7 @@ def _build_mf_alerts(
 
 _MF_CACHE_TTL_SECONDS = 180
 _meteo_cache_lock = Lock()
-_meteo_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_meteo_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "meteo_france"}
 
 _VIGICRUES_CACHE_TTL_SECONDS = 300
 _ITINISERE_CACHE_TTL_SECONDS = 180
@@ -473,36 +516,35 @@ _ISERE_OPENDATA_CACHE_TTL_SECONDS = 1800
 _ANFR_ISERE_CACHE_TTL_SECONDS = 43200
 _ARCEP_ISERE_CACHE_TTL_SECONDS = 900
 _HUBEAU_GROUNDWATER_CACHE_TTL_SECONDS = 10800
-_AVALANCHE_ISERE_CACHE_TTL_SECONDS = 3600
 _APIC_ISERE_CACHE_TTL_SECONDS = 300
 _VIGICRUES_FLASH_ISERE_CACHE_TTL_SECONDS = 300
 _ISERE_BOUNDARY_CACHE_TTL_SECONDS = 21600
 _AURA_AIRCRAFT_CACHE_TTL_SECONDS = 45
 
 _vigicrues_cache_lock = Lock()
-_vigicrues_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_vigicrues_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "vigicrues"}
 _itinisere_cache_lock = Lock()
-_itinisere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_itinisere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "itinisere"}
 _bison_cache_lock = Lock()
-_bison_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_bison_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "bison_fute"}
 _isere_boundary_cache_lock = Lock()
 _isere_boundary_cache: dict[str, Any] = {"geometry": None, "expires_at": datetime.min}
 _georisques_cache_lock = Lock()
-_georisques_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_georisques_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "georisques"}
 _prefecture_cache_lock = Lock()
-_prefecture_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_prefecture_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "prefecture"}
 _dauphine_cache_lock = Lock()
-_dauphine_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_dauphine_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "dauphine"}
 _vigieau_cache_lock = Lock()
-_vigieau_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_vigieau_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "vigieau"}
 _atmo_aura_cache_lock = Lock()
-_atmo_aura_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_atmo_aura_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "atmo_aura"}
 _sncf_isere_cache_lock = Lock()
-_sncf_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_sncf_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "sncf_isere"}
 _rte_electricity_cache_lock = Lock()
-_rte_electricity_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_rte_electricity_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "rte_electricity"}
 _finess_isere_cache_lock = Lock()
-_finess_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_finess_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "finess_isere"}
 _finess_isere_communes_lock = Lock()
 _finess_isere_communes_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 
@@ -948,21 +990,21 @@ def _finess_precise_geocode(
     except (TypeError, ValueError):
         return None
 _isere_opendata_cache_lock = Lock()
-_isere_opendata_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_isere_opendata_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "isere_opendata"}
 _anfr_isere_cache_lock = Lock()
-_anfr_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_anfr_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "anfr_isere"}
 _arcep_isere_cache_lock = Lock()
-_arcep_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_arcep_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "arcep_isere"}
 _hubeau_groundwater_cache_lock = Lock()
-_hubeau_groundwater_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_hubeau_groundwater_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "hubeau_groundwater"}
 _avalanche_isere_cache_lock = Lock()
-_avalanche_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_avalanche_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "avalanche_isere"}
 _apic_isere_cache_lock = Lock()
-_apic_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_apic_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "apic_isere"}
 _vigicrues_flash_isere_cache_lock = Lock()
-_vigicrues_flash_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_vigicrues_flash_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "vigicrues_flash"}
 _aura_aircraft_cache_lock = Lock()
-_aura_aircraft_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_aura_aircraft_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "aura_aircraft"}
 _isere_aval_polyline_cache_lock = Lock()
 _isere_aval_polyline_cache: dict[str, Any] = {"points": None, "expires_at": datetime.min}
 _ISERE_AVAL_GRENOBLE_CUTOFF_LON = 5.67526671768763
@@ -1178,17 +1220,31 @@ def _cached_external_payload(
     loader: Any,
 ) -> dict[str, Any]:
     now = datetime.utcnow()
+    redis_key: str | None = cache.get("redis_key")  # clé Redis stockée dans le dict de cache
+
+    # 1. Cache mémoire local (le plus rapide, par worker)
     with lock:
         cached_payload = cache.get("payload")
         expires_at = cache.get("expires_at") or datetime.min
         if not force_refresh and cached_payload and now < expires_at:
             return deepcopy(cached_payload)
 
+    # 2. Cache Redis partagé entre tous les workers (persistant entre redémarrages)
+    if not force_refresh and redis_key:
+        redis_data = _redis_get(redis_key)
+        if redis_data:
+            with lock:
+                cache["payload"] = redis_data
+                cache["expires_at"] = datetime.utcnow() + timedelta(seconds=ttl_seconds)
+            return redis_data
+
     payload = loader()
     if payload.get("status") in {"online", "partial", "stale"}:
         with lock:
             cache["payload"] = deepcopy(payload)
             cache["expires_at"] = datetime.utcnow() + timedelta(seconds=ttl_seconds)
+        if redis_key:
+            _redis_set(redis_key, payload, ttl_seconds)
         return payload
 
     with lock:
@@ -5921,100 +5977,3 @@ def vigicrues_geojson_from_stations(stations: list[dict[str, Any]]) -> dict[str,
 # Réseaux sociaux — flux RSS via Nitter (sans clé API)
 # ---------------------------------------------------------------------------
 
-_SOCIAL_ACCOUNTS = [
-    {"handle": "SNCFTERAURA", "label": "SNCF TER AURA",        "icon": "🚆"},
-    {"handle": "sdis38",      "label": "SDIS 38",               "icon": "🚒"},
-    {"handle": "Prefet38",    "label": "Préfecture de l'Isère", "icon": "🏛️"},
-    {"handle": "Gendarmerie_038", "label": "Gendarmerie Isère", "icon": "🛡️"},
-    {"handle": "PoliceNat38", "label": "Police Nationale Isère","icon": "🚓"},
-]
-
-_NITTER_INSTANCES = [
-    "https://nitter.poast.org",
-    "https://nitter.privacydev.net",
-    "https://nitter.net",
-    "https://nitter.1d4.us",
-]
-
-_social_feeds_cache_lock = Lock()
-_social_feeds_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
-_SOCIAL_FEEDS_TTL = 900  # 15 minutes
-
-
-def _fetch_nitter_rss(handle: str, max_items: int = 10) -> list[dict]:
-    """Tente chaque instance Nitter jusqu'à en trouver une qui répond."""
-    for base in _NITTER_INSTANCES:
-        url = f"{base}/{handle}/rss"
-        try:
-            req = Request(url, headers={
-                "User-Agent": "Mozilla/5.0 (compatible; ope-protec/1.0)",
-                "Accept": "application/rss+xml, application/xml, text/xml",
-            })
-            raw = _http_get_with_retries(request=req, timeout=12, max_retries=1)
-            root = ET.fromstring(raw)
-            ns = {"dc": "http://purl.org/dc/elements/1.1/"}
-            items = root.findall(".//item")
-            results = []
-            for item in items[:max_items]:
-                title = (item.findtext("title") or "").strip()
-                link  = (item.findtext("link")  or "").strip()
-                desc  = (item.findtext("description") or "").strip()
-                pub   = (item.findtext("pubDate") or "").strip()
-                # Nettoyer le HTML dans la description
-                desc = re.sub(r"<[^>]+>", "", unescape(desc)).strip()
-                # Parser la date
-                try:
-                    dt = parsedate_to_datetime(pub)
-                    date_iso = dt.isoformat()
-                    date_fr  = dt.strftime("%d/%m/%Y %H:%M")
-                except Exception:
-                    date_iso = ""
-                    date_fr  = pub[:16] if pub else ""
-                results.append({
-                    "title":    title,
-                    "text":     desc or title,
-                    "url":      link.replace(base, "https://x.com").replace("/SNCFTERAURA/", "/SNCFTERAURA/").strip(),
-                    "date_iso": date_iso,
-                    "date_fr":  date_fr,
-                })
-            if results:
-                return results
-        except Exception:
-            continue
-    return []
-
-
-def _fetch_social_feeds_live() -> dict[str, Any]:
-    feeds = []
-    with ThreadPoolExecutor(max_workers=5) as pool:
-        futures = {
-            pool.submit(_fetch_nitter_rss, acc["handle"]): acc
-            for acc in _SOCIAL_ACCOUNTS
-        }
-        for future, acc in futures.items():
-            try:
-                posts = future.result(timeout=20)
-            except Exception:
-                posts = []
-            feeds.append({
-                "handle": acc["handle"],
-                "label":  acc["label"],
-                "icon":   acc["icon"],
-                "url":    f"https://x.com/{acc['handle']}",
-                "posts":  posts,
-            })
-    return {
-        "status": "ok" if any(f["posts"] for f in feeds) else "partial",
-        "feeds":  feeds,
-        "updated_at": datetime.utcnow().isoformat() + "Z",
-    }
-
-
-def fetch_social_feeds(force_refresh: bool = False) -> dict[str, Any]:
-    return _cached_external_payload(
-        cache=_social_feeds_cache,
-        lock=_social_feeds_cache_lock,
-        ttl_seconds=_SOCIAL_FEEDS_TTL,
-        force_refresh=force_refresh,
-        loader=_fetch_social_feeds_live,
-    )

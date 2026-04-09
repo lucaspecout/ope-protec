@@ -32,8 +32,8 @@ const API_RETRY_BASE_DELAY_MS = 500;
 const API_MAX_RETRIES_GET = 3;
 const API_MAX_RETRIES_NON_GET = 1;
 const API_ORIGIN_COOLDOWN_MS = 60000;
-const STATIC_POINTS_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const TELECOM_POINTS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const STATIC_POINTS_CACHE_TTL_MS = 10 * 60 * 1000;
+const TELECOM_POINTS_CACHE_TTL_MS = 10 * 60 * 1000;
 const OSM_DETAILS_MIN_ZOOM = 15;
 const PANEL_TITLES = {
   'situation-panel': 'Situation opérationnelle',
