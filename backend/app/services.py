@@ -2876,79 +2876,185 @@ def _cityway_fetch_isere_disruptions() -> list[dict[str, Any]]:
         return []
 
 
-def _fetch_itinisere_disruptions_live(limit: int = 60) -> dict[str, Any]:
-    source = "https://www.itinisere.fr/fr/rss/Disruptions"
+def _fetch_gtfsrt_service_alerts() -> list[dict[str, Any]]:
+    """Fetch Itinisère GTFS-RT service alerts (bus/tram service disruptions, no auth required).
+    Source: transport.data.gouv.fr resource 82300 — 100 % availability, updates every 2 min.
+    Falls back to [] on any error or if gtfs-realtime-bindings is not installed.
+    """
+    _GTFSRT_URL = "https://www.itinisere.fr/ftp/gtfsrt/GtfsRT.Disruptions.CG38.pb"
     try:
-        xml_payload = _http_get_text(source)
-        root = ET.fromstring(xml_payload)
+        from google.transit import gtfs_realtime_pb2  # type: ignore
+    except ImportError:
+        return []
+    try:
+        req = Request(_GTFSRT_URL, headers={"User-Agent": _UA})
+        with urlopen(req, timeout=12) as resp:
+            pb_bytes = resp.read()
+        feed = gtfs_realtime_pb2.FeedMessage()
+        feed.ParseFromString(pb_bytes)
+
+        # GTFS-RT cause → category label
+        _CAUSE_CATEGORY: dict[int, str] = {
+            1: "transport",   # UNKNOWN_CAUSE
+            2: "transport",   # OTHER_CAUSE
+            3: "travaux",     # TECHNICAL_PROBLEM
+            4: "travaux",     # STRIKE
+            5: "evenement",   # DEMONSTRATION
+            6: "incident",    # ACCIDENT
+            7: "evenement",   # HOLIDAY
+            8: "meteo",       # WEATHER
+            9: "travaux",     # MAINTENANCE
+            10: "incident",   # POLICE_ACTIVITY
+            11: "incident",   # MEDICAL_EMERGENCY
+            12: "travaux",    # CONSTRUCTION
+        }
+        # GTFS-RT effect → severity
+        _EFFECT_SEVERITY: dict[int, str] = {
+            1: "rouge",   # NO_SERVICE
+            2: "orange",  # REDUCED_SERVICE
+            3: "orange",  # SIGNIFICANT_DELAYS
+            4: "jaune",   # DETOUR
+            5: "vert",    # ADDITIONAL_SERVICE
+            6: "jaune",   # MODIFIED_SERVICE
+            7: "vert",    # OTHER_EFFECT
+            8: "vert",    # UNKNOWN_EFFECT
+            9: "jaune",   # STOP_MOVED
+            10: "vert",   # NO_EFFECT
+            11: "jaune",  # ACCESSIBILITY_ISSUE
+        }
+
+        def _get_fr_text(translated_string) -> str:
+            if not translated_string.translation:
+                return ""
+            for t in translated_string.translation:
+                if t.language in ("fr", "fr-FR", ""):
+                    return t.text
+            return translated_string.translation[0].text
+
+        now_ts = int(datetime.utcnow().timestamp())
         events: list[dict[str, Any]] = []
-        raw_items = root.findall(".//item")[: max(1, min(limit, 120))]
-        normalized_items = [
-            {
-                "title": re.sub(r"\s+", " ", (item.findtext("title") or "Perturbation").strip()),
-                "description": re.sub(r"\s+", " ", (item.findtext("description") or "").strip()),
-                "published": re.sub(r"\s+", " ", (item.findtext("pubDate") or "").strip()),
-                "link": (item.findtext("link") or "https://www.itinisere.fr").strip(),
-            }
-            for item in raw_items
-        ]
-
-        details_by_link: dict[str, dict[str, Any]] = {}
-        with ThreadPoolExecutor(max_workers=6) as executor:
-            future_map = {
-                executor.submit(_itinisere_fetch_detail, payload["link"], payload["title"]): payload["link"]
-                for payload in normalized_items
-                if payload["link"].startswith("http")
-            }
-            for future in as_completed(future_map):
-                link = future_map[future]
-                try:
-                    details_by_link[link] = future.result() or {}
-                except Exception:
-                    details_by_link[link] = {}
-
-        for item in normalized_items:
-            title = item["title"]
-            description = item["description"]
-            published = item["published"]
-            link = item["link"]
-
-            detail = details_by_link.get(link) or {}
-            final_title = detail.get("title") or title
-            final_description = detail.get("description") or description
-            roads = _itinisere_extract_roads(f"{final_title} {final_description}")
-            category = _itinisere_category(final_title, final_description)
-            severity = _itinisere_severity(final_title, final_description, category)
-            locations = detail.get("locations") or _itinisere_extract_locations(final_title, final_description)
-            if _itinisere_is_public_transport_event(final_title, final_description):
+        for entity in feed.entity:
+            if not entity.HasField("alert"):
                 continue
-            if not _itinisere_is_isere_event(final_title, final_description, roads=roads, locations=locations):
+            alert = entity.alert
+            # Skip non-active periods
+            if alert.active_period:
+                active = any(
+                    (p.start == 0 or p.start <= now_ts) and (p.end == 0 or p.end >= now_ts)
+                    for p in alert.active_period
+                )
+                if not active:
+                    continue
+
+            title = _get_fr_text(alert.header_text).strip()
+            description = _get_fr_text(alert.description_text).strip()
+            if not title:
+                title = description[:80] if description else "Perturbation réseau"
+
+            # Affected routes (bus line IDs)
+            routes = list({ie.route_id for ie in alert.informed_entity if ie.route_id})
+
+            category = _CAUSE_CATEGORY.get(alert.cause, "transport")
+            severity = _EFFECT_SEVERITY.get(alert.effect, "jaune")
+
+            period_start, period_end = "", ""
+            if alert.active_period:
+                p = alert.active_period[0]
+                if p.start:
+                    period_start = datetime.utcfromtimestamp(p.start).strftime("%Y-%m-%dT%H:%M:%SZ")
+                if p.end:
+                    period_end = datetime.utcfromtimestamp(p.end).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+            events.append({
+                "title": title[:200],
+                "description": description[:550],
+                "published_at": period_start,
+                "link": "https://itinisere.fr/fr/disruptions/17/Disruption/Index",
+                "roads": routes,
+                "category": category,
+                "severity": severity,
+                "period_start": period_start,
+                "period_end": period_end,
+                "locations": _itinisere_extract_locations(title, description),
+                "source_api": "gtfsrt",
+            })
+        return events
+    except Exception:
+        return []
+
+
+def _fetch_itinisere_disruptions_live(limit: int = 60) -> dict[str, Any]:
+    # itinisere.fr a refondu son site en avril 2026 : plus de flux RSS.
+    # Les perturbations sont maintenant intégrées directement dans le HTML de la page principale.
+    source = "https://itinisere.fr"
+    try:
+        html = _http_get_text(source, timeout=15)
+        events: list[dict[str, Any]] = []
+
+        # Chaque événement suit le schéma :
+        # <a href="#">TITRE</a>  ... <p>DESCRIPTION avec dates et routes</p>
+        # On cherche des paires (ancre href="#", paragraphe descriptif) proches
+        pattern = re.compile(
+            r'<a\s[^>]*href\s*=\s*["\']#["\'][^>]*>([\s\S]{10,250}?)</a>'
+            r'[\s\S]{0,600}?'
+            r'<p[^>]*>([\s\S]{30,900}?)</p>',
+            re.IGNORECASE,
+        )
+        seen_titles: set[str] = set()
+        for m in pattern.finditer(html):
+            title = unescape(re.sub(r"<[^>]+>", "", m.group(1))).strip()
+            title = re.sub(r"\s+", " ", title)
+            description = unescape(re.sub(r"<[^>]+>", " ", m.group(2))).strip()
+            description = re.sub(r"\s+", " ", description)
+
+            if len(title) < 10 or len(description) < 25:
                 continue
-            if not _itinisere_is_road_closure_pass_or_camera_event(final_title, final_description, category, roads=roads):
+            # Filtre de contenu : doit parler de routes/travaux/isère
+            desc_lower = f"{title} {description}".lower()
+            if not any(tok in desc_lower for tok in (
+                "route", "rd ", "département", "travaux", "fermeture", "coupure",
+                "col ", "chantier", "accident", "déviation", "alternat",
+                "jusqu'au", "jusqu'à", "depuis le", "a compter",
+            )):
                 continue
-            events.append(
-                {
-                    "title": final_title,
-                    "description": final_description[:550],
-                    "published_at": detail.get("published_at") or published,
-                    "link": link,
-                    "roads": roads,
-                    "category": category,
-                    "severity": severity,
-                    "period_start": detail.get("period_start"),
-                    "period_end": detail.get("period_end"),
-                    "locations": locations,
-                }
-            )
-        # Merge Cityway events (have lat/lon) — add only those not already in RSS
+            title_key = title.lower()[:60]
+            if title_key in seen_titles:
+                continue
+            seen_titles.add(title_key)
+
+            roads = _itinisere_extract_roads(f"{title} {description}")
+            category = _itinisere_category(title, description)
+            severity = _itinisere_severity(title, description, category)
+            locations = _itinisere_extract_locations(title, description)
+            period_start, period_end = _itinisere_extract_period(description)
+
+            if not _itinisere_is_isere_event(title, description, roads=roads, locations=locations):
+                continue
+
+            events.append({
+                "title": title[:200],
+                "description": description[:550],
+                "published_at": "",
+                "link": source,
+                "roads": roads,
+                "category": category,
+                "severity": severity,
+                "period_start": period_start,
+                "period_end": period_end,
+                "locations": locations,
+            })
+            if len(events) >= limit:
+                break
+
+        # Fallback Cityway (perturbations crowdsourcées avec lat/lon)
         cityway_events = _cityway_fetch_isere_disruptions()
-        rss_titles = {e["title"].lower()[:60] for e in events}
-        for cw_event in cityway_events:
-            if cw_event["title"].lower()[:60] not in rss_titles:
-                if not _itinisere_is_public_transport_event(cw_event["title"], cw_event["description"]):
-                    events.append(cw_event)
+        seen_titles_full = {e["title"].lower()[:60] for e in events}
+        for cw in cityway_events:
+            if cw["title"].lower()[:60] not in seen_titles_full:
+                if not _itinisere_is_public_transport_event(cw["title"], cw["description"]):
+                    events.append(cw)
 
-        # Also enrich RSS events that match a Cityway event with coordinates
+        # Enrichir les événements sans coordonnées via Cityway
         cityway_by_title = {e["title"].lower()[:60]: e for e in cityway_events}
         for event in events:
             if event.get("lat") is None:
@@ -2956,50 +3062,65 @@ def _fetch_itinisere_disruptions_live(limit: int = 60) -> dict[str, Any]:
                 if match and match.get("lat") is not None:
                     event["lat"] = match["lat"]
                     event["lon"] = match["lon"]
-                    event["source_api"] = "cityway"
+
+        # GTFS-RT service alerts (bus/transport disruptions — structured feed, no auth)
+        gtfsrt_events = _fetch_gtfsrt_service_alerts()
+        seen_titles_full = {e["title"].lower()[:60] for e in events}
+        for ge in gtfsrt_events:
+            if ge["title"].lower()[:60] not in seen_titles_full:
+                events.append(ge)
 
         insights = _itinisere_insights(events)
         insights["severity_breakdown"] = {
-            level: len([event for event in events if event.get("severity") == level])
+            level: len([e for e in events if e.get("severity") == level])
             for level in ("rouge", "orange", "jaune", "vert")
         }
+        insights["transport_alerts"] = len(gtfsrt_events)
         return {
-            "service": "Itinisère",
-            "status": "online",
+            "service": "Inforoute Isère",
+            "status": "online" if events else "degraded",
             "source": source,
-            "events": events,
+            "events": events[:limit],
             "events_total": len(events),
             "insights": insights,
             "updated_at": datetime.utcnow().isoformat() + "Z",
         }
-    except (ET.ParseError, HTTPError, URLError, TimeoutError, ValueError) as exc:
-        # If RSS fails, try Cityway only
+    except (HTTPError, URLError, TimeoutError, ValueError) as exc:
+        # Si le scraping HTML échoue, on tente GTFS-RT + Cityway
         cityway_events = _cityway_fetch_isere_disruptions()
-        if cityway_events:
-            insights = _itinisere_insights(cityway_events)
+        gtfsrt_events = _fetch_gtfsrt_service_alerts()
+        fallback_events = cityway_events + gtfsrt_events
+        if fallback_events:
+            insights = _itinisere_insights(fallback_events)
             insights["severity_breakdown"] = {
-                level: len([e for e in cityway_events if e.get("severity") == level])
+                level: len([e for e in fallback_events if e.get("severity") == level])
                 for level in ("rouge", "orange", "jaune", "vert")
             }
+            insights["transport_alerts"] = len(gtfsrt_events)
             return {
-                "service": "Itinisère",
-                "status": "degraded_rss",
-                "source": "cityway",
-                "events": cityway_events,
-                "events_total": len(cityway_events),
+                "service": "Inforoute Isère",
+                "status": "degraded_html",
+                "source": "gtfsrt+cityway",
+                "events": fallback_events[:limit],
+                "events_total": len(fallback_events),
                 "insights": insights,
                 "updated_at": datetime.utcnow().isoformat() + "Z",
             }
         return {
-            "service": "Itinisère",
-            "status": "degraded",
+            "service": "Inforoute Isère",
+            "status": "offline",
             "source": source,
             "events": [],
             "events_total": 0,
             "insights": {"dominant_category": "aucune", "category_breakdown": {}, "top_roads": []},
-            "error": str(exc),
+            "error": str(exc)[:200],
+            "updated_at": datetime.utcnow().isoformat() + "Z",
         }
 
+
+# ----- DEAD CODE REMOVED -----
+# _itinisere_fetch_detail() et la logique RSS sont supprimés.
+# Le scraping HTML remplace le RSS depuis la refonte du site (avril 2026).
 
 def fetch_itinisere_disruptions(limit: int = 60, force_refresh: bool = False) -> dict[str, Any]:
     safe_limit = max(1, min(limit, 120))

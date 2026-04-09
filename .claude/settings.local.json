@@ -156,7 +156,18 @@
       "Bash(powershell.exe -Command \"Get-Command docker -ErrorAction SilentlyContinue; Get-ChildItem 'C:\\\\Program Files\\\\Docker' -ErrorAction SilentlyContinue | Select-Object Name\")",
       "Bash(powershell.exe -Command \"Get-ChildItem 'C:\\\\Program Files\\\\Docker\\\\Docker\\\\resources\\\\bin\\\\' -ErrorAction SilentlyContinue | Select-Object Name; Get-ChildItem 'C:\\\\Users\\\\lucme\\\\AppData\\\\Local\\\\Docker\\\\' -ErrorAction SilentlyContinue | Select-Object Name\")",
       "Bash(powershell.exe -Command \"where.exe docker 2>&1\")",
-      "Bash(powershell.exe -Command 'Set-Location '\\\\''C:\\\\Users\\\\lucme\\\\Music\\\\opeprotec\\\\ope-protec'\\\\''; & { $env:PATH += '\\\\'';C:\\\\Program Files\\\\Docker\\\\Docker\\\\resources\\\\bin;C:\\\\Users\\\\lucme\\\\AppData\\\\Local\\\\Docker\\\\wsl\\\\distro\\\\usr\\\\bin'\\\\''; docker compose build web 2>&1 } ')"
+      "Bash(powershell.exe -Command 'Set-Location '\\\\''C:\\\\Users\\\\lucme\\\\Music\\\\opeprotec\\\\ope-protec'\\\\''; & { $env:PATH += '\\\\'';C:\\\\Program Files\\\\Docker\\\\Docker\\\\resources\\\\bin;C:\\\\Users\\\\lucme\\\\AppData\\\\Local\\\\Docker\\\\wsl\\\\distro\\\\usr\\\\bin'\\\\''; docker compose build web 2>&1 } ')",
+      "WebFetch(domain:itinisere.fr)",
+      "WebFetch(domain:transport.data.gouv.fr)",
+      "WebFetch(domain:www.oura.com)",
+      "WebFetch(domain:api.oura3.cityway.fr)",
+      "WebFetch(domain:api.ppp38v2.cityway.fr)",
+      "WebFetch(domain:www.isere.fr)",
+      "WebFetch(domain:www.datara.gouv.fr)",
+      "WebFetch(domain:data.isere.fr)",
+      "WebFetch(domain:www.waze.com)",
+      "WebFetch(domain:www.inforoutefrance.fr)",
+      "WebFetch(domain:www.bison-fute.gouv.fr)"
     ]
   }
 }

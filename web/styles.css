@@ -891,8 +891,10 @@ svg text { font-size: 14px; fill: #17335f; }
   .home-nav.open { display: flex; position: fixed; inset: 0; background: #132f63; z-index: 25; padding: 4.5rem 1rem 1rem; }
   .home-nav.open a, .home-nav.open button { width: 100%; text-align: left; }
   .home-topbar { flex-wrap: wrap; }
-  .sidebar { position: fixed; left: 0; top: 0; bottom: 0; z-index: 20; width: min(390px, 100vw); transform: translateX(-120%); transition: transform .2s ease; border-radius: 0; }
-  .sidebar.open { transform: translateX(0); }
+  .sidebar { position: fixed; left: 0; top: 0; bottom: 0; z-index: 20; width: min(390px, 100vw); transform: translateX(-120%); transition: transform .22s ease; border-radius: 0; }
+  .sidebar.open { transform: translateX(0); box-shadow: 4px 0 24px rgba(0,0,0,.22); }
+  .sidebar-backdrop { display: block; position: fixed; inset: 0; z-index: 19; background: rgba(0,0,0,.45); opacity: 0; pointer-events: none; transition: opacity .22s ease; }
+  .sidebar-backdrop.open { opacity: 1; pointer-events: auto; }
   .map-panel-head { flex-direction: column; }
 }
 

@@ -1778,10 +1778,20 @@ async function apiFile(path) {
   throw createApiError(sanitizeErrorMessage(lastError?.message || 'API indisponible'), lastError?.status);
 }
 
-function setActivePanel(panelId) {
-  // Fermer automatiquement le menu latéral sur mobile
+function closeMobileSidebar() {
   document.getElementById('app-sidebar')?.classList.remove('open');
+  document.getElementById('sidebar-backdrop')?.classList.remove('open');
   document.getElementById('app-menu-btn')?.setAttribute('aria-expanded', 'false');
+}
+
+function openMobileSidebar() {
+  document.getElementById('app-sidebar')?.classList.add('open');
+  document.getElementById('sidebar-backdrop')?.classList.add('open');
+  document.getElementById('app-menu-btn')?.setAttribute('aria-expanded', 'true');
+}
+
+function setActivePanel(panelId) {
+  closeMobileSidebar();
   localStorage.setItem(STORAGE_KEYS.activePanel, panelId);
   document.querySelectorAll('.menu-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.target === panelId));
   document.querySelectorAll('.view').forEach((panel) => setVisibility(panel, panel.id === panelId));
@@ -8137,8 +8147,7 @@ function bindAppInteractions() {
 
   document.querySelectorAll('.menu-btn').forEach((button) => button.addEventListener('click', () => {
     setActivePanel(button.dataset.target);
-    appSidebar?.classList.remove('open');
-    appMenuButton?.setAttribute('aria-expanded', 'false');
+    // setActivePanel appelle déjà closeMobileSidebar()
   }));
   document.getElementById('georisques-pcs-select')?.addEventListener('change', (event) => {
     selectedGeorisquesPcsCommuneKey = String(event.target?.value || '').trim().toLowerCase();
@@ -8149,9 +8158,11 @@ function bindAppInteractions() {
     renderGeorisquesPcsRisks(georisquesData.monitored_communes || georisquesData.monitored_municipalities || georisquesData.communes || []);
   });
   appMenuButton?.addEventListener('click', () => {
-    const isOpen = appSidebar?.classList.toggle('open');
-    appMenuButton.setAttribute('aria-expanded', String(Boolean(isOpen)));
+    const isOpen = !appSidebar?.classList.contains('open');
+    if (isOpen) openMobileSidebar(); else closeMobileSidebar();
   });
+  document.getElementById('sidebar-backdrop')?.addEventListener('click', closeMobileSidebar);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMobileSidebar(); });
   const appSidebarToggle = document.getElementById('app-sidebar-toggle');
   appSidebarToggle?.addEventListener('click', () => {
     const appView = document.getElementById('app-view');
