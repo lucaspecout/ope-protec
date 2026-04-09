@@ -42,6 +42,7 @@ const PANEL_TITLES = {
   'georisques-panel': 'Page Géorisques',
   'news-panel': 'Actualités Isère',
   'api-panel': 'Interconnexions API',
+  'social-panel': 'Réseaux sociaux · Isère',
   'municipalities-panel': 'Communes partenaires',
   'logs-panel': 'Main courante opérationnelle',
   'map-panel': 'Carte stratégique Isère',
@@ -1847,6 +1848,7 @@ function setActivePanel(panelId) {
   }
   if (panelId === 'logs-panel') ensureLogMunicipalitiesLoaded();
   if (panelId === 'news-panel') ensureSocialFeedsRendered();
+  if (panelId === 'social-panel') ensureSocialPanelRendered();
   if (panelId === 'api-panel' && token) {
     loadApiInterconnections(false).catch((error) => {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
@@ -1881,6 +1883,22 @@ function ensureSocialFeedsRendered() {
       setVisibility(fallback, !hasEmbeddedTimeline);
     });
   }, 4500);
+}
+
+let socialPanelRendered = false;
+function ensureSocialPanelRendered() {
+  const panel = document.getElementById('social-panel');
+  if (!panel) return;
+  if (window.twttr?.widgets?.load) {
+    window.twttr.widgets.load(panel);
+  } else if (!socialPanelRendered) {
+    // Charger le script Twitter la première fois
+    const script = document.querySelector('script[src*="platform.twitter.com"]');
+    if (script) {
+      script.addEventListener('load', () => window.twttr?.widgets?.load(panel), { once: true });
+    }
+  }
+  socialPanelRendered = true;
 }
 
 function centerMapOnIsere() {

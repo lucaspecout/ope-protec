@@ -1210,6 +1210,36 @@ svg text { font-size: 14px; fill: #17335f; }
   margin: .55rem 0 0;
 }
 
+.social-feeds-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1.25rem;
+  padding: 1rem 0;
+}
+
+.social-feed-header {
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+  margin-bottom: .65rem;
+}
+
+.social-feed-icon {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.social-feed-link {
+  display: block;
+  font-size: .82rem;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.social-feed-link:hover {
+  text-decoration: underline;
+}
+
 /* --- 2026 corporate modernization pass — Protection Civile brand --- */
 :root {
   --bg: #eaf0f9;
