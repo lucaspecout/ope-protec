@@ -7474,6 +7474,22 @@ const SVC_CAT_COLORS = {
   'Santé':         '#1b6b3a',
 };
 
+/* Détail déplié pour chaque service (listes d'alertes / stations / etc.) */
+const SVC_DETAIL_LISTS = {
+  meteo_france:          [{ id: 'meteo-alerts-list',     label: 'Alertes météo' }],
+  apic_isere:            [{ id: 'apic-list',             label: 'Alertes pluie intense' }],
+  vigicrues:             [{ id: 'stations-list',         label: 'Stations' }, { id: 'troncons-list', label: 'Tronçons' }],
+  vigicrues_flash_isere: [{ id: 'vigicrues-flash-list',  label: 'Alertes crues rapides' }],
+  vigieau:               [{ id: 'vigieau-list',          label: 'Restrictions eau' }],
+  bison_fute:            [{ id: 'bison-communique-list', label: 'Communiqués' }],
+  sncf_isere:            [{ id: 'sncf-alerts-list',      label: 'Alertes voie ferrée' }],
+  electricity_isere:     [{ id: 'electricity-list',      label: 'Données réseau' }],
+  prefecture_isere:      [{ id: 'prefecture-news-list',  label: 'Actualités', titleId: 'prefecture-news-title' }],
+  dauphine_isere:        [{ id: 'dauphine-news-list',    label: 'Articles' }],
+  anfr_isere:            [{ id: 'anfr-list',             label: 'Synthèse antennes' }],
+  arcep_isere:           [{ id: 'arcep-list',            label: 'Indisponibilités' }],
+};
+
 function buildServiceCards() {
   const root = document.getElementById('svc-cards-root');
   if (!root || root.dataset.built) return;
@@ -7488,27 +7504,45 @@ function buildServiceCards() {
   let html = '';
   for (const [cat, svcs] of groups) {
     const color = SVC_CAT_COLORS[cat] || 'var(--primary)';
+    const visibleSvcs = svcs.filter((s) => s.key !== 'groundwater_isere');
+    if (!visibleSvcs.length) continue;
     html += `<div class="svc-cat-group"><div class="svc-cat-hd" style="--cat-color:${color}">`;
     html += `<span class="svc-cat-dot"></span><span class="svc-cat-label">${escapeHtml(cat)}</span>`;
-    html += `<span class="svc-cat-count">${svcs.length}</span></div><div class="svc-cat-cards">`;
-    for (const svc of svcs) {
-      if (svc.key === 'groundwater_isere') continue; // rendu séparément
-      const meta = SVC_CARD_META[svc.key] || {};
+    html += `<span class="svc-cat-count">${visibleSvcs.length}</span></div><div class="svc-cat-cards">`;
+    for (const svc of visibleSvcs) {
+      const meta     = SVC_CARD_META[svc.key] || {};
       const statusId = meta.statusId || '';
-      const infoId = meta.infoId || '';
-      const url = meta.url || '#';
-      const extraHtml = meta.extraHtml || '';
-      html += `<article class="svc-card" data-svc-key="${escapeHtml(svc.key)}">`;
-      html += `<div class="svc-card-hd">`;
+      const infoId   = meta.infoId || '';
+      const url      = meta.url || '#';
+      const lists    = SVC_DETAIL_LISTS[svc.key] || [];
+      const hasBison = svc.key === 'bison_fute';
+      const hasDetail = lists.length > 0 || infoId || hasBison;
+
+      // Résumé compact toujours visible (summary)
+      html += `<details class="svc-card" data-svc-key="${escapeHtml(svc.key)}">`;
+      html += `<summary class="svc-card-summary">`;
       html += `<span class="svc-card-icon">${svc.icon}</span>`;
       html += `<div class="svc-card-body">`;
       html += `<h5 class="svc-card-title">${escapeHtml(svc.label)}</h5>`;
       if (statusId) html += `<p id="${escapeHtml(statusId)}" class="svc-card-status">–</p>`;
-      if (infoId)   html += `<p id="${escapeHtml(infoId)}" class="svc-card-info">–</p>`;
-      html += extraHtml;
       html += `</div>`;
-      html += `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer" class="svc-card-link" title="Ouvrir">↗</a>`;
-      html += `</div></article>`;
+      if (hasDetail) html += `<span class="svc-chevron" aria-hidden="true"></span>`;
+      html += `</summary>`;
+
+      // Contenu déplié
+      if (hasDetail) {
+        html += `<div class="svc-card-detail">`;
+        if (infoId) html += `<p id="${escapeHtml(infoId)}" class="svc-card-info muted">–</p>`;
+        if (hasBison) html += `<div id="bison-isere-square" class="bison-isere-square" aria-live="polite"></div>`;
+        for (const lst of lists) {
+          const titleAttr = lst.titleId ? ` id="${escapeHtml(lst.titleId)}"` : '';
+          html += `<p class="svc-list-label"${titleAttr}>${escapeHtml(lst.label)}</p>`;
+          html += `<ul id="${escapeHtml(lst.id)}" class="list svc-card-list"></ul>`;
+        }
+        html += `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer" class="svc-ext-link">Ouvrir le portail ↗</a>`;
+        html += `</div>`;
+      }
+      html += `</details>`;
     }
     html += '</div></div>';
   }

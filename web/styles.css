@@ -1682,36 +1682,45 @@ select:focus {
 }
 .svc-cat-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 1px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   background: var(--line);
+  gap: 1px;
 }
 
-/* ── Carte de service ─────────────────────────────────────────── */
+/* ── Carte de service (accordéon <details>) ───────────────────── */
 .svc-card {
   background: #fff;
-  padding: .7rem .85rem;
+  border-bottom: 1px solid #eef3fa;
   transition: background .12s ease;
 }
-.svc-card:hover { background: #f5f9ff; }
-.svc-card-hd {
+.svc-card:last-child { border-bottom: none; }
+
+/* Summary = en-tête compact cliquable */
+.svc-card-summary {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: .55rem;
+  padding: .6rem .85rem;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  transition: background .1s ease;
 }
+.svc-card-summary::-webkit-details-marker { display: none; }
+.svc-card-summary:hover { background: #f5f9ff; }
+
 .svc-card-icon {
-  font-size: 1.25rem;
+  font-size: 1.2rem;
   line-height: 1;
   flex-shrink: 0;
-  margin-top: .05rem;
 }
 .svc-card-body {
   flex: 1;
   min-width: 0;
 }
 .svc-card-title {
-  margin: 0 0 .18rem;
-  font-size: .85rem;
+  margin: 0 0 .1rem;
+  font-size: .83rem;
   font-weight: 700;
   color: var(--primary);
   white-space: nowrap;
@@ -1719,31 +1728,72 @@ select:focus {
   text-overflow: ellipsis;
 }
 .svc-card-status {
-  margin: 0 0 .12rem;
-  font-size: .8rem;
+  margin: 0;
+  font-size: .77rem;
   font-weight: 700;
   color: var(--text);
 }
-.svc-card-info {
-  margin: 0;
-  font-size: .75rem;
-  color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.svc-card-link {
+
+/* Chevron tournant à l'ouverture */
+.svc-chevron {
   flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: .75rem;
+  transition: transform .18s ease;
+}
+.svc-chevron::before { content: '›'; font-weight: 700; }
+.svc-card[open] .svc-chevron { transform: rotate(90deg); }
+.svc-card[open] > .svc-card-summary { background: #f0f6ff; }
+
+/* Contenu déplié */
+.svc-card-detail {
+  padding: .55rem .85rem .75rem 2.6rem;
+  border-top: 1px solid #eef3fa;
+  background: #fafcff;
+  animation: svc-slide-down .15s ease;
+}
+@keyframes svc-slide-down {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.svc-card-info {
+  margin: 0 0 .5rem;
+  font-size: .78rem;
+}
+.svc-list-label {
+  margin: .6rem 0 .25rem;
+  font-size: .72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--muted);
+}
+.svc-card-list {
+  margin: 0 0 .4rem;
+  padding-left: 1rem;
+}
+.svc-card-list li {
   font-size: .8rem;
+  padding: .18rem 0;
+  border-bottom: 1px solid #eef3fa;
+}
+.svc-card-list li:last-child { border-bottom: none; }
+.svc-ext-link {
+  display: inline-block;
+  margin-top: .5rem;
+  font-size: .76rem;
   font-weight: 700;
   color: #0b4daa;
   text-decoration: none;
-  opacity: .55;
-  padding: .15rem .3rem;
-  border-radius: 6px;
-  transition: opacity .1s ease, background .1s ease;
+  opacity: .7;
+  transition: opacity .1s ease;
 }
-.svc-card-link:hover { opacity: 1; background: #e8f0fd; }
+.svc-ext-link:hover { opacity: 1; text-decoration: underline; }
 
 /* ── Section nappes phréatiques ───────────────────────────────── */
 .svc-gw-section {
