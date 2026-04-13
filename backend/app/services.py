@@ -9,6 +9,7 @@ from http.client import RemoteDisconnected
 import json
 from pathlib import Path
 import re
+import ssl
 import unicodedata
 from random import uniform
 from time import sleep
@@ -190,11 +191,25 @@ def _is_retryable_network_error(exc: Exception) -> bool:
     return False
 
 
-def _http_get_with_retries(request: Request, timeout: int = 8, retries: int = 1, retry_delay_seconds: float = 0.5) -> bytes:
+def _make_permissive_ssl_context() -> ssl.SSLContext:
+    """Contexte SSL assoupli pour les serveurs gouv avec config TLS stricte.
+    Maintient la vérification des certificats mais élargit les suites de chiffrement."""
+    ctx = ssl.create_default_context()
+    ctx.set_ciphers("DEFAULT:@SECLEVEL=1")
+    return ctx
+
+
+def _http_get_with_retries(
+    request: Request,
+    timeout: int = 8,
+    retries: int = 1,
+    retry_delay_seconds: float = 0.5,
+    ssl_context: ssl.SSLContext | None = None,
+) -> bytes:
     last_error: Exception | None = None
     for attempt in range(retries + 1):
         try:
-            with urlopen(request, timeout=timeout) as response:
+            with urlopen(request, timeout=timeout, context=ssl_context) as response:
                 return response.read()
         except (HTTPError, URLError, TimeoutError, RemoteDisconnected) as exc:
             last_error = exc
@@ -205,18 +220,18 @@ def _http_get_with_retries(request: Request, timeout: int = 8, retries: int = 1,
     raise last_error or RuntimeError("Échec HTTP inattendu")
 
 
-def _http_get_json(url: str, timeout: int = 12, headers: dict[str, str] | None = None) -> Any:
+def _http_get_json(url: str, timeout: int = 12, headers: dict[str, str] | None = None, ssl_context: ssl.SSLContext | None = None) -> Any:
     request_headers = {"User-Agent": "ope-protec/1.0", "Connection": "keep-alive"}
     if headers:
         request_headers.update(headers)
     request = Request(url, headers=request_headers)
-    payload = _http_get_with_retries(request=request, timeout=timeout)
+    payload = _http_get_with_retries(request=request, timeout=timeout, ssl_context=ssl_context)
     return json.loads(payload.decode("utf-8"))
 
 
-def _http_get_text(url: str, timeout: int = 12) -> str:
+def _http_get_text(url: str, timeout: int = 12, ssl_context: ssl.SSLContext | None = None) -> str:
     request = Request(url, headers={"User-Agent": "ope-protec/1.0", "Connection": "keep-alive"})
-    payload = _http_get_with_retries(request=request, timeout=timeout)
+    payload = _http_get_with_retries(request=request, timeout=timeout, ssl_context=ssl_context)
     return payload.decode("utf-8", errors="ignore")
 
 
@@ -1700,9 +1715,12 @@ def _fetch_hubeau_isere_station_codes() -> set[str]:
 
 
 def _fetch_hubeau_isere_stations_full() -> list[dict[str, Any]]:
-    """Fetch all Isère hydrometric stations from HuBEAU with full metadata (1–2 HTTP calls)."""
+    """Fetch all Isère hydrometric stations from HuBEAU with full metadata (1–2 HTTP calls).
+
+    HuBEAU v2 utilise une pagination 0-indexée (page=0 = première page).
+    """
     stations: list[dict[str, Any]] = []
-    page = 1
+    page = 0
     page_size = 1000
     while True:
         payload = _http_get_json(
@@ -3192,14 +3210,17 @@ def _fetch_prefecture_isere_news_live(limit: int = 7) -> dict[str, Any]:
         }
 
 def _extract_drupal_settings_json(page_html: str) -> dict[str, Any]:
-    match = re.search(
-        r'<script type="application/json" data-drupal-selector="drupal-settings-json">(.*?)</script>',
-        page_html,
-        flags=re.DOTALL,
-    )
-    if not match:
-        raise ValueError("Configuration Drupal introuvable")
-    return json.loads(match.group(1))
+    # Essaie plusieurs variantes du sélecteur Drupal (les sites peuvent changer le format des attributs)
+    patterns = [
+        r'<script[^>]+data-drupal-selector=["\']drupal-settings-json["\'][^>]*>(.*?)</script>',
+        r'<script[^>]+type=["\']application/json["\'][^>]+data-drupal-selector=["\']drupal-settings-json["\'][^>]*>(.*?)</script>',
+        r'jQuery\.extend\(Drupal\.settings,\s*(.*?)\);\s*</script>',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, page_html, flags=re.DOTALL)
+        if match:
+            return json.loads(match.group(1))
+    raise ValueError("Configuration Drupal introuvable")
 
 
 def _atmo_level_from_index(index_value: float | int | None) -> str:
@@ -3231,7 +3252,7 @@ def _atmo_label_from_index(index_value: float | int | None) -> str:
 def _fetch_atmo_aura_isere_air_quality_live() -> dict[str, Any]:
     source = "https://www.atmo-auvergnerhonealpes.fr/air-commune/grenoble/38185/indice-atmo"
     try:
-        page_html = _http_get_text(source, timeout=16)
+        page_html = _http_get_text(source, timeout=30)
         settings_payload = _extract_drupal_settings_json(page_html)
         dataviz = settings_payload.get("dataviz") or {}
         indices = dataviz.get("indices") or {}
@@ -4014,13 +4035,16 @@ def fetch_finess_isere_resources(force_refresh: bool = False, limit: int = 5000)
 
 
 
+_opendata_isere_ssl_ctx = _make_permissive_ssl_context()
+
+
 def _isere_opendata_fetch_dataset_records(dataset_id: str, select_fields: str, limit: int = 1) -> dict[str, Any]:
     encoded_fields = quote_plus(select_fields)
     url = (
         f"https://opendata.isere.fr/api/explore/v2.1/catalog/datasets/{dataset_id}/records"
         f"?select={encoded_fields}&limit={max(1, min(limit, 100))}"
     )
-    payload = _http_get_json(url, timeout=15)
+    payload = _http_get_json(url, timeout=15, ssl_context=_opendata_isere_ssl_ctx)
     return payload if isinstance(payload, dict) else {}
 
 
