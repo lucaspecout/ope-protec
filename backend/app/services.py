@@ -6172,7 +6172,7 @@ def vigicrues_geojson_from_stations(stations: list[dict[str, Any]]) -> dict[str,
 # ---------------------------------------------------------------------------
 
 # ===========================================================================
-# Nouveaux flux transport Isère
+# Flux transport Isère — autoroutes, TER, cars
 # ===========================================================================
 
 _ISERE_ROAD_COORDS: dict[str, tuple[float, float]] = {
@@ -6203,94 +6203,39 @@ _aprr_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min
 _APRR_ISERE_ROUTES = ["A41", "A43", "A48", "A51"]
 
 
+_APRR_ROAD_PATTERN = re.compile(r'\bA(41|43|48|51)\b', re.IGNORECASE)
+
+
 def _fetch_aprr_isere_live() -> dict[str, Any]:
-    source = "https://voyage.aprr.fr/information-trafic"
+    """Filtre les événements Bison Futé DATEX2 pour les routes APRR/AREA en Isère.
+    Source fiable et déjà rafraîchie toutes les 5 min — aucun scraping SPA nécessaire."""
+    bison_data = fetch_bison_fute_live_events()
+    all_events: list[dict[str, Any]] = bison_data.get("events") or []
     events: list[dict[str, Any]] = []
-    try:
-        html = _http_get_text_quick(source, timeout=8)
-        # Chercher JSON embarqué (Next.js / Nuxt / app React SSR)
-        for pattern in (
-            r'<script[^>]+id="__NEXT_DATA__"[^>]*>(\{.+?\})</script>',
-            r'window\.__NUXT__\s*=\s*(\{.+?\});\s*</script>',
-            r'window\.__INITIAL_STATE__\s*=\s*(\{.+?\});\s*</script>',
-        ):
-            for raw in re.findall(pattern, html, re.DOTALL):
-                try:
-                    data = json.loads(raw)
-                    stack: list[Any] = [data]
-                    visited: set[int] = set()
-                    while stack and len(events) < 30:
-                        node = stack.pop()
-                        nid = id(node)
-                        if nid in visited:
-                            continue
-                        visited.add(nid)
-                        if isinstance(node, dict):
-                            for k, v in node.items():
-                                if k in ("events", "incidents", "evenements", "items", "disruptions") and isinstance(v, list):
-                                    for evt in v:
-                                        if not isinstance(evt, dict):
-                                            continue
-                                        blob = " ".join(str(x) for x in evt.values()).lower()
-                                        if any(kw in blob for kw in _ISERE_ROAD_KEYWORDS):
-                                            road = _parse_road_from_text(blob.upper())
-                                            coords = _ISERE_ROAD_COORDS.get(road or "", (45.19, 5.73))
-                                            events.append({
-                                                "title": str(evt.get("title") or evt.get("libelle") or "Événement trafic")[:120],
-                                                "type": str(evt.get("type") or evt.get("categorie") or "inconnu"),
-                                                "road": road,
-                                                "description": str(evt.get("description") or evt.get("detail") or "")[:400],
-                                                "lat": coords[0],
-                                                "lon": coords[1],
-                                                "start": str(evt.get("startDate") or evt.get("dateDebut") or ""),
-                                                "end": str(evt.get("endDate") or evt.get("dateFin") or ""),
-                                            })
-                                elif isinstance(v, (dict, list)):
-                                    stack.append(v)
-                        elif isinstance(node, list):
-                            stack.extend(node)
-                except (json.JSONDecodeError, RecursionError):
-                    pass
-                if events:
-                    break
-        # Fallback texte brut
-        if not events:
-            text = _strip_html_tags(html)
-            for m in re.finditer(
-                r'(?:A(?:41|43|48|51)|autoroute)[^.]{0,200}(?:accident|travaux|chantier|perturbation|bouchon|ralentissement)[^.]*\.',
-                text, re.IGNORECASE,
-            ):
-                snippet = m.group(0).strip()[:300]
-                road = _parse_road_from_text(snippet)
-                coords = _ISERE_ROAD_COORDS.get(road or "", (45.19, 5.73))
-                events.append({
-                    "title": snippet[:100],
-                    "type": "travaux" if "travaux" in snippet.lower() else "accident",
-                    "road": road,
-                    "description": snippet,
-                    "lat": coords[0],
-                    "lon": coords[1],
-                })
-        return {
-            "service": "APRR/AREA · Autoroutes Isère",
-            "status": "online",
-            "source": source,
-            "routes": _APRR_ISERE_ROUTES,
-            "events": events[:10],
-            "events_total": len(events),
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
-    except (HTTPError, URLError, TimeoutError, RemoteDisconnected) as exc:
-        return {
-            "service": "APRR/AREA · Autoroutes Isère",
-            "status": "degraded",
-            "source": source,
-            "routes": _APRR_ISERE_ROUTES,
-            "events": [],
-            "events_total": 0,
-            "error": str(exc),
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
+    for evt in all_events:
+        road = str(evt.get("road") or "")
+        blob = f"{road} {evt.get('title', '')} {evt.get('description', '')} {evt.get('location_summary', '')}"
+        if _APRR_ROAD_PATTERN.search(blob):
+            events.append({
+                "title": str(evt.get("title") or "Événement trafic")[:120],
+                "type": str(evt.get("category") or "inconnu"),
+                "road": road,
+                "description": str(evt.get("description") or "")[:400],
+                "lat": evt.get("lat") or _ISERE_ROAD_COORDS.get(road, (45.19, 5.73))[0],
+                "lon": evt.get("lon") or _ISERE_ROAD_COORDS.get(road, (45.19, 5.73))[1],
+                "start": str(evt.get("validity_start") or ""),
+                "end": str(evt.get("validity_end") or ""),
+                "severity": str(evt.get("severity") or "jaune"),
+            })
+    return {
+        "service": "APRR/AREA · Autoroutes Isère",
+        "status": "online",
+        "source": "https://www.bison-fute.gouv.fr (DATEX2)",
+        "routes": _APRR_ISERE_ROUTES,
+        "events": events[:10],
+        "events_total": len(events),
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
 
 
 def fetch_aprr_isere_traffic(force_refresh: bool = False) -> dict[str, Any]:
@@ -6310,13 +6255,24 @@ _resom_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "re
 
 
 def _fetch_resom_live() -> dict[str, Any]:
+    # Source principale : page info-trafic Réseau M Isère
     source = "https://www.reso-m.fr/55-infotrafic.htm"
+    # Fallback : GTFS-RT service alerts pour les transports Isère via transport.data.gouv.fr
+    gtfs_rt_source = (
+        "https://proxy.transport.data.gouv.fr/resource/isere-mobilites-gtfs-rt-service-alerts"
+    )
+    disruptions: list[dict[str, Any]] = []
+    source_used = ""
+    normal_service = False
+
+    # --- Tentative 1 : page HTML Réseau M ---
     try:
-        html = _http_get_text_quick(source, timeout=10)
+        html = _http_get_text_quick(source, timeout=12)
         text = _strip_html_tags(unescape(html))
-        disruptions: list[dict[str, Any]] = []
+        # Recherche large : les libellés peuvent varier
         for m in re.finditer(
-            r'(?:ligne|service|bus|tram)[^.]{0,300}(?:perturbation|déviation|suppression|retard|incident|modifié|interrompu)[^.]*\.',
+            r'(?:ligne|service|bus|tram|réseau|car)[^.!?]{0,400}'
+            r'(?:perturbation|déviation|suppression|retard|incident|interrompu|modifié|travaux)[^.!?]*[.!?]',
             text, re.IGNORECASE,
         ):
             snippet = m.group(0).strip()
@@ -6330,28 +6286,54 @@ def _fetch_resom_live() -> dict[str, Any]:
                     else "perturbation"
                 ),
             })
-        no_disruption = bool(
+        normal_service = bool(
             re.search(r'aucune?\s+perturbation|trafic\s+normal|service\s+normal', text, re.IGNORECASE)
         )
-        return {
-            "service": "Réseau M · Cars Isère",
-            "status": "online",
-            "source": source,
-            "disruptions": disruptions[:10],
-            "disruptions_total": len(disruptions),
-            "normal_service": no_disruption and not disruptions,
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
-    except (HTTPError, URLError, TimeoutError, RemoteDisconnected) as exc:
+        source_used = source
+    except (HTTPError, URLError, TimeoutError, RemoteDisconnected):
+        pass
+
+    # --- Tentative 2 : GTFS-RT JSON alerts ---
+    if not source_used:
+        try:
+            data = _http_get_json(gtfs_rt_source, timeout=10)
+            alerts = (
+                data.get("entity") or data.get("alerts") or
+                (data.get("header", {}) or {}).get("entity") or []
+            )
+            for entity in alerts:
+                alert = entity.get("alert") or entity if isinstance(entity, dict) else {}
+                header = str((alert.get("headerText") or {}).get("translation", [{}])[0].get("text", "") if isinstance(alert.get("headerText"), dict) else alert.get("headerText") or "")
+                desc = str((alert.get("descriptionText") or {}).get("translation", [{}])[0].get("text", "") if isinstance(alert.get("descriptionText"), dict) else alert.get("descriptionText") or "")
+                if header or desc:
+                    disruptions.append({
+                        "line": "?",
+                        "description": (header + " " + desc).strip()[:300],
+                        "type": "perturbation",
+                    })
+            source_used = gtfs_rt_source
+        except Exception:
+            pass
+
+    if not source_used:
         return {
             "service": "Réseau M · Cars Isère",
             "status": "degraded",
             "source": source,
             "disruptions": [],
             "disruptions_total": 0,
-            "error": str(exc),
+            "error": "Source indisponible",
             "updated_at": datetime.utcnow().isoformat() + "Z",
         }
+    return {
+        "service": "Réseau M · Cars Isère",
+        "status": "online",
+        "source": source_used,
+        "disruptions": disruptions[:10],
+        "disruptions_total": len(disruptions),
+        "normal_service": normal_service and not disruptions,
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
 
 
 def fetch_resom_isere_traffic(force_refresh: bool = False) -> dict[str, Any]:
@@ -6371,82 +6353,39 @@ _vinci_autoroutes_cache: dict[str, Any] = {"payload": None, "expires_at": dateti
 _VINCI_ISERE_ROUTES = ["A40", "A41", "A42", "A43"]
 
 
+_VINCI_ROAD_PATTERN = re.compile(r'\bA(40|41|42|43)\b', re.IGNORECASE)
+
+
 def _fetch_vinci_autoroutes_live() -> dict[str, Any]:
-    source = "https://www.vinci-autoroutes.com/fr/autoroutes-temps-reel/"
+    """Filtre les événements Bison Futé DATEX2 pour les routes Vinci/AREA en Isère (A40,A41,A42,A43).
+    Source fiable et déjà rafraîchie toutes les 5 min — aucun scraping SPA nécessaire."""
+    bison_data = fetch_bison_fute_live_events()
+    all_events: list[dict[str, Any]] = bison_data.get("events") or []
     events: list[dict[str, Any]] = []
-    try:
-        html = _http_get_text_quick(source, timeout=8)
-        for pattern in (
-            r'<script[^>]+id="__NEXT_DATA__"[^>]*>(\{.+?\})</script>',
-            r'window\.__INITIAL_STATE__\s*=\s*(\{.+?\});\s*</script>',
-            r'"(?:events|incidents)"\s*:\s*(\[.+?\])',
-        ):
-            for raw in re.findall(pattern, html, re.DOTALL):
-                try:
-                    data = json.loads(raw)
-                    raw_list = (
-                        data.get("events", data.get("incidents", data.get("items", [])))
-                        if isinstance(data, dict)
-                        else data if isinstance(data, list)
-                        else []
-                    )
-                    for evt in raw_list:
-                        if not isinstance(evt, dict):
-                            continue
-                        blob = " ".join(str(x) for x in evt.values()).lower()
-                        if any(kw in blob for kw in _ISERE_ROAD_KEYWORDS):
-                            road = _parse_road_from_text(blob.upper())
-                            coords = _ISERE_ROAD_COORDS.get(road or "", (45.19, 5.73))
-                            events.append({
-                                "title": str(evt.get("title") or "Événement trafic")[:120],
-                                "type": str(evt.get("type") or "inconnu"),
-                                "road": road,
-                                "description": str(evt.get("description") or "")[:400],
-                                "lat": coords[0],
-                                "lon": coords[1],
-                            })
-                except (json.JSONDecodeError, TypeError):
-                    pass
-                if events:
-                    break
-        if not events:
-            text = _strip_html_tags(html)
-            for m in re.finditer(
-                r'(?:A(?:40|41|42|43)|autoroute)[^.]{0,200}(?:accident|travaux|perturbation)[^.]*\.',
-                text, re.IGNORECASE,
-            ):
-                snippet = m.group(0).strip()[:300]
-                if any(kw in snippet.lower() for kw in _ISERE_ROAD_KEYWORDS):
-                    road = _parse_road_from_text(snippet)
-                    coords = _ISERE_ROAD_COORDS.get(road or "", (45.19, 5.73))
-                    events.append({
-                        "title": snippet[:100],
-                        "type": "travaux" if "travaux" in snippet.lower() else "accident",
-                        "road": road,
-                        "description": snippet,
-                        "lat": coords[0],
-                        "lon": coords[1],
-                    })
-        return {
-            "service": "Vinci Autoroutes · Isère",
-            "status": "online",
-            "source": source,
-            "routes": _VINCI_ISERE_ROUTES,
-            "events": events[:10],
-            "events_total": len(events),
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
-    except (HTTPError, URLError, TimeoutError, RemoteDisconnected) as exc:
-        return {
-            "service": "Vinci Autoroutes · Isère",
-            "status": "degraded",
-            "source": source,
-            "routes": _VINCI_ISERE_ROUTES,
-            "events": [],
-            "events_total": 0,
-            "error": str(exc),
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
+    for evt in all_events:
+        road = str(evt.get("road") or "")
+        blob = f"{road} {evt.get('title', '')} {evt.get('description', '')} {evt.get('location_summary', '')}"
+        if _VINCI_ROAD_PATTERN.search(blob):
+            events.append({
+                "title": str(evt.get("title") or "Événement trafic")[:120],
+                "type": str(evt.get("category") or "inconnu"),
+                "road": road,
+                "description": str(evt.get("description") or "")[:400],
+                "lat": evt.get("lat") or _ISERE_ROAD_COORDS.get(road, (45.19, 5.73))[0],
+                "lon": evt.get("lon") or _ISERE_ROAD_COORDS.get(road, (45.19, 5.73))[1],
+                "start": str(evt.get("validity_start") or ""),
+                "end": str(evt.get("validity_end") or ""),
+                "severity": str(evt.get("severity") or "jaune"),
+            })
+    return {
+        "service": "Vinci Autoroutes · Isère",
+        "status": "online",
+        "source": "https://www.bison-fute.gouv.fr (DATEX2)",
+        "routes": _VINCI_ISERE_ROUTES,
+        "events": events[:10],
+        "events_total": len(events),
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
 
 
 def fetch_vinci_autoroutes_isere(force_refresh: bool = False) -> dict[str, Any]:
@@ -6469,36 +6408,94 @@ _TER_ISERE_GEO_KEYWORDS: tuple[str, ...] = (
 )
 
 
-def _fetch_ter_aura_live() -> dict[str, Any]:
-    siri_source = "https://proxy.transport.data.gouv.fr/resource/sncf-siri-lite-situation-exchange"
-    rss_source = "https://www.ter.sncf.com/auvergne-rhone-alpes/se-deplacer/info-trafic/rss"
+_TER_SIRI_NAMESPACES = [
+    "http://www.siri.org.uk/siri",
+    "http://wsdl.siri.org.uk/siri",
+    "",  # sans namespace
+]
+
+
+def _parse_siri_situations(xml_text: str, geo_keywords: tuple[str, ...]) -> list[dict[str, Any]]:
+    """Tente de parser un document SIRI SX avec plusieurs préfixes de namespace."""
     disruptions: list[dict[str, Any]] = []
-    source_used = ""
-    try:
-        xml_payload = _http_get_text(siri_source, timeout=18)
-        root = ET.fromstring(xml_payload)
-        ns = {"siri": "http://www.siri.org.uk/siri"}
-        source_used = siri_source
-        for situation in root.findall(".//siri:PtSituationElement", ns):
-            summary = re.sub(r"\s+", " ", (situation.findtext("siri:Summary", default="", namespaces=ns) or "").strip())
-            description = re.sub(r"\s+", " ", (situation.findtext("siri:Description", default="", namespaces=ns) or "").strip())
+    root = ET.fromstring(xml_text)
+    for ns_uri in _TER_SIRI_NAMESPACES:
+        prefix = f"{{{ns_uri}}}" if ns_uri else ""
+        situations = root.findall(f".//{prefix}PtSituationElement")
+        if not situations:
+            situations = root.findall(".//PtSituationElement")
+        for situation in situations:
+            def _txt(tag: str) -> str:
+                val = situation.findtext(f"{prefix}{tag}") or situation.findtext(tag) or ""
+                return re.sub(r"\s+", " ", val.strip())
+            summary = _txt("Summary")
+            description = _txt("Description")
             text_blob = f"{summary} {description}".lower()
-            is_ter = any(kw in text_blob for kw in ("ter", "train", "sncf", "intercités", "tgv"))
-            is_isere = any(kw in text_blob for kw in _TER_ISERE_GEO_KEYWORDS)
-            if not (is_ter and is_isere):
+            if not any(kw in text_blob for kw in geo_keywords):
                 continue
-            severity = (situation.findtext("siri:Severity", default="", namespaces=ns) or "").strip()
-            level = "rouge" if severity in ("severe", "verySevere") else "orange" if severity == "normal" else "jaune"
+            severity = (_txt("Severity") or "").lower()
+            level = "rouge" if severity in ("severe", "verysevere") else "orange" if severity in ("normal", "moderate") else "jaune"
             disruptions.append({
-                "title": summary or "Perturbation TER Isère",
+                "title": summary or "Perturbation TER",
                 "description": description[:500],
                 "level": level,
-                "valid_from": (situation.findtext("siri:ValidityPeriod/siri:StartTime", default="", namespaces=ns) or "").strip(),
-                "valid_until": (situation.findtext("siri:ValidityPeriod/siri:EndTime", default="", namespaces=ns) or "").strip(),
+                "valid_from": _txt("ValidityPeriod/StartTime") or _txt("StartTime"),
+                "valid_until": _txt("ValidityPeriod/EndTime") or _txt("EndTime"),
             })
-    except (ET.ParseError, HTTPError, URLError, TimeoutError, RemoteDisconnected):
+        if disruptions:
+            break
+    return disruptions
+
+
+def _fetch_ter_aura_live() -> dict[str, Any]:
+    # Source 1 : proxy transport.data.gouv.fr SIRI SX (aggrégation nationale)
+    siri_source = "https://proxy.transport.data.gouv.fr/resource/sncf-siri-lite-situation-exchange"
+    # Source 2 : SNCF Open Data — perturbations hebdomadaires TER AURA (région 84)
+    opendata_source = (
+        "https://ressources.data.sncf.com/api/explore/v2.1/catalog/datasets/"
+        "disruptions-semaines-a-venir-4-weeks/records"
+        "?limit=20&where=region_code%3D%2284%22%20AND%20reseau_name%3D%22TER%22"
+    )
+    # Source 3 : RSS TER AURA
+    rss_source = "https://www.ter.sncf.com/auvergne-rhone-alpes/se-deplacer/info-trafic/rss"
+
+    disruptions: list[dict[str, Any]] = []
+    source_used = ""
+
+    # --- Tentative 1 : SIRI SX ---
+    try:
+        xml_payload = _http_get_text(siri_source, timeout=15)
+        disruptions = _parse_siri_situations(xml_payload, _TER_ISERE_GEO_KEYWORDS)
+        source_used = siri_source
+    except Exception:
+        pass
+
+    # --- Tentative 2 : SNCF Open Data JSON ---
+    if not source_used:
         try:
-            rss_text = _http_get_text(rss_source, timeout=15)
+            data = _http_get_json(opendata_source, timeout=12)
+            records = data.get("results") or data.get("records") or []
+            for rec in records:
+                fields = rec.get("fields") or rec if isinstance(rec, dict) else {}
+                title = str(fields.get("titre") or fields.get("title") or "Perturbation TER")
+                desc = str(fields.get("description") or fields.get("cause") or "")
+                blob = f"{title} {desc}".lower()
+                if any(kw in blob for kw in _TER_ISERE_GEO_KEYWORDS):
+                    disruptions.append({
+                        "title": title[:200],
+                        "description": desc[:500],
+                        "level": "jaune",
+                        "valid_from": str(fields.get("date_debut") or fields.get("start") or ""),
+                        "valid_until": str(fields.get("date_fin") or fields.get("end") or ""),
+                    })
+            source_used = opendata_source
+        except Exception:
+            pass
+
+    # --- Tentative 3 : RSS TER ---
+    if not source_used:
+        try:
+            rss_text = _http_get_text(rss_source, timeout=12)
             root = ET.fromstring(rss_text)
             source_used = rss_source
             for item in root.findall(".//item")[:20]:
@@ -6514,6 +6511,7 @@ def _fetch_ter_aura_live() -> dict[str, Any]:
                     })
         except Exception:
             pass
+
     if not source_used:
         return {
             "service": "TER SNCF · Auvergne-Rhône-Alpes",
@@ -6521,7 +6519,7 @@ def _fetch_ter_aura_live() -> dict[str, Any]:
             "source": siri_source,
             "disruptions": [],
             "disruptions_total": 0,
-            "error": "Source SIRI et RSS indisponibles",
+            "error": "Sources SIRI, OpenData et RSS indisponibles",
             "updated_at": datetime.utcnow().isoformat() + "Z",
         }
     return {
@@ -6554,52 +6552,102 @@ _CARS_REGION_ISERE_KEYWORDS: tuple[str, ...] = (
 
 
 def _fetch_cars_region_live() -> dict[str, Any]:
+    # Source 1 : API GTFS-RT service alerts Région AURA (transport.data.gouv.fr)
+    gtfs_rt_url = (
+        "https://proxy.transport.data.gouv.fr/resource/aura-cars-region-gtfs-rt-service-alerts"
+    )
+    # Source 2 : OTP routers alerts (portail sim.laregionvoustransporte.fr)
     otp_url = "https://sim.laregionvoustransporte.fr/otp/routers/default/alerts"
-    web_source = "https://sim.laregionvoustransporte.fr/fr/schedules"
+    # Source 3 : SNCF OpenData disruptions Cars Région AURA (region 84, réseau≠TER)
+    opendata_url = (
+        "https://ressources.data.sncf.com/api/explore/v2.1/catalog/datasets/"
+        "disruptions-semaines-a-venir-4-weeks/records"
+        "?limit=20&where=region_code%3D%2284%22%20AND%20reseau_name%3D%22Cars%20R%C3%A9gion%22"
+    )
+
     disruptions: list[dict[str, Any]] = []
-    source_used = web_source
+    source_used = ""
+
+    # --- Source 1 : GTFS-RT ---
     try:
-        data = _http_get_json(otp_url, timeout=15)
-        source_used = otp_url
-        alerts = data if isinstance(data, list) else (data.get("alerts") or data.get("items") or [])
-        for alert in alerts:
-            if not isinstance(alert, dict):
+        data = _http_get_json(gtfs_rt_url, timeout=10)
+        entities = data.get("entity") or (data if isinstance(data, list) else [])
+        for entity in entities:
+            alert = entity.get("alert") or entity if isinstance(entity, dict) else {}
+            header_obj = alert.get("headerText") or {}
+            desc_obj = alert.get("descriptionText") or {}
+            header = str(header_obj.get("translation", [{}])[0].get("text", "") if isinstance(header_obj, dict) else header_obj)
+            desc = str(desc_obj.get("translation", [{}])[0].get("text", "") if isinstance(desc_obj, dict) else desc_obj)
+            blob = f"{header} {desc}".lower()
+            if not any(kw in blob for kw in _CARS_REGION_ISERE_KEYWORDS):
                 continue
-            header = str(alert.get("headerText") or alert.get("header") or alert.get("title") or "")
-            desc = str(alert.get("descriptionText") or alert.get("description") or "")
-            if not any(kw in f"{header} {desc}".lower() for kw in _CARS_REGION_ISERE_KEYWORDS):
-                continue
-            routes_affected = alert.get("route") or alert.get("routeId") or []
-            if isinstance(routes_affected, str):
-                routes_affected = [routes_affected]
             disruptions.append({
-                "title": header[:200] or "Perturbation Cars Région",
+                "title": (header or "Perturbation Cars Région")[:200],
                 "description": desc[:400],
-                "routes": routes_affected,
-                "effect": str(alert.get("effect") or alert.get("type") or "perturbation"),
-                "valid_from": str(alert.get("startTime") or alert.get("start") or ""),
-                "valid_until": str(alert.get("endTime") or alert.get("end") or ""),
+                "routes": [],
+                "effect": "perturbation",
+                "valid_from": "",
+                "valid_until": "",
             })
-    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, json.JSONDecodeError):
+        source_used = gtfs_rt_url
+    except Exception:
+        pass
+
+    # --- Source 2 : OTP ---
+    if not source_used:
         try:
-            html = _http_get_text_quick(web_source, timeout=8)
-            text = _strip_html_tags(unescape(html))
-            for m in re.finditer(
-                r'(?:ligne|service|car)[^.]{0,200}(?:perturbation|déviation|suppression|retard)[^.]*\.',
-                text, re.IGNORECASE,
-            ):
-                snippet = m.group(0).strip()
-                if any(kw in snippet.lower() for kw in _CARS_REGION_ISERE_KEYWORDS):
-                    disruptions.append({
-                        "title": snippet[:120],
-                        "description": snippet[:300],
-                        "routes": [],
-                        "effect": "perturbation",
-                        "valid_from": "",
-                        "valid_until": "",
-                    })
+            data = _http_get_json(otp_url, timeout=12)
+            alerts = data if isinstance(data, list) else (data.get("alerts") or data.get("items") or [])
+            for alert in alerts:
+                if not isinstance(alert, dict):
+                    continue
+                header = str(alert.get("headerText") or alert.get("header") or alert.get("title") or "")
+                desc = str(alert.get("descriptionText") or alert.get("description") or "")
+                if not any(kw in f"{header} {desc}".lower() for kw in _CARS_REGION_ISERE_KEYWORDS):
+                    continue
+                disruptions.append({
+                    "title": (header or "Perturbation Cars Région")[:200],
+                    "description": desc[:400],
+                    "routes": [],
+                    "effect": str(alert.get("effect") or "perturbation"),
+                    "valid_from": str(alert.get("startTime") or ""),
+                    "valid_until": str(alert.get("endTime") or ""),
+                })
+            source_used = otp_url
         except Exception:
             pass
+
+    # --- Source 3 : SNCF OpenData ---
+    if not source_used:
+        try:
+            data = _http_get_json(opendata_url, timeout=12)
+            records = data.get("results") or data.get("records") or []
+            for rec in records:
+                fields = rec.get("fields") or rec if isinstance(rec, dict) else {}
+                title = str(fields.get("titre") or fields.get("title") or "Perturbation Cars Région")
+                desc = str(fields.get("description") or "")
+                disruptions.append({
+                    "title": title[:200],
+                    "description": desc[:400],
+                    "routes": [],
+                    "effect": "perturbation",
+                    "valid_from": str(fields.get("date_debut") or ""),
+                    "valid_until": str(fields.get("date_fin") or ""),
+                })
+            source_used = opendata_url
+        except Exception:
+            pass
+
+    if not source_used:
+        return {
+            "service": "Cars Région · Auvergne-Rhône-Alpes",
+            "status": "degraded",
+            "source": gtfs_rt_url,
+            "disruptions": [],
+            "disruptions_total": 0,
+            "error": "Sources GTFS-RT, OTP et OpenData indisponibles",
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
     return {
         "service": "Cars Région · Auvergne-Rhône-Alpes",
         "status": "online",
