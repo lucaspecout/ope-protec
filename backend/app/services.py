@@ -1245,6 +1245,9 @@ def _load_isere_aval_polyline_online() -> list[list[float]]:
     return simplified
 
 
+_PERSIST_TTL_SECONDS = 7 * 24 * 3600  # 7 jours — conserve la dernière bonne valeur entre redémarrages
+
+
 def _cached_external_payload(
     *,
     cache: dict[str, Any],
@@ -1255,6 +1258,7 @@ def _cached_external_payload(
 ) -> dict[str, Any]:
     now = datetime.utcnow()
     redis_key: str | None = cache.get("redis_key")  # clé Redis stockée dans le dict de cache
+    persist_key = f"persist:{redis_key}" if redis_key else None
 
     # 1. Cache mémoire local (le plus rapide, par worker)
     with lock:
@@ -1263,7 +1267,7 @@ def _cached_external_payload(
         if not force_refresh and cached_payload and now < expires_at:
             return deepcopy(cached_payload)
 
-    # 2. Cache Redis partagé entre tous les workers (persistant entre redémarrages)
+    # 2. Cache Redis court terme (partagé entre workers)
     if not force_refresh and redis_key:
         redis_data = _redis_get(redis_key)
         if redis_data:
@@ -1272,6 +1276,18 @@ def _cached_external_payload(
                 cache["expires_at"] = datetime.utcnow() + timedelta(seconds=ttl_seconds)
             return redis_data
 
+    # 3. Cache Redis persistant (7 jours) — fallback au démarrage quand le cache court est expiré
+    if not force_refresh and persist_key:
+        persist_data = _redis_get(persist_key)
+        if persist_data:
+            # Remettre en cache mémoire et court terme pour les prochains accès
+            with lock:
+                cache["payload"] = persist_data
+                cache["expires_at"] = datetime.utcnow() + timedelta(seconds=ttl_seconds)
+            if redis_key:
+                _redis_set(redis_key, persist_data, ttl_seconds)
+            return persist_data
+
     payload = loader()
     if payload.get("status") in {"online", "partial", "stale"}:
         with lock:
@@ -1279,8 +1295,12 @@ def _cached_external_payload(
             cache["expires_at"] = datetime.utcnow() + timedelta(seconds=ttl_seconds)
         if redis_key:
             _redis_set(redis_key, payload, ttl_seconds)
+        if persist_key:
+            # Toujours mettre à jour le cache persistant avec la dernière bonne valeur
+            _redis_set(persist_key, payload, _PERSIST_TTL_SECONDS)
         return payload
 
+    # Fetch échoué — retourner la dernière valeur connue en mémoire (stale)
     with lock:
         cached_payload = cache.get("payload")
         if cached_payload:
@@ -6598,4 +6618,23 @@ def fetch_cars_region_aura_disruptions(force_refresh: bool = False) -> dict[str,
         force_refresh=force_refresh,
         loader=_fetch_cars_region_live,
     )
+
+
+# ---------------------------------------------------------------------------
+# Persistance du snapshot consolidé (main.py ↔ Redis)
+# ---------------------------------------------------------------------------
+
+_RISKS_SNAPSHOT_KEY = "risks_snapshot_v1"
+
+
+def save_risks_snapshot(payload: dict[str, Any]) -> None:
+    """Sauvegarde le snapshot complet des risques dans Redis (7 jours).
+    Appelé par main.py après chaque mise à jour d'un slot de service."""
+    _redis_set(_RISKS_SNAPSHOT_KEY, payload, _PERSIST_TTL_SECONDS)
+
+
+def load_risks_snapshot() -> dict[str, Any] | None:
+    """Charge le dernier snapshot complet depuis Redis.
+    Retourne None si Redis est indisponible ou si aucune donnée n'a encore été sauvegardée."""
+    return _redis_get(_RISKS_SNAPSHOT_KEY)
 

@@ -84,6 +84,8 @@ from .services import (
     generate_pdf_report,
     resolve_commune_insee_code,
     vigicrues_geojson_from_stations,
+    save_risks_snapshot,
+    load_risks_snapshot,
 )
 
 Base.metadata.create_all(bind=engine)
@@ -445,6 +447,7 @@ def _set_external_risks_snapshot(payload: dict) -> None:
     with _external_risks_snapshot_lock:
         _external_risks_snapshot["updated_at"] = datetime.utcnow()
         _external_risks_snapshot["payload"] = deepcopy(payload)
+    save_risks_snapshot(payload)
     _broadcast_risk_update_from_thread()
 
 
@@ -462,6 +465,8 @@ def _update_service_slot(key: str, result: dict) -> None:
         payload["updated_at"] = datetime.utcnow().isoformat() + "Z"
         _external_risks_snapshot["payload"] = payload
         _external_risks_snapshot["updated_at"] = datetime.utcnow()
+        snapshot_copy = deepcopy(payload)
+    save_risks_snapshot(snapshot_copy)
     _broadcast_risk_update_from_thread()
 
 
@@ -522,12 +527,22 @@ def startup_warmup_external_sources() -> None:
     # Préchauffer bcrypt en arrière-plan pour que la première connexion soit rapide.
     Thread(target=warmup_crypto, daemon=True).start()
 
-    # Initialiser le snapshot avec les valeurs par défaut ("pending") pour que le
-    # frontend affiche un état cohérent dès le premier poll, avant la fin des fetches.
+    # Initialiser le snapshot : charger la dernière valeur depuis Redis si disponible
+    # pour que les données soient immédiatement présentes après un redémarrage.
+    # Sinon, utiliser les valeurs "pending" par défaut en attendant les premiers fetches.
     initial_jobs = build_external_risks_fetch_jobs(refresh=False, pcs_commune_names=[])
-    initial_payload: dict = {key: dict(fallback) for key, (_, fallback) in initial_jobs.items()}
-    initial_payload["updated_at"] = utc_timestamp()
-    _set_external_risks_snapshot(initial_payload)
+    persisted_snapshot = load_risks_snapshot()
+    if persisted_snapshot and isinstance(persisted_snapshot, dict):
+        # Fusionner avec les valeurs par défaut pour garantir que tous les services
+        # sont présents (y compris les nouveaux services ajoutés après la dernière sauvegarde).
+        fallback_payload: dict = {key: dict(fb) for key, (_, fb) in initial_jobs.items()}
+        fallback_payload.update(persisted_snapshot)
+        fallback_payload["updated_at"] = persisted_snapshot.get("updated_at") or utc_timestamp()
+        _set_external_risks_snapshot(fallback_payload)
+    else:
+        initial_payload: dict = {key: dict(fb) for key, (_, fb) in initial_jobs.items()}
+        initial_payload["updated_at"] = utc_timestamp()
+        _set_external_risks_snapshot(initial_payload)
 
     # Démarrer une boucle indépendante par service.
     for key, interval in SERVICE_REFRESH_INTERVALS.items():
