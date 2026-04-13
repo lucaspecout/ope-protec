@@ -223,6 +223,7 @@ let mapAddPointMode = false;
 let mapPoints = [];
 let mapAnnotations = [];
 let mapAnnotationsSync = null;
+let externalRisksSSE = null;
 let mapDrawControl = null;
 let mapAnnotationFeatureGroup = null;
 let mapZoneImpactLayer = null;
@@ -5340,6 +5341,34 @@ function startMapAnnotationsSync() {
   };
 }
 
+function stopExternalRisksSSE() {
+  if (externalRisksSSE) {
+    externalRisksSSE.close();
+    externalRisksSSE = null;
+  }
+}
+
+function startExternalRisksSSE() {
+  stopExternalRisksSSE();
+  if (!token || typeof window.EventSource === 'undefined') return;
+  externalRisksSSE = new window.EventSource(`/external/isere/risks/stream?token=${encodeURIComponent(token)}`);
+  externalRisksSSE.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      if (!data || typeof data !== 'object') return;
+      cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, data);
+      renderExternalRisks(cachedExternalRisksSnapshot);
+      renderApiInterconnections(cachedExternalRisksSnapshot);
+      saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
+      renderTrafficOnMap().catch(() => {});
+    } catch (_) {}
+  };
+  externalRisksSSE.onerror = () => {
+    stopExternalRisksSSE();
+    window.setTimeout(startExternalRisksSSE, 5000);
+  };
+}
+
 async function loadMapPoints() {
   let loadedPoints = [];
   let usedCacheFallback = false;
@@ -9063,6 +9092,7 @@ function logout() {
   if (apiResyncTimer) clearInterval(apiResyncTimer);
   if (photoCameraRefreshTimer) clearInterval(photoCameraRefreshTimer);
   stopMapAnnotationsSync();
+  stopExternalRisksSSE();
   finishStartupQueue();
   showLogin();
 }
@@ -9076,12 +9106,11 @@ async function refreshLiveEvents() {
   if (!token || document.hidden) return;
   return withPreservedScroll(async () => {
     try {
-      const [logs, risks, dashboard] = await Promise.all([
+      const [logs, dashboard] = await Promise.all([
         // TTL court pour forcer le re-fetch à chaque cycle live tout en permettant la déduplication
         // in-flight si plusieurs appelants déclenchent la même requête simultanément.
         // bypassCache: true est intentionnellement évité ici car il viderait apiGetCache + apiInFlight.
         api('/logs', { cacheTtlMs: 30000 }),
-        api('/external/isere/risks', { cacheTtlMs: 30000, timeoutMs: API_SLOW_ENDPOINT_TIMEOUT_MS }),
         api('/dashboard', { cacheTtlMs: 30000 }),
       ]);
 
@@ -9100,10 +9129,7 @@ async function refreshLiveEvents() {
         };
       saveSnapshot(STORAGE_KEYS.dashboardSnapshot, cachedDashboardSnapshot);
 
-      renderExternalRisks(risks);
       renderSituationOverview();
-      saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
-      saveSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot, cachedExternalRisksSnapshot);
       document.getElementById('dashboard-error').textContent = '';
     } catch (error) {
       document.getElementById('dashboard-error').textContent = `Actualisation live des évènements: ${sanitizeErrorMessage(error.message)}`;
@@ -9231,6 +9257,7 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
   startAutoRefresh();
   startLiveEventsRefresh();
   startMapAnnotationsSync();
+  startExternalRisksSSE();
 }
 
 loginForm.addEventListener('submit', async (event) => {

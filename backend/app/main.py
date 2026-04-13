@@ -232,6 +232,12 @@ _external_risks_snapshot_lock = Lock()
 _external_risks_snapshot: dict = {"updated_at": None, "payload": {}}
 _external_risks_refresh_lock = Lock()
 _external_risks_refresh_in_progress = False
+
+# SSE broadcast registry — clients abonnés aux mises à jour temps réel
+_sse_risk_clients: set[asyncio.Queue] = set()
+_sse_risk_clients_lock = Lock()
+_sse_risk_loop: asyncio.AbstractEventLoop | None = None
+
 ALLOWED_DOC_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
 
 _map_annotations_revision_lock = Lock()
@@ -411,10 +417,35 @@ def serialize_document(document: MunicipalityDocument, db: Session) -> Municipal
     )
 
 
+def _broadcast_risk_update_from_thread() -> None:
+    """Pousse le snapshot courant vers tous les clients SSE connectés.
+    Appelé depuis des threads sync — utilise call_soon_threadsafe pour
+    soumettre l'écriture dans la boucle asyncio principale."""
+    loop = _sse_risk_loop
+    if loop is None or not loop.is_running():
+        return
+    # Capturer le snapshot ici, dans le thread, avant de soumettre à la boucle.
+    snapshot = _get_external_risks_snapshot()
+
+    def _enqueue() -> None:
+        with _sse_risk_clients_lock:
+            for q in list(_sse_risk_clients):
+                try:
+                    q.put_nowait(snapshot)
+                except asyncio.QueueFull:
+                    pass  # client trop lent, on passe
+
+    try:
+        loop.call_soon_threadsafe(_enqueue)
+    except RuntimeError:
+        pass
+
+
 def _set_external_risks_snapshot(payload: dict) -> None:
     with _external_risks_snapshot_lock:
         _external_risks_snapshot["updated_at"] = datetime.utcnow()
         _external_risks_snapshot["payload"] = deepcopy(payload)
+    _broadcast_risk_update_from_thread()
 
 
 def _get_external_risks_snapshot() -> dict:
@@ -431,6 +462,7 @@ def _update_service_slot(key: str, result: dict) -> None:
         payload["updated_at"] = datetime.utcnow().isoformat() + "Z"
         _external_risks_snapshot["payload"] = payload
         _external_risks_snapshot["updated_at"] = datetime.utcnow()
+    _broadcast_risk_update_from_thread()
 
 
 def _refresh_one_service(key: str) -> None:
@@ -476,6 +508,13 @@ def _service_loop(key: str, interval: int) -> None:
     while True:
         _refresh_one_service(key)
         sleep(interval)
+
+
+@app.on_event("startup")
+async def startup_capture_event_loop() -> None:
+    """Capture la boucle asyncio pour pouvoir y soumettre des mises à jour SSE depuis les threads."""
+    global _sse_risk_loop
+    _sse_risk_loop = asyncio.get_running_loop()
 
 
 @app.on_event("startup")
@@ -712,6 +751,45 @@ async def stream_map_annotations(request: Request, token: str = Query(...), db: 
                 yield ": keep-alive\n\n"
                 last_heartbeat = asyncio.get_running_loop().time()
             await asyncio.sleep(1.0)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/external/isere/risks/stream")
+async def stream_external_risks(request: Request, token: str = Query(...), db: Session = Depends(get_db)):
+    """Flux SSE : pousse le snapshot complet des risques dès chaque mise à jour serveur.
+    Le client reçoit immédiatement le snapshot courant à la connexion, puis chaque
+    mise à jour dès qu'un service est rafraîchi en arrière-plan."""
+    user = get_user_from_token_value(token, db)
+    if user.role not in READ_ROLES:
+        raise HTTPException(403, "Droits insuffisants")
+
+    queue: asyncio.Queue = asyncio.Queue(maxsize=10)
+    with _sse_risk_clients_lock:
+        _sse_risk_clients.add(queue)
+
+    async def event_stream():
+        try:
+            # Envoi immédiat du snapshot courant dès la connexion
+            current = _get_external_risks_snapshot()
+            yield f"data: {json.dumps(current)}\n\n"
+
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    data = await asyncio.wait_for(queue.get(), timeout=20.0)
+                    yield f"data: {json.dumps(data)}\n\n"
+                except asyncio.TimeoutError:
+                    # Maintien de la connexion à travers les proxies
+                    yield ": keep-alive\n\n"
+        finally:
+            with _sse_risk_clients_lock:
+                _sse_risk_clients.discard(queue)
 
     return StreamingResponse(
         event_stream(),
