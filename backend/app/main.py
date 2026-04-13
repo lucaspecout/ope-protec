@@ -40,6 +40,7 @@ from .schemas import (
     OperationalLogUpdate,
     PasswordChangeRequest,
     ShareAccessRequest,
+    LoginResponse,
     Token,
     TwoFactorToggleRequest,
     UserCreate,
@@ -799,7 +800,7 @@ def delete_user(user_id: int, db: Session = Depends(get_db), actor: User = Depen
     return {"status": "deleted", "id": user_id}
 
 
-@app.post("/auth/login", response_model=Token)
+@app.post("/auth/login", response_model=LoginResponse)
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == form_data.username).first()
     if not user:
@@ -815,6 +816,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         "access_token": create_access_token(user.username),
         "token_type": "bearer",
         "must_change_password": user.must_change_password,
+        "user": user,
     }
 
 

@@ -8903,7 +8903,7 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
   showApp();
   setActivePanel(localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel');
   hydrateUiFromLocalCache();
-  await loadIsereBoundary();
+  loadIsereBoundary();
   renderStations(cachedVigicruesPayload);
   syncLogScopeFields();
   syncLogOtherFields();
@@ -8945,6 +8945,7 @@ loginForm.addEventListener('submit', async (event) => {
     token = result.access_token;
     localStorage.setItem(STORAGE_KEYS.token, token);
     pendingCurrentPassword = password;
+    currentUser = result.user;
 
     if (result.must_change_password) {
       setVisibility(loginForm, false);
@@ -8952,7 +8953,6 @@ loginForm.addEventListener('submit', async (event) => {
       return;
     }
 
-    currentUser = await api('/auth/me');
     await initializeAuthenticatedSession({ runRefreshInBackground: true });
   } catch (error) {
     setLoginError(error.message, buildLoginDebugDetails(error, username));

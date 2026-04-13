@@ -62,6 +62,13 @@ class UserOut(BaseModel):
         from_attributes = True
 
 
+class LoginResponse(BaseModel):
+    access_token: str
+    token_type: str
+    must_change_password: bool = False
+    user: UserOut
+
+
 class PasswordChangeRequest(BaseModel):
     current_password: str
     new_password: str
