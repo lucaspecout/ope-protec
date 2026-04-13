@@ -7438,6 +7438,149 @@ async function loadDashboard(forceRefresh = false) {
   }
 }
 
+/* ── Services panel — cards builder & groundwater renderers ──────────────── */
+
+const SVC_CARD_META = {
+  meteo_france:          { statusId: 'meteo-status',           infoId: 'meteo-info',           url: 'https://vigilance.meteofrance.fr' },
+  apic_isere:            { statusId: 'apic-status',            infoId: 'apic-info',            url: 'https://apic.meteofrance.fr' },
+  vigicrues:             { statusId: 'vigicrues-status',       infoId: 'vigicrues-info',       url: 'https://www.vigicrues.gouv.fr' },
+  vigicrues_flash_isere: { statusId: 'vigicrues-flash-status', infoId: 'vigicrues-flash-info', url: 'https://apic.meteofrance.fr/?mode=vf&area=fr' },
+  vigieau:               { statusId: 'vigieau-status',         infoId: 'vigieau-info',         url: 'https://www.vigieau.gouv.fr' },
+  groundwater_isere:     { statusId: 'groundwater-status',     infoId: 'groundwater-info',     url: 'https://hubeau.eaufrance.fr' },
+  atmo_aura:             { statusId: 'atmo-status',            infoId: 'atmo-info',            url: 'https://www.atmo-auvergnerhonealpes.fr' },
+  georisques:            { statusId: 'georisques-status',      infoId: 'georisques-info',      url: 'https://www.georisques.gouv.fr' },
+  itinisere:             { statusId: 'itinisere-status',       infoId: null,                   url: 'https://www.itinisere.fr' },
+  bison_fute:            { statusId: 'bison-status',           infoId: 'bison-info',           url: 'https://www.bison-fute.gouv.fr', extraHtml: '<div id="bison-isere-square" class="bison-isere-square" aria-live="polite"></div>' },
+  sncf_isere:            { statusId: 'sncf-status',            infoId: 'sncf-info',            url: 'https://www.sncf.com/fr/itineraire-reservation/info-trafic' },
+  electricity_isere:     { statusId: 'electricity-status',     infoId: 'electricity-info',     url: 'https://www.data.gouv.fr/datasets/donnees-eco2mix-regionales-temps-reel-1' },
+  prefecture_isere:      { statusId: 'prefecture-status',      infoId: 'prefecture-info',      url: 'https://www.isere.gouv.fr' },
+  dauphine_isere:        { statusId: 'dauphine-status',        infoId: 'dauphine-info',        url: 'https://www.ledauphine.com' },
+  anfr_isere:            { statusId: 'anfr-status',            infoId: 'anfr-info',            url: 'https://www.data.gouv.fr/fr/datasets/donnees-sur-les-installations-radioelectriques-de-plus-de-5-watts-1/' },
+  arcep_isere:           { statusId: 'arcep-status',           infoId: 'arcep-info',           url: 'https://www.data.gouv.fr/fr/datasets/sites-indisponibles/' },
+  isere_opendata:        { statusId: 'opendata-status',        infoId: 'opendata-info',        url: 'https://opendata.isere.fr' },
+  finess_isere:          { statusId: 'finess-status',          infoId: 'finess-info',          url: 'https://www.data.gouv.fr/datasets/finess-extraction-du-fichier-des-etablissements' },
+};
+
+const SVC_CAT_COLORS = {
+  'Eau':           '#0b4daa',
+  'Météo':         '#3a7bd5',
+  'Environnement': '#2e7d32',
+  'Transport':     '#7b4f00',
+  'Énergie':       '#c47a00',
+  'Télécom':       '#5c2d91',
+  'Actualités':    '#1a5276',
+  'Risques':       '#922b21',
+  'Données':       '#1565c0',
+  'Santé':         '#1b6b3a',
+};
+
+function buildServiceCards() {
+  const root = document.getElementById('svc-cards-root');
+  if (!root || root.dataset.built) return;
+  root.dataset.built = '1';
+
+  const groups = new Map();
+  for (const svc of FLUX_SERVICES) {
+    if (!groups.has(svc.category)) groups.set(svc.category, []);
+    groups.get(svc.category).push(svc);
+  }
+
+  let html = '';
+  for (const [cat, svcs] of groups) {
+    const color = SVC_CAT_COLORS[cat] || 'var(--primary)';
+    html += `<div class="svc-cat-group"><div class="svc-cat-hd" style="--cat-color:${color}">`;
+    html += `<span class="svc-cat-dot"></span><span class="svc-cat-label">${escapeHtml(cat)}</span>`;
+    html += `<span class="svc-cat-count">${svcs.length}</span></div><div class="svc-cat-cards">`;
+    for (const svc of svcs) {
+      if (svc.key === 'groundwater_isere') continue; // rendu séparément
+      const meta = SVC_CARD_META[svc.key] || {};
+      const statusId = meta.statusId || '';
+      const infoId = meta.infoId || '';
+      const url = meta.url || '#';
+      const extraHtml = meta.extraHtml || '';
+      html += `<article class="svc-card" data-svc-key="${escapeHtml(svc.key)}">`;
+      html += `<div class="svc-card-hd">`;
+      html += `<span class="svc-card-icon">${svc.icon}</span>`;
+      html += `<div class="svc-card-body">`;
+      html += `<h5 class="svc-card-title">${escapeHtml(svc.label)}</h5>`;
+      if (statusId) html += `<p id="${escapeHtml(statusId)}" class="svc-card-status">–</p>`;
+      if (infoId)   html += `<p id="${escapeHtml(infoId)}" class="svc-card-info">–</p>`;
+      html += extraHtml;
+      html += `</div>`;
+      html += `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer" class="svc-card-link" title="Ouvrir">↗</a>`;
+      html += `</div></article>`;
+    }
+    html += '</div></div>';
+  }
+  root.innerHTML = html;
+}
+
+function renderSvcSummaryBar(data = {}) {
+  const bar = document.getElementById('svc-summary-bar');
+  if (!bar) return;
+  const counts = { online: 0, error: 0, stale: 0, pending: 0 };
+  for (const svc of FLUX_SERVICES) {
+    const { state } = _fluxServiceState(data[svc.key] || {}, svc.interval);
+    counts[state] = (counts[state] || 0) + 1;
+  }
+  const pills = [];
+  if (counts.online  > 0) pills.push(`<span class="svc-pill svc-pill--ok">${counts.online} actif${counts.online > 1 ? 's' : ''}</span>`);
+  if (counts.stale   > 0) pills.push(`<span class="svc-pill svc-pill--stale">${counts.stale} obsolète${counts.stale > 1 ? 's' : ''}</span>`);
+  if (counts.error   > 0) pills.push(`<span class="svc-pill svc-pill--error">${counts.error} erreur${counts.error > 1 ? 's' : ''}</span>`);
+  if (counts.pending > 0) pills.push(`<span class="svc-pill svc-pill--pending">${counts.pending} en attente</span>`);
+  pills.push(`<span class="svc-pill svc-pill--total">${FLUX_SERVICES.length} flux</span>`);
+  bar.innerHTML = pills.join('');
+}
+
+function renderGroundwaterDetail(gw = {}) {
+  const summary = document.getElementById('groundwater-summary');
+  if (summary) {
+    const trend = gw.trend_summary || {};
+    const total = gw.stations_total ?? 0;
+    const status = gw.status || 'inconnu';
+    const statusClass = status === 'online' ? 'svc-gw-kpi--ok' : 'svc-gw-kpi--muted';
+    summary.innerHTML = [
+      `<span class="svc-gw-kpi"><strong>${total}</strong> station${total !== 1 ? 's' : ''}</span>`,
+      `<span class="svc-gw-kpi svc-gw-kpi--up">↑ ${trend.hausse ?? 0} hausse</span>`,
+      `<span class="svc-gw-kpi svc-gw-kpi--stable">= ${trend.stable ?? 0} stable</span>`,
+      `<span class="svc-gw-kpi svc-gw-kpi--down">↓ ${trend.baisse ?? 0} baisse</span>`,
+      `<span class="svc-gw-kpi ${statusClass}">${escapeHtml(status)}</span>`,
+    ].join('');
+  }
+
+  const stationsEl = document.getElementById('groundwater-stations');
+  if (!stationsEl) return;
+  const stations = Array.isArray(gw.stations) ? gw.stations : [];
+  if (!stations.length) {
+    stationsEl.innerHTML = '<p class="muted" style="padding:.6rem 0">Aucune donnée de nappe phréatique disponible.</p>';
+    return;
+  }
+  const trendIcon  = (t) => t === 'hausse' ? '↑' : t === 'baisse' ? '↓' : '=';
+  const trendClass = (t) => t === 'hausse' ? 'svc-trend-up' : t === 'baisse' ? 'svc-trend-down' : 'svc-trend-stable';
+  const rows = stations.slice(0, 24).map((s) => {
+    const level = s.groundwater_level_m_ngf != null ? `${Number(s.groundwater_level_m_ngf).toFixed(2)} m NGF` : '–';
+    const depth = s.depth_m != null ? `–${Number(s.depth_m).toFixed(1)} m` : '–';
+    const date  = s.date_measure ? new Date(s.date_measure).toLocaleDateString('fr-FR') : '–';
+    const trend = s.trend || 'stable';
+    return `<tr>
+      <td class="svc-gw-td-code">${escapeHtml(s.code_bss || '–')}</td>
+      <td>${escapeHtml(s.name || '–')}</td>
+      <td class="svc-gw-td-muted">${escapeHtml(s.commune || '–')}</td>
+      <td class="svc-gw-td-num">${escapeHtml(level)}</td>
+      <td class="svc-gw-td-num">${escapeHtml(depth)}</td>
+      <td><span class="${trendClass(trend)}">${trendIcon(trend)} ${escapeHtml(trend)}</span></td>
+      <td class="svc-gw-td-muted">${escapeHtml(date)}</td>
+    </tr>`;
+  }).join('');
+  stationsEl.innerHTML = `<div class="svc-gw-table-wrap"><table class="svc-gw-table">
+    <thead><tr>
+      <th>Code BSS</th><th>Station</th><th>Commune</th>
+      <th>Niveau NGF</th><th>Profondeur</th><th>Tendance</th><th>Mesure</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
 function renderExternalRisks(data = {}) {
   const mergedData = mergeExternalRisksSnapshot(
     cachedExternalRisksSnapshot,
@@ -7534,6 +7677,8 @@ function renderExternalRisks(data = {}) {
   setText('map-flood-docs', String(georisques.flood_documents_total ?? 0));
   renderStations(cachedVigicruesPayload);
   renderSituationOverview();
+  renderSvcSummaryBar(mergedData);
+  renderGroundwaterDetail(mergedData?.groundwater_isere || {});
   return true;
 }
 
@@ -8901,6 +9046,7 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
   document.getElementById('current-commune').textContent = currentUser.municipality_name || 'Toutes';
   applyRoleVisibility();
   showApp();
+  buildServiceCards();
   setActivePanel(localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel');
   hydrateUiFromLocalCache();
   loadIsereBoundary();

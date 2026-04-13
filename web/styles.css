@@ -1592,3 +1592,248 @@ select:focus {
   background: linear-gradient(90deg, transparent, rgba(255,255,255,.6), transparent);
   animation: progress-slide 1.4s linear infinite;
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   Services panel — redesign moderne
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── En-tête du panel ─────────────────────────────────────────── */
+.svc-panel-hd {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: .75rem;
+  padding: 1rem 1.1rem .6rem;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: .9rem;
+}
+.svc-panel-hd h3 { margin: 0 0 .15rem; }
+.svc-panel-hd .muted { margin: 0; font-size: .9rem; }
+
+/* ── Barre de résumé (pills de statut) ────────────────────────── */
+.svc-summary-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+  align-items: center;
+}
+.svc-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  font-size: .78rem;
+  font-weight: 700;
+  padding: .25rem .65rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.svc-pill--ok      { background: #d1fae5; color: #065f46; border-color: #6ee7b7; }
+.svc-pill--stale   { background: #f3f4f6; color: #4b5563; border-color: #d1d5db; }
+.svc-pill--error   { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
+.svc-pill--pending { background: #fef3c7; color: #92400e; border-color: #fde68a; }
+.svc-pill--total   { background: #eff6ff; color: #1e40af; border-color: #bfdbfe; }
+
+/* ── Grille des catégories ────────────────────────────────────── */
+.svc-cards-root {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 0 .6rem;
+}
+.svc-cat-group {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+  background: linear-gradient(180deg, #fafcff, #f4f8ff);
+}
+.svc-cat-hd {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  padding: .55rem .85rem;
+  background: linear-gradient(135deg, #f0f5ff, #f8fbff);
+  border-bottom: 1px solid #dce9f9;
+}
+.svc-cat-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--cat-color);
+  flex-shrink: 0;
+}
+.svc-cat-label {
+  font-size: .8rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--cat-color);
+}
+.svc-cat-count {
+  margin-left: auto;
+  font-size: .74rem;
+  font-weight: 700;
+  color: var(--cat-color);
+  background: rgba(255,255,255,.7);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: .1rem .5rem;
+}
+.svc-cat-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1px;
+  background: var(--line);
+}
+
+/* ── Carte de service ─────────────────────────────────────────── */
+.svc-card {
+  background: #fff;
+  padding: .7rem .85rem;
+  transition: background .12s ease;
+}
+.svc-card:hover { background: #f5f9ff; }
+.svc-card-hd {
+  display: flex;
+  align-items: flex-start;
+  gap: .55rem;
+}
+.svc-card-icon {
+  font-size: 1.25rem;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top: .05rem;
+}
+.svc-card-body {
+  flex: 1;
+  min-width: 0;
+}
+.svc-card-title {
+  margin: 0 0 .18rem;
+  font-size: .85rem;
+  font-weight: 700;
+  color: var(--primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.svc-card-status {
+  margin: 0 0 .12rem;
+  font-size: .8rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.svc-card-info {
+  margin: 0;
+  font-size: .75rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.svc-card-link {
+  flex-shrink: 0;
+  font-size: .8rem;
+  font-weight: 700;
+  color: #0b4daa;
+  text-decoration: none;
+  opacity: .55;
+  padding: .15rem .3rem;
+  border-radius: 6px;
+  transition: opacity .1s ease, background .1s ease;
+}
+.svc-card-link:hover { opacity: 1; background: #e8f0fd; }
+
+/* ── Section nappes phréatiques ───────────────────────────────── */
+.svc-gw-section {
+  margin: .9rem .6rem .7rem;
+  border: 1px solid #b8d4f5;
+  border-radius: 14px;
+  background: linear-gradient(145deg, #f0f7ff, #fafcff);
+  overflow: hidden;
+}
+.svc-gw-hd {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  padding: .65rem .9rem;
+  background: linear-gradient(135deg, #e8f2ff, #f4f9ff);
+  border-bottom: 1px solid #cce0f8;
+}
+.svc-gw-icon {
+  font-size: 1.6rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.svc-gw-title {
+  margin: 0 0 .25rem;
+  font-size: .95rem;
+  font-weight: 800;
+  color: #0b4daa;
+}
+.svc-gw-kpis {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+}
+.svc-gw-kpi {
+  font-size: .78rem;
+  font-weight: 700;
+  padding: .18rem .55rem;
+  border-radius: 999px;
+  background: #e8f2ff;
+  color: #1e3a6e;
+  border: 1px solid #cce0f8;
+}
+.svc-gw-kpi--up     { background: #d1fae5; color: #065f46; border-color: #6ee7b7; }
+.svc-gw-kpi--down   { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
+.svc-gw-kpi--stable { background: #f3f4f6; color: #374151; border-color: #d1d5db; }
+.svc-gw-kpi--ok     { background: #d1fae5; color: #065f46; border-color: #6ee7b7; }
+.svc-gw-kpi--muted  { background: #f3f4f6; color: #6b7280; border-color: #e5e7eb; }
+
+/* ── Tableau nappes phréatiques ───────────────────────────────── */
+.svc-gw-stations { padding: .55rem .75rem .75rem; }
+.svc-gw-table-wrap { overflow-x: auto; border-radius: 10px; border: 1px solid #d4e6fb; }
+.svc-gw-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .8rem;
+  background: #fff;
+}
+.svc-gw-table thead tr {
+  background: linear-gradient(135deg, #e8f2ff, #f0f7ff);
+  border-bottom: 2px solid #cce0f8;
+}
+.svc-gw-table th {
+  padding: .45rem .6rem;
+  text-align: left;
+  font-size: .72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: #1e40af;
+  white-space: nowrap;
+}
+.svc-gw-table td {
+  padding: .38rem .6rem;
+  border-bottom: 1px solid #eef4fd;
+  vertical-align: middle;
+}
+.svc-gw-table tbody tr:last-child td { border-bottom: none; }
+.svc-gw-table tbody tr:hover td { background: #f5f9ff; }
+.svc-gw-td-code  { font-family: monospace; font-size: .75rem; color: #4b5563; white-space: nowrap; }
+.svc-gw-td-num   { font-weight: 700; white-space: nowrap; text-align: right; }
+.svc-gw-td-muted { color: var(--muted); font-size: .76rem; }
+
+/* ── Tendances nappes ─────────────────────────────────────────── */
+.svc-trend-up     { color: #065f46; font-weight: 700; }
+.svc-trend-down   { color: #991b1b; font-weight: 700; }
+.svc-trend-stable { color: #4b5563; font-weight: 600; }
+
+/* ── Adaptation responsive ────────────────────────────────────── */
+@media (max-width: 600px) {
+  .svc-panel-hd { flex-direction: column; }
+  .svc-cat-cards { grid-template-columns: 1fr; }
+  .svc-gw-hd { flex-direction: column; align-items: flex-start; }
+}

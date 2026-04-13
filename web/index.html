@@ -83,125 +83,30 @@
         </section>
 
         <section id="services-panel" class="panel view hidden" hidden>
-          <div class="panel-heading">
-            <h3>Services connectés</h3>
-            <p class="muted">Disponibilité des flux utiles à la cellule de crise en Isère et raccourcis vers les portails officiels.</p>
+          <div class="svc-panel-hd">
+            <div>
+              <h3>Services connectés</h3>
+              <p class="muted">Surveillance temps réel des flux opérationnels pour la cellule de crise Isère.</p>
+            </div>
+            <div id="svc-summary-bar" class="svc-summary-bar"></div>
           </div>
-          <div class="services-grid">
-            <article class="service-card">
-              <div class="service-card__head">
-                <h4>Météo-France Vigilance</h4>
-                <a href="https://vigilance.meteofrance.fr" target="_blank" rel="noreferrer">Ouvrir</a>
+
+          <!-- Cartes par catégorie — générées dynamiquement par buildServiceCards() -->
+          <div id="svc-cards-root" class="svc-cards-root"></div>
+
+          <!-- Nappes phréatiques — section dédiée -->
+          <div class="svc-gw-section">
+            <div class="svc-gw-hd">
+              <span class="svc-gw-icon">🏔️</span>
+              <div>
+                <h4 class="svc-gw-title">Nappes phréatiques Isère · Hub'Eau</h4>
+                <div id="groundwater-summary" class="svc-gw-kpis"></div>
               </div>
-              <p id="meteo-status" class="service-status">-</p>
-              <p id="meteo-info" class="muted"></p>
-            </article>
-            <article class="service-card">
-              <div class="service-card__head">
-                <h4>Vigicrues</h4>
-                <a href="https://www.vigicrues.gouv.fr" target="_blank" rel="noreferrer">Ouvrir</a>
-              </div>
-              <p id="vigicrues-status" class="service-status">-</p>
-              <p id="vigicrues-info" class="muted"></p>
-            </article>
-            <article class="service-card">
-              <div class="service-card__head">
-                <h4>Géorisques</h4>
-                <a href="https://www.georisques.gouv.fr" target="_blank" rel="noreferrer">Ouvrir</a>
-              </div>
-              <p id="georisques-status" class="service-status">-</p>
-              <p id="georisques-info" class="muted"></p>
-            </article>
-            <article class="service-card">
-              <div class="service-card__head">
-                <h4>Info route Isère</h4>
-                <a href="https://www.itinisere.fr" target="_blank" rel="noreferrer">Ouvrir</a>
-              </div>
-              <p id="itinisere-status" class="service-status">-</p>
-              <p class="muted">État des perturbations et routes impactées.</p>
-            </article>
-            <article class="service-card">
-              <div class="service-card__head">
-                <h4>Bison Futé</h4>
-                <a href="https://www.bison-fute.gouv.fr" target="_blank" rel="noreferrer">Ouvrir</a>
-              </div>
-              <p id="bison-status" class="service-status">-</p>
-              <div id="bison-isere-square" class="bison-isere-square" aria-live="polite"></div>
-              <p id="bison-info" class="muted"></p>
-            </article>
-            <article class="service-card">
-              <div class="service-card__head">
-                <h4>Préfecture de l'Isère</h4>
-                <a href="https://www.isere.gouv.fr" target="_blank" rel="noreferrer">Ouvrir</a>
-              </div>
-              <p id="prefecture-status" class="service-status">-</p>
-              <p id="prefecture-info" class="muted">Communication officielle, arrêtés et points de situation.</p>
-            </article>
-            <article class="service-card">
-              <div class="service-card__head">
-                <h4>SNCF Isère (accidents / travaux voies)</h4>
-                <a href="https://www.sncf.com/fr/itineraire-reservation/info-trafic" target="_blank" rel="noreferrer">Ouvrir</a>
-              </div>
-              <p id="sncf-status" class="service-status">-</p>
-              <p id="sncf-info" class="muted">Alertes SNCF filtrées sur l'Isère : accidents et travaux de voie.</p>
-            </article>
-            <article class="service-card">
-              <div class="service-card__head">
-                <h4>Vigieau</h4>
-                <a href="https://www.vigieau.gouv.fr" target="_blank" rel="noreferrer">Ouvrir</a>
-              </div>
-              <p id="vigieau-status" class="service-status">-</p>
-              <p id="vigieau-info" class="muted"></p>
-            </article>
-            <article class="service-card">
-              <div class="service-card__head">
-                <h4>Qualité de l'air (Atmo AURA)</h4>
-                <a href="https://www.atmo-auvergnerhonealpes.fr" target="_blank" rel="noreferrer">Ouvrir</a>
-              </div>
-              <p id="atmo-status" class="service-status">-</p>
-              <p id="atmo-info" class="muted"></p>
-            </article>
-            <article class="service-card">
-              <div class="service-card__head">
-                <h4>Électricité Isère (RTE éCO2mix)</h4>
-                <a href="https://www.data.gouv.fr/datasets/donnees-eco2mix-regionales-temps-reel-1" target="_blank" rel="noreferrer">Ouvrir</a>
-              </div>
-              <p id="electricity-status" class="service-status">-</p>
-              <p id="electricity-info" class="muted"></p>
-            </article>
-            <article class="service-card">
-              <div class="service-card__head">
-                <h4>ANFR · Antennes mobiles Isère</h4>
-                <a href="https://www.data.gouv.fr/fr/datasets/donnees-sur-les-installations-radioelectriques-de-plus-de-5-watts-1/" target="_blank" rel="noreferrer">Ouvrir</a>
-              </div>
-              <p id="anfr-status" class="service-status">-</p>
-              <p id="anfr-info" class="muted"></p>
-            </article>
-            <article class="service-card">
-              <div class="service-card__head">
-                <h4>ARCEP · Sites mobiles indisponibles Isère</h4>
-                <a href="https://www.data.gouv.fr/fr/datasets/sites-indisponibles/" target="_blank" rel="noreferrer">Ouvrir</a>
-              </div>
-              <p id="arcep-status" class="service-status">-</p>
-              <p id="arcep-info" class="muted"></p>
-            </article>
-            <article class="service-card">
-              <div class="service-card__head">
-                <h4>APIC · Pluie intense Isère</h4>
-                <a href="https://apic.meteofrance.fr" target="_blank" rel="noreferrer">Ouvrir</a>
-              </div>
-              <p id="apic-status" class="service-status">-</p>
-              <p id="apic-info" class="muted"></p>
-            </article>
-            <article class="service-card">
-              <div class="service-card__head">
-                <h4>Vigicrues Flash · Crues rapides Isère</h4>
-                <a href="https://apic.meteofrance.fr/?mode=vf&area=fr" target="_blank" rel="noreferrer">Ouvrir</a>
-              </div>
-              <p id="vigicrues-flash-status" class="service-status">-</p>
-              <p id="vigicrues-flash-info" class="muted"></p>
-            </article>
+            </div>
+            <div id="groundwater-stations" class="svc-gw-stations"></div>
           </div>
+
+          <!-- Listes détaillées (IDs préservés) -->
           <div class="services-lists">
             <article class="tile">
               <h4>Alertes météo Isère (en cours / demain)</h4>

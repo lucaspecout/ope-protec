@@ -167,7 +167,8 @@
       "WebFetch(domain:data.isere.fr)",
       "WebFetch(domain:www.waze.com)",
       "WebFetch(domain:www.inforoutefrance.fr)",
-      "WebFetch(domain:www.bison-fute.gouv.fr)"
+      "WebFetch(domain:www.bison-fute.gouv.fr)",
+      "Bash(xargs grep:*)"
     ]
   }
 }
