@@ -76,6 +76,11 @@ from .services import (
     fetch_vigicrues_isere,
     fetch_vigicrues_flash_isere_alerts,
     fetch_vigieau_restrictions,
+    fetch_aprr_isere_traffic,
+    fetch_resom_isere_traffic,
+    fetch_vinci_autoroutes_isere,
+    fetch_ter_aura_disruptions,
+    fetch_cars_region_aura_disruptions,
     generate_pdf_report,
     resolve_commune_insee_code,
     vigicrues_geojson_from_stations,
@@ -899,6 +904,11 @@ def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str])
         "finess_isere": (lambda: fetch_finess_isere_resources(force_refresh=refresh), {"status": "pending", "resources": [], "resources_total": 0}),
         "groundwater_isere": (lambda: fetch_hubeau_isere_groundwater(force_refresh=refresh), {"status": "pending", "stations": [], "stations_total": 0, "trend_summary": {"hausse": 0, "baisse": 0, "stable": 0}}),
         "isere_opendata": (lambda: fetch_isere_opendata_resilience(force_refresh=refresh), {"status": "pending", "datasets": [], "totals": {"food_aid_points": 0, "health_centers": 0, "schools": 0}, "insights": []}),
+        "aprr_isere": (lambda: fetch_aprr_isere_traffic(force_refresh=refresh), {"status": "pending", "events": [], "events_total": 0, "routes": ["A41", "A43", "A48", "A51"]}),
+        "resom_isere": (lambda: fetch_resom_isere_traffic(force_refresh=refresh), {"status": "pending", "disruptions": [], "disruptions_total": 0}),
+        "vinci_autoroutes": (lambda: fetch_vinci_autoroutes_isere(force_refresh=refresh), {"status": "pending", "events": [], "events_total": 0, "routes": ["A40", "A41", "A42", "A43"]}),
+        "ter_aura": (lambda: fetch_ter_aura_disruptions(force_refresh=refresh), {"status": "pending", "disruptions": [], "disruptions_total": 0}),
+        "cars_region_aura": (lambda: fetch_cars_region_aura_disruptions(force_refresh=refresh), {"status": "pending", "disruptions": [], "disruptions_total": 0}),
     }
 
 

@@ -47,6 +47,11 @@ const FLUX_SERVICES = [
   { key: 'itinisere',              label: 'Itinisère · Transports',    icon: '🚌', category: 'Transport',     interval: 120,   metric: (d) => `${d.events_total ?? (d.events || []).length} perturbation(s)` },
   { key: 'bison_fute',             label: 'Bison Futé',                icon: '🚗', category: 'Transport',     interval: 300,   metric: (d) => d.today?.isere?.departure ? `Départ: ${d.today.isere.departure} · Retour: ${d.today.isere.return || '?'}` : 'Trafic non disponible' },
   { key: 'sncf_isere',             label: 'SNCF Isère',                icon: '🚆', category: 'Transport',     interval: 120,   metric: (d) => `${(d.alerts || []).length} alerte(s) voie ferrée` },
+  { key: 'ter_aura',               label: 'TER SNCF · AURA',           icon: '🚄', category: 'Transport',     interval: 120,   metric: (d) => `${d.disruptions_total ?? 0} perturbation(s) TER` },
+  { key: 'aprr_isere',             label: 'APRR/AREA · Autoroutes',    icon: '🛣️', category: 'Transport',     interval: 180,   metric: (d) => `${d.events_total ?? 0} événement(s) · ${(d.routes || []).join(' ')}` },
+  { key: 'vinci_autoroutes',       label: 'Vinci Autoroutes · Isère',  icon: '🚧', category: 'Transport',     interval: 180,   metric: (d) => `${d.events_total ?? 0} événement(s) · ${(d.routes || []).join(' ')}` },
+  { key: 'resom_isere',            label: 'Réseau M · Cars Isère',     icon: '🚍', category: 'Transport',     interval: 120,   metric: (d) => d.normal_service ? 'Trafic normal' : `${d.disruptions_total ?? 0} perturbation(s)` },
+  { key: 'cars_region_aura',       label: 'Cars Région · AURA',        icon: '🚐', category: 'Transport',     interval: 300,   metric: (d) => `${d.disruptions_total ?? 0} perturbation(s) cars région` },
   { key: 'electricity_isere',      label: 'RTE · Électricité',         icon: '⚡', category: 'Énergie',       interval: 180,   metric: (d) => `${d.level || '?'} · marge ${d.supply_margin_mw ?? '-'} MW` },
   { key: 'prefecture_isere',       label: 'Préfecture Isère',          icon: '🏛️', category: 'Actualités',   interval: 90,    metric: (d) => `${(d.items || []).length} actualité(s)` },
   { key: 'dauphine_isere',         label: 'Dauphiné Libéré',           icon: '📰', category: 'Actualités',   interval: 180,   metric: (d) => `${(d.items || []).length} article(s)` },
@@ -202,6 +207,7 @@ let itinisereLayer = null;
 let bisonLayer = null;
 let bisonCameraLayer = null;
 let photoCameraLayer = null;
+let autorouteLayer = null;
 let institutionLayer = null;
 let populationLayer = null;
 let mapTileLayer = null;
@@ -2651,6 +2657,7 @@ function initMap() {
   bisonLayer = window.L.layerGroup().addTo(leafletMap);
   bisonCameraLayer = window.L.layerGroup().addTo(leafletMap);
   photoCameraLayer = window.L.layerGroup().addTo(leafletMap);
+  autorouteLayer = window.L.layerGroup().addTo(leafletMap);
   institutionLayer = window.L.layerGroup().addTo(leafletMap);
   populationLayer = window.L.layerGroup().addTo(leafletMap);
   montagneLayer = window.L.layerGroup(); // ajouté à la carte uniquement si filtre activé
@@ -5096,7 +5103,34 @@ async function renderTrafficOnMap() {
   bisonLayer.clearLayers();
   bisonCameraLayer.clearLayers();
   photoCameraLayer.clearLayers();
+  if (autorouteLayer) autorouteLayer.clearLayers();
   mapStats.traffic = 0;
+
+  // ── Événements autoroutes APRR/AREA + Vinci (avec coordonnées) ──
+  if (autorouteLayer) {
+    const typeColor = { accident: '#c22f43', travaux: '#f07800', chantier: '#f07800', perturbation: '#e6a800', inconnu: '#5f7190' };
+    const allRoadEvents = [
+      ...(cachedExternalRisksSnapshot?.aprr_isere?.events || []).map((e) => ({ ...e, src: 'APRR/AREA' })),
+      ...(cachedExternalRisksSnapshot?.vinci_autoroutes?.events || []).map((e) => ({ ...e, src: 'Vinci' })),
+    ];
+    allRoadEvents.forEach((evt) => {
+      const lat = Number(evt.lat);
+      const lon = Number(evt.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+      const color = typeColor[evt.type] || typeColor.inconnu;
+      const icon = emojiDivIcon(evt.type === 'accident' ? '⚠️' : '🚧', { iconSize: [22, 22], iconAnchor: [11, 11], popupAnchor: [0, -12] });
+      const popup = `<div class="map-popup-content">
+        <p class="tag">${escapeHtml(evt.src)} · ${escapeHtml(evt.road || 'Autoroute')}</p>
+        <strong>${escapeHtml(evt.title || evt.type || 'Événement trafic')}</strong>
+        ${evt.description ? `<p style="font-size:.8rem;margin:.3rem 0 0">${escapeHtml(evt.description.substring(0, 200))}</p>` : ''}
+        ${evt.start ? `<p class="muted" style="font-size:.75rem;margin:.2rem 0 0">Depuis: ${new Date(evt.start).toLocaleString('fr-FR')}</p>` : ''}
+      </div>`;
+      const marker = window.L.marker([lat, lon], { icon });
+      marker.bindPopup(popup);
+      marker.addTo(autorouteLayer);
+      mapStats.traffic += 1;
+    });
+  }
 
   const showTrafficIncidents = document.getElementById('filter-traffic-incidents')?.checked ?? true;
   if (showTrafficIncidents) {
@@ -7459,6 +7493,11 @@ const SVC_CARD_META = {
   arcep_isere:           { statusId: 'arcep-status',           infoId: 'arcep-info',           url: 'https://www.data.gouv.fr/fr/datasets/sites-indisponibles/' },
   isere_opendata:        { statusId: 'opendata-status',        infoId: 'opendata-info',        url: 'https://opendata.isere.fr' },
   finess_isere:          { statusId: 'finess-status',          infoId: 'finess-info',          url: 'https://www.data.gouv.fr/datasets/finess-extraction-du-fichier-des-etablissements' },
+  ter_aura:              { statusId: 'ter-aura-status',        infoId: 'ter-aura-info',        url: 'https://www.ter.sncf.com/auvergne-rhone-alpes/se-deplacer/info-trafic' },
+  aprr_isere:            { statusId: 'aprr-status',            infoId: 'aprr-info',            url: 'https://voyage.aprr.fr/information-trafic' },
+  vinci_autoroutes:      { statusId: 'vinci-status',           infoId: 'vinci-info',           url: 'https://www.vinci-autoroutes.com/fr/autoroutes-temps-reel/' },
+  resom_isere:           { statusId: 'resom-status',           infoId: 'resom-info',           url: 'https://www.reso-m.fr/55-infotrafic.htm' },
+  cars_region_aura:      { statusId: 'cars-region-status',     infoId: 'cars-region-info',     url: 'https://sim.laregionvoustransporte.fr/fr/schedules' },
 };
 
 const SVC_CAT_COLORS = {
@@ -7488,6 +7527,11 @@ const SVC_DETAIL_LISTS = {
   dauphine_isere:        [{ id: 'dauphine-news-list',    label: 'Articles' }],
   anfr_isere:            [{ id: 'anfr-list',             label: 'Synthèse antennes' }],
   arcep_isere:           [{ id: 'arcep-list',            label: 'Indisponibilités' }],
+  ter_aura:              [{ id: 'ter-aura-list',         label: 'Perturbations TER Isère' }],
+  aprr_isere:            [{ id: 'aprr-list',             label: 'Événements autoroutes Isère' }],
+  vinci_autoroutes:      [{ id: 'vinci-list',            label: 'Événements Vinci Isère' }],
+  resom_isere:           [{ id: 'resom-list',            label: 'Perturbations cars Isère' }],
+  cars_region_aura:      [{ id: 'cars-region-list',      label: 'Perturbations cars Région AURA' }],
 };
 
 function buildServiceCards() {
@@ -7615,6 +7659,95 @@ function renderGroundwaterDetail(gw = {}) {
   </table></div>`;
 }
 
+/* ── Nouveaux flux transport ─────────────────────────────────────────────── */
+
+function _renderDisruptionsList(listId, items, emptyMsg = 'Aucune perturbation signalée.') {
+  const lvlColor = { rouge: '#c22f43', orange: '#b46a00', jaune: '#9a7700', vert: '#2f9e44', inconnu: '#5f7190' };
+  setHtml(listId, items.slice(0, 10).map((d) => {
+    const level = d.level || d.effect || 'inconnu';
+    const color = lvlColor[level] || lvlColor.inconnu;
+    const from = d.valid_from ? ` · dès ${new Date(d.valid_from).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}` : '';
+    const road = d.road ? ` · <strong>${escapeHtml(d.road)}</strong>` : (d.line ? ` · Ligne ${escapeHtml(d.line)}` : '');
+    const routes = Array.isArray(d.routes) && d.routes.length ? ` · lignes ${d.routes.slice(0, 3).map(escapeHtml).join(', ')}` : '';
+    return `<li style="border-left:3px solid ${color};padding-left:.5rem">
+      <strong style="color:${color}">${escapeHtml(level)}</strong>${road}${routes}${from}<br>
+      <span style="font-size:.78rem">${escapeHtml((d.title || d.description || 'Perturbation').substring(0, 160))}</span>
+    </li>`;
+  }).join('') || `<li class="muted">${emptyMsg}</li>`);
+}
+
+function _renderEventsList(listId, items, emptyMsg = 'Aucun événement signalé.') {
+  const typeIcon = { accident: '⚠️', travaux: '🔧', chantier: '🔧', perturbation: '⚡', bouchon: '🚗', inconnu: 'ℹ️' };
+  setHtml(listId, items.slice(0, 10).map((e) => {
+    const icon = typeIcon[e.type] || typeIcon.inconnu;
+    const road = e.road ? ` · <strong>${escapeHtml(e.road)}</strong>` : '';
+    const dates = e.start ? ` · dès ${new Date(e.start).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}` : '';
+    return `<li>${icon}${road}${dates} — ${escapeHtml((e.title || e.description || 'Événement').substring(0, 160))}</li>`;
+  }).join('') || `<li class="muted">${emptyMsg}</li>`);
+}
+
+function renderTransportFlux(data = {}) {
+  // TER SNCF AURA
+  const ter = data?.ter_aura || {};
+  const terDisruptions = ter.disruptions || [];
+  setRiskText('ter-aura-status',
+    `${ter.status || 'inconnu'} · ${terDisruptions.length} perturbation(s)`,
+    terDisruptions.length > 0 ? 'orange' : (ter.status === 'online' ? 'vert' : 'jaune'),
+  );
+  setText('ter-aura-info', ter.status === 'online'
+    ? (terDisruptions.length === 0 ? 'Trafic TER normal sur Isère' : `${terDisruptions.length} perturbation(s) détectée(s)`)
+    : (ter.error ? ter.error.substring(0, 80) : 'Données non disponibles'));
+  _renderDisruptionsList('ter-aura-list', terDisruptions, 'Trafic TER normal pour l\'Isère.');
+
+  // APRR/AREA
+  const aprr = data?.aprr_isere || {};
+  const aprEvents = aprr.events || [];
+  setRiskText('aprr-status',
+    `${aprr.status || 'inconnu'} · ${aprEvents.length} événement(s) · ${(aprr.routes || []).join(' ')}`,
+    aprEvents.length > 0 ? 'orange' : (aprr.status === 'online' ? 'vert' : 'jaune'),
+  );
+  setText('aprr-info', aprr.status === 'online'
+    ? (aprEvents.length === 0 ? 'Trafic autoroutier fluide sur Isère' : `${aprEvents.length} événement(s) sur ${(aprr.routes || []).join(', ')}`)
+    : (aprr.error ? aprr.error.substring(0, 80) : 'Données non disponibles'));
+  _renderEventsList('aprr-list', aprEvents, 'Trafic autoroutier fluide sur les axes Isère.');
+
+  // Vinci Autoroutes
+  const vinci = data?.vinci_autoroutes || {};
+  const vinciEvents = vinci.events || [];
+  setRiskText('vinci-status',
+    `${vinci.status || 'inconnu'} · ${vinciEvents.length} événement(s)`,
+    vinciEvents.length > 0 ? 'orange' : (vinci.status === 'online' ? 'vert' : 'jaune'),
+  );
+  setText('vinci-info', vinci.status === 'online'
+    ? (vinciEvents.length === 0 ? 'Trafic fluide sur Isère' : `${vinciEvents.length} événement(s) Vinci`)
+    : (vinci.error ? vinci.error.substring(0, 80) : 'Données non disponibles'));
+  _renderEventsList('vinci-list', vinciEvents, 'Trafic Vinci fluide sur Isère.');
+
+  // Réseau M
+  const resom = data?.resom_isere || {};
+  const resomDisruptions = resom.disruptions || [];
+  setRiskText('resom-status',
+    `${resom.status || 'inconnu'} · ${resomDisruptions.length ? resomDisruptions.length + ' perturbation(s)' : (resom.normal_service ? 'trafic normal' : '–')}`,
+    resomDisruptions.length > 0 ? 'orange' : (resom.status === 'online' ? 'vert' : 'jaune'),
+  );
+  setText('resom-info', resom.normal_service && !resomDisruptions.length
+    ? 'Service normal sur tous les cars Isère'
+    : (resom.error ? resom.error.substring(0, 80) : `${resomDisruptions.length} perturbation(s) réseau Isère`));
+  _renderDisruptionsList('resom-list', resomDisruptions, 'Service normal sur les cars Isère.');
+
+  // Cars Région AURA
+  const cars = data?.cars_region_aura || {};
+  const carsDisruptions = cars.disruptions || [];
+  setRiskText('cars-region-status',
+    `${cars.status || 'inconnu'} · ${carsDisruptions.length} perturbation(s)`,
+    carsDisruptions.length > 0 ? 'orange' : (cars.status === 'online' ? 'vert' : 'jaune'),
+  );
+  setText('cars-region-info', cars.status === 'online'
+    ? (carsDisruptions.length === 0 ? 'Service Cars Région normal sur Isère' : `${carsDisruptions.length} perturbation(s)`)
+    : (cars.error ? cars.error.substring(0, 80) : 'Données non disponibles'));
+  _renderDisruptionsList('cars-region-list', carsDisruptions, 'Service Cars Région normal sur Isère.');
+}
+
 function renderExternalRisks(data = {}) {
   const mergedData = mergeExternalRisksSnapshot(
     cachedExternalRisksSnapshot,
@@ -7713,6 +7846,7 @@ function renderExternalRisks(data = {}) {
   renderSituationOverview();
   renderSvcSummaryBar(mergedData);
   renderGroundwaterDetail(mergedData?.groundwater_isere || {});
+  renderTransportFlux(mergedData);
   return true;
 }
 
