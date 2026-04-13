@@ -1690,7 +1690,7 @@ def _vigicrues_build_station_entry(
 
 def _fetch_hubeau_isere_station_codes() -> set[str]:
     station_codes: set[str] = set()
-    page = 1
+    page = 0
     page_size = 1000
 
     while True:
@@ -1905,44 +1905,54 @@ def _fetch_vigicrues_isere_live(
                 })
 
         # ═══════════════════════════════════════════════════════════════════════
-        # PHASE 2B – Fallback Vigicrues : stations connues en parallèle
-        # (utilisé quand HuBEAU est indisponible)
-        # Chaque appel Vigicrues donne le vrai nom + les observations
-        # en 2 requêtes légères par station, 24 en parallèle → ~3-5 secondes.
+        # PHASE 2B – Fallback HuBEAU par codes connus
+        # (utilisé quand _fetch_hubeau_isere_stations_full échoue ou renvoie [])
+        # Utilise les codes Isère hardcodés + HuBEAU pour métadonnées/observations.
+        # L'ancienne API vigicrues.gouv.fr/services/ est hors ligne depuis 2024.
         # ═══════════════════════════════════════════════════════════════════════
         if not isere_stations:
-            fallback_codes = [
-                c for c in fallback_isere_codes
-                if c.startswith("W")  # Seuls les vrais codes hydro SANDRE
-            ]
-            force_include = set(fallback_codes)
-            catalog = set(fallback_codes)
-            worker_count = min(len(fallback_codes), 12)
-            fb_executor = ThreadPoolExecutor(max_workers=worker_count)
-            fb_futures = [
-                fb_executor.submit(
-                    _vigicrues_build_station_entry,
-                    source,
-                    code,
-                    priority_names,
-                    force_include,
-                    catalog,
-                    None,
-                )
-                for code in fallback_codes
-            ]
+            fallback_codes_list = list(fallback_isere_codes)
+            meta_map: dict[str, dict[str, Any]] = {}
             try:
-                for fut in as_completed(fb_futures, timeout=20):
-                    try:
-                        station = fut.result()
-                    except Exception:
-                        station = None
-                    if station:
-                        isere_stations.append(station)
-            except TimeoutError:
+                meta_map = _fetch_hubeau_stations_by_codes(fallback_codes_list)
+            except Exception:
                 pass
-            finally:
-                fb_executor.shutdown(wait=False, cancel_futures=True)
+
+            obs_fallback: dict[str, tuple[float, float, str | None]] = {}
+            try:
+                obs_fallback = _fetch_hubeau_observations_batch(fallback_codes_list)
+            except Exception:
+                pass
+
+            for code in fallback_codes_list:
+                meta = meta_map.get(code, {})
+                try:
+                    lat = float(meta["latitude_station"]) if meta.get("latitude_station") is not None else None
+                    lon = float(meta["longitude_station"]) if meta.get("longitude_station") is not None else None
+                except (TypeError, ValueError):
+                    lat = lon = None
+                station_name = meta.get("libelle_station") or meta.get("libelle_cours_eau") or code
+                river_name = meta.get("libelle_cours_eau") or ""
+                text_blob = f"{station_name} {river_name}".lower()
+                height_m, delta_m, observed_at = obs_fallback.get(code, (0.0, 0.0, None))
+                level = _vigicrues_level_from_delta(abs(delta_m))
+                isere_stations.append({
+                    "code": code,
+                    "station": station_name,
+                    "river": river_name,
+                    "height_m": round(height_m, 2),
+                    "delta_window_m": round(delta_m, 3),
+                    "level": level,
+                    "control_status": "Fonctionnel",
+                    "is_priority": "grenoble" in text_blob or any(name in text_blob for name in priority_names),
+                    "observed_at": observed_at,
+                    "lat": lat,
+                    "lon": lon,
+                    "commune_code": str(meta.get("code_commune_station") or ""),
+                    "troncon": "",
+                    "troncon_code": "",
+                    "source_link": f"{source}/station/{code}",
+                })
 
         if not isere_stations:
             return {
@@ -1955,7 +1965,7 @@ def _fetch_vigicrues_isere_live(
                 "alerts": [],
                 "station_count": 0,
                 "updated_at": datetime.utcnow().isoformat() + "Z",
-                "stale_reason": "Aucune station résolue (HuBEAU et Vigicrues indisponibles)",
+                "error": "Aucune station résolue — HuBEAU (referentiel/stations + observations_tr) et fallback indisponibles",
             }
 
         troncons_index: dict[str, dict[str, Any]] = {}
