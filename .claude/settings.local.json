@@ -172,7 +172,8 @@
       "Bash(grep -v \"^[0-9]*://\\\\|//.*Layer\")",
       "Bash(python -c \"import ast; ast.parse\\(open\\('backend/app/services.py'\\).read\\(\\)\\); print\\('services.py OK'\\)\")",
       "Bash(python -c \"import ast; ast.parse\\(open\\('backend/app/services.py', encoding='utf-8'\\).read\\(\\)\\); print\\('services.py OK'\\)\")",
-      "Bash(python -c \"import ast; ast.parse\\(open\\('backend/app/main.py', encoding='utf-8'\\).read\\(\\)\\); print\\('main.py OK'\\)\")"
+      "Bash(python -c \"import ast; ast.parse\\(open\\('backend/app/main.py', encoding='utf-8'\\).read\\(\\)\\); print\\('main.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('backend/app/services.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")"
     ]
   }
 }

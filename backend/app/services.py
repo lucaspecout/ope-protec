@@ -229,9 +229,28 @@ def _http_get_json(url: str, timeout: int = 12, headers: dict[str, str] | None =
     return json.loads(payload.decode("utf-8"))
 
 
-def _http_get_text(url: str, timeout: int = 12, ssl_context: ssl.SSLContext | None = None) -> str:
+def _http_get_text(url: str, timeout: int = 12, ssl_context: ssl.SSLContext | None = None, retries: int = 1) -> str:
     request = Request(url, headers={"User-Agent": "ope-protec/1.0", "Connection": "keep-alive"})
-    payload = _http_get_with_retries(request=request, timeout=timeout, ssl_context=ssl_context)
+    payload = _http_get_with_retries(request=request, timeout=timeout, ssl_context=ssl_context, retries=retries)
+    return payload.decode("utf-8", errors="ignore")
+
+
+_BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
+
+
+def _http_get_text_quick(url: str, timeout: int = 8) -> str:
+    """Scraping rapide sans retry, User-Agent navigateur. Pour sites tiers peu fiables."""
+    request = Request(url, headers={
+        "User-Agent": _BROWSER_UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "fr-FR,fr;q=0.9",
+        "Connection": "keep-alive",
+    })
+    payload = _http_get_with_retries(request=request, timeout=timeout, retries=0)
     return payload.decode("utf-8", errors="ignore")
 
 
@@ -6168,7 +6187,7 @@ def _fetch_aprr_isere_live() -> dict[str, Any]:
     source = "https://voyage.aprr.fr/information-trafic"
     events: list[dict[str, Any]] = []
     try:
-        html = _http_get_text(source, timeout=22)
+        html = _http_get_text_quick(source, timeout=8)
         # Chercher JSON embarqué (Next.js / Nuxt / app React SSR)
         for pattern in (
             r'<script[^>]+id="__NEXT_DATA__"[^>]*>(\{.+?\})</script>',
@@ -6273,7 +6292,7 @@ _resom_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "re
 def _fetch_resom_live() -> dict[str, Any]:
     source = "https://www.reso-m.fr/55-infotrafic.htm"
     try:
-        html = _http_get_text(source, timeout=20)
+        html = _http_get_text_quick(source, timeout=10)
         text = _strip_html_tags(unescape(html))
         disruptions: list[dict[str, Any]] = []
         for m in re.finditer(
@@ -6336,7 +6355,7 @@ def _fetch_vinci_autoroutes_live() -> dict[str, Any]:
     source = "https://www.vinci-autoroutes.com/fr/autoroutes-temps-reel/"
     events: list[dict[str, Any]] = []
     try:
-        html = _http_get_text(source, timeout=22)
+        html = _http_get_text_quick(source, timeout=8)
         for pattern in (
             r'<script[^>]+id="__NEXT_DATA__"[^>]*>(\{.+?\})</script>',
             r'window\.__INITIAL_STATE__\s*=\s*(\{.+?\});\s*</script>',
@@ -6543,7 +6562,7 @@ def _fetch_cars_region_live() -> dict[str, Any]:
             })
     except (HTTPError, URLError, TimeoutError, RemoteDisconnected, json.JSONDecodeError):
         try:
-            html = _http_get_text(web_source, timeout=18)
+            html = _http_get_text_quick(web_source, timeout=8)
             text = _strip_html_tags(unescape(html))
             for m in re.finditer(
                 r'(?:ligne|service|car)[^.]{0,200}(?:perturbation|déviation|suppression|retard)[^.]*\.',
