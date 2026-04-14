@@ -6380,6 +6380,24 @@ function safeDateToLocale(value, options = {}) {
     : '-';
 }
 
+/**
+ * Retourne un horodatage relatif lisible : "il y a 5 min", "il y a 2h", "hier"…
+ * Utilisé dans la MCO pour rendre les entrées récentes immédiatement lisibles.
+ */
+function timeAgo(value) {
+  const date = new Date(value || 0);
+  if (!Number.isFinite(date.getTime()) || date.getTime() <= 0) return '';
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (seconds < 30)  return 'à l\'instant';
+  if (seconds < 90)  return 'il y a 1 min';
+  if (seconds < 3600) return `il y a ${Math.floor(seconds / 60)} min`;
+  if (seconds < 7200) return 'il y a 1h';
+  if (seconds < 86400) return `il y a ${Math.floor(seconds / 3600)}h`;
+  if (seconds < 172800) return 'hier';
+  if (seconds < 604800) return `il y a ${Math.floor(seconds / 86400)} j`;
+  return safeDateToLocale(value, { day: '2-digit', month: '2-digit', year: '2-digit' });
+}
+
 function toDatetimeLocal(value) {
   const date = new Date(value || 0);
   if (!Number.isFinite(date.getTime()) || date.getTime() <= 0) return '';
@@ -6620,12 +6638,13 @@ function renderSituationOverview() {
         <p class="muted">Version claire et moderne pour envoi immédiat · mise à jour ${escapeHtml(generatedAt)}</p>
       </div>
       <div class="situation-toolbar__actions">
-        <button id="situation-export-pdf-btn" type="button">📄 Générer et télécharger le SITREP PDF</button>
+        <button id="situation-copy-sitrep-btn" type="button" class="btn-copy-sitrep ghost" title="Copier le SITREP en texte brut">📋 Copier SITREP</button>
+        <button id="situation-export-pdf-btn" type="button">📄 Télécharger PDF</button>
       </div>
     </div>
 
     <div class="situation-top-grid">
-      ${kpiCards.map((card) => `<article class="tile situation-tile situation-tile--interactive" role="button" tabindex="0" data-kpi-key="${escapeHtml(card.key)}" data-kpi-label="${escapeHtml(card.label)}"><h3>${card.label}</h3><p class="kpi-value ${card.css}">${escapeHtml(card.value)}</p><p class="muted">${escapeHtml(card.info)}</p>${card.detail || ''}</article>`).join('')}
+      ${kpiCards.map((card) => `<article class="tile situation-tile situation-tile--interactive situation-tile--bg-${escapeHtml(card.css)}" role="button" tabindex="0" data-kpi-key="${escapeHtml(card.key)}" data-kpi-label="${escapeHtml(card.label)}"><h3>${card.label}</h3><p class="kpi-value ${card.css}">${escapeHtml(card.value)}</p><p class="muted">${escapeHtml(card.info)}</p>${card.detail || ''}</article>`).join('')}
     </div>
 
     <div class="situation-top-grid">
@@ -7085,6 +7104,7 @@ function exportSitrepPdf() {
 }
 
 function bindSituationActions() {
+  document.getElementById('situation-copy-sitrep-btn')?.addEventListener('click', () => copySitrepToClipboard());
   document.getElementById('situation-export-pdf-btn')?.addEventListener('click', async () => {
     const button = document.getElementById('situation-export-pdf-btn');
     const originalText = button?.textContent || '📄 Générer et télécharger le SITREP PDF';
@@ -7127,6 +7147,9 @@ function bindSituationActions() {
 function renderDashboard(dashboard = {}) {
   cachedDashboardSnapshot = dashboard && typeof dashboard === 'object' ? dashboard : {};
   renderSituationOverview();
+  // Mettre à jour le badge de vigilance dans le header dès que le dashboard change.
+  const globalLevel = normalizeLevel(dashboard?.global_risk || dashboard?.vigilance || 'vert');
+  updateHeaderVigilanceBadge(globalLevel);
 }
 
 function renderSncfAlerts(sncf = {}) {
@@ -8082,7 +8105,11 @@ function buildLogTableRow(log = {}) {
     ? `<div class="map-inline-actions"><button type="button" class="ghost inline-action" data-log-edit="${log.id}">Modifier</button><button type="button" class="ghost inline-action danger" data-log-delete="${log.id}">Supprimer MCO</button></div>`
     : '—';
   const eventTitle = escapeHtml(getEventTitle(log.event_id));
-  return `<tr><td>${new Date(log.event_time || log.created_at).toLocaleString()}</td><td><span class="badge neutral">${formatLogScope(log)}${municipality}</span></td><td>${log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢'}</td><td><strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'MCO')}</strong><br/><span class="muted">${eventTitle}</span></td><td>${place}<br/><span class="muted">${owner} · ${source}${next ? ` · ${next}` : ''}</span><br/>${escapeHtml(log.description || '')}${log.actions_taken ? `<br/><span class="muted">Actions: ${escapeHtml(log.actions_taken)}</span>` : ''}</td><td>${actions}</td></tr>`;
+  const logTimestamp = log.event_time || log.created_at;
+  const timeAbsolute = new Date(logTimestamp).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit' });
+  const timeRelative = timeAgo(logTimestamp);
+  const timeCell = `<span class="log-time-abs">${escapeHtml(timeAbsolute)}</span>${timeRelative ? `<span class="log-time-rel">${escapeHtml(timeRelative)}</span>` : ''}`;
+  return `<tr><td>${timeCell}</td><td><span class="badge neutral">${formatLogScope(log)}${municipality}</span></td><td>${log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢'}</td><td><strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'MCO')}</strong><br/><span class="muted">${eventTitle}</span></td><td>${place}<br/><span class="muted">${owner} · ${source}${next ? ` · ${next}` : ''}</span><br/>${escapeHtml(log.description || '')}${log.actions_taken ? `<br/><span class="muted">Actions: ${escapeHtml(log.actions_taken)}</span>` : ''}</td><td>${actions}</td></tr>`;
 }
 
 function renderLogsList() {
@@ -8124,6 +8151,7 @@ async function loadEvents(preloaded = null) {
   renderEventsList();
   updateEventDetailPanel();
   renderLogsList();
+  updateMenuEventsBadge();
 }
 
 async function exportLogsCsv() {
@@ -8464,6 +8492,17 @@ function bindAppInteractions() {
     setActivePanel(button.dataset.target);
     // setActivePanel appelle déjà closeMobileSidebar()
   }));
+
+  // Bouton "Rafraîchir" dans le header — accessible depuis tous les panels.
+  document.getElementById('header-refresh-btn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('header-refresh-btn');
+    if (btn) btn.classList.add('spinning');
+    try {
+      await refreshAll(true);
+    } finally {
+      if (btn) btn.classList.remove('spinning');
+    }
+  });
   document.getElementById('georisques-pcs-select')?.addEventListener('change', (event) => {
     selectedGeorisquesPcsCommuneKey = String(event.target?.value || '').trim().toLowerCase();
     const georisquesPayload = cachedExternalRisksSnapshot?.georisques || {};
@@ -9075,6 +9114,138 @@ function startAutoRefresh() {
   refreshTimer = setInterval(() => token && refreshAll(true), AUTO_REFRESH_MS);
 }
 
+/* ─────────────────────────────────────────────────────────────
+   AMÉLIORATIONS OPÉRATIONNELLES
+   ───────────────────────────────────────────────────────────── */
+
+/** Horloge temps réel dans le header — mise à jour chaque seconde. */
+function startLiveClock() {
+  const elTime = document.getElementById('header-time');
+  const elDate = document.getElementById('header-date');
+  if (!elTime || !elDate) return;
+  function tick() {
+    const now = new Date();
+    elTime.textContent = now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    elDate.textContent = now.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' });
+  }
+  tick();
+  setInterval(tick, 1000);
+}
+
+/** Badge de vigilance globale dans le header — mis à jour à chaque renderDashboard. */
+function updateHeaderVigilanceBadge(level) {
+  const badge = document.getElementById('header-vigilance-badge');
+  if (!badge) return;
+  const lvl = normalizeLevel(level || 'vert');
+  const labels = { vert: 'VERT', jaune: 'JAUNE', orange: 'ORANGE', rouge: 'ROUGE' };
+  badge.textContent = labels[lvl] || lvl.toUpperCase();
+  ['vert', 'jaune', 'orange', 'rouge'].forEach((l) => badge.classList.toggle(`header-vigilance-badge--${l}`, l === lvl));
+}
+
+/** Indicateur de fraîcheur : "données de il y a Xs" mis à jour toutes les 15s. */
+function startDataFreshnessIndicator() {
+  const el = document.getElementById('header-freshness');
+  if (!el) return;
+  function update() {
+    if (!_lastRefreshAllTs) { el.textContent = ''; return; }
+    const seconds = Math.floor((Date.now() - _lastRefreshAllTs) / 1000);
+    if (seconds < 10)  { el.textContent = 'données fraîches'; return; }
+    if (seconds < 60)  { el.textContent = `données il y a ${seconds}s`; return; }
+    if (seconds < 3600) { el.textContent = `données il y a ${Math.floor(seconds / 60)} min`; return; }
+    el.textContent = `données il y a ${Math.floor(seconds / 3600)}h`;
+  }
+  update();
+  setInterval(update, 15000);
+}
+
+/** Badge "N événements ouverts" sur le bouton Main courante dans le menu. */
+function updateMenuEventsBadge() {
+  const badge = document.getElementById('menu-events-badge');
+  if (!badge) return;
+  const openCount = Array.isArray(cachedEvents)
+    ? cachedEvents.filter((e) => String(e.status || '').toLowerCase() === 'ouvert').length
+    : 0;
+  if (openCount > 0) {
+    badge.textContent = String(openCount > 99 ? '99+' : openCount);
+    badge.classList.remove('hidden');
+    badge.setAttribute('aria-label', `${openCount} événement(s) ouvert(s)`);
+  } else {
+    badge.classList.add('hidden');
+  }
+}
+
+/** Génère le SITREP en texte brut pour copie presse-papier. */
+function buildSitrepText() {
+  const dashboard = cachedDashboardSnapshot || {};
+  const externalRisks = cachedExternalRisksSnapshot || {};
+  const now = new Date().toLocaleString('fr-FR');
+  const vigilance = normalizeLevel(dashboard.vigilance || externalRisks?.meteo_france?.level || 'vert');
+  const crises = Number(dashboard.communes_crise ?? 0);
+  const prefItems = Array.isArray(externalRisks?.prefecture_isere?.items)
+    ? externalRisks.prefecture_isere.items.slice(0, 3) : [];
+  const openEvents = Array.isArray(cachedEvents)
+    ? cachedEvents.filter((e) => String(e.status || '').toLowerCase() === 'ouvert') : [];
+  const recentLogs = Array.isArray(cachedLogs) ? cachedLogs.slice(0, 6) : [];
+
+  const lines = [
+    `SITREP ISÈRE · ${now}`,
+    '═'.repeat(50),
+    '',
+    `VIGILANCE MÉTÉO : ${vigilance.toUpperCase()}`,
+    `COMMUNES EN CRISE : ${crises}`,
+    `RISQUE GLOBAL : ${normalizeLevel(dashboard.global_risk || vigilance).toUpperCase()}`,
+    '',
+    '── ÉVÉNEMENTS OUVERTS ──────────────────────────',
+    ...(openEvents.length
+      ? openEvents.map((e) => `• [${String(e.status || '').toUpperCase()}] ${e.title} — ${e.address}`)
+      : ['• Aucun événement ouvert.']),
+    '',
+    '── FIL MCO (6 dernières entrées) ───────────────',
+    ...(recentLogs.length
+      ? recentLogs.map((l) => {
+          const at = new Date(l.event_time || l.created_at).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+          return `• ${at} [${(l.danger_level || 'vert').toUpperCase()}] ${l.description || '(sans description)'}`;
+        })
+      : ['• Aucune entrée MCO.']),
+    '',
+    '── PRÉFECTURE ISÈRE ────────────────────────────',
+    ...(prefItems.length
+      ? prefItems.map((i) => `• ${i.title || 'Actualité'}${i.published_at ? ` (${i.published_at})` : ''}`)
+      : ['• Aucune actualité Préfecture.']),
+    '',
+    `Généré par CRISIS38 · Protection Civile Isère · ${now}`,
+  ];
+  return lines.join('\n');
+}
+
+/** Copie le SITREP dans le presse-papier et feedback visuel sur le bouton. */
+async function copySitrepToClipboard() {
+  const btn = document.getElementById('situation-copy-sitrep-btn');
+  const text = buildSitrepText();
+  try {
+    await navigator.clipboard.writeText(text);
+    if (btn) {
+      btn.textContent = '✅ Copié !';
+      btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = '📋 Copier SITREP'; btn.classList.remove('copied'); }, 2500);
+    }
+  } catch {
+    // Fallback si clipboard API non disponible
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    if (btn) {
+      btn.textContent = '✅ Copié !';
+      btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = '📋 Copier SITREP'; btn.classList.remove('copied'); }, 2500);
+    }
+  }
+}
+
 async function refreshLiveEvents() {
   if (!token || document.hidden) return;
   return withPreservedScroll(async () => {
@@ -9231,6 +9402,8 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
   startLiveEventsRefresh();
   startMapAnnotationsSync();
   startExternalRisksSSE();
+  startLiveClock();
+  startDataFreshnessIndicator();
 }
 
 // Efface l'erreur de login dès que l'utilisateur recommence à taper

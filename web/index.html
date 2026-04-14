@@ -18,8 +18,14 @@
   <main class="shell">
     <section id="login-view" class="auth-wrap">
       <form id="login-form" class="panel auth-card" method="post" action="#" autocomplete="off">
-        <p class="tag">Protection Civile · Isère</p>
-        <h1>Connexion CRISIS38</h1>
+        <div class="login-logo">
+          <div class="login-logo__icon" aria-hidden="true"></div>
+          <div class="login-logo__text">
+            <strong>CRISIS38</strong>
+            <span>Protection Civile · Isère</span>
+          </div>
+        </div>
+        <h1>Connexion</h1>
         <p class="lead">Accès au centre opérationnel et aux services connectés.</p>
         <label>Identifiant<input id="login-username" name="username" autocomplete="username" required /></label>
         <label>Mot de passe<input id="login-password" name="password" type="password" autocomplete="current-password" required /></label>
@@ -56,7 +62,7 @@
           <button class="menu-btn" data-target="georisques-panel" data-icon="🌍"><span class="menu-label">Page Géorisques</span></button>
           <button class="menu-btn" data-target="news-panel" data-icon="📰"><span class="menu-label">Actualités</span></button>
           <button class="menu-btn" data-target="municipalities-panel" data-icon="🏛️"><span class="menu-label">Communes</span></button>
-          <button class="menu-btn" data-target="logs-panel" data-icon="📝"><span class="menu-label">Main courante</span></button>
+          <button class="menu-btn" data-target="logs-panel" data-icon="📝"><span class="menu-label">Main courante</span><span id="menu-events-badge" class="menu-badge hidden" aria-label="événements ouverts"></span></button>
           <button class="menu-btn" data-target="map-panel" data-icon="🗺️"><span class="menu-label">Carte Isère</span></button>
           <button class="menu-btn" data-target="users-panel" data-icon="👤"><span class="menu-label">Utilisateurs</span></button>
           <button class="menu-btn" data-target="api-panel" data-icon="🧩"><span class="menu-label">Interconnexions API</span></button>
@@ -76,6 +82,15 @@
           </div>
           <div class="header-actions">
             <p id="dashboard-error" class="error"></p>
+            <div class="header-live-bar" aria-label="État opérationnel">
+              <span id="header-vigilance-badge" class="header-vigilance-badge header-vigilance-badge--vert" title="Niveau de vigilance global">VERT</span>
+              <button id="header-refresh-btn" class="ghost header-refresh-btn" type="button" title="Actualiser les données maintenant">↺</button>
+              <div class="header-clock" aria-live="off" aria-label="Heure courante">
+                <span id="header-time" class="header-clock__time">--:--:--</span>
+                <span id="header-date" class="header-clock__date">--/--/----</span>
+              </div>
+              <span id="header-freshness" class="header-freshness" aria-live="polite"></span>
+            </div>
           </div>
         </header>
 

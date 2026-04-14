@@ -1915,3 +1915,188 @@ select:focus {
   .svc-cat-cards { grid-template-columns: 1fr; }
   .svc-gw-hd { flex-direction: column; align-items: flex-start; }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   AMÉLIORATIONS OPÉRATIONNELLES
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Barre live header (horloge + vigilance + rafraîchir) ────── */
+.header-live-bar {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  flex-wrap: wrap;
+}
+
+.header-clock {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 72px;
+  line-height: 1.15;
+}
+.header-clock__time {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: var(--primary);
+  letter-spacing: .02em;
+  font-variant-numeric: tabular-nums;
+}
+.header-clock__date {
+  font-size: .72rem;
+  color: var(--muted);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.header-vigilance-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .28rem .7rem;
+  border-radius: 999px;
+  font-size: .78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  border: 1.5px solid transparent;
+  white-space: nowrap;
+  transition: background .3s, color .3s, border-color .3s;
+}
+.header-vigilance-badge::before { content: '●'; font-size: .65em; }
+.header-vigilance-badge--vert   { background: #e4f7ec; color: #0f6f3e; border-color: #b7e7c8; }
+.header-vigilance-badge--jaune  { background: #fffbe0; color: #8a6a00; border-color: #f7d84a; }
+.header-vigilance-badge--orange { background: #ffe2c2; color: #944200; border-color: #ffb067; }
+.header-vigilance-badge--rouge  {
+  background: #ffe2e7; color: #9f1f32; border-color: #f5aab8;
+  animation: badge-rouge-pulse 1.8s ease-in-out infinite;
+}
+@keyframes badge-rouge-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(213, 63, 86, 0); }
+  50%       { box-shadow: 0 0 0 5px rgba(213, 63, 86, .22); }
+}
+
+.header-refresh-btn {
+  padding: .38rem .65rem;
+  font-size: .88rem;
+  font-weight: 700;
+  border-radius: 10px;
+  line-height: 1;
+  transition: transform .15s ease;
+}
+.header-refresh-btn:hover { transform: rotate(-20deg); }
+.header-refresh-btn.spinning { animation: spin-refresh .6s linear infinite; }
+@keyframes spin-refresh { to { transform: rotate(-360deg); } }
+
+.header-freshness {
+  font-size: .72rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* ── KPI tiles avec fond coloré selon le niveau ──────────────── */
+.situation-tile--bg-vert {
+  border-left: 4px solid #2f9e44;
+  background: linear-gradient(145deg, #f0fff5, #ffffff);
+}
+.situation-tile--bg-jaune {
+  border-left: 4px solid #e3b000;
+  background: linear-gradient(145deg, #fffdf0, #ffffff);
+}
+.situation-tile--bg-orange {
+  border-left: 4px solid #f07800;
+  background: linear-gradient(145deg, #fff8f0, #ffffff);
+}
+.situation-tile--bg-rouge {
+  border-left: 4px solid #d53f56;
+  background: linear-gradient(145deg, #fff2f4, #ffffff);
+  animation: tile-rouge-pulse 2.5s ease-in-out infinite;
+}
+@keyframes tile-rouge-pulse {
+  0%, 100% { border-left-color: #d53f56; }
+  50%       { border-left-color: #ff2244; }
+}
+
+/* ── Badge "événements ouverts" dans le menu ─────────────────── */
+.menu-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #d53f56;
+  color: #fff;
+  font-size: .68rem;
+  font-weight: 800;
+  line-height: 1;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.app--sidebar-collapsed .menu-badge { display: none; }
+.menu-btn { display: flex; align-items: center; gap: .45rem; }
+
+/* ── Horodatage relatif MCO ─────────────────────────────────── */
+.log-time-abs  { display: block; font-size: .82rem; font-variant-numeric: tabular-nums; }
+.log-time-rel  { display: block; font-size: .74rem; color: var(--muted); font-weight: 500; }
+
+/* ── Bouton copier SITREP ────────────────────────────────────── */
+.btn-copy-sitrep {
+  background: #edf3ff;
+  color: var(--primary);
+  border: 1px solid #c0d1e7;
+  font-size: .88rem;
+  padding: .55rem .85rem;
+}
+.btn-copy-sitrep.copied {
+  background: #e4f7ec;
+  color: #0f6f3e;
+  border-color: #b7e7c8;
+}
+
+/* ── Logo page de connexion ──────────────────────────────────── */
+.login-logo {
+  display: flex;
+  align-items: center;
+  gap: .7rem;
+  margin-bottom: 1rem;
+  padding-bottom: .85rem;
+  border-bottom: 1px solid var(--line);
+}
+.login-logo__icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #1a3568, #0f2240);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  position: relative;
+}
+.login-logo__icon::after {
+  content: '';
+  position: absolute;
+  width: 0; height: 0;
+  border-left: 10px solid transparent;
+  border-right: 10px solid transparent;
+  border-bottom: 17px solid #f07800;
+}
+.login-logo__text strong {
+  display: block;
+  font-size: 1rem;
+  color: var(--primary);
+  font-weight: 800;
+  line-height: 1.1;
+}
+.login-logo__text span {
+  font-size: .75rem;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+@media (max-width: 540px) {
+  .header-live-bar { gap: .4rem; }
+  .header-clock { display: none; }
+  .header-freshness { display: none; }
+}
