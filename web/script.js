@@ -171,6 +171,7 @@ let apiResyncTimer = null;
 let refreshAllInFlight = null;
 let photoCameraRefreshTimer = null;
 let _lastRefreshAllTs = 0;
+let _liveEventsFailCount = 0;
 let lastApiResyncAt = null;
 let isLoginSubmitting = false;
 const apiGetCache = new Map();
@@ -8306,6 +8307,10 @@ async function refreshAll(forceRefresh = false) {
 
   try {
     await refreshAllInFlight;
+    // Un refreshAll complet réussi signifie que les données sont fraîches :
+    // réinitialiser le compteur d'échecs live pour ne pas afficher d'erreur
+    // sur le prochain cycle si le refreshAll a déjà tout corrigé.
+    _liveEventsFailCount = 0;
   } finally {
     refreshAllInFlight = null;
     _lastRefreshAllTs = Date.now();
@@ -9246,8 +9251,14 @@ async function copySitrepToClipboard() {
   }
 }
 
+// Seuil avant d'afficher une erreur live (absorbe les micro-coupures réseau).
+const _LIVE_EVENTS_ERROR_THRESHOLD = 2;
+
 async function refreshLiveEvents() {
   if (!token || document.hidden) return;
+  // Ne pas tourner si un refreshAll complet est déjà en cours — il fait le même
+  // travail et va de toute façon écraser les données qu'on chargerait ici.
+  if (refreshAllInFlight) return;
   return withPreservedScroll(async () => {
     try {
       const [logs, dashboard] = await Promise.all([
@@ -9257,6 +9268,10 @@ async function refreshLiveEvents() {
         api('/logs', { cacheTtlMs: 30000 }),
         api('/dashboard', { cacheTtlMs: 30000 }),
       ]);
+
+      // Succès : réinitialiser le compteur d'échecs et effacer l'erreur si elle
+      // avait été posée par ce même chemin (et non par refreshAll).
+      _liveEventsFailCount = 0;
 
       cachedLogs = keepPreviousArray(cachedLogs, logs);
       renderLogsList();
@@ -9274,9 +9289,21 @@ async function refreshLiveEvents() {
       saveSnapshot(STORAGE_KEYS.dashboardSnapshot, cachedDashboardSnapshot);
 
       renderSituationOverview();
-      document.getElementById('dashboard-error').textContent = '';
+      // Effacer uniquement les erreurs posées par ce chemin (préfixe connu).
+      const errEl = document.getElementById('dashboard-error');
+      if (errEl && (errEl.textContent || '').startsWith('Actualisation live')) {
+        errEl.textContent = '';
+      }
     } catch (error) {
-      document.getElementById('dashboard-error').textContent = `Actualisation live des évènements: ${sanitizeErrorMessage(error.message)}`;
+      _liveEventsFailCount += 1;
+      // N'afficher l'erreur qu'après le seuil d'échecs consécutifs, et
+      // seulement si le dashboard-error est vide (ne pas écraser refreshAll).
+      if (_liveEventsFailCount >= _LIVE_EVENTS_ERROR_THRESHOLD) {
+        const errEl = document.getElementById('dashboard-error');
+        if (errEl && !errEl.textContent.trim()) {
+          errEl.textContent = `Actualisation live: ${sanitizeErrorMessage(error.message)}`;
+        }
+      }
     }
   });
 }
