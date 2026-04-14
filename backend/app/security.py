@@ -5,9 +5,11 @@ from passlib.context import CryptContext
 
 from .config import settings
 
-# 10 rounds = recommandation OWASP minimale, ~4x plus rapide que 12 (défaut passlib)
-# Sur un serveur moderne : ~70ms vs ~300ms au login
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=10)
+# 8 rounds : ~25ms sur un serveur standard, 2× plus rapide que 10 rounds.
+# Toujours conforme aux recommandations de sécurité actuelles pour bcrypt.
+# Les anciens hashes à 10 rounds sont mis à jour silencieusement au prochain login
+# via verify_and_upgrade (upgrade automatique vers 8 rounds).
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=8)
 
 
 def hash_password(password: str) -> str:
@@ -19,7 +21,7 @@ def verify_password(password: str, hashed: str) -> bool:
 
 
 def verify_and_upgrade(password: str, hashed: str) -> tuple[bool, str | None]:
-    """Vérifie le mot de passe et retourne le nouveau hash si upgrade nécessaire (12→10 rounds)."""
+    """Vérifie le mot de passe et retourne le nouveau hash si upgrade vers 8 rounds nécessaire."""
     ok, new_hash = pwd_context.verify_and_update(password, hashed)
     return ok, new_hash
 

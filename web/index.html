@@ -21,9 +21,10 @@
         <p class="tag">Protection Civile · Isère</p>
         <h1>Connexion CRISIS38</h1>
         <p class="lead">Accès au centre opérationnel et aux services connectés.</p>
-        <label>Identifiant<input name="username" required /></label>
-        <label>Mot de passe<input name="password" type="password" required /></label>
-        <button type="submit">Connexion sécurisée</button>
+        <label>Identifiant<input id="login-username" name="username" autocomplete="username" required /></label>
+        <label>Mot de passe<input id="login-password" name="password" type="password" autocomplete="current-password" required /></label>
+        <button id="login-submit-btn" type="submit">Connexion sécurisée</button>
+        <p id="login-status" class="login-status hidden"></p>
         <p id="login-error" class="error"></p>
         <details id="login-error-debug-wrap" class="login-error-debug hidden">
           <summary>Détails techniques de connexion</summary>

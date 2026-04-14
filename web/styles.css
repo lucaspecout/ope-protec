@@ -208,6 +208,34 @@ label { display: block; margin-bottom: .8rem; }
 
 .auth-wrap { min-height: 85vh; display: grid; place-items: center; }
 .auth-card { width: min(480px, 100%); padding: 1.2rem; }
+
+/* Statut de connexion (spinner textuel) */
+.login-status {
+  color: #2e5c96;
+  font-size: .88rem;
+  font-weight: 500;
+  margin: .3rem 0 0;
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+}
+.login-status::before {
+  content: '';
+  display: inline-block;
+  width: 13px; height: 13px;
+  border: 2px solid #2e5c96;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin-login .7s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes spin-login { to { transform: rotate(360deg); } }
+
+/* Bouton login en cours */
+#login-submit-btn:disabled {
+  opacity: .7;
+  cursor: not-allowed;
+}
 .login-error-debug { margin-top: .5rem; border: 1px dashed #d9b7be; border-radius: 10px; background: #fff6f7; }
 .login-error-debug summary { cursor: pointer; padding: .55rem .65rem; color: #7a2f3d; font-weight: 600; }
 .login-error-debug pre {

@@ -176,7 +176,8 @@
       "Bash(python -c \"import ast; ast.parse\\(open\\('backend/app/services.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")",
       "Bash(python -c \"import ast, pathlib; ast.parse\\(pathlib.Path\\('main.py'\\).read_text\\(encoding='utf-8'\\)\\); print\\('main.py OK'\\)\")",
       "Bash(python -c \"import ast, pathlib; ast.parse\\(pathlib.Path\\('main.py'\\).read_text\\(encoding='utf-8'\\)\\); print\\('OK'\\)\")",
-      "Bash(python -c \"import ast, pathlib; ast.parse\\(pathlib.Path\\('main.py'\\).read_text\\(encoding='utf-8'\\)\\); ast.parse\\(pathlib.Path\\('services.py'\\).read_text\\(encoding='utf-8'\\)\\); print\\('OK'\\)\")"
+      "Bash(python -c \"import ast, pathlib; ast.parse\\(pathlib.Path\\('main.py'\\).read_text\\(encoding='utf-8'\\)\\); ast.parse\\(pathlib.Path\\('services.py'\\).read_text\\(encoding='utf-8'\\)\\); print\\('OK'\\)\")",
+      "Bash(python -c \"import ast, pathlib; ast.parse\\(pathlib.Path\\('main.py'\\).read_text\\(encoding='utf-8'\\)\\); ast.parse\\(pathlib.Path\\('security.py'\\).read_text\\(encoding='utf-8'\\)\\); print\\('OK'\\)\")"
     ]
   }
 }

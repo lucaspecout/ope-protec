@@ -27,7 +27,8 @@ const API_PANEL_REFRESH_MS = 60000;
 const API_MAX_CONCURRENT_REQUESTS = 8;
 const API_REQUEST_TIMEOUT_MS = 20000;
 const API_SLOW_ENDPOINT_TIMEOUT_MS = 45000;
-const LOGIN_REQUEST_TIMEOUT_MS = 10000;
+const LOGIN_REQUEST_TIMEOUT_MS = 20000;   // 20s — Docker cold start peut être lent
+const SESSION_RESTORE_TIMEOUT_MS = 6000;  // 6s pour la vérification de session au démarrage
 const API_RETRY_BASE_DELAY_MS = 500;
 const API_MAX_RETRIES_GET = 3;
 const API_MAX_RETRIES_NON_GET = 1;
@@ -1435,6 +1436,7 @@ function setLoginError(message = '', debugDetails = '') {
   const debugTarget = document.getElementById('login-error-debug');
 
   if (errorTarget) errorTarget.textContent = message;
+  _setLoginStatus('');  // effacer le statut en cours quand une erreur apparaît
 
   if (!debugWrap || !debugTarget) return;
   if (!debugDetails) {
@@ -1446,6 +1448,26 @@ function setLoginError(message = '', debugDetails = '') {
 
   debugTarget.textContent = debugDetails;
   debugWrap.classList.remove('hidden');
+}
+
+function _setLoginStatus(message = '') {
+  const el = document.getElementById('login-status');
+  if (!el) return;
+  if (message) {
+    el.textContent = message;
+    el.classList.remove('hidden');
+  } else {
+    el.textContent = '';
+    el.classList.add('hidden');
+  }
+}
+
+function _setLoginSubmitting(submitting) {
+  const btn = document.getElementById('login-submit-btn');
+  if (btn) {
+    btn.disabled = submitting;
+    btn.textContent = submitting ? 'Connexion en cours…' : 'Connexion sécurisée';
+  }
 }
 
 function buildLoginDebugDetails(error, username = '') {
@@ -9260,47 +9282,82 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
   startExternalRisksSSE();
 }
 
+// Efface l'erreur de login dès que l'utilisateur recommence à taper
+['login-username', 'login-password'].forEach((id) => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('input', () => { setLoginError(''); _setLoginStatus(''); });
+});
+
 loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   if (isLoginSubmitting) return;
   isLoginSubmitting = true;
   setLoginError('');
-  const submitBtn = loginForm.querySelector('button[type="submit"]');
-  if (submitBtn) submitBtn.disabled = true;
+  _setLoginSubmitting(true);
+
   const form = new FormData(loginForm);
-  const username = String(form.get('username') || '');
+  const username = String(form.get('username') || '').trim();
   const password = String(form.get('password') || '');
 
-  try {
-    const payload = new URLSearchParams({ username, password });
-    const result = await api('/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: payload,
-      logoutOn401: false,
-      omitAuth: true,
-      highPriority: true,
-      timeoutMs: LOGIN_REQUEST_TIMEOUT_MS,
-      maxRetries: 0,
-    });
-    token = result.access_token;
-    localStorage.setItem(STORAGE_KEYS.token, token);
-    pendingCurrentPassword = password;
-    currentUser = result.user;
+  // Tentatives : 1 retry automatique sur erreur réseau/timeout (pas sur 401/403)
+  const MAX_LOGIN_ATTEMPTS = 2;
+  let lastError = null;
 
-    if (result.must_change_password) {
-      setVisibility(loginForm, false);
-      setVisibility(passwordForm, true);
-      return;
+  for (let attempt = 0; attempt < MAX_LOGIN_ATTEMPTS; attempt += 1) {
+    if (attempt > 0) {
+      _setLoginStatus('Reconnexion en cours… (tentative 2/2)');
+      await wait(800);
+    } else {
+      _setLoginStatus('Connexion en cours…');
     }
 
-    await initializeAuthenticatedSession({ runRefreshInBackground: true });
-  } catch (error) {
-    setLoginError(error.message, buildLoginDebugDetails(error, username));
-  } finally {
-    isLoginSubmitting = false;
-    if (submitBtn) submitBtn.disabled = false;
+    try {
+      const payload = new URLSearchParams({ username, password });
+      const result = await api('/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: payload,
+        logoutOn401: false,
+        omitAuth: true,
+        highPriority: true,
+        timeoutMs: LOGIN_REQUEST_TIMEOUT_MS,
+        maxRetries: 0,  // géré manuellement ici
+      });
+
+      _setLoginStatus('');
+      token = result.access_token;
+      localStorage.setItem(STORAGE_KEYS.token, token);
+      pendingCurrentPassword = password;
+      currentUser = result.user;
+
+      if (result.must_change_password) {
+        setVisibility(loginForm, false);
+        setVisibility(passwordForm, true);
+        isLoginSubmitting = false;
+        _setLoginSubmitting(false);
+        return;
+      }
+
+      await initializeAuthenticatedSession({ runRefreshInBackground: true });
+      isLoginSubmitting = false;
+      _setLoginSubmitting(false);
+      return;
+
+    } catch (error) {
+      lastError = error;
+      // Ne pas retenter si c'est une erreur d'authentification (mauvais mdp)
+      const isAuthError = error?.status === 401 || error?.status === 403;
+      if (isAuthError) break;
+      // Retenter uniquement sur timeout ou erreur réseau
+      const isRetryable = error?.isTimeout || isNetworkFetchError(error);
+      if (!isRetryable) break;
+    }
   }
+
+  _setLoginStatus('');
+  setLoginError(lastError?.message || 'Connexion impossible', buildLoginDebugDetails(lastError, username));
+  isLoginSubmitting = false;
+  _setLoginSubmitting(false);
 });
 
 passwordForm.addEventListener('submit', async (event) => {
@@ -9508,16 +9565,35 @@ document.getElementById('event-form')?.addEventListener('submit', async (event) 
     if (token) refreshAll(false);
   });
 
-  if (!token) return showLogin();
+  // Afficher le formulaire de login immédiatement — pas de blanc d'écran.
+  // Si un token existe, on tente une restauration silencieuse en arrière-plan.
+  if (!token) {
+    showLogin();
+    return;
+  }
+
+  // Token présent : montrer le login avec un message discret pendant la vérification.
+  showLogin();
+  _setLoginStatus('Vérification de la session…');
+
   try {
-    currentUser = await api('/auth/me');
+    // Timeout court (6s) + 1 seul essai : on ne veut pas bloquer l'utilisateur.
+    currentUser = await api('/auth/me', {
+      timeoutMs: SESSION_RESTORE_TIMEOUT_MS,
+      maxRetries: 1,
+    });
+    _setLoginStatus('');
     await initializeAuthenticatedSession({ runRefreshInBackground: true });
   } catch (error) {
+    _setLoginStatus('');
     if (Number(error?.status) === 401) {
-      logout();
+      // Token expiré ou invalide — nettoyage silencieux, login prêt à l'emploi
+      localStorage.removeItem(STORAGE_KEYS.token);
+      token = null;
       return;
     }
-    setLoginError(`Session conservée mais API indisponible: ${sanitizeErrorMessage(error?.message || 'erreur inconnue')}`, buildLoginDebugDetails(error, currentUser?.username || 'session existante'));
-    showLogin();
+    // Erreur réseau : le serveur est peut-être en cours de démarrage.
+    // L'utilisateur peut se connecter manuellement, le formulaire est déjà visible.
+    setLoginError('Serveur momentanément indisponible. Réessayez dans quelques secondes.');
   }
 })();

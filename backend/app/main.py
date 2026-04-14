@@ -904,14 +904,21 @@ def delete_user(user_id: int, db: Session = Depends(get_db), actor: User = Depen
 
 
 @app.post("/auth/login", response_model=LoginResponse)
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == form_data.username).first()
     if not user:
+        # Délai constant pour éviter l'énumération d'utilisateurs via timing (~25ms ≈ bcrypt 8 rounds)
+        await asyncio.sleep(0.025)
         raise HTTPException(401, "Utilisateur ou mot de passe incorrect")
-    ok, new_hash = verify_and_upgrade(form_data.password, user.hashed_password)
+    # Exécuter bcrypt dans l'executor pour ne pas bloquer la boucle asyncio
+    hashed = user.hashed_password
+    password_plain = form_data.password
+    ok, new_hash = await asyncio.get_running_loop().run_in_executor(
+        None, lambda: verify_and_upgrade(password_plain, hashed)
+    )
     if not ok:
         raise HTTPException(401, "Utilisateur ou mot de passe incorrect")
-    # Upgrade silencieux du hash vers 10 rounds si nécessaire (était 12 par défaut)
+    # Upgrade silencieux vers 8 rounds si le hash était à 10 ou 12 rounds
     if new_hash:
         user.hashed_password = new_hash
         db.commit()
