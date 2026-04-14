@@ -1671,7 +1671,7 @@ async function requestApiAcrossOrigins(path, fetchOptions = {}, {
   maxRetries,
   timeoutMs = API_REQUEST_TIMEOUT_MS,
 } = {}) {
-  const headers = { ...(fetchOptions.headers || {}) };
+  const headers = { 'Connection': 'keep-alive', ...(fetchOptions.headers || {}) };
   const method = String(fetchOptions.method || 'GET').toUpperCase();
   if (token && !fetchOptions.omitAuth) headers.Authorization = `Bearer ${token}`;
 

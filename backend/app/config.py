@@ -16,8 +16,11 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("GEORISQUES_API_TOKEN", "GEORISQUE_API_TOKEN"),
     )
-    db_pool_size: int = 12
-    db_max_overflow: int = 24
+    # Pool par worker × 3 workers gunicorn.
+    # pool_size=5 → 15 connexions de base, max_overflow=10 → 30 en pic = 45 total max.
+    # PostgreSQL par défaut accepte max 100 connexions — on reste bien en-dessous.
+    db_pool_size: int = 5
+    db_max_overflow: int = 10
     db_pool_timeout_seconds: int = 30
     db_pool_recycle_seconds: int = 1800
     external_fetch_workers: int = 18

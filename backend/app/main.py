@@ -517,9 +517,13 @@ def _refresh_one_service(key: str) -> None:
             db.close()
 
 
-def _service_loop(key: str, interval: int) -> None:
-    """Boucle perpétuelle : première récupération immédiate au démarrage,
-    puis toutes les `interval` secondes. Indépendante des autres services."""
+def _service_loop(key: str, interval: int, initial_delay: float = 0.0) -> None:
+    """Boucle perpétuelle : première récupération après `initial_delay` secondes,
+    puis toutes les `interval` secondes. Indépendante des autres services.
+    Le délai initial permet d'échelonner les 22 services pour éviter le thundering
+    herd au démarrage (66 requêtes externes simultanées × 3 workers)."""
+    if initial_delay > 0:
+        sleep(initial_delay)
     while True:
         _refresh_one_service(key)
         sleep(interval)
@@ -555,8 +559,12 @@ def startup_warmup_external_sources() -> None:
         _set_external_risks_snapshot(initial_payload)
 
     # Démarrer une boucle indépendante par service.
-    for key, interval in SERVICE_REFRESH_INTERVALS.items():
-        Thread(target=_service_loop, args=(key, interval), daemon=True).start()
+    # Tri par intervalle croissant : les services les plus fréquents (météo, crues…)
+    # démarrent en premier, puis on échelonne de 400ms entre chaque service.
+    # Résultat : 22 services répartis sur ~9s au lieu de tous démarrer à 0s.
+    sorted_services = sorted(SERVICE_REFRESH_INTERVALS.items(), key=lambda kv: kv[1])
+    for i, (key, interval) in enumerate(sorted_services):
+        Thread(target=_service_loop, args=(key, interval, i * 0.4), daemon=True).start()
 
     # Préchauffer toutes les données statiques au démarrage.
     # Priorité : fichier JSON (immédiat) → Redis → Overpass/CSV (réseau, seulement si nécessaire).
@@ -1191,16 +1199,77 @@ def operations_bootstrap(
     db: Session = Depends(get_db),
     user: User = Depends(require_roles(*READ_ROLES)),
 ):
+    """Charge en une seule requête toutes les données nécessaires à l'interface.
+    Les 4 requêtes DB (communes, évènements, MCO, users) sont exécutées en parallèle
+    avec des sessions indépendantes — SQLAlchemy n'est pas thread-safe sur une session."""
     started_at = datetime.utcnow()
+
+    # get_external_risks_payload lit depuis la mémoire (snapshot) → <1ms, pas de réseau.
     risks_payload = get_external_risks_payload(refresh=refresh, db=db)
     dashboard_payload = build_dashboard_payload(db, user, external_risks=risks_payload)
-    municipalities_payload = list_municipalities(db=db, user=user)
-    events_payload = list_events(db=db, user=user)
-    logs_payload = list_logs(db=db, user=user)
 
-    users_payload = []
-    if user.role == "admin":
-        users_payload = db.query(User).order_by(User.created_at.desc()).all()
+    # Requêtes DB parallèles — chaque tâche ouvre et ferme sa propre session.
+    from concurrent.futures import ThreadPoolExecutor as _TPE
+
+    user_role = user.role
+    user_municipality_name = user.municipality_name
+
+    def _fetch_municipalities() -> list:
+        with SessionLocal() as s:
+            if user_role == "mairie":
+                if not user_municipality_name:
+                    return []
+                nm = user_municipality_name.strip().lower()
+                return s.query(Municipality).filter(func.lower(Municipality.name) == nm).all()
+            rows = s.query(Municipality).order_by(Municipality.name).all()
+            s.expunge_all()
+            return rows
+
+    def _fetch_events() -> list:
+        with SessionLocal() as s:
+            q = s.query(IncidentEvent).order_by(IncidentEvent.created_at.desc())
+            if user_role == "mairie":
+                mun = s.query(Municipality).filter(
+                    func.lower(Municipality.name) == (user_municipality_name or "").strip().lower()
+                ).first()
+                if mun is None:
+                    return []
+                q = q.filter(IncidentEvent.municipality_id == mun.id)
+            rows = q.limit(300).all()
+            s.expunge_all()
+            return rows
+
+    def _fetch_logs() -> list:
+        with SessionLocal() as s:
+            q = s.query(OperationalLog).order_by(OperationalLog.created_at.desc())
+            if user_role == "mairie":
+                mun = s.query(Municipality).filter(
+                    func.lower(Municipality.name) == (user_municipality_name or "").strip().lower()
+                ).first()
+                if mun is None:
+                    return []
+                q = q.filter(OperationalLog.municipality_id == mun.id)
+            rows = q.limit(200).all()
+            s.expunge_all()
+            return rows
+
+    def _fetch_users() -> list:
+        if user_role != "admin":
+            return []
+        with SessionLocal() as s:
+            rows = s.query(User).order_by(User.created_at.desc()).all()
+            s.expunge_all()
+            return rows
+
+    with _TPE(max_workers=4) as ex:
+        f_muni  = ex.submit(_fetch_municipalities)
+        f_evts  = ex.submit(_fetch_events)
+        f_logs  = ex.submit(_fetch_logs)
+        f_users = ex.submit(_fetch_users)
+        municipalities_payload = f_muni.result()
+        events_payload         = f_evts.result()
+        logs_payload           = f_logs.result()
+        users_payload          = f_users.result()
 
     duration_ms = int((datetime.utcnow() - started_at).total_seconds() * 1000)
     return {
