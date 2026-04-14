@@ -645,13 +645,17 @@ _INSTITUTIONS_CRITICAL_QUERY = f"""[out:json][timeout:60];
 );
 out center tags;"""
 
-# Requête Overpass bbox Isère — équipements hébergement/accueil (nodes uniquement)
-_INSTITUTIONS_FACILITIES_QUERY = f"""[out:json][timeout:60];
+# Requête Overpass bbox Isère — équipements hébergement/accueil
+_INSTITUTIONS_FACILITIES_QUERY = f"""[out:json][timeout:90];
 (
-  node["amenity"~"community_centre|arts_centre|theatre|cinema|concert_hall|events_venue|convention_centre|social_facility"]({_INSTITUTIONS_ISERE_BBOX});
-  node["leisure"~"sports_hall|sports_centre|stadium|ice_rink"]({_INSTITUTIONS_ISERE_BBOX});
-  way["amenity"~"community_centre|theatre|cinema|social_facility"]({_INSTITUTIONS_ISERE_BBOX});
-  way["leisure"~"sports_hall|sports_centre|stadium"]({_INSTITUTIONS_ISERE_BBOX});
+  node["amenity"~"community_centre|arts_centre|theatre|cinema|concert_hall|events_venue|convention_centre|conference_centre|social_facility"]({_INSTITUTIONS_ISERE_BBOX});
+  node["leisure"~"sports_hall|sports_centre|stadium|ice_rink|arena"]({_INSTITUTIONS_ISERE_BBOX});
+  node["building"~"gymnasium|sports_hall|civic|hall"]({_INSTITUTIONS_ISERE_BBOX});
+  node["amenity"="gym"]({_INSTITUTIONS_ISERE_BBOX});
+  way["amenity"~"community_centre|theatre|cinema|social_facility|conference_centre|convention_centre"]({_INSTITUTIONS_ISERE_BBOX});
+  way["leisure"~"sports_hall|sports_centre|stadium|ice_rink|arena"]({_INSTITUTIONS_ISERE_BBOX});
+  way["building"~"gymnasium|sports_hall|civic|hall"]({_INSTITUTIONS_ISERE_BBOX});
+  relation["leisure"~"sports_hall|stadium"]({_INSTITUTIONS_ISERE_BBOX});
 );
 out center tags;"""
 
@@ -664,6 +668,7 @@ def _classify_institution_osm(tags: dict) -> str | None:
     railway = str(tags.get("railway") or "").lower()
     aeroway = str(tags.get("aeroway") or "").lower()
     police_type = str(tags.get("police") or "").lower()
+    sport = str(tags.get("sport") or "").lower()
 
     if amenity == "kindergarten":
         return "creche"
@@ -693,14 +698,20 @@ def _classify_institution_osm(tags: dict) -> str | None:
         return "transport_aeroport"
     if amenity in ("theatre", "cinema", "music_venue", "concert_hall", "events_venue"):
         return "salle_spectacle_public"
-    if amenity == "convention_centre":
+    if amenity in ("convention_centre", "conference_centre"):
         return "palais_congres"
-    if leisure in ("sports_hall", "sports_centre") or building in ("sports_hall", "gymnasium"):
+    # Gymnases : plusieurs tags possibles en France
+    if (
+        leisure in ("sports_hall", "sports_centre", "arena", "ice_rink")
+        or building in ("sports_hall", "gymnasium")
+        or amenity == "gym"
+        or any(kw in name for kw in ("gymnase", "salle sport", "complexe sport", "piscine", "patinoire"))
+    ):
         return "gymnase"
-    if leisure == "stadium" or building == "stadium":
+    if leisure == "stadium" or building == "stadium" or "stade" in name:
         return "stade"
-    if amenity in ("community_centre", "arts_centre", "social_facility"):
-        if any(token in name for token in ("foyer", "polyvalent", "fête", "fete", "salle")):
+    if amenity in ("community_centre", "arts_centre", "social_facility") or building in ("civic", "hall"):
+        if any(token in name for token in ("foyer", "polyvalent", "fête", "fetes", "salle", "maison du peuple", "espace")):
             return "salle_fetes"
         return "centre_culturel"
     return None

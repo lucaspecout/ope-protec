@@ -3715,8 +3715,9 @@ async function loadIsereInstitutions() {
   // 1. Cache localStorage valide (24h) avec données réelles
   const cached = readFreshSnapshot(STORAGE_KEYS.staticInstitutionsCache, STATIC_POINTS_CACHE_TTL_MS);
   const filteredCached = filterIserePoints(cached);
-  const cacheIsUsable = filteredCached.length >= 20
-    && filteredCached.some((p) => ['ecole_primaire', 'caserne_pompier', 'gendarmerie', 'police_municipale', 'commissariat_police_nationale'].includes(p.type));
+  const hasCritical = filteredCached.some((p) => ['ecole_primaire', 'caserne_pompier', 'gendarmerie', 'police_municipale', 'commissariat_police_nationale'].includes(p.type));
+  const hasHosting = filteredCached.some((p) => ['gymnase', 'complexe_sportif', 'stade', 'salle_omnisports', 'centre_culturel', 'salle_spectacle_public', 'palais_congres', 'salle_fetes'].includes(p.type));
+  const cacheIsUsable = filteredCached.length >= 20 && hasCritical && hasHosting;
   if (cacheIsUsable) {
     institutionPointsCache = filteredCached;
     institutionsLoaded = true;
@@ -9319,8 +9320,25 @@ function bindAppInteractions() {
   ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       if (RESOURCE_ONLY_FILTERS.has(id)) {
-        // Rendu immédiat depuis le cache + lancement background si besoin
+        // Rendu immédiat depuis le cache
         renderResources();
+        // Si le filtre hébergement vient d'être activé et qu'aucun point hébergement n'est en cache
+        // → force un refresh backend pour récupérer les données facilities (gymnases, salles…)
+        if ((id === 'filter-resources-hosting' || id === 'filter-resources-hosting-type')
+            && document.getElementById('filter-resources-hosting')?.checked) {
+          const hasHostingInCache = institutionPointsCache.some((p) =>
+            ['gymnase', 'complexe_sportif', 'stade', 'salle_omnisports', 'centre_culturel', 'salle_spectacle_public', 'palais_congres', 'salle_fetes'].includes(p.type)
+          );
+          if (!hasHostingInCache && !_institutionsLoadInFlight) {
+            // Invalider le cache localStorage pour forcer un re-fetch avec facilities
+            try { localStorage.removeItem(STORAGE_KEYS.staticInstitutionsCache); } catch (_) {}
+            institutionsLoaded = false;
+            _institutionsLoadInFlight = true;
+            loadIsereInstitutions()
+              .then(() => { _institutionsLoadInFlight = false; _drawResourceMarkers(); })
+              .catch(() => { _institutionsLoadInFlight = false; });
+          }
+        }
         return;
       }
       // Filtres globaux (hydro, pcs, trafic, caméras) → tout re-rendre
