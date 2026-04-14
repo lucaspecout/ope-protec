@@ -1354,23 +1354,23 @@ function apiOrigins() {
   const { protocol, hostname, port } = window.location;
   const isDefaultWebPort = (protocol === 'https:' && (port === '' || port === '443')) || (protocol === 'http:' && (port === '' || port === '80'));
   const lowerHostname = String(hostname || '').toLowerCase();
+  // Les aliases loopback ne sont utiles que si le navigateur est AUSSI sur localhost.
+  // Si l'utilisateur accède via une IP réseau (192.168.x.x, 10.x…), localhost:1182
+  // pointe sur SA propre machine — pas le serveur — et ne fait que créer des délais.
   const isLocalHostname = ['localhost', '127.0.0.1', '::1'].includes(lowerHostname);
-  const isPrivateNetworkHostname = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(lowerHostname);
-  const canProbeLoopbackAliases = isLocalHostname || isPrivateNetworkHostname;
 
   origins.push(window.location.origin);
 
-  if (hostname) {
+  if (hostname && !isLocalHostname) {
+    // Accès via IP ou nom de domaine : on teste seulement le port explicite si besoin
     const preferredProtocol = protocol === 'https:' ? 'https:' : 'http:';
     if (isDefaultWebPort) origins.push(`${preferredProtocol}//${hostname}`);
-    origins.push(`${preferredProtocol}//${hostname}:1182`);
+    if (port !== '1182') origins.push(`${preferredProtocol}//${hostname}:1182`);
   }
 
-  if (canProbeLoopbackAliases) {
-    origins.push(
-      'http://localhost:1182',
-      'http://127.0.0.1:1182',
-    );
+  if (isLocalHostname) {
+    // Sur localhost uniquement : on peut tester les aliases loopback
+    origins.push('http://localhost:1182', 'http://127.0.0.1:1182');
   }
 
   return Array.from(new Set(origins));
@@ -1409,13 +1409,13 @@ function sanitizeErrorMessage(message) {
     return "Délai dépassé — le serveur met trop longtemps à répondre. Réessayez dans quelques secondes.";
   }
   if (normalized.includes('<!doctype') || normalized.includes('<html')) {
-    return "L'API renvoie une page HTML au lieu d'un JSON. Vérifiez que le backend tourne bien sur le même hôte (docker compose up -d).";
+    return "Le serveur démarre encore. Réessayez dans quelques secondes.";
   }
   if (normalized.includes('502') || normalized.includes('Bad Gateway')) {
-    return "Erreur passerelle (502) — le backend est inaccessible depuis Nginx. Vérifiez les conteneurs Docker.";
+    return "Serveur en cours de démarrage (502) — réessayez dans quelques secondes.";
   }
-  if (normalized.includes('503') || normalized.includes('Service Unavailable')) {
-    return "Service temporairement indisponible (503) — réessayez dans quelques instants.";
+  if (normalized.includes('503') || normalized.includes('Service Unavailable') || normalized.includes('starting')) {
+    return "Serveur en cours de démarrage — réessayez dans quelques secondes.";
   }
   return normalized;
 }
@@ -9348,8 +9348,15 @@ loginForm.addEventListener('submit', async (event) => {
       // Ne pas retenter si c'est une erreur d'authentification (mauvais mdp)
       const isAuthError = error?.status === 401 || error?.status === 403;
       if (isAuthError) break;
-      // Retenter uniquement sur timeout ou erreur réseau
-      const isRetryable = error?.isTimeout || isNetworkFetchError(error);
+      // Retenter sur timeout, erreur réseau, ou réponse HTML (nginx 502 au démarrage)
+      const msg = String(error?.message || '');
+      const isRetryable = error?.isTimeout
+        || isNetworkFetchError(error)
+        || msg.includes('non-JSON')
+        || msg.includes('HTML')
+        || error?.status === 502
+        || error?.status === 503
+        || error?.status === 504;
       if (!isRetryable) break;
     }
   }
@@ -9577,23 +9584,22 @@ document.getElementById('event-form')?.addEventListener('submit', async (event) 
   _setLoginStatus('Vérification de la session…');
 
   try {
-    // Timeout court (6s) + 1 seul essai : on ne veut pas bloquer l'utilisateur.
+    // 1 seule tentative, timeout court — on ne bloque pas l'utilisateur.
+    // Si le serveur est lent au démarrage, l'utilisateur peut se connecter manuellement.
     currentUser = await api('/auth/me', {
       timeoutMs: SESSION_RESTORE_TIMEOUT_MS,
-      maxRetries: 1,
+      maxRetries: 0,
     });
     _setLoginStatus('');
     await initializeAuthenticatedSession({ runRefreshInBackground: true });
   } catch (error) {
     _setLoginStatus('');
     if (Number(error?.status) === 401) {
-      // Token expiré ou invalide — nettoyage silencieux, login prêt à l'emploi
+      // Token expiré — nettoyage silencieux
       localStorage.removeItem(STORAGE_KEYS.token);
       token = null;
-      return;
     }
-    // Erreur réseau : le serveur est peut-être en cours de démarrage.
-    // L'utilisateur peut se connecter manuellement, le formulaire est déjà visible.
-    setLoginError('Serveur momentanément indisponible. Réessayez dans quelques secondes.');
+    // Toute autre erreur (réseau, HTML 502, timeout) : login déjà visible, rien à faire.
+    // Ne pas afficher de message d'erreur — l'utilisateur peut simplement se connecter.
   }
 })();

@@ -177,7 +177,8 @@
       "Bash(python -c \"import ast, pathlib; ast.parse\\(pathlib.Path\\('main.py'\\).read_text\\(encoding='utf-8'\\)\\); print\\('main.py OK'\\)\")",
       "Bash(python -c \"import ast, pathlib; ast.parse\\(pathlib.Path\\('main.py'\\).read_text\\(encoding='utf-8'\\)\\); print\\('OK'\\)\")",
       "Bash(python -c \"import ast, pathlib; ast.parse\\(pathlib.Path\\('main.py'\\).read_text\\(encoding='utf-8'\\)\\); ast.parse\\(pathlib.Path\\('services.py'\\).read_text\\(encoding='utf-8'\\)\\); print\\('OK'\\)\")",
-      "Bash(python -c \"import ast, pathlib; ast.parse\\(pathlib.Path\\('main.py'\\).read_text\\(encoding='utf-8'\\)\\); ast.parse\\(pathlib.Path\\('security.py'\\).read_text\\(encoding='utf-8'\\)\\); print\\('OK'\\)\")"
+      "Bash(python -c \"import ast, pathlib; ast.parse\\(pathlib.Path\\('main.py'\\).read_text\\(encoding='utf-8'\\)\\); ast.parse\\(pathlib.Path\\('security.py'\\).read_text\\(encoding='utf-8'\\)\\); print\\('OK'\\)\")",
+      "Bash(python -c \"import ast, pathlib; [ast.parse\\(pathlib.Path\\(f\\).read_text\\(encoding='utf-8'\\)\\) or print\\(f+' OK'\\) for f in ['main.py','security.py','services.py']]\")"
     ]
   }
 }
