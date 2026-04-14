@@ -170,6 +170,7 @@ let apiPanelTimer = null;
 let apiResyncTimer = null;
 let refreshAllInFlight = null;
 let photoCameraRefreshTimer = null;
+let _lastRefreshAllTs = 0;
 let lastApiResyncAt = null;
 let isLoginSubmitting = false;
 const apiGetCache = new Map();
@@ -8189,8 +8190,15 @@ async function refreshAll(forceRefresh = false) {
     // Total : 4 requêtes au lieu de 10, tout tient dans la limite de 6 connexions du navigateur.
     startStartupQueue(4);
 
+    // Effacer toute erreur résiduelle du cycle précédent dès le début.
+    // Sans ce reset, une erreur ponctuelle reste affichée pour toujours même si les
+    // refreshs suivants réussissent.
+    const errorTarget = document.getElementById('dashboard-error');
+    if (errorTarget) errorTarget.textContent = '';
+
     const suffix = forceRefresh ? '?refresh=true' : '';
     let bootstrapError = null;
+    let fallbackFailedCount = 0;
 
     setStartupQueueCurrent('Chargement initial…');
     try {
@@ -8198,6 +8206,9 @@ async function refreshAll(forceRefresh = false) {
         bypassCache: forceRefresh,
         cacheTtlMs: forceRefresh ? 0 : API_CACHE_TTL_MS,
         timeoutMs: API_SLOW_ENDPOINT_TIMEOUT_MS,
+        // Pas de retry sur le bootstrap : un fallback individuel prend le relais
+        // immédiatement. Réessayer 3 fois × 45s bloquerait l'UI pour rien.
+        maxRetries: 0,
       });
 
       // — dashboard —
@@ -8221,15 +8232,17 @@ async function refreshAll(forceRefresh = false) {
       ]);
     } catch (err) {
       bootstrapError = err;
-      // Fallback : appels individuels si le bootstrap échoue
-      await Promise.all([
-        loadDashboard(forceRefresh).catch(() => {}),
-        loadExternalRisks(forceRefresh).catch(() => {}),
-        loadMunicipalities(null).catch(() => {}),
-        loadEvents(null).catch(() => {}),
-        loadLogs(null).catch(() => {}),
-        loadUsers(null).catch(() => {}),
+      // Fallback : appels individuels si le bootstrap échoue.
+      // Compter les échecs : si tous réussissent, l'UI est complète → pas d'erreur à afficher.
+      const fallbackResults = await Promise.allSettled([
+        loadDashboard(forceRefresh),
+        loadExternalRisks(forceRefresh),
+        loadMunicipalities(null),
+        loadEvents(null),
+        loadLogs(null),
+        loadUsers(null),
       ]);
+      fallbackFailedCount = fallbackResults.filter((r) => r.status === 'rejected').length;
     }
     advanceStartupQueue('données initiales');
 
@@ -8253,15 +8266,11 @@ async function refreshAll(forceRefresh = false) {
     renderResources();
     _ensureStaticDataLoaded();
 
-    const optionalWarnings = phase2Results
-      .filter((r) => r.status === 'rejected')
-      .map((r) => `${r.label}: ${sanitizeErrorMessage(r.reason?.message || 'erreur')}`);
-
-    const errorTarget = document.getElementById('dashboard-error');
-    if (bootstrapError && !errorTarget?.textContent.trim()) {
-      errorTarget.textContent = `Chargement dégradé: ${sanitizeErrorMessage(bootstrapError.message)}`;
-    } else if (optionalWarnings.length && errorTarget && !errorTarget.textContent.trim()) {
-      errorTarget.textContent = `Modules secondaires indisponibles: ${optionalWarnings.join(' · ')}`;
+    // N'afficher "Chargement dégradé" que si le fallback a aussi échoué (≥3 sources en erreur).
+    // Si le bootstrap échoue mais que les fallbacks individuels passent, l'UI est complète
+    // et il n'y a rien à signaler à l'utilisateur.
+    if (bootstrapError && fallbackFailedCount >= 3) {
+      if (errorTarget) errorTarget.textContent = `Chargement dégradé: ${sanitizeErrorMessage(bootstrapError.message)}`;
     }
 
     finishStartupQueue();
@@ -8271,6 +8280,7 @@ async function refreshAll(forceRefresh = false) {
     await refreshAllInFlight;
   } finally {
     refreshAllInFlight = null;
+    _lastRefreshAllTs = Date.now();
   }
 }
 
@@ -9505,13 +9515,26 @@ document.getElementById('event-form')?.addEventListener('submit', async (event) 
   _loadGeocodeCache();
   bindAppInteractions();
   startApiPanelAutoRefresh();
+  // Sur mobile, `visibilitychange` et `focus` se déclenchent ensemble quand on
+  // déverrouille l'écran. On déduplique avec un court debounce pour n'appeler
+  // refreshAll qu'une seule fois, et seulement si au moins 30s se sont écoulées
+  // depuis la dernière actualisation (évite les rafraîchissements inutiles).
+  const _REFRESH_DEBOUNCE_MS = 500;
+  const _MIN_REFRESH_INTERVAL_MS = 30000;
+  let _visibilityDebounceTimer = null;
+  function _scheduleVisibilityRefresh() {
+    if (!token) return;
+    clearTimeout(_visibilityDebounceTimer);
+    _visibilityDebounceTimer = setTimeout(() => {
+      if (Date.now() - _lastRefreshAllTs < _MIN_REFRESH_INTERVAL_MS) return;
+      refreshAll(false);
+    }, _REFRESH_DEBOUNCE_MS);
+  }
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
-    if (token) refreshAll(false);
+    _scheduleVisibilityRefresh();
   });
-  window.addEventListener('focus', () => {
-    if (token) refreshAll(false);
-  });
+  window.addEventListener('focus', _scheduleVisibilityRefresh);
 
   // Afficher le formulaire de login immédiatement — pas de blanc d'écran.
   // Si un token existe, on tente une restauration silencieuse en arrière-plan.
