@@ -2630,33 +2630,12 @@ function renderBarrageLayer() {
 
 async function loadBarragePoints() {
   if (barrageLoaded) return barragePointsCache;
-  const cached = readFreshSnapshot(STORAGE_KEYS.staticBarrageCache, STATIC_POINTS_CACHE_TTL_MS);
-  if (Array.isArray(cached) && cached.length > 0) {
-    barragePointsCache = cached;
-    barrageLoaded = true;
-    return barragePointsCache;
+  try {
+    const payload = await api('/api/osm/isere/barrages', { cacheTtlMs: 24 * 60 * 60 * 1000 });
+    barragePointsCache = Array.isArray(payload?.points) ? payload.points : [];
+  } catch {
+    barragePointsCache = [];
   }
-  const query = `[out:json][timeout:60];
-area["boundary"="administrative"]["admin_level"="6"]["ref:INSEE"="38"]->.searchArea;
-(
-  nwr["waterway"="dam"](area.searchArea);
-  nwr["man_made"="dam"](area.searchArea);
-  nwr["waterway"="weir"](area.searchArea);
-);
-out center tags;`;
-  const elements = await _overpassFetch(query);
-  barragePointsCache = elements.map((el) => {
-    const lat = Number(el.lat ?? el.center?.lat);
-    const lon = Number(el.lon ?? el.center?.lon);
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-    const tags = el.tags || {};
-    const name = String(tags.name || '').trim() || 'Barrage';
-    const capacity = tags['capacity:persons'] || tags.volume || null;
-    const ele = tags.ele || tags.elevation || null;
-    const operator = tags.operator || null;
-    return { id: `osm-${el.type}-${el.id}`, lat, lon, name, capacity, ele, operator, osmId: el.id, osmType: el.type };
-  }).filter(Boolean);
-  if (barragePointsCache.length > 0) saveSnapshot(STORAGE_KEYS.staticBarrageCache, barragePointsCache);
   barrageLoaded = true;
   return barragePointsCache;
 }
@@ -3962,93 +3941,26 @@ let barragePointsCache = [];
 let barrageLoaded = false;
 let _barrageLoadInFlight = false;
 
-async function _overpassFetch(query) {
-  const endpoints = [
-    'https://overpass-api.de/api/interpreter',
-    'https://overpass.kumi.systems/api/interpreter',
-  ];
-  for (const endpoint of endpoints) {
-    try {
-      const resp = await queueApiRequest(() => fetchWithTimeout(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
-        body: query,
-      }, 60000));
-      const data = await parseJsonResponse(resp, endpoint);
-      if (Array.isArray(data?.elements) && data.elements.length > 0) return data.elements;
-    } catch { /* essayer l'endpoint suivant */ }
-  }
-  return [];
-}
-
 async function loadMontagnePoints() {
   if (montagneLoaded) return montagnePointsCache;
-  const cached = readFreshSnapshot(STORAGE_KEYS.staticMontagneCache, STATIC_POINTS_CACHE_TTL_MS);
-  if (Array.isArray(cached) && cached.length > 0) {
-    montagnePointsCache = cached;
-    montagneLoaded = true;
-    return montagnePointsCache;
+  try {
+    const payload = await api('/api/osm/isere/montagne', { cacheTtlMs: 24 * 60 * 60 * 1000 });
+    montagnePointsCache = Array.isArray(payload?.points) ? payload.points : [];
+  } catch {
+    montagnePointsCache = [];
   }
-  const query = `[out:json][timeout:60];
-area["boundary"="administrative"]["admin_level"="6"]["ref:INSEE"="38"]->.searchArea;
-(
-  nwr["tourism"="alpine_hut"](area.searchArea);
-  nwr["tourism"="wilderness_hut"](area.searchArea);
-  nwr["amenity"="shelter"]["shelter_type"="basic_hut"](area.searchArea);
-  nwr["emergency"="mountain_rescue"](area.searchArea);
-  nwr["man_made"="tower"]["tower:type"="watchtower"](area.searchArea);
-);
-out center tags;`;
-  const elements = await _overpassFetch(query);
-  montagnePointsCache = elements.map((el) => {
-    const lat = Number(el.lat ?? el.center?.lat);
-    const lon = Number(el.lon ?? el.center?.lon);
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-    const tags = el.tags || {};
-    const name = String(tags.name || '').trim() || 'Refuge';
-    const capacity = tags.capacity || tags['capacity:persons'] || null;
-    const ele = tags.ele || tags.elevation || null;
-    const operator = tags.operator || tags.network || null;
-    const type = tags.emergency === 'mountain_rescue' ? 'rescue'
-      : tags.tourism === 'wilderness_hut' ? 'wilderness'
-      : tags.amenity === 'shelter' ? 'shelter'
-      : 'refuge';
-    return { id: `osm-${el.type}-${el.id}`, lat, lon, name, capacity, ele, operator, type, osmId: el.id, osmType: el.type };
-  }).filter(Boolean);
-  if (montagnePointsCache.length > 0) saveSnapshot(STORAGE_KEYS.staticMontagneCache, montagnePointsCache);
   montagneLoaded = true;
   return montagnePointsCache;
 }
 
 async function loadHelipadPoints() {
   if (helipadLoaded) return helipadPointsCache;
-  const cached = readFreshSnapshot(STORAGE_KEYS.staticHelipadCache, STATIC_POINTS_CACHE_TTL_MS);
-  if (Array.isArray(cached) && cached.length > 0) {
-    helipadPointsCache = cached;
-    helipadLoaded = true;
-    return helipadPointsCache;
+  try {
+    const payload = await api('/api/osm/isere/helipads', { cacheTtlMs: 24 * 60 * 60 * 1000 });
+    helipadPointsCache = Array.isArray(payload?.points) ? payload.points : [];
+  } catch {
+    helipadPointsCache = [];
   }
-  const query = `[out:json][timeout:60];
-area["boundary"="administrative"]["admin_level"="6"]["ref:INSEE"="38"]->.searchArea;
-(
-  nwr["aeroway"="helipad"](area.searchArea);
-  nwr["aeroway"="aerodrome"](area.searchArea);
-  nwr["aeroway"="airport"](area.searchArea);
-);
-out center tags;`;
-  const elements = await _overpassFetch(query);
-  helipadPointsCache = elements.map((el) => {
-    const lat = Number(el.lat ?? el.center?.lat);
-    const lon = Number(el.lon ?? el.center?.lon);
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-    const tags = el.tags || {};
-    const name = String(tags.name || '').trim() || 'Héliport';
-    const aeroway = tags.aeroway || 'helipad';
-    const icao = tags.icao || tags['ref:ICAO'] || null;
-    const smur = /smur|samu|hôpital|hopital|chu|chg|clinic/i.test(name + (tags.operator || ''));
-    return { id: `osm-${el.type}-${el.id}`, lat, lon, name, aeroway, icao, smur, operator: tags.operator || null, osmId: el.id, osmType: el.type };
-  }).filter(Boolean);
-  if (helipadPointsCache.length > 0) saveSnapshot(STORAGE_KEYS.staticHelipadCache, helipadPointsCache);
   helipadLoaded = true;
   return helipadPointsCache;
 }
@@ -8272,57 +8184,86 @@ async function refreshAll(forceRefresh = false) {
   if (refreshAllInFlight) return refreshAllInFlight;
 
   refreshAllInFlight = withPreservedScroll(async () => {
-    const loaders = [
-      { label: 'tableau de bord', loader: () => loadDashboard(forceRefresh), optional: true },
-      { label: 'flux API (Météo / Vigicrues / Itinisère / Bison / Géorisques)', loader: () => loadExternalRisks(forceRefresh), optional: false },
-      { label: 'interconnexions API', loader: async () => renderApiInterconnections(cachedExternalRisksSnapshot), optional: true },
-      { label: 'communes', loader: loadMunicipalities, optional: false },
-      { label: 'évènements', loader: loadEvents, optional: false },
-      { label: 'main courante', loader: loadLogs, optional: false },
-      { label: 'utilisateurs', loader: loadUsers, optional: true },
+    // Phase 1 : bootstrap (dashboard + risks + communes + évènements + MCO + users) → 1 requête
+    // Phase 2 : points carte + annotations + trafic en parallèle → 3 requêtes simultanées
+    // Total : 4 requêtes au lieu de 10, tout tient dans la limite de 6 connexions du navigateur.
+    startStartupQueue(4);
+
+    const suffix = forceRefresh ? '?refresh=true' : '';
+    let bootstrapError = null;
+
+    setStartupQueueCurrent('Chargement initial…');
+    try {
+      const bsData = await api(`/operations/bootstrap${suffix}`, {
+        bypassCache: forceRefresh,
+        cacheTtlMs: forceRefresh ? 0 : API_CACHE_TTL_MS,
+        timeoutMs: API_SLOW_ENDPOINT_TIMEOUT_MS,
+      });
+
+      // — dashboard —
+      if (bsData?.dashboard) {
+        renderDashboard(bsData.dashboard);
+        saveSnapshot(STORAGE_KEYS.dashboardSnapshot, bsData.dashboard);
+      }
+      // — risques externes —
+      if (bsData?.external_risks) {
+        cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, bsData.external_risks);
+        renderExternalRisks(cachedExternalRisksSnapshot);
+        saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
+        renderApiInterconnections(cachedExternalRisksSnapshot);
+      }
+      // — données opérationnelles (support preloaded) —
+      await Promise.all([
+        loadMunicipalities(Array.isArray(bsData?.municipalities) ? bsData.municipalities : null),
+        loadEvents(Array.isArray(bsData?.events) ? bsData.events : null),
+        loadLogs(Array.isArray(bsData?.logs) ? bsData.logs : null),
+        loadUsers(Array.isArray(bsData?.users) ? bsData.users : null),
+      ]);
+    } catch (err) {
+      bootstrapError = err;
+      // Fallback : appels individuels si le bootstrap échoue
+      await Promise.all([
+        loadDashboard(forceRefresh).catch(() => {}),
+        loadExternalRisks(forceRefresh).catch(() => {}),
+        loadMunicipalities(null).catch(() => {}),
+        loadEvents(null).catch(() => {}),
+        loadLogs(null).catch(() => {}),
+        loadUsers(null).catch(() => {}),
+      ]);
+    }
+    advanceStartupQueue('données initiales');
+
+    // Phase 2 : carte et annotations (non inclus dans bootstrap)
+    const phase2 = [
       { label: 'points cartographiques', loader: loadMapPoints, optional: true },
       { label: 'annotations tactiques', loader: loadMapAnnotations, optional: true },
       { label: 'trafic cartographique', loader: renderTrafficOnMap, optional: true },
     ];
-    startStartupQueue(loaders.length);
-    const results = await Promise.all(loaders.map(async ({ label, loader }) => {
-      setStartupQueueCurrent(`Chargement: ${label}…`);
+    const phase2Results = await Promise.all(phase2.map(async ({ label, loader }) => {
       try {
-        const value = await loader();
-        return { status: 'fulfilled', value };
-      } catch (error) {
-        return { status: 'rejected', reason: error };
-      } finally {
+        await loader();
         advanceStartupQueue(label);
+        return { status: 'fulfilled' };
+      } catch (error) {
+        advanceStartupQueue(label);
+        return { status: 'rejected', reason: error, label };
       }
     }));
-    const failures = results
-      .map((result, index) => ({ result, config: loaders[index] }))
-      .filter(({ result }) => result.status === 'rejected');
-
-    const blockingFailures = failures.filter(({ config }) => !config.optional);
-    const optionalFailures = failures.filter(({ config }) => config.optional);
 
     renderResources();
-    // Pré-chauffer les données statiques (OSM, FINESS, Télécom) en arrière-plan
-    // dès le démarrage, pour qu'elles soient prêtes quand l'utilisateur ouvre la carte.
     _ensureStaticDataLoaded();
 
-    if (!blockingFailures.length) {
-      finishStartupQueue();
-      const errorTarget = document.getElementById('dashboard-error');
-      if (errorTarget && !errorTarget.textContent.trim()) {
-        const warning = optionalFailures.length
-          ? `Modules secondaires indisponibles: ${optionalFailures.map(({ config, result }) => `${config.label}: ${sanitizeErrorMessage(result.reason?.message || 'erreur')}`).join(' · ')}`
-          : '';
-        errorTarget.textContent = warning;
-      }
-      return;
+    const optionalWarnings = phase2Results
+      .filter((r) => r.status === 'rejected')
+      .map((r) => `${r.label}: ${sanitizeErrorMessage(r.reason?.message || 'erreur')}`);
+
+    const errorTarget = document.getElementById('dashboard-error');
+    if (bootstrapError && !errorTarget?.textContent.trim()) {
+      errorTarget.textContent = `Chargement dégradé: ${sanitizeErrorMessage(bootstrapError.message)}`;
+    } else if (optionalWarnings.length && errorTarget && !errorTarget.textContent.trim()) {
+      errorTarget.textContent = `Modules secondaires indisponibles: ${optionalWarnings.join(' · ')}`;
     }
 
-    const message = blockingFailures.map(({ config, result }) => `${config.label}: ${sanitizeErrorMessage(result.reason?.message || 'erreur')}`).join(' · ');
-    document.getElementById('dashboard-error').textContent = message;
-    setMapFeedback(message, true);
     finishStartupQueue();
   });
 

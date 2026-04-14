@@ -6669,6 +6669,252 @@ def fetch_cars_region_aura_disruptions(force_refresh: bool = False) -> dict[str,
 
 
 # ---------------------------------------------------------------------------
+# Points statiques OSM (Barrages, Montagne, Héliports) – cache Redis uniquement
+# ---------------------------------------------------------------------------
+
+_OSM_POINTS_CACHE_TTL = 24 * 3600  # 24 h
+
+# --- Barrages ---
+
+_BARRAGE_OVERPASS_QUERY = """[out:json][timeout:60];
+area["boundary"="administrative"]["admin_level"="6"]["ref:INSEE"="38"]->.searchArea;
+(
+  nwr["waterway"="dam"](area.searchArea);
+  nwr["man_made"="dam"](area.searchArea);
+  nwr["waterway"="weir"](area.searchArea);
+);
+out center tags;"""
+
+_barrages_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_barrages_cache_lock = Lock()
+
+
+def _fetch_barrages_live() -> dict[str, Any]:
+    elements = _overpass_fetch_institutions(_BARRAGE_OVERPASS_QUERY)
+    points: list[dict[str, Any]] = []
+    for el in elements:
+        lat = el.get("lat") or (el.get("center") or {}).get("lat")
+        lon = el.get("lon") or (el.get("center") or {}).get("lon")
+        try:
+            lat, lon = float(lat), float(lon)
+        except (TypeError, ValueError):
+            continue
+        if not (44.70 <= lat <= 45.95 and 4.70 <= lon <= 6.60):
+            continue
+        tags = el.get("tags") or {}
+        name = str(tags.get("name") or "").strip() or "Barrage"
+        points.append({
+            "id": f"osm-{el.get('type', 'node')}-{el.get('id', 0)}",
+            "lat": lat,
+            "lon": lon,
+            "name": name,
+            "capacity": tags.get("capacity:persons") or tags.get("volume"),
+            "ele": tags.get("ele") or tags.get("elevation"),
+            "operator": tags.get("operator"),
+            "osmId": el.get("id"),
+            "osmType": el.get("type", "node"),
+        })
+    return {
+        "status": "online",
+        "count": len(points),
+        "points": points,
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+def fetch_barrages_isere(force_refresh: bool = False) -> dict[str, Any]:
+    redis_key = "osm_barrages_isere"
+    persist_key = f"persist:{redis_key}"
+    with _barrages_cache_lock:
+        if not force_refresh and _barrages_cache["payload"] and datetime.utcnow() < _barrages_cache["expires_at"]:
+            return _barrages_cache["payload"]
+    cached = _redis_get(redis_key)
+    if cached and not force_refresh:
+        with _barrages_cache_lock:
+            _barrages_cache["payload"] = cached
+            _barrages_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_OSM_POINTS_CACHE_TTL)
+        return cached
+    try:
+        live = _fetch_barrages_live()
+        _redis_set(redis_key, live, _OSM_POINTS_CACHE_TTL)
+        _redis_set(persist_key, live, _PERSIST_TTL_SECONDS)
+        with _barrages_cache_lock:
+            _barrages_cache["payload"] = live
+            _barrages_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_OSM_POINTS_CACHE_TTL)
+        return live
+    except Exception:
+        stale = _redis_get(persist_key)
+        if stale:
+            return stale
+        return {"status": "degraded", "count": 0, "points": [], "updated_at": datetime.utcnow().isoformat() + "Z"}
+
+
+# --- Montagne (refuges, abris, secours) ---
+
+_MONTAGNE_OVERPASS_QUERY = """[out:json][timeout:60];
+area["boundary"="administrative"]["admin_level"="6"]["ref:INSEE"="38"]->.searchArea;
+(
+  nwr["tourism"="alpine_hut"](area.searchArea);
+  nwr["tourism"="wilderness_hut"](area.searchArea);
+  nwr["amenity"="shelter"]["shelter_type"="basic_hut"](area.searchArea);
+  nwr["emergency"="mountain_rescue"](area.searchArea);
+  nwr["man_made"="tower"]["tower:type"="watchtower"](area.searchArea);
+);
+out center tags;"""
+
+_montagne_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_montagne_cache_lock = Lock()
+
+
+def _fetch_montagne_live() -> dict[str, Any]:
+    elements = _overpass_fetch_institutions(_MONTAGNE_OVERPASS_QUERY)
+    points: list[dict[str, Any]] = []
+    for el in elements:
+        lat = el.get("lat") or (el.get("center") or {}).get("lat")
+        lon = el.get("lon") or (el.get("center") or {}).get("lon")
+        try:
+            lat, lon = float(lat), float(lon)
+        except (TypeError, ValueError):
+            continue
+        if not (44.70 <= lat <= 45.95 and 4.70 <= lon <= 6.60):
+            continue
+        tags = el.get("tags") or {}
+        name = str(tags.get("name") or "").strip() or "Refuge"
+        point_type = (
+            "rescue" if tags.get("emergency") == "mountain_rescue"
+            else "wilderness" if tags.get("tourism") == "wilderness_hut"
+            else "shelter" if tags.get("amenity") == "shelter"
+            else "refuge"
+        )
+        points.append({
+            "id": f"osm-{el.get('type', 'node')}-{el.get('id', 0)}",
+            "lat": lat,
+            "lon": lon,
+            "name": name,
+            "capacity": tags.get("capacity") or tags.get("capacity:persons"),
+            "ele": tags.get("ele") or tags.get("elevation"),
+            "operator": tags.get("operator") or tags.get("network"),
+            "type": point_type,
+            "osmId": el.get("id"),
+            "osmType": el.get("type", "node"),
+        })
+    return {
+        "status": "online",
+        "count": len(points),
+        "points": points,
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+def fetch_montagne_isere(force_refresh: bool = False) -> dict[str, Any]:
+    redis_key = "osm_montagne_isere"
+    persist_key = f"persist:{redis_key}"
+    with _montagne_cache_lock:
+        if not force_refresh and _montagne_cache["payload"] and datetime.utcnow() < _montagne_cache["expires_at"]:
+            return _montagne_cache["payload"]
+    cached = _redis_get(redis_key)
+    if cached and not force_refresh:
+        with _montagne_cache_lock:
+            _montagne_cache["payload"] = cached
+            _montagne_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_OSM_POINTS_CACHE_TTL)
+        return cached
+    try:
+        live = _fetch_montagne_live()
+        _redis_set(redis_key, live, _OSM_POINTS_CACHE_TTL)
+        _redis_set(persist_key, live, _PERSIST_TTL_SECONDS)
+        with _montagne_cache_lock:
+            _montagne_cache["payload"] = live
+            _montagne_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_OSM_POINTS_CACHE_TTL)
+        return live
+    except Exception:
+        stale = _redis_get(persist_key)
+        if stale:
+            return stale
+        return {"status": "degraded", "count": 0, "points": [], "updated_at": datetime.utcnow().isoformat() + "Z"}
+
+
+# --- Héliports / Hélistations / Aérodromes ---
+
+_HELIPAD_OVERPASS_QUERY = """[out:json][timeout:60];
+area["boundary"="administrative"]["admin_level"="6"]["ref:INSEE"="38"]->.searchArea;
+(
+  nwr["aeroway"="helipad"](area.searchArea);
+  nwr["aeroway"="aerodrome"](area.searchArea);
+  nwr["aeroway"="airport"](area.searchArea);
+);
+out center tags;"""
+
+_helipads_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_helipads_cache_lock = Lock()
+
+
+def _fetch_helipads_live() -> dict[str, Any]:
+    import re as _re
+    _smur_re = _re.compile(r"smur|samu|h[oô]pital|hopital|chu|chg|clinic", _re.IGNORECASE)
+    elements = _overpass_fetch_institutions(_HELIPAD_OVERPASS_QUERY)
+    points: list[dict[str, Any]] = []
+    for el in elements:
+        lat = el.get("lat") or (el.get("center") or {}).get("lat")
+        lon = el.get("lon") or (el.get("center") or {}).get("lon")
+        try:
+            lat, lon = float(lat), float(lon)
+        except (TypeError, ValueError):
+            continue
+        if not (44.70 <= lat <= 45.95 and 4.70 <= lon <= 6.60):
+            continue
+        tags = el.get("tags") or {}
+        name = str(tags.get("name") or "").strip() or "Héliport"
+        aeroway = tags.get("aeroway", "helipad")
+        icao = tags.get("icao") or tags.get("ref:ICAO")
+        smur = bool(_smur_re.search(name + (tags.get("operator") or "")))
+        points.append({
+            "id": f"osm-{el.get('type', 'node')}-{el.get('id', 0)}",
+            "lat": lat,
+            "lon": lon,
+            "name": name,
+            "aeroway": aeroway,
+            "icao": icao,
+            "smur": smur,
+            "operator": tags.get("operator"),
+            "osmId": el.get("id"),
+            "osmType": el.get("type", "node"),
+        })
+    return {
+        "status": "online",
+        "count": len(points),
+        "points": points,
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+def fetch_helipads_isere(force_refresh: bool = False) -> dict[str, Any]:
+    redis_key = "osm_helipads_isere"
+    persist_key = f"persist:{redis_key}"
+    with _helipads_cache_lock:
+        if not force_refresh and _helipads_cache["payload"] and datetime.utcnow() < _helipads_cache["expires_at"]:
+            return _helipads_cache["payload"]
+    cached = _redis_get(redis_key)
+    if cached and not force_refresh:
+        with _helipads_cache_lock:
+            _helipads_cache["payload"] = cached
+            _helipads_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_OSM_POINTS_CACHE_TTL)
+        return cached
+    try:
+        live = _fetch_helipads_live()
+        _redis_set(redis_key, live, _OSM_POINTS_CACHE_TTL)
+        _redis_set(persist_key, live, _PERSIST_TTL_SECONDS)
+        with _helipads_cache_lock:
+            _helipads_cache["payload"] = live
+            _helipads_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_OSM_POINTS_CACHE_TTL)
+        return live
+    except Exception:
+        stale = _redis_get(persist_key)
+        if stale:
+            return stale
+        return {"status": "degraded", "count": 0, "points": [], "updated_at": datetime.utcnow().isoformat() + "Z"}
+
+
+# ---------------------------------------------------------------------------
 # Persistance du snapshot consolidé (main.py ↔ Redis)
 # ---------------------------------------------------------------------------
 

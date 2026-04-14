@@ -86,6 +86,9 @@ from .services import (
     vigicrues_geojson_from_stations,
     save_risks_snapshot,
     load_risks_snapshot,
+    fetch_barrages_isere,
+    fetch_montagne_isere,
+    fetch_helipads_isere,
 )
 
 Base.metadata.create_all(bind=engine)
@@ -552,6 +555,26 @@ def startup_warmup_external_sources() -> None:
     # Démarrer une boucle indépendante par service.
     for key, interval in SERVICE_REFRESH_INTERVALS.items():
         Thread(target=_service_loop, args=(key, interval), daemon=True).start()
+
+    # Préchauffer les données OSM statiques (barrages, montagne, héliports) en arrière-plan.
+    # Si déjà en cache Redis (persist), la fonction retourne immédiatement sans appel Overpass.
+    def _warmup_osm_static() -> None:
+        from time import sleep as _sleep
+        _sleep(5)  # Laisser le serveur démarrer avant les appels Overpass
+        try:
+            fetch_barrages_isere()
+        except Exception:
+            pass
+        try:
+            fetch_montagne_isere()
+        except Exception:
+            pass
+        try:
+            fetch_helipads_isere()
+        except Exception:
+            pass
+
+    Thread(target=_warmup_osm_static, daemon=True).start()
 
 
 @app.get("/health")
@@ -1254,6 +1277,30 @@ def interactive_map_finess_isere_resources(
 ):
     safe_limit = max(200, min(limit, 100000))
     return fetch_finess_isere_resources(force_refresh=refresh, limit=safe_limit)
+
+
+@app.get("/api/osm/isere/barrages")
+def api_osm_barrages_isere(
+    refresh: bool = False,
+    _: User = Depends(require_roles(*READ_ROLES)),
+):
+    return fetch_barrages_isere(force_refresh=refresh)
+
+
+@app.get("/api/osm/isere/montagne")
+def api_osm_montagne_isere(
+    refresh: bool = False,
+    _: User = Depends(require_roles(*READ_ROLES)),
+):
+    return fetch_montagne_isere(force_refresh=refresh)
+
+
+@app.get("/api/osm/isere/helipads")
+def api_osm_helipads_isere(
+    refresh: bool = False,
+    _: User = Depends(require_roles(*READ_ROLES)),
+):
+    return fetch_helipads_isere(force_refresh=refresh)
 
 
 @app.get("/api/hubeau/isere/groundwater")
