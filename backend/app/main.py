@@ -89,6 +89,8 @@ from .services import (
     fetch_barrages_isere,
     fetch_montagne_isere,
     fetch_helipads_isere,
+    get_static_data_status,
+    collect_all_static_data,
 )
 
 Base.metadata.create_all(bind=engine)
@@ -556,25 +558,28 @@ def startup_warmup_external_sources() -> None:
     for key, interval in SERVICE_REFRESH_INTERVALS.items():
         Thread(target=_service_loop, args=(key, interval), daemon=True).start()
 
-    # Préchauffer les données OSM statiques (barrages, montagne, héliports) en arrière-plan.
-    # Si déjà en cache Redis (persist), la fonction retourne immédiatement sans appel Overpass.
-    def _warmup_osm_static() -> None:
+    # Préchauffer toutes les données statiques au démarrage.
+    # Priorité : fichier JSON (immédiat) → Redis → Overpass/CSV (réseau, seulement si nécessaire).
+    def _warmup_static_data() -> None:
         from time import sleep as _sleep
-        _sleep(5)  # Laisser le serveur démarrer avant les appels Overpass
+        _sleep(3)  # Laisser gunicorn/uvicorn terminer le démarrage
+        # Institutions et FINESS : fetch_* lit le fichier JSON en priorité (< 10 ms)
         try:
-            fetch_barrages_isere()
+            fetch_institutions_isere()
         except Exception:
             pass
         try:
-            fetch_montagne_isere()
+            fetch_finess_isere_resources()
         except Exception:
             pass
-        try:
-            fetch_helipads_isere()
-        except Exception:
-            pass
+        # Barrages / montagne / hélipads : Redis persist → fichier → Overpass
+        for fn in (fetch_barrages_isere, fetch_montagne_isere, fetch_helipads_isere):
+            try:
+                fn()
+            except Exception:
+                pass
 
-    Thread(target=_warmup_osm_static, daemon=True).start()
+    Thread(target=_warmup_static_data, daemon=True).start()
 
 
 @app.get("/health")
@@ -1277,6 +1282,23 @@ def interactive_map_finess_isere_resources(
 ):
     safe_limit = max(200, min(limit, 100000))
     return fetch_finess_isere_resources(force_refresh=refresh, limit=safe_limit)
+
+
+@app.get("/api/admin/static-data/status")
+def api_static_data_status(
+    _: User = Depends(require_roles("admin")),
+):
+    """Retourne l'état des fichiers de données statiques sur le volume Docker."""
+    return get_static_data_status()
+
+
+@app.post("/api/admin/static-data/collect")
+def api_static_data_collect(
+    _: User = Depends(require_roles("admin")),
+):
+    """Force la re-collecte de toutes les données statiques (Overpass + FINESS CSV).
+    Bloquant, prévoir 2–5 min. Résultat : statut par source et comptages."""
+    return collect_all_static_data()
 
 
 @app.get("/api/osm/isere/barrages")

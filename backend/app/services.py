@@ -33,6 +33,44 @@ from .database import SessionLocal
 from .models import Municipality, OperationalLog, WeatherAlert
 
 # ---------------------------------------------------------------------------
+# Cache fichier JSON – persistance sur volume Docker (/data/static)
+# ---------------------------------------------------------------------------
+
+def _static_data_path(filename: str) -> Path:
+    """Retourne le chemin absolu d'un fichier de cache statique."""
+    d = Path(settings.static_data_dir)
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    return d / filename
+
+
+def _file_cache_load(filename: str) -> dict[str, Any] | None:
+    """Charge un fichier JSON de cache statique. Retourne None si absent ou corrompu."""
+    try:
+        p = _static_data_path(filename)
+        if not p.exists():
+            return None
+        with p.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _file_cache_save(filename: str, data: dict[str, Any]) -> None:
+    """Écrit un fichier JSON de cache statique de façon atomique (écriture temp + rename)."""
+    try:
+        p = _static_data_path(filename)
+        tmp = p.with_suffix(".tmp")
+        with tmp.open("w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, default=str)
+        tmp.replace(p)
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
 # Cache Redis partagé entre tous les workers gunicorn
 # ---------------------------------------------------------------------------
 try:
@@ -868,22 +906,43 @@ def _institutions_bg_refresh() -> None:
         _institutions_bg_refresh_running = False
 
 
+_INSTITUTIONS_FILE = "institutions_isere.json"
+
+
 def fetch_institutions_isere(force_refresh: bool = False) -> dict[str, Any]:
     """
     Stratégie :
     1. Cache mémoire (expire en 24h)
-    2. DB PostgreSQL (persistant, mis à jour 1x/semaine en arrière-plan)
-    3. Si DB vide → fetch Overpass immédiat + sauvegarde DB
+    2. Fichier JSON sur volume Docker  (/data/static/institutions_isere.json) — toujours disponible
+    3. DB PostgreSQL (persistant, mis à jour 1x/semaine en arrière-plan)
+    4. Si fichier et DB vides → fetch Overpass immédiat + sauvegarde fichier + DB
     """
     # 1. Cache mémoire
     with _institutions_isere_cache_lock:
         if not force_refresh and _institutions_isere_cache["payload"] and datetime.utcnow() < _institutions_isere_cache["expires_at"]:
             return _institutions_isere_cache["payload"]
 
-    # 2. Charger depuis la DB
+    # 2. Fichier JSON (lecture ultra-rapide, indépendant de la DB et d'Overpass)
+    if not force_refresh:
+        file_data = _file_cache_load(_INSTITUTIONS_FILE)
+        if file_data and file_data.get("points"):
+            result = file_data
+            with _institutions_isere_cache_lock:
+                _institutions_isere_cache["payload"] = result
+                _institutions_isere_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_INSTITUTIONS_ISERE_CACHE_TTL_SECONDS)
+            # Vérifier si le fichier est trop vieux (> 30 jours) → refresh en arrière-plan
+            try:
+                updated_at = result.get("updated_at") or ""
+                age_days = (datetime.utcnow() - datetime.fromisoformat(updated_at.rstrip("Z"))).days if updated_at else 999
+                if age_days >= 30:
+                    Thread(target=_institutions_bg_refresh, daemon=True).start()
+            except Exception:
+                pass
+            return result
+
+    # 3. DB PostgreSQL
     db_points = _institutions_load_from_db()
     if db_points:
-        # Vérifier si une mise à jour hebdomadaire est nécessaire
         oldest = min((p.get("updated_at") or "") for p in db_points) if db_points else ""
         needs_refresh = force_refresh
         if oldest:
@@ -902,16 +961,19 @@ def fetch_institutions_isere(force_refresh: bool = False) -> dict[str, Any]:
             "points": db_points,
             "updated_at": db_points[0].get("updated_at") if db_points else datetime.utcnow().isoformat() + "Z",
         }
+        # Sauvegarder dans le fichier pour les prochains démarrages
+        _file_cache_save(_INSTITUTIONS_FILE, result)
         with _institutions_isere_cache_lock:
             _institutions_isere_cache["payload"] = result
             _institutions_isere_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_INSTITUTIONS_ISERE_CACHE_TTL_SECONDS)
         return result
 
-    # 3. DB vide → fetch immédiat depuis Overpass + sauvegarde
+    # 4. Fichier et DB vides → fetch Overpass + sauvegarde
     live = _fetch_institutions_isere_live()
     points = live.get("points") or []
     if points:
         _institutions_save_to_db(points)
+        _file_cache_save(_INSTITUTIONS_FILE, live)
     with _institutions_isere_cache_lock:
         _institutions_isere_cache["payload"] = live
         _institutions_isere_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_INSTITUTIONS_ISERE_CACHE_TTL_SECONDS)
@@ -4048,13 +4110,44 @@ def _fetch_finess_isere_resources_live(limit: int = 5000) -> dict[str, Any]:
     }
 
 
+_FINESS_FILE = "finess_isere.json"
+
+
 def fetch_finess_isere_resources(force_refresh: bool = False, limit: int = 5000) -> dict[str, Any]:
     safe_limit = max(200, min(limit, _FINESS_ISERE_MAX_LIMIT))
 
+    # Vérifier d'abord le cache fichier (avant Redis/CSV) si pas de force_refresh
+    if not force_refresh:
+        with _finess_isere_cache_lock:
+            cached_payload = _finess_isere_cache.get("payload")
+            if cached_payload and datetime.utcnow() < (_finess_isere_cache.get("expires_at") or datetime.min):
+                return deepcopy(cached_payload)
+
+        file_data = _file_cache_load(_FINESS_FILE)
+        if file_data and file_data.get("resources"):
+            # Tronquer si la limite est inférieure au nombre de ressources stockées
+            resources = file_data.get("resources") or []
+            if len(resources) > safe_limit:
+                file_data = dict(file_data)
+                file_data["resources"] = resources[:safe_limit]
+                file_data["resources_total"] = len(file_data["resources"])
+            with _finess_isere_cache_lock:
+                _finess_isere_cache["payload"] = file_data
+                _finess_isere_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_FINESS_ISERE_CACHE_TTL_SECONDS)
+            return file_data
+
     def loader() -> dict[str, Any]:
         try:
-            return _fetch_finess_isere_resources_live(limit=safe_limit)
+            result = _fetch_finess_isere_resources_live(limit=safe_limit)
+            # Sauvegarder dans le fichier dès qu'on a de vraies données
+            if result.get("status") == "online" and result.get("resources"):
+                _file_cache_save(_FINESS_FILE, result)
+            return result
         except Exception as exc:
+            # Fallback : retourner le fichier si disponible
+            file_data = _file_cache_load(_FINESS_FILE)
+            if file_data and file_data.get("resources"):
+                return file_data
             return {
                 "status": "degraded",
                 "source": "FINESS data.gouv.fr",
@@ -6912,6 +7005,79 @@ def fetch_helipads_isere(force_refresh: bool = False) -> dict[str, Any]:
         if stale:
             return stale
         return {"status": "degraded", "count": 0, "points": [], "updated_at": datetime.utcnow().isoformat() + "Z"}
+
+
+# ---------------------------------------------------------------------------
+# Gestion globale des données statiques (état + collecte forcée)
+# ---------------------------------------------------------------------------
+
+_STATIC_FILES: dict[str, str] = {
+    "institutions": _INSTITUTIONS_FILE,
+    "finess": _FINESS_FILE,
+    "barrages": "osm_barrages_isere.json",    # cohérence nom Redis → fichier
+    "montagne": "osm_montagne_isere.json",
+    "helipads": "osm_helipads_isere.json",
+}
+
+
+def get_static_data_status() -> dict[str, Any]:
+    """Retourne l'état de chaque fichier de cache statique (présence, taille, date)."""
+    result = {}
+    for key, filename in _STATIC_FILES.items():
+        p = _static_data_path(filename)
+        if p.exists():
+            try:
+                stat = p.stat()
+                data = _file_cache_load(filename) or {}
+                result[key] = {
+                    "file": str(p),
+                    "exists": True,
+                    "size_kb": round(stat.st_size / 1024, 1),
+                    "updated_at": data.get("updated_at", "?"),
+                    "count": data.get("count") or data.get("resources_total") or len(data.get("points") or data.get("resources") or []),
+                }
+            except Exception as exc:
+                result[key] = {"file": str(p), "exists": True, "error": str(exc)}
+        else:
+            result[key] = {"file": str(p), "exists": False}
+    return result
+
+
+def collect_all_static_data() -> dict[str, Any]:
+    """Force la re-collecte de toutes les données statiques depuis leurs sources.
+    Sauvegarde les résultats dans les fichiers JSON du volume Docker.
+    Cette opération peut prendre 2–5 minutes (requêtes Overpass + CSV FINESS)."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed as _ac
+
+    tasks = {
+        "institutions": lambda: fetch_institutions_isere(force_refresh=True),
+        "finess": lambda: fetch_finess_isere_resources(force_refresh=True, limit=_FINESS_ISERE_MAX_LIMIT),
+        "barrages": lambda: fetch_barrages_isere(force_refresh=True),
+        "montagne": lambda: fetch_montagne_isere(force_refresh=True),
+        "helipads": lambda: fetch_helipads_isere(force_refresh=True),
+    }
+    results: dict[str, Any] = {}
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {executor.submit(fn): key for key, fn in tasks.items()}
+        for future in _ac(futures):
+            key = futures[future]
+            try:
+                data = future.result()
+                status = data.get("status", "?")
+                count = data.get("count") or data.get("resources_total") or len(data.get("points") or data.get("resources") or [])
+                results[key] = {"status": status, "count": count, "updated_at": data.get("updated_at", "?")}
+            except Exception as exc:
+                results[key] = {"status": "error", "error": str(exc)}
+
+    # Sauvegarder barrages/montagne/helipads dans leurs fichiers JSON aussi
+    for key, filename in [("barrages", _STATIC_FILES["barrages"]), ("montagne", _STATIC_FILES["montagne"]), ("helipads", _STATIC_FILES["helipads"])]:
+        redis_key = f"osm_{key}_isere" if key != "helipads" else "osm_helipads_isere"
+        data = _redis_get(redis_key)
+        if data:
+            _file_cache_save(filename, data)
+
+    results["collected_at"] = datetime.utcnow().isoformat() + "Z"
+    return results
 
 
 # ---------------------------------------------------------------------------
