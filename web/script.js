@@ -6235,10 +6235,10 @@ async function openMunicipalityDetailsModal(municipality) {
   ]);
   const municipalityLogs = (Array.isArray(logs) ? logs : [])
     .filter((log) => String(log.municipality_id || '') === String(municipality.id))
-    .slice(0, 8);
+    .slice(0, 10);
   const municipalityEvents = sortOperationalEvents(cachedEvents)
     .filter((event) => String(event.municipality_id || '') === String(municipality.id) && isOpenOrActiveEvent(event))
-    .slice(0, 8);
+    .slice(0, 10);
   const previousState = municipalityDocumentsUiState.get(String(municipality.id)) || { search: '', type: 'all', sort: 'date_desc', uploading: false, progress: 0 };
   const state = { ...previousState, uploading: false, progress: 0 };
   municipalityDocumentsUiState.set(String(municipality.id), state);
@@ -6256,15 +6256,57 @@ async function openMunicipalityDetailsModal(municipality) {
       if (state.sort === 'date_asc') return leftDate - rightDate;
       return rightDate - leftDate;
     });
-  const byType = files.reduce((acc, file) => {
-    const key = file.doc_type || 'document';
-    acc[key] = (acc[key] || 0) + 1;
-    return acc;
-  }, {});
-  const quickActions = canMunicipalityFiles()
-    ? `<div class="municipality-actions municipality-actions--modal">
-         ${canEdit() ? `<button type="button" class="ghost inline-action" data-muni-detail-crisis="${municipality.id}">${municipality.crisis_mode ? 'Sortir de crise' : 'Passer en crise'}</button>
-         ` : ''}
+
+  const level = normalizeLevel(municipality.vigilance_color || 'vert');
+  const badgeClass = level === 'rouge' ? 'red' : level === 'orange' ? 'orange' : level === 'jaune' ? 'yellow' : 'green';
+
+  // ── Tab: Fiche ────────────────────────────────────────────
+  const crisisActions = canEdit()
+    ? `<button type="button" class="ghost inline-action${municipality.crisis_mode ? ' danger' : ''}" data-muni-detail-crisis="${municipality.id}" style="margin-top:.6rem">${municipality.crisis_mode ? '🔴 Sortir de crise' : '⚠️ Passer en crise'}</button>
+       <button type="button" class="ghost inline-action" data-muni-edit="${municipality.id}" style="margin-top:.6rem">Éditer la fiche</button>`
+    : '';
+
+  const ficheTab = `
+    <div class="muni-status-strip">
+      <span class="badge ${badgeClass}">${level}</span>
+      ${municipality.crisis_mode ? '<span style="font-weight:700;color:#c91c2e;font-size:.85rem">🔴 MODE CRISE</span>' : '<span style="color:#5f7190;font-size:.85rem">🟢 Veille normale</span>'}
+      <span class="muni-pill ${municipality.pcs_active ? 'pcs-on' : 'pcs-off'}">${municipality.pcs_active ? '✅ PCS actif' : '⬜ PCS inactif'}</span>
+    </div>
+    <div class="muni-info-grid">
+      <p class="muni-info-item"><strong>Code postal</strong>${escapeHtml(municipality.postal_code || '-')}</p>
+      <p class="muni-info-item"><strong>Code INSEE</strong>${escapeHtml(municipality.insee_code || '-')}</p>
+      <p class="muni-info-item"><strong>Population</strong>${municipality.population ? Number(municipality.population).toLocaleString('fr-FR') + ' hab.' : '-'}</p>
+      <p class="muni-info-item"><strong>Capacité d'accueil</strong>${municipality.shelter_capacity ? Number(municipality.shelter_capacity).toLocaleString('fr-FR') + ' places' : '-'}</p>
+      <p class="muni-info-item"><strong>Téléphone</strong>${municipality.phone ? `<a href="tel:${encodeURIComponent(municipality.phone.replace(/\s/g,''))}" style="color:var(--primary)">${escapeHtml(municipality.phone)}</a>` : '-'}</p>
+      <p class="muni-info-item"><strong>Email</strong>${municipality.email ? `<a href="mailto:${encodeURIComponent(municipality.email)}" style="color:var(--primary)">${escapeHtml(municipality.email)}</a>` : '-'}</p>
+    </div>
+    ${municipality.contacts ? `<p style="margin:.3rem 0 .5rem"><strong style="font-size:.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Contacts d'astreinte</strong><br><span style="white-space:pre-wrap">${escapeHtml(municipality.contacts)}</span></p>` : ''}
+    ${municipality.additional_info ? `<p style="margin:.3rem 0"><strong style="font-size:.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Informations complémentaires</strong><br><span style="white-space:pre-wrap;font-size:.88rem">${escapeHtml(municipality.additional_info)}</span></p>` : ''}
+    ${crisisActions}
+  `;
+
+  // ── Tab: Documents ────────────────────────────────────────
+  const docTypeIcon = (type) => ({ pcs: '📋', orsec: '🚨', convention: '🤝', cartographie: '🗺️', annexe: '📎', document: '📄' }[type] || '📄');
+  const richFilesMarkup = filteredFiles.length
+    ? filteredFiles.map((file) => `
+        <div class="muni-doc-item">
+          <div class="muni-doc-icon">${docTypeIcon(file.doc_type)}</div>
+          <div class="muni-doc-meta">
+            <div class="muni-doc-title">${escapeHtml(file.title)}</div>
+            <div class="muni-doc-sub">${escapeHtml(file.doc_type)} · ${new Date(file.created_at).toLocaleDateString('fr-FR')} · ${escapeHtml(file.uploaded_by)}</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:.25rem;flex-shrink:0">
+            <button type="button" class="ghost inline-action" style="padding:.28rem .65rem;font-size:.77rem" data-muni-file-open="${file.id}" data-muni-id="${municipality.id}">Ouvrir</button>
+            <button type="button" class="ghost inline-action" style="padding:.28rem .65rem;font-size:.77rem" data-muni-file-download="${file.id}" data-muni-id="${municipality.id}" data-muni-file-name="${escapeHtml(file.title || 'document')}">Télécharger</button>
+            ${canMunicipalityFiles() ? `<button type="button" class="ghost inline-action danger" style="padding:.28rem .65rem;font-size:.77rem" data-muni-file-delete="${file.id}" data-muni-id="${municipality.id}">Supprimer</button>` : ''}
+          </div>
+        </div>`)
+      .join('')
+    : '<p class="muted" style="margin:.4rem 0">Aucun document pour cette commune.</p>';
+
+  const uploadForm = canMunicipalityFiles()
+    ? `<div class="muni-upload-section">
+         <h6>Ajouter un document</h6>
          <form class="municipality-upload-form" data-muni-upload-form="${municipality.id}">
            <input name="title" placeholder="Titre du document" required />
            <select name="doc_type">
@@ -6285,35 +6327,71 @@ async function openMunicipalityDetailsModal(municipality) {
        </div>`
     : '';
 
-  setHtml('municipality-details-content', `
-    <h4>${escapeHtml(municipality.name)}</h4>
-    <p><strong>Téléphone:</strong> ${escapeHtml(municipality.phone || '-')} · <strong>Email:</strong> ${escapeHtml(municipality.email || '-')}</p>
-    <p><strong>Code postal:</strong> ${escapeHtml(municipality.postal_code || '-')} · <strong>Code INSEE:</strong> ${escapeHtml(municipality.insee_code || '-')} · <strong>PCS:</strong> ${municipality.pcs_active ? 'actif' : 'inactif'}</p>
-    <p><strong>Statut:</strong> ${municipality.crisis_mode ? 'CRISE' : 'veille'} · <strong>Vigilance:</strong> ${escapeHtml(normalizeLevel(municipality.vigilance_color || 'vert'))}</p>
-    <p><strong>Population:</strong> ${municipality.population ?? '-'} · <strong>Capacité d'accueil:</strong> ${municipality.shelter_capacity ?? '-'}</p>
-    <p><strong>Contacts d'astreinte:</strong><br>${escapeHtml(municipality.contacts || 'Aucun')}</p>
-    <p><strong>Informations complémentaires:</strong><br>${escapeHtml(municipality.additional_info || 'Aucune')}</p>
-    <h5>Documents partagés</h5>
-    <p class="muted">Total: <strong>${files.length}</strong>${Object.entries(byType).map(([type, count]) => ` · ${escapeHtml(type)}: ${count}`).join('')}</p>
+  const docsTab = `
     ${municipalityDocumentFiltersMarkup(state, municipality.id)}
-    <ul class="list compact">${municipalityFilesMarkup(filteredFiles, municipality.id)}</ul>
-    <h5>Évènements actifs de la commune (accès direct)</h5>
-    <ul class="list compact">${municipalityEvents.map((event) => {
-      const status = EVENT_STATUS_LABEL[event.status] || event.status || 'Ouvert';
-      return `<li><strong>${escapeHtml(event.title || 'Évènement')}</strong> · <span class="badge neutral">${escapeHtml(status)}</span><br>${escapeHtml(event.address || 'Adresse non renseignée')}<br><button type="button" class="ghost inline-action" data-muni-open-event="${event.id}">Ouvrir la fiche évènement</button></li>`;
-    }).join('') || '<li>Aucun évènement ouvert/en cours lié à cette commune.</li>'}</ul>
-    <h5>Main courante liée à la commune</h5>
-    <ul class="list compact">${municipalityLogs.map((log) => {
-      const status = LOG_STATUS_LABEL[String(log.status || 'nouveau')] || 'Nouveau';
-      const eventTitle = getEventTitle(log.event_id);
-      const openAction = log.event_id ? `<br><button type="button" class="ghost inline-action" data-muni-open-event="${log.event_id}">Accéder à l'évènement</button>` : '';
-      return `<li><strong>${new Date(log.created_at).toLocaleString()}</strong> · ${log.danger_emoji || '🟢'} <strong>${escapeHtml(log.event_type || 'MCO')}</strong> · <span class="badge neutral">${status}</span><br><span class="muted">${escapeHtml(eventTitle)}</span><br>${escapeHtml(log.description || '')}${openAction}</li>`;
-    }).join('') || '<li>Aucune entrée main courante associée.</li>'}</ul>
-    ${quickActions}
+    ${richFilesMarkup}
+    ${uploadForm}
+  `;
+
+  // ── Tab: Événements ──────────────────────────────────────
+  const eventsTab = municipalityEvents.length
+    ? municipalityEvents.map((event) => {
+        const status = EVENT_STATUS_LABEL[event.status] || event.status || 'Ouvert';
+        return `<div class="muni-event-item">
+          <div class="muni-event-item__title">${escapeHtml(event.title || 'Évènement')}</div>
+          <div class="muni-event-item__sub">${escapeHtml(event.address || 'Adresse non renseignée')} · <span class="badge neutral">${escapeHtml(status)}</span></div>
+          <button type="button" class="ghost inline-action" style="margin-top:.4rem;padding:.3rem .7rem;font-size:.8rem" data-muni-open-event="${event.id}">Ouvrir la fiche évènement</button>
+        </div>`;
+      }).join('')
+    : '<p class="muted">Aucun évènement ouvert lié à cette commune.</p>';
+
+  // ── Tab: MCO ─────────────────────────────────────────────
+  const mcoTab = municipalityLogs.length
+    ? municipalityLogs.map((log) => {
+        const status = LOG_STATUS_LABEL[String(log.status || 'nouveau')] || 'Nouveau';
+        const eventTitle = getEventTitle(log.event_id);
+        const openAction = log.event_id ? `<button type="button" class="ghost inline-action" style="margin-top:.35rem;padding:.28rem .65rem;font-size:.77rem" data-muni-open-event="${log.event_id}">Accéder à l'évènement</button>` : '';
+        return `<div class="muni-log-item">
+          <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.25rem">
+            <span>${log.danger_emoji || '🟢'} <strong>${escapeHtml(log.event_type || 'MCO')}</strong></span>
+            <span class="badge neutral">${escapeHtml(status)}</span>
+            <span class="muted" style="font-size:.78rem">${timeAgo(log.created_at)}</span>
+          </div>
+          ${eventTitle ? `<div class="muni-log-item__sub" style="margin-bottom:.2rem">${escapeHtml(eventTitle)}</div>` : ''}
+          <div style="font-size:.88rem">${escapeHtml(log.description || '')}</div>
+          ${openAction}
+        </div>`;
+      }).join('')
+    : '<p class="muted">Aucune entrée main courante associée.</p>';
+
+  // ── Assemble HTML ─────────────────────────────────────────
+  setHtml('municipality-details-content', `
+    <div style="display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;margin-bottom:.5rem">
+      <h4 style="margin:0;font-size:1.05rem">${escapeHtml(municipality.name)}</h4>
+      ${municipality.postal_code ? `<span class="muted" style="font-size:.85rem">${escapeHtml(municipality.postal_code)}</span>` : ''}
+    </div>
+    <nav class="muni-detail-tabs" id="muni-tabs-nav-${municipality.id}">
+      <button class="muni-tab-btn active" data-muni-tab="fiche">Fiche</button>
+      <button class="muni-tab-btn" data-muni-tab="docs">Documents${files.length > 0 ? `<span class="muni-tab-badge">${files.length}</span>` : ''}</button>
+      <button class="muni-tab-btn" data-muni-tab="events">Évènements${municipalityEvents.length > 0 ? `<span class="muni-tab-badge">${municipalityEvents.length}</span>` : ''}</button>
+      <button class="muni-tab-btn" data-muni-tab="mco">MCO${municipalityLogs.length > 0 ? `<span class="muni-tab-badge">${municipalityLogs.length}</span>` : ''}</button>
+    </nav>
+    <div class="muni-detail-section active" data-muni-section="fiche">${ficheTab}</div>
+    <div class="muni-detail-section" data-muni-section="docs">${docsTab}</div>
+    <div class="muni-detail-section" data-muni-section="events">${eventsTab}</div>
+    <div class="muni-detail-section" data-muni-section="mco">${mcoTab}</div>
   `);
 
-  content.querySelectorAll('button').forEach((button) => {
-    if ((button.textContent || '').trim().toLowerCase() === 'éditer la fiche') button.remove();
+  // Tab switching
+  content.querySelectorAll('.muni-tab-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.muniTab;
+      content.querySelectorAll('.muni-tab-btn').forEach((b) => b.classList.remove('active'));
+      content.querySelectorAll('.muni-detail-section').forEach((s) => s.classList.remove('active'));
+      btn.classList.add('active');
+      const section = content.querySelector(`[data-muni-section="${tab}"]`);
+      if (section) section.classList.add('active');
+    });
   });
 
   if (typeof modal.showModal === 'function') {
@@ -8003,33 +8081,69 @@ async function loadApiInterconnections(forceRefresh = false) {
 }
 
 function renderMunicipalitiesList(municipalities = []) {
+  // ── Summary bar ────────────────────────────────────────────
+  const totalAll = cachedMunicipalityRecords.length;
+  const crisisCount = cachedMunicipalityRecords.filter((m) => m.crisis_mode).length;
+  const pcsCount = cachedMunicipalityRecords.filter((m) => m.pcs_active).length;
+  const summaryBar = document.getElementById('municipalities-summary-bar');
+  if (summaryBar && totalAll > 0) {
+    summaryBar.hidden = false;
+    summaryBar.classList.remove('hidden');
+    summaryBar.innerHTML = `
+      <span class="muni-summary-pill total">🏘️ ${totalAll} commune${totalAll > 1 ? 's' : ''}</span>
+      ${crisisCount > 0 ? `<span class="muni-summary-pill crisis">🔴 ${crisisCount} en crise</span>` : ''}
+      <span class="muni-summary-pill pcs">✅ ${pcsCount} PCS actif${pcsCount > 1 ? 's' : ''}</span>
+      ${totalAll - crisisCount > 0 ? `<span class="muni-summary-pill veille">🟡 ${totalAll - crisisCount} en veille</span>` : ''}
+    `;
+  } else if (summaryBar) {
+    summaryBar.hidden = true;
+    summaryBar.classList.add('hidden');
+  }
+
+  // ── Cards ──────────────────────────────────────────────────
   const municipalitiesMarkup = municipalities.map((m) => {
-    const dangerColor = levelColor(m.vigilance_color || 'vert');
+    const level = normalizeLevel(m.vigilance_color || 'vert');
+    const badgeClass = level === 'rouge' ? 'red' : level === 'orange' ? 'orange' : level === 'jaune' ? 'yellow' : 'green';
+
+    const crisisBanner = m.crisis_mode
+      ? `<div class="muni-crisis-banner">Mode crise activé</div>`
+      : '';
+
+    const phoneHref = m.phone ? `<a class="muni-contact-btn" href="tel:${encodeURIComponent(m.phone.replace(/\s/g,''))}">📞 ${escapeHtml(m.phone)}</a>` : '';
+    const emailHref = m.email ? `<a class="muni-contact-btn" href="mailto:${encodeURIComponent(m.email)}">✉️ ${escapeHtml(m.email)}</a>` : '';
+
+    const pills = `<div class="muni-pills">
+      <span class="muni-pill ${m.pcs_active ? 'pcs-on' : 'pcs-off'}">${m.pcs_active ? '✅ PCS actif' : '⬜ PCS inactif'}</span>
+      ${m.population ? `<span class="muni-pill pop">👥 ${Number(m.population).toLocaleString('fr-FR')}</span>` : ''}
+      ${m.shelter_capacity ? `<span class="muni-pill shelter">🏠 ${Number(m.shelter_capacity).toLocaleString('fr-FR')} places</span>` : ''}
+    </div>`;
+
+    const additionalInfo = m.additional_info
+      ? `<p class="muted" style="font-size:.82rem;margin:.4rem 0 0;">${escapeHtml(m.additional_info)}</p>`
+      : '';
+
     const actions = canEdit()
       ? `<div class="municipality-actions">
-           <button type="button" class="ghost inline-action" data-muni-view="${m.id}">Voir</button>
+           <button type="button" class="ghost inline-action" data-muni-view="${m.id}">Voir la fiche</button>
            <button type="button" class="ghost inline-action" data-muni-edit="${m.id}">Éditer</button>
-           <button type="button" class="ghost inline-action" data-muni-crisis="${m.id}">${m.crisis_mode ? 'Sortir de crise' : 'Passer en crise'}</button>
-           <button type="button" class="ghost inline-action" data-muni-files="${m.id}">Documents</button>
+           <button type="button" class="ghost inline-action${m.crisis_mode ? ' danger' : ''}" data-muni-crisis="${m.id}">${m.crisis_mode ? '🔴 Sortir de crise' : '⚠️ Passer en crise'}</button>
            <button type="button" class="ghost inline-action danger" data-muni-delete="${m.id}">Supprimer</button>
          </div>`
       : canMunicipalityFiles()
-        ? `<div class="municipality-actions"><button type="button" class="ghost inline-action" data-muni-view="${m.id}">Voir</button><button type="button" class="ghost inline-action" data-muni-files="${m.id}">Documents</button></div>`
-        : `<div class="municipality-actions"><button type="button" class="ghost inline-action" data-muni-view="${m.id}">Voir</button></div>`;
-    return `<article class="municipality-card" data-muni-id="${m.id}">
+        ? `<div class="municipality-actions"><button type="button" class="ghost inline-action" data-muni-view="${m.id}">Voir la fiche</button></div>`
+        : `<div class="municipality-actions"><button type="button" class="ghost inline-action" data-muni-view="${m.id}">Voir la fiche</button></div>`;
+
+    return `<article class="municipality-card municipality-card--${level}" data-muni-id="${m.id}">
+      ${crisisBanner}
       <header>
-        <h4>${escapeHtml(m.name)}</h4>
-        <span class="badge ${normalizeLevel(m.vigilance_color || 'vert') === 'rouge' ? 'red' : normalizeLevel(m.vigilance_color || 'vert') === 'orange' ? 'orange' : normalizeLevel(m.vigilance_color || 'vert') === 'jaune' ? 'yellow' : 'green'}">${normalizeLevel(m.vigilance_color || 'vert')}</span>
+        <h4 style="font-size:.97rem">${escapeHtml(m.postal_code ? `${m.postal_code} · ` : '')}${escapeHtml(m.name)}</h4>
+        <span class="badge ${badgeClass}">${level}</span>
       </header>
-      <p><strong>${escapeHtml(m.phone)}</strong> · ${escapeHtml(m.email)}</p>
-      <p style="color:${dangerColor}">Statut: ${m.crisis_mode ? 'CRISE' : 'veille'} · PCS ${m.pcs_active ? 'actif' : 'inactif'} · ${m.postal_code || 'CP ?'}</p>
-      <div class="municipality-stats">
-        <p>Population<br><strong>${m.population ?? '-'}</strong></p>
-        <p>Accueil<br><strong>${m.shelter_capacity ?? '-'}</strong></p>
-        <p>Contacts<br><strong>${escapeHtml(m.contacts || '-')}</strong></p>
+      <div class="muni-quick-contact" style="margin-top:.5rem">
+        ${phoneHref}${emailHref}
       </div>
-      <p class="municipality-docs">Documents: personnalisés</p>
-      <p class="muted">${escapeHtml(m.additional_info || 'Aucune information complémentaire')}</p>
+      ${pills}
+      ${additionalInfo}
       ${actions}
     </article>`;
   }).join('') || '<p class="muted">Aucune commune.</p>';
@@ -8830,16 +8944,27 @@ function bindAppInteractions() {
   });
   document.getElementById('municipality-details-content')?.addEventListener('click', async (event) => {
     const crisisButton = event.target.closest('[data-muni-detail-crisis]');
+    const editButton = event.target.closest('[data-muni-edit]');
     const openEventButton = event.target.closest('[data-muni-open-event]');
     const openFileButton = event.target.closest('[data-muni-file-open]');
     const downloadFileButton = event.target.closest('[data-muni-file-download]');
     const uploadFileButton = event.target.closest('[data-muni-file-upload]');
     const deleteFileButton = event.target.closest('[data-muni-file-delete]');
-    if (!crisisButton && !openEventButton && !openFileButton && !downloadFileButton && !uploadFileButton && !deleteFileButton) return;
+    if (!crisisButton && !editButton && !openEventButton && !openFileButton && !downloadFileButton && !uploadFileButton && !deleteFileButton) return;
 
     const getMunicipality = (id) => cachedMunicipalityRecords.find((m) => String(m.id) === String(id));
 
     try {
+      if (editButton) {
+        if (!canEdit()) return;
+        const municipalityId = editButton.getAttribute('data-muni-edit');
+        const municipality = getMunicipality(municipalityId);
+        if (!municipality) return;
+        closeMunicipalityDetailsModal();
+        openMunicipalityEditor(municipality);
+        return;
+      }
+
       if (openEventButton) {
         const eventId = openEventButton.getAttribute('data-muni-open-event');
         if (!eventId) return;

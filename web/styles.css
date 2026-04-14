@@ -2100,3 +2100,218 @@ select:focus {
   .header-clock { display: none; }
   .header-freshness { display: none; }
 }
+
+/* ── Page Communes — barre de résumé ─────────────────────────── */
+.muni-summary-bar {
+  display: flex;
+  gap: .5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: .75rem;
+  padding: .55rem .85rem;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #f2f6ff, #edf2fb);
+  border: 1px solid #d0dcf0;
+}
+.muni-summary-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .28rem .72rem;
+  border-radius: 20px;
+  font-size: .8rem;
+  font-weight: 600;
+}
+.muni-summary-pill.total  { background: #e8eefb; color: #1a3568; }
+.muni-summary-pill.crisis { background: #fde8ea; color: #b71c1c; }
+.muni-summary-pill.pcs    { background: #e6f7ec; color: #1a6e3c; }
+.muni-summary-pill.veille { background: #fff8e1; color: #7a5500; }
+
+/* ── Cartes communes — vigilance couleur + crise ─────────────── */
+.municipality-card {
+  border-left-width: 4px !important;
+  border-left-style: solid !important;
+  overflow: hidden;
+  transition: box-shadow .15s, transform .1s;
+}
+.municipality-card:hover { box-shadow: 0 4px 14px rgba(16,43,94,.12); transform: translateY(-1px); }
+.municipality-card--vert   { border-left-color: #1b8a4f !important; }
+.municipality-card--jaune  { border-left-color: #d4a017 !important; }
+.municipality-card--orange { border-left-color: #e06800 !important; }
+.municipality-card--rouge  { border-left-color: #c91c2e !important; }
+
+.muni-crisis-banner {
+  margin: -.9rem -.9rem .65rem;
+  padding: .3rem .9rem;
+  background: linear-gradient(90deg, #c91c2e, #e02030);
+  color: #fff;
+  font-size: .72rem;
+  font-weight: 800;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+}
+.muni-crisis-banner::before { content: '🔴'; font-size: .85rem; }
+
+.muni-quick-contact {
+  display: flex;
+  gap: .4rem;
+  flex-wrap: wrap;
+  margin: .5rem 0 .35rem;
+}
+.muni-contact-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .28rem .7rem;
+  border-radius: 8px;
+  border: 1px solid #c8dafb;
+  background: #f2f7ff;
+  color: var(--primary);
+  font-size: .8rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.muni-contact-btn:hover { background: #dbe9ff; border-color: #a3bfe8; }
+.muni-contact-btn svg { flex-shrink: 0; }
+
+.muni-pills {
+  display: flex;
+  gap: .35rem;
+  flex-wrap: wrap;
+  margin: .4rem 0;
+}
+.muni-pill {
+  font-size: .72rem;
+  font-weight: 700;
+  padding: .2rem .55rem;
+  border-radius: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: .25rem;
+}
+.muni-pill.pcs-on  { background: #e6f7ec; color: #1a6e3c; }
+.muni-pill.pcs-off { background: #f3f4f8; color: #7a7a8a; }
+.muni-pill.pop     { background: #eef1fc; color: #3248a0; }
+.muni-pill.shelter { background: #fff3e8; color: #904000; }
+
+.municipality-stats { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+
+/* ── Modal Communes — onglets ──────────────────────────────────── */
+.muni-detail-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid var(--line);
+  margin: .2rem 0 .85rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.muni-detail-tabs::-webkit-scrollbar { display: none; }
+.muni-tab-btn {
+  flex-shrink: 0;
+  padding: .52rem 1.05rem;
+  font-size: .83rem;
+  font-weight: 600;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  margin-bottom: -2px;
+  cursor: pointer;
+  transition: color .15s, border-color .15s;
+}
+.muni-tab-btn:hover { color: var(--primary); background: none; filter: none; }
+.muni-tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
+.muni-tab-btn .muni-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #fff;
+  font-size: .68rem;
+  font-weight: 700;
+  margin-left: .3rem;
+}
+.muni-detail-section { display: none; }
+.muni-detail-section.active { display: block; }
+
+.muni-info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: .5rem .9rem;
+  margin-bottom: .8rem;
+}
+.muni-info-item { margin: 0; font-size: .9rem; }
+.muni-info-item strong { display: block; font-size: .72rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: .12rem; }
+
+.muni-status-strip {
+  display: flex;
+  gap: .4rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: .9rem;
+  padding: .5rem .8rem;
+  border-radius: 10px;
+  background: #f5f8ff;
+  border: 1px solid var(--line);
+}
+
+.muni-doc-item {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: .5rem .6rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #fafbff;
+  margin-bottom: .35rem;
+}
+.muni-doc-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  font-size: .85rem;
+  flex-shrink: 0;
+  background: #e8eefb;
+  color: #1a3568;
+}
+.muni-doc-meta { flex: 1; min-width: 0; }
+.muni-doc-title { font-weight: 600; font-size: .88rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.muni-doc-sub { font-size: .74rem; color: var(--muted); margin-top: .05rem; }
+
+.muni-event-item, .muni-log-item {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: .6rem .8rem;
+  margin-bottom: .4rem;
+  background: #fafbff;
+}
+.muni-event-item__title { font-weight: 700; font-size: .9rem; margin-bottom: .2rem; }
+.muni-event-item__sub, .muni-log-item__sub { font-size: .78rem; color: var(--muted); }
+
+.muni-upload-section {
+  margin-top: .9rem;
+  padding: .75rem .85rem;
+  border: 1px dashed #b8cdef;
+  border-radius: 10px;
+  background: #f6f9ff;
+}
+.muni-upload-section h6 { margin: 0 0 .6rem; font-size: .82rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+
+@media (max-width: 540px) {
+  .muni-summary-bar { gap: .35rem; padding: .45rem .65rem; }
+  .municipality-upload-form { grid-template-columns: 1fr 1fr; }
+  .municipality-upload-form input[type=file] { grid-column: span 2; }
+  .municipality-upload-form button { grid-column: span 2; }
+}
