@@ -3881,7 +3881,9 @@ async function loadTelecomPoints() {
 
 function getDisplayedResources() {
   const query = (document.getElementById('map-search')?.value || '').trim().toLowerCase();
-  const staticResources = RESOURCE_POINTS
+  const hostingStatic = Array.isArray(window.HOSTING_STATIC_VENUES) ? window.HOSTING_STATIC_VENUES : [];
+  const allStaticPoints = [...RESOURCE_POINTS, ...hostingStatic];
+  const staticResources = allStaticPoints
     .filter((r) => r.active)
     .filter((r) => resourceVisibilityOverrides.get(r.id) !== false)
     .filter((r) => shouldDisplayBaseResourceType(r.type))
@@ -3889,6 +3891,8 @@ function getDisplayedResources() {
     .map((r) => ({ ...r, dynamic: false }));
   const dynamicResources = [...institutionPointsCache, ...finessPointsCache, ...telecomPointsCache]
     .filter((r) => r.type)
+    // Exclure les doublons avec les données statiques hébergement (même id)
+    .filter((r) => !hostingStatic.some((h) => h.id === r.id))
     .filter((r) => shouldDisplayBaseResourceType(r.type))
     .filter((r) => resourceVisibilityOverrides.get(r.id) !== false)
     .filter((r) => !query || `${r.name} ${r.address}`.toLowerCase().includes(query));
@@ -3896,10 +3900,12 @@ function getDisplayedResources() {
 }
 
 function getResourcesForZoneImpact() {
-  const staticResources = RESOURCE_POINTS
+  const hostingStatic = Array.isArray(window.HOSTING_STATIC_VENUES) ? window.HOSTING_STATIC_VENUES : [];
+  const staticResources = [...RESOURCE_POINTS, ...hostingStatic]
     .filter((resource) => resource.active)
     .map((resource) => ({ ...resource, dynamic: false }));
-  const dynamicResources = [...institutionPointsCache, ...finessPointsCache, ...telecomPointsCache];
+  const dynamicResources = [...institutionPointsCache, ...finessPointsCache, ...telecomPointsCache]
+    .filter((r) => !hostingStatic.some((h) => h.id === r.id));
   return [...staticResources, ...dynamicResources];
 }
 
@@ -9322,23 +9328,6 @@ function bindAppInteractions() {
       if (RESOURCE_ONLY_FILTERS.has(id)) {
         // Rendu immédiat depuis le cache
         renderResources();
-        // Si le filtre hébergement vient d'être activé et qu'aucun point hébergement n'est en cache
-        // → force un refresh backend pour récupérer les données facilities (gymnases, salles…)
-        if ((id === 'filter-resources-hosting' || id === 'filter-resources-hosting-type')
-            && document.getElementById('filter-resources-hosting')?.checked) {
-          const hasHostingInCache = institutionPointsCache.some((p) =>
-            ['gymnase', 'complexe_sportif', 'stade', 'salle_omnisports', 'centre_culturel', 'salle_spectacle_public', 'palais_congres', 'salle_fetes'].includes(p.type)
-          );
-          if (!hasHostingInCache && !_institutionsLoadInFlight) {
-            // Invalider le cache localStorage pour forcer un re-fetch avec facilities
-            try { localStorage.removeItem(STORAGE_KEYS.staticInstitutionsCache); } catch (_) {}
-            institutionsLoaded = false;
-            _institutionsLoadInFlight = true;
-            loadIsereInstitutions()
-              .then(() => { _institutionsLoadInFlight = false; _drawResourceMarkers(); })
-              .catch(() => { _institutionsLoadInFlight = false; });
-          }
-        }
         return;
       }
       // Filtres globaux (hydro, pcs, trafic, caméras) → tout re-rendre
