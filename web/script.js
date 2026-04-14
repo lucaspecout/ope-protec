@@ -255,6 +255,7 @@ let cachedCrisisPoints = [];
 let cachedEvents = [];
 let selectedOperationalEventId = null;
 let cachedLogs = [];
+let mcoEventFilter = 'open'; // 'open' | 'all' | 'clos'
 let cachedDashboardSnapshot = {};
 let cachedExternalRisksSnapshot = {};
 let cachedWeeklyMeteo = null;
@@ -1108,8 +1109,10 @@ function fillLogFormFromEntry(log = {}) {
   form.elements.description.value = log.description || '';
   form.elements.actions_taken.value = log.actions_taken || '';
   form.dataset.editLogId = String(log.id);
-  const submitButton = form.querySelector('button[type="submit"]');
+  const submitButton = document.getElementById('mco-submit-btn') || form.querySelector('button[type="submit"]');
   if (submitButton) submitButton.textContent = 'Enregistrer la modification';
+  const cancelBtn = document.getElementById('mco-cancel-edit-btn');
+  if (cancelBtn) { cancelBtn.hidden = false; cancelBtn.classList.remove('hidden'); }
   syncLogScopeFields();
 }
 
@@ -1117,58 +1120,104 @@ function resetLogFormState() {
   const form = document.getElementById('log-form');
   if (!form) return;
   delete form.dataset.editLogId;
-  const submitButton = form.querySelector('button[type="submit"]');
+  const submitButton = document.getElementById('mco-submit-btn') || form.querySelector('button[type="submit"]');
   if (submitButton) submitButton.textContent = "Ajouter l'entrée";
+  const cancelBtn = document.getElementById('mco-cancel-edit-btn');
+  if (cancelBtn) { cancelBtn.hidden = true; cancelBtn.classList.add('hidden'); }
 }
 
 function renderEventsList() {
   const target = document.getElementById('events-list');
   if (!target) return;
 
-  const sortedEvents = sortOperationalEvents(cachedEvents);
-  const markup = sortedEvents.map((event) => {
+  let sorted = sortOperationalEvents(cachedEvents);
+
+  // Apply sidebar filter
+  if (mcoEventFilter === 'open') {
+    sorted = sorted.filter((e) => String(e.status || 'ouvert').toLowerCase() !== 'clos');
+  } else if (mcoEventFilter === 'clos') {
+    sorted = sorted.filter((e) => String(e.status || '').toLowerCase() === 'clos');
+  }
+
+  const markup = sorted.map((event) => {
     const isSelected = String(event.id) === String(selectedOperationalEventId);
-    const municipality = event.municipality_id ? ` · ${escapeHtml(getMunicipalityName(event.municipality_id))}` : ' · Départemental';
+    const municipality = event.municipality_id
+      ? escapeHtml(getMunicipalityName(event.municipality_id))
+      : 'Départemental';
     const status = EVENT_STATUS_LABEL[event.status] || event.status || 'Ouvert';
-    const actionLabel = isSelected ? 'Fiche ouverte' : 'Ouvrir la fiche';
-    const deleteAction = canEdit()
-      ? `<button type="button" class="ghost inline-action danger" data-event-delete="${event.id}">Supprimer</button>`
-      : '';
-    return `<li class="event-list-item${isSelected ? ' active' : ''}"><strong>${escapeHtml(event.title || 'Évènement')}</strong><br/><span class="muted">${escapeHtml(event.address || '-')}${municipality}</span><br/><span class="badge neutral">${escapeHtml(status)}</span> <button type="button" class="ghost inline-action" data-event-open="${event.id}">${actionLabel}</button> ${deleteAction}</li>`;
+    const isClosed = String(event.status || '').toLowerCase() === 'clos';
+
+    // Compute worst severity from MCO entries for this event
+    const eventLogs = (Array.isArray(cachedLogs) ? cachedLogs : [])
+      .filter((log) => String(log.event_id || '') === String(event.id));
+    const worstLevel = eventLogs.reduce((max, log) => {
+      return riskRank(log.danger_level) > riskRank(max) ? (log.danger_level || 'vert') : max;
+    }, 'vert');
+    const levelNorm = normalizeLevel(worstLevel);
+    const levelEmoji = LOG_LEVEL_EMOJI[levelNorm] || '🟢';
+
+    const badgeClass = levelNorm === 'rouge' ? 'red' : levelNorm === 'orange' ? 'orange' : levelNorm === 'jaune' ? 'yellow' : 'green';
+
+    return `<li>
+      <div class="mco-event-card mco-event-card--${levelNorm}${isSelected ? ' active' : ''}" data-event-open="${event.id}" role="button" tabindex="0">
+        <div class="mco-event-card-title">${levelEmoji} ${escapeHtml(event.title || 'Évènement')}</div>
+        <div class="mco-event-card-sub">${escapeHtml(event.address || '-')} · ${municipality}</div>
+        <div class="mco-event-card-foot">
+          <span class="badge ${isClosed ? 'neutral' : badgeClass}" style="font-size:.7rem;padding:.18rem .5rem">${escapeHtml(status)}</span>
+          ${eventLogs.length > 0 ? `<span class="mco-event-entry-count">📝 ${eventLogs.length} entrée${eventLogs.length > 1 ? 's' : ''}</span>` : '<span class="mco-event-entry-count muted">Aucune entrée</span>'}
+          ${isSelected ? '<span style="font-size:.72rem;font-weight:700;color:var(--primary)">● ouvert</span>' : ''}
+        </div>
+      </div>
+    </li>`;
   }).join('');
 
-  target.innerHTML = markup || '<li>Aucun évènement pour le moment.</li>';
+  target.innerHTML = markup || `<li><p class="muted" style="font-size:.85rem;padding:.4rem .2rem">Aucun évènement ${mcoEventFilter === 'open' ? 'en cours' : mcoEventFilter === 'clos' ? 'clôturé' : ''}.</p></li>`;
 }
 
 function updateEventDetailPanel() {
   const detailPanel = document.getElementById('event-detail');
+  const emptyState = document.getElementById('mco-empty-state');
+  const workspace = document.querySelector('.mco-workspace');
   const selectedEvent = getSelectedOperationalEvent();
   if (!detailPanel) return;
+
   if (!selectedEvent) {
     setVisibility(detailPanel, false);
+    if (emptyState) setVisibility(emptyState, true);
+    if (workspace) workspace.classList.remove('mco-event-selected');
     renderEventMcoSuggestions();
     return;
   }
 
   setVisibility(detailPanel, true);
+  if (emptyState) setVisibility(emptyState, false);
+  if (workspace) workspace.classList.add('mco-event-selected');
+
   setText('event-detail-title', selectedEvent.title || 'Fiche évènement');
   const status = EVENT_STATUS_LABEL[selectedEvent.status] || selectedEvent.status || 'Ouvert';
   const locality = selectedEvent.municipality_id ? getMunicipalityName(selectedEvent.municipality_id) : 'Départemental';
-  setText('event-detail-meta', `${selectedEvent.address || 'Adresse non renseignée'} · ${locality} · Statut: ${status}`);
+  const isClosed = String(selectedEvent.status || '').toLowerCase() === 'clos';
+  const levelEmoji = (() => {
+    const eventLogs = (Array.isArray(cachedLogs) ? cachedLogs : [])
+      .filter((log) => String(log.event_id || '') === String(selectedEvent.id));
+    const worstLevel = eventLogs.reduce((max, log) => riskRank(log.danger_level) > riskRank(max) ? (log.danger_level || 'vert') : max, 'vert');
+    return LOG_LEVEL_EMOJI[normalizeLevel(worstLevel)] || '🟢';
+  })();
+  setText('event-detail-meta', `${levelEmoji} ${escapeHtml(selectedEvent.address || 'Adresse non renseignée')} · ${locality} · ${status}${isClosed ? ' 🔒' : ''}`);
 
-  const normalizedStatus = String(selectedEvent.status || '').toLowerCase();
   const closeButton = document.getElementById('event-close-btn');
   if (closeButton) {
-    const isClosed = normalizedStatus === 'clos';
     closeButton.setAttribute('data-event-status', String(selectedEvent.id));
     closeButton.setAttribute('data-event-next', isClosed ? 'ouvert' : 'clos');
-    closeButton.textContent = isClosed ? "Réouvrir l'évènement" : "Clôturer l'évènement";
+    closeButton.textContent = isClosed ? "Réouvrir" : "Clôturer";
   }
 
   const deleteButton = document.getElementById('event-delete-btn');
-  if (deleteButton) {
-    deleteButton.setAttribute('data-event-delete', String(selectedEvent.id));
-  }
+  if (deleteButton) deleteButton.setAttribute('data-event-delete', String(selectedEvent.id));
+
+  // Show/hide the add-entry form based on closed state
+  const addWrap = document.querySelector('.mco-add-wrap');
+  if (addWrap) addWrap.style.opacity = isClosed ? '.5' : '1';
 
   renderEventMcoSuggestions();
 }
@@ -8211,20 +8260,40 @@ function computeLogCriticality(level) {
 }
 
 function buildLogTableRow(log = {}) {
-  const municipality = log.municipality_id ? ` · ${escapeHtml(getMunicipalityName(log.municipality_id))}` : '';
-  const place = log.location ? `📍 ${escapeHtml(log.location)}` : 'Lieu non précisé';
-  const source = log.source ? `Source: ${escapeHtml(log.source)}` : 'Source non précisée';
-  const owner = log.assigned_to ? `👤 ${escapeHtml(log.assigned_to)}` : '👤 Non assigné';
-  const next = log.next_update_due ? `⏱️ MAJ ${new Date(log.next_update_due).toLocaleString()}` : '';
-  const actions = canEdit()
-    ? `<div class="map-inline-actions"><button type="button" class="ghost inline-action" data-log-edit="${log.id}">Modifier</button><button type="button" class="ghost inline-action danger" data-log-delete="${log.id}">Supprimer MCO</button></div>`
-    : '—';
-  const eventTitle = escapeHtml(getEventTitle(log.event_id));
+  const level = normalizeLevel(log.danger_level || 'vert');
+  const emoji = log.danger_emoji || LOG_LEVEL_EMOJI[level] || '🟢';
   const logTimestamp = log.event_time || log.created_at;
-  const timeAbsolute = new Date(logTimestamp).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit' });
-  const timeRelative = timeAgo(logTimestamp);
-  const timeCell = `<span class="log-time-abs">${escapeHtml(timeAbsolute)}</span>${timeRelative ? `<span class="log-time-rel">${escapeHtml(timeRelative)}</span>` : ''}`;
-  return `<tr><td>${timeCell}</td><td><span class="badge neutral">${formatLogScope(log)}${municipality}</span></td><td>${log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢'}</td><td><strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'MCO')}</strong><br/><span class="muted">${eventTitle}</span></td><td>${place}<br/><span class="muted">${owner} · ${source}${next ? ` · ${next}` : ''}</span><br/>${escapeHtml(log.description || '')}${log.actions_taken ? `<br/><span class="muted">Actions: ${escapeHtml(log.actions_taken)}</span>` : ''}</td><td>${actions}</td></tr>`;
+  const timeAbsolute = new Date(logTimestamp).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+  const timeRel = timeAgo(logTimestamp);
+
+  const municipality = log.municipality_id ? escapeHtml(getMunicipalityName(log.municipality_id)) : '';
+  const scope = formatLogScope(log);
+  const scopeLabel = municipality ? `${scope} · ${municipality}` : scope;
+
+  const metaChips = [
+    log.location ? `<span class="mco-meta-chip">📍 ${escapeHtml(log.location)}</span>` : '',
+    log.source ? `<span class="mco-meta-chip">🗣️ ${escapeHtml(log.source)}</span>` : '',
+    log.assigned_to ? `<span class="mco-meta-chip">👤 ${escapeHtml(log.assigned_to)}</span>` : '',
+    log.next_update_due ? `<span class="mco-meta-chip">⏱️ MAJ ${new Date(log.next_update_due).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>` : '',
+  ].filter(Boolean).join('');
+
+  const actionsBtns = canEdit()
+    ? `<button type="button" class="mco-entry-btn" data-log-edit="${log.id}">Modifier</button>
+       <button type="button" class="mco-entry-btn danger" data-log-delete="${log.id}">Supprimer</button>`
+    : '';
+
+  return `<div class="mco-entry mco-entry--${level}">
+    <div class="mco-entry-head">
+      <span class="mco-entry-emoji">${emoji}</span>
+      <span class="mco-entry-time-rel">${escapeHtml(timeRel || timeAbsolute)}</span>
+      <span class="mco-entry-time-abs">${timeRel ? escapeHtml(timeAbsolute) : ''}</span>
+      <span class="mco-entry-scope">${escapeHtml(scopeLabel)}</span>
+    </div>
+    ${log.description ? `<div class="mco-entry-desc">${escapeHtml(log.description)}</div>` : ''}
+    ${metaChips ? `<div class="mco-entry-meta">${metaChips}</div>` : ''}
+    ${log.actions_taken ? `<div class="mco-entry-actions-text">${escapeHtml(log.actions_taken)}</div>` : ''}
+    ${actionsBtns ? `<div class="mco-entry-btns">${actionsBtns}</div>` : ''}
+  </div>`;
 }
 
 function renderLogsList() {
@@ -8238,7 +8307,8 @@ function renderLogsList() {
   filtered.sort((a, b) => new Date(b.event_time || b.created_at).getTime() - new Date(a.event_time || a.created_at).getTime());
 
   setText('logs-count', String(filtered.length));
-  setHtml('logs-table-stream', filtered.map((log) => buildLogTableRow(log)).join('') || '<tr><td colspan="6">Aucune entrée MCO pour cet évènement.</td></tr>');
+  setHtml('logs-table-stream', filtered.map((log) => buildLogTableRow(log)).join('')
+    || '<p class="muted" style="font-size:.88rem;padding:.4rem .2rem;text-align:center">Aucune entrée MCO pour cet évènement. Ajoutez la première ci-dessous.</p>');
 }
 
 async function loadLogs(preloaded = null) {
@@ -9133,6 +9203,47 @@ function bindAppInteractions() {
     }
   });
   syncLogScopeFields();
+
+  // ── MCO: toggle new-event form ────────────────────────────
+  document.getElementById('mco-new-event-toggle')?.addEventListener('click', () => {
+    const wrap = document.getElementById('mco-new-event-wrap');
+    if (!wrap) return;
+    const isHidden = wrap.hidden;
+    wrap.hidden = !isHidden;
+    wrap.classList.toggle('hidden', !isHidden);
+    const btn = document.getElementById('mco-new-event-toggle');
+    if (btn) btn.textContent = isHidden ? '✕ Annuler' : '+ Nouvel évènement';
+  });
+  document.getElementById('mco-new-event-cancel')?.addEventListener('click', () => {
+    const wrap = document.getElementById('mco-new-event-wrap');
+    if (wrap) { wrap.hidden = true; wrap.classList.add('hidden'); }
+    const btn = document.getElementById('mco-new-event-toggle');
+    if (btn) btn.textContent = '+ Nouvel évènement';
+  });
+
+  // ── MCO: event filter buttons ─────────────────────────────
+  document.querySelectorAll('.mco-filter-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      mcoEventFilter = btn.dataset.mcoFilter || 'open';
+      document.querySelectorAll('.mco-filter-btn').forEach((b) => b.classList.toggle('active', b === btn));
+      renderEventsList();
+    });
+  });
+
+  // ── MCO: back button (mobile) ─────────────────────────────
+  document.getElementById('mco-back-btn')?.addEventListener('click', () => {
+    selectedOperationalEventId = null;
+    updateEventDetailPanel();
+    renderEventsList();
+    renderLogsList();
+  });
+
+  // ── MCO: cancel log edit ──────────────────────────────────
+  document.getElementById('mco-cancel-edit-btn')?.addEventListener('click', () => {
+    const form = document.getElementById('log-form');
+    if (form) { form.reset(); resetLogFormState(); }
+    syncLogScopeFields();
+  });
 
   document.getElementById('municipality-edit-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();

@@ -318,70 +318,118 @@
         </section>
 
         <section id="logs-panel" class="panel view hidden" hidden>
-          <h3>Main courante</h3>
-          <p class="muted">Interface refondue : un évènement pilote son statut, la MCO garde uniquement les informations de suivi essentielles.</p>
-          <form id="event-form" class="form logs-modern-form" data-requires-edit>
-            <input name="title" placeholder="Titre évènement (ex: Crue Isère centre-ville)" required />
-            <input name="address" placeholder="Adresse / secteur concerné" required />
-            <select name="municipality_id" id="event-municipality-id">
-              <option value="">Aucune commune (départemental)</option>
-            </select>
-            <button type="submit">Créer l'évènement</button>
-          </form>
 
-          <article class="logs-events-list-wrap">
-            <h4>Évènements</h4>
-            <ul id="events-list" class="list"></ul>
-          </article>
-
-          <article id="event-detail" class="event-detail hidden" hidden>
-            <div class="event-detail-head">
-              <div>
-                <h4 id="event-detail-title">Fiche évènement</h4>
-                <p id="event-detail-meta" class="muted">-</p>
-              </div>
-              <div class="event-detail-actions">
-                <button id="event-close-btn" type="button" class="ghost" data-requires-edit>Clôturer l'évènement</button>
-                <button id="event-delete-btn" type="button" class="ghost danger" data-requires-edit>Supprimer l'évènement</button>
-              </div>
+          <!-- Page header -->
+          <div class="mco-page-head">
+            <div>
+              <h3 style="margin:0">Main courante opérationnelle</h3>
+              <p class="muted" style="margin:.25rem 0 0;font-size:.85rem">Pilotage des évènements et traçabilité des actions engagées.</p>
             </div>
+            <button id="mco-new-event-toggle" type="button" class="ghost mco-new-event-btn" data-requires-edit>+ Nouvel évènement</button>
+          </div>
 
-          <form id="log-form" class="form logs-modern-form" data-requires-edit>
-            <select name="danger_level" id="log-danger-level">
-              <option value="vert">🟢 Vert</option>
-              <option value="jaune">🟡 Jaune</option>
-              <option value="orange">🟠 Orange</option>
-              <option value="rouge">🔴 Rouge</option>
-            </select>
-            <select name="target_scope" id="log-target-scope">
-              <option value="departemental">Départemental</option>
-              <option value="commune">Commune</option>
-              <option value="pcs">PCS</option>
-            </select>
-            <select name="municipality_id" id="log-municipality-id" disabled>
-              <option value="">Sélectionnez une commune</option>
-            </select>
-            <input name="location" placeholder="Lieu / secteur" />
-            <input name="source" placeholder="Source (CODIS, mairie, terrain...)" />
-            <input name="assigned_to" placeholder="Responsable suivi" />
-            <input name="next_update_due" type="datetime-local" />
-            <textarea name="description" placeholder="Faits observés"></textarea>
-            <textarea name="actions_taken" placeholder="Actions engagées / décisions"></textarea>
-            <button type="submit">Ajouter l'entrée</button>
-          </form>
-          <div id="log-event-mco-suggestions" class="muted"></div>
+          <!-- Collapsible new event form -->
+          <div id="mco-new-event-wrap" class="mco-new-event-wrap hidden" hidden>
+            <form id="event-form" class="mco-create-event-form" data-requires-edit>
+              <input name="title" placeholder="Titre de l'évènement (ex: Crue Isère centre-ville)" required />
+              <input name="address" placeholder="Adresse / secteur concerné" required />
+              <select name="municipality_id" id="event-municipality-id">
+                <option value="">Aucune commune (départemental)</option>
+              </select>
+              <div class="mco-create-event-btns">
+                <button type="submit">Créer l'évènement</button>
+                <button type="button" id="mco-new-event-cancel" class="ghost">Annuler</button>
+              </div>
+            </form>
+          </div>
 
-          <p class="muted">Entrées affichées: <strong id="logs-count">0</strong></p>
-          <article class="logs-stream-wrap">
-            <h4>Flux MCO de l'évènement</h4>
-            <table class="users-table">
-              <thead>
-                <tr><th>Horodatage</th><th>Périmètre</th><th>Criticité</th><th>Évènement</th><th>Détails</th><th>Actions</th></tr>
-              </thead>
-              <tbody id="logs-table-stream"></tbody>
-            </table>
-          </article>
-          </article>
+          <!-- Two-column workspace -->
+          <div class="mco-workspace">
+
+            <!-- LEFT: Event list sidebar -->
+            <aside class="mco-sidebar">
+              <div class="mco-sidebar-filters">
+                <button class="mco-filter-btn active" data-mco-filter="open">En cours</button>
+                <button class="mco-filter-btn" data-mco-filter="all">Tous</button>
+                <button class="mco-filter-btn" data-mco-filter="clos">Clôturés</button>
+              </div>
+              <ul id="events-list" class="mco-events-list"></ul>
+            </aside>
+
+            <!-- RIGHT: Active event detail -->
+            <div class="mco-content">
+
+              <!-- Empty state -->
+              <div id="mco-empty-state" class="mco-empty-state">
+                <div class="mco-empty-icon">📋</div>
+                <p>Sélectionnez un évènement<br>pour afficher la main courante</p>
+              </div>
+
+              <!-- Event detail panel -->
+              <article id="event-detail" class="event-detail hidden" hidden>
+
+                <!-- Mobile: back button -->
+                <button type="button" id="mco-back-btn" class="ghost mco-back-btn">← Retour aux évènements</button>
+
+                <!-- Event header -->
+                <div class="mco-event-header">
+                  <div class="mco-event-header-info">
+                    <h4 id="event-detail-title" style="margin:0;font-size:1.05rem">Fiche évènement</h4>
+                    <p id="event-detail-meta" class="muted" style="margin:.3rem 0 0;font-size:.85rem">-</p>
+                  </div>
+                  <div class="event-detail-actions">
+                    <button id="event-close-btn" type="button" class="ghost" data-requires-edit>Clôturer</button>
+                    <button id="event-delete-btn" type="button" class="ghost danger" data-requires-edit>Supprimer</button>
+                  </div>
+                </div>
+
+                <!-- MCO stream -->
+                <div class="mco-stream-head">
+                  <span class="mco-stream-label">Flux main courante · <strong id="logs-count">0</strong> entrée(s)</span>
+                </div>
+                <div id="logs-table-stream" class="mco-timeline"></div>
+                <div id="log-event-mco-suggestions" class="muted"></div>
+
+                <!-- Add entry form -->
+                <div class="mco-add-wrap">
+                  <div class="mco-add-head">
+                    <span class="mco-add-title">Nouvelle entrée MCO</span>
+                  </div>
+                  <form id="log-form" class="mco-entry-form" data-requires-edit>
+                    <div class="mco-form-row mco-form-row--context">
+                      <select name="danger_level" id="log-danger-level" class="mco-level-select">
+                        <option value="vert">🟢 Vert</option>
+                        <option value="jaune">🟡 Jaune</option>
+                        <option value="orange">🟠 Orange</option>
+                        <option value="rouge">🔴 Rouge</option>
+                      </select>
+                      <select name="target_scope" id="log-target-scope">
+                        <option value="departemental">Départemental</option>
+                        <option value="commune">Commune</option>
+                        <option value="pcs">PCS</option>
+                      </select>
+                      <select name="municipality_id" id="log-municipality-id" disabled>
+                        <option value="">Commune</option>
+                      </select>
+                    </div>
+                    <div class="mco-form-row mco-form-row--meta">
+                      <input name="location" placeholder="📍 Lieu / secteur" />
+                      <input name="source" placeholder="Source (CODIS, mairie...)" />
+                      <input name="assigned_to" placeholder="👤 Responsable" />
+                      <input name="next_update_due" type="datetime-local" title="Prochaine mise à jour prévue" />
+                    </div>
+                    <textarea name="description" placeholder="Faits observés, situation en cours..." rows="2"></textarea>
+                    <textarea name="actions_taken" placeholder="Actions engagées, décisions prises..." rows="2"></textarea>
+                    <div class="mco-form-submit-row">
+                      <button type="submit" id="mco-submit-btn">Ajouter l'entrée</button>
+                      <button type="button" id="mco-cancel-edit-btn" class="ghost hidden" hidden>Annuler la modification</button>
+                    </div>
+                  </form>
+                </div>
+
+              </article>
+            </div><!-- .mco-content -->
+          </div><!-- .mco-workspace -->
         </section>
 
         <section id="news-panel" class="panel view hidden" hidden>
