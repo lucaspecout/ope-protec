@@ -65,7 +65,7 @@ from .services import (
     fetch_prefecture_isere_news,
     fetch_dauphine_isere_news,
     fetch_france_bleu_isere_news,
-    fetch_mtag_grenoble_disruptions,
+    fetch_mreseau_disruptions,
     fetch_finess_isere_resources,
     fetch_isere_opendata_resilience,
     fetch_hubeau_isere_groundwater,
@@ -79,7 +79,6 @@ from .services import (
     fetch_vigicrues_flash_isere_alerts,
     fetch_vigieau_restrictions,
     fetch_aprr_isere_traffic,
-    fetch_resom_isere_traffic,
     fetch_vinci_autoroutes_isere,
     fetch_ter_aura_disruptions,
     fetch_cars_region_aura_disruptions,
@@ -223,8 +222,7 @@ SERVICE_REFRESH_INTERVALS: dict[str, int] = {
     "sncf_isere":             120,
     "vigicrues":              120,
     "ter_aura":               120,   # Transport
-    "mtag_grenoble":          120,   # Tram/bus Grenoble
-    "resom_isere":            120,
+    "mreseau":                120,   # M Réseau trams + bus + cars Grenoble
     "vigicrues_flash_isere":  180,
     "apic_isere":             180,
     "electricity_isere":      180,
@@ -1051,10 +1049,9 @@ def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str])
         "groundwater_isere": (lambda: fetch_hubeau_isere_groundwater(force_refresh=refresh), {"status": "pending", "stations": [], "stations_total": 0, "trend_summary": {"hausse": 0, "baisse": 0, "stable": 0}}),
         "isere_opendata": (lambda: fetch_isere_opendata_resilience(force_refresh=refresh), {"status": "pending", "datasets": [], "totals": {"food_aid_points": 0, "health_centers": 0, "schools": 0}, "insights": []}),
         "aprr_isere": (lambda: fetch_aprr_isere_traffic(force_refresh=refresh), {"status": "pending", "events": [], "events_total": 0, "routes": ["A41", "A43", "A48", "A51"]}),
-        "resom_isere": (lambda: fetch_resom_isere_traffic(force_refresh=refresh), {"status": "pending", "disruptions": [], "disruptions_total": 0}),
         "vinci_autoroutes": (lambda: fetch_vinci_autoroutes_isere(force_refresh=refresh), {"status": "pending", "events": [], "events_total": 0, "routes": ["A40", "A41", "A42", "A43"]}),
         "ter_aura": (lambda: fetch_ter_aura_disruptions(force_refresh=refresh), {"status": "pending", "disruptions": [], "disruptions_total": 0}),
-        "mtag_grenoble": (lambda: fetch_mtag_grenoble_disruptions(force_refresh=refresh), {"status": "pending", "disruptions": [], "disruptions_total": 0, "normal_service": True}),
+        "mreseau": (lambda: fetch_mreseau_disruptions(force_refresh=refresh), {"status": "pending", "disruptions": [], "disruptions_total": 0, "normal_service": True}),
         "cars_region_aura": (lambda: fetch_cars_region_aura_disruptions(force_refresh=refresh), {"status": "pending", "disruptions": [], "disruptions_total": 0}),
     }
 

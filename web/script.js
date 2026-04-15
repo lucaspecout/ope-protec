@@ -49,10 +49,9 @@ const FLUX_SERVICES = [
   { key: 'bison_fute',             label: 'Bison Futé',                icon: '🚗', category: 'Transport',     interval: 300,   metric: (d) => d.today?.isere?.departure ? `Départ: ${d.today.isere.departure} · Retour: ${d.today.isere.return || '?'}` : 'Trafic non disponible' },
   { key: 'sncf_isere',             label: 'SNCF Isère',                icon: '🚆', category: 'Transport',     interval: 120,   metric: (d) => `${(d.alerts || []).length} alerte(s) voie ferrée` },
   { key: 'ter_aura',               label: 'TER SNCF · AURA',           icon: '🚄', category: 'Transport',     interval: 120,   metric: (d) => `${d.disruptions_total ?? 0} perturbation(s) TER` },
-  { key: 'mtag_grenoble',          label: 'M TAG · Tram Grenoble',     icon: '🚃', category: 'Transport',     interval: 120,   metric: (d) => d.normal_service ? 'Trafic normal' : `${d.disruptions_total ?? 0} perturbation(s)` },
+  { key: 'mreseau',                 label: 'M Réseau · Grenoble',       icon: '🚊', category: 'Transport',     interval: 120,   metric: (d) => d.normal_service ? 'Trafic normal' : `${d.disruptions_total ?? 0} perturbation(s)` },
   { key: 'aprr_isere',             label: 'APRR/AREA · Autoroutes',    icon: '🛣️', category: 'Transport',     interval: 180,   metric: (d) => `${d.events_total ?? 0} événement(s) · ${(d.routes || []).join(' ')}` },
   { key: 'vinci_autoroutes',       label: 'Vinci Autoroutes · Isère',  icon: '🚧', category: 'Transport',     interval: 180,   metric: (d) => `${d.events_total ?? 0} événement(s) · ${(d.routes || []).join(' ')}` },
-  { key: 'resom_isere',            label: 'Réseau M · Cars Isère',     icon: '🚍', category: 'Transport',     interval: 120,   metric: (d) => d.normal_service ? 'Trafic normal' : `${d.disruptions_total ?? 0} perturbation(s)` },
   { key: 'cars_region_aura',       label: 'Cars Région · AURA',        icon: '🚐', category: 'Transport',     interval: 300,   metric: (d) => `${d.disruptions_total ?? 0} perturbation(s) cars région` },
   { key: 'electricity_isere',      label: 'RTE · Électricité',         icon: '⚡', category: 'Énergie',       interval: 180,   metric: (d) => `${d.level || '?'} · marge ${d.supply_margin_mw ?? '-'} MW` },
   { key: 'prefecture_isere',       label: 'Préfecture Isère',          icon: '🏛️', category: 'Actualités',   interval: 90,    metric: (d) => `${(d.items || []).length} actualité(s)` },
@@ -608,7 +607,7 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
       disruptions: keepPreviousArray(p.disruptions, n.disruptions),
       disruptions_total: keepPreviousValue(p.disruptions_total, n.disruptions_total),
     })),
-    mtag_grenoble: mergeServiceSlot(previous.mtag_grenoble || {}, next.mtag_grenoble || {}, (p, n) => ({
+    mreseau: mergeServiceSlot(previous.mreseau || {}, next.mreseau || {}, (p, n) => ({
       ...p, ...n,
       disruptions: keepPreviousArray(p.disruptions, n.disruptions),
       disruptions_total: keepPreviousValue(p.disruptions_total, n.disruptions_total),
@@ -622,11 +621,6 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
       ...p, ...n,
       events: keepPreviousArray(p.events, n.events),
       events_total: keepPreviousValue(p.events_total, n.events_total),
-    })),
-    resom_isere: mergeServiceSlot(previous.resom_isere || {}, next.resom_isere || {}, (p, n) => ({
-      ...p, ...n,
-      disruptions: keepPreviousArray(p.disruptions, n.disruptions),
-      disruptions_total: keepPreviousValue(p.disruptions_total, n.disruptions_total),
     })),
     cars_region_aura: mergeServiceSlot(previous.cars_region_aura || {}, next.cars_region_aura || {}, (p, n) => ({
       ...p, ...n,
@@ -6751,9 +6745,9 @@ function buildCriticalRisksMarkup(dashboard = {}, externalRisks = {}) {
   if (terDisruptions > 0) {
     risks.push(`<li><strong>TER SNCF AURA</strong> · <span class="risk-jaune">${terDisruptions} perturbation(s)</span> sur le réseau TER en Isère.</li>`);
   }
-  const mtagDisruptions = Number(externalRisks?.mtag_grenoble?.disruptions_total ?? (externalRisks?.mtag_grenoble?.disruptions || []).length);
-  if (mtagDisruptions > 0) {
-    risks.push(`<li><strong>M TAG Grenoble</strong> · <span class="risk-jaune">${mtagDisruptions} perturbation(s)</span> tram/bus agglomération grenobloise.</li>`);
+  const mreseauDisruptions = Number(externalRisks?.mreseau?.disruptions_total ?? (externalRisks?.mreseau?.disruptions || []).length);
+  if (mreseauDisruptions > 0) {
+    risks.push(`<li><strong>M Réseau Grenoble</strong> · <span class="risk-jaune">${mreseauDisruptions} alerte(s)</span> trams/bus agglomération grenobloise.</li>`);
   }
   const apicAlerts = Number((externalRisks?.apic_isere?.alerts_total ?? (externalRisks?.apic_isere?.alerts || []).length) || 0);
   const vfAlerts = Number((externalRisks?.vigicrues_flash_isere?.alerts_total ?? (externalRisks?.vigicrues_flash_isere?.alerts || []).length) || 0);
@@ -7804,10 +7798,9 @@ const SVC_CARD_META = {
   isere_opendata:        { statusId: 'opendata-status',        infoId: 'opendata-info',        url: 'https://opendata.isere.fr' },
   finess_isere:          { statusId: 'finess-status',          infoId: 'finess-info',          url: 'https://www.data.gouv.fr/datasets/finess-extraction-du-fichier-des-etablissements' },
   ter_aura:              { statusId: 'ter-aura-status',        infoId: 'ter-aura-info',        url: 'https://www.ter.sncf.com/auvergne-rhone-alpes/se-deplacer/info-trafic' },
-  mtag_grenoble:         { statusId: 'mtag-status',            infoId: 'mtag-info',            url: 'https://www.reso-m.fr/' },
+  mreseau:               { statusId: 'mreseau-status',         infoId: 'mreseau-info',         url: 'https://www.reso-m.fr/55-infotrafic.htm' },
   aprr_isere:            { statusId: 'aprr-status',            infoId: 'aprr-info',            url: 'https://voyage.aprr.fr/information-trafic' },
   vinci_autoroutes:      { statusId: 'vinci-status',           infoId: 'vinci-info',           url: 'https://www.vinci-autoroutes.com/fr/autoroutes-temps-reel/' },
-  resom_isere:           { statusId: 'resom-status',           infoId: 'resom-info',           url: 'https://www.reso-m.fr/55-infotrafic.htm' },
   cars_region_aura:      { statusId: 'cars-region-status',     infoId: 'cars-region-info',     url: 'https://sim.laregionvoustransporte.fr/fr/schedules' },
 };
 
@@ -7840,10 +7833,9 @@ const SVC_DETAIL_LISTS = {
   anfr_isere:            [{ id: 'anfr-list',             label: 'Synthèse antennes' }],
   arcep_isere:           [{ id: 'arcep-list',            label: 'Indisponibilités' }],
   ter_aura:              [{ id: 'ter-aura-list',         label: 'Perturbations TER Isère' }],
-  mtag_grenoble:         [{ id: 'mtag-list',             label: 'Perturbations Tram/Bus Grenoble' }],
+  mreseau:               [{ id: 'mreseau-list',          label: 'Alertes M Réseau (trams · bus · cars)' }],
   aprr_isere:            [{ id: 'aprr-list',             label: 'Événements autoroutes Isère' }],
   vinci_autoroutes:      [{ id: 'vinci-list',            label: 'Événements Vinci Isère' }],
-  resom_isere:           [{ id: 'resom-list',            label: 'Perturbations cars Isère' }],
   cars_region_aura:      [{ id: 'cars-region-list',      label: 'Perturbations cars Région AURA' }],
 };
 
@@ -7999,6 +7991,20 @@ function _renderEventsList(listId, items, emptyMsg = 'Aucun événement signalé
   }).join('') || `<li class="muted">${emptyMsg}</li>`);
 }
 
+function _renderMreseauList(listId, items) {
+  const lvlColor = { rouge: '#c22f43', orange: '#b46a00', jaune: '#9a7700', vert: '#2f9e44', inconnu: '#5f7190' };
+  const modeIcon = { Tram: '🚊', 'Bus/Car': '🚌' };
+  setHtml(listId, items.slice(0, 20).map((d) => {
+    const level = d.level || 'inconnu';
+    const color = lvlColor[level] || lvlColor.inconnu;
+    const line = d.line ? `<strong style="color:${color}">${escapeHtml(d.line)}</strong>` : '';
+    const icon = modeIcon[d.mode] || '🚌';
+    const until = d.valid_until ? ` · jusqu'au <em>${escapeHtml(d.valid_until)}</em>` : '';
+    const from = d.valid_from ? ` · dès le ${escapeHtml(d.valid_from)}` : '';
+    return `<li>${icon} ${line ? line + ' · ' : ''}<span style="font-size:.9em">${escapeHtml(d.description || d.title || '–').substring(0, 220)}</span>${from}${until}</li>`;
+  }).join('') || '<li class="muted">Trafic M Réseau normal — aucune alerte en cours.</li>');
+}
+
 function renderTransportFlux(data = {}) {
   // TER SNCF AURA
   const ter = data?.ter_aura || {};
@@ -8012,20 +8018,23 @@ function renderTransportFlux(data = {}) {
     : (ter.error ? ter.error.substring(0, 80) : 'Données non disponibles'));
   _renderDisruptionsList('ter-aura-list', terDisruptions, 'Trafic TER normal pour l\'Isère.');
 
-  // M TAG Tram/Bus Grenoble
-  const mtag = data?.mtag_grenoble || {};
-  const mtagDisruptions = mtag.disruptions || [];
-  const mtagLines = (mtag.lines || ['A','B','C','D','E']).join(' · ');
-  setRiskText('mtag-status',
-    mtag.normal_service !== false && mtagDisruptions.length === 0
-      ? `online · Trafic normal · ${mtagLines}`
-      : `${mtag.status || 'inconnu'} · ${mtagDisruptions.length} perturbation(s)`,
-    mtagDisruptions.length > 0 ? 'orange' : (mtag.status === 'online' ? 'vert' : 'jaune'),
+  // M Réseau (trams + bus + cars agglomération grenobloise)
+  const mreseau = data?.mreseau || {};
+  const mreseauDisruptions = mreseau.disruptions || [];
+  const mreseauTrams = (mreseau.lines_tram || ['A','B','C','D','E']).join(' · ');
+  const mreseauNormal = mreseau.normal_service !== false && mreseauDisruptions.length === 0;
+  setRiskText('mreseau-status',
+    mreseauNormal
+      ? `online · Trafic normal · Trams ${mreseauTrams}`
+      : `${mreseau.status || 'inconnu'} · ${mreseauDisruptions.length} perturbation(s)`,
+    mreseauDisruptions.length > 0 ? 'orange' : (mreseau.status === 'online' ? 'vert' : 'jaune'),
   );
-  setText('mtag-info', mtag.normal_service !== false && mtagDisruptions.length === 0
-    ? `Réseau TAG normal · Trams ${mtagLines}`
-    : (mtagDisruptions.length > 0 ? `${mtagDisruptions.length} perturbation(s) sur le réseau TAG` : (mtag.error ? mtag.error.substring(0, 80) : 'Données non disponibles')));
-  _renderDisruptionsList('mtag-list', mtagDisruptions, 'Trafic M TAG normal sur l\'agglomération grenobloise.');
+  setText('mreseau-info', mreseauNormal
+    ? `Trams A·B·C·D·E + bus normaux · source reso-m.fr`
+    : (mreseauDisruptions.length > 0
+        ? `${mreseauDisruptions.length} alerte(s) en cours · ${mreseau.source ? new URL(mreseau.source).hostname : 'reso-m.fr'}`
+        : (mreseau.error ? mreseau.error.substring(0, 80) : 'Données non disponibles')));
+  _renderMreseauList('mreseau-list', mreseauDisruptions);
 
   // APRR/AREA
   const aprr = data?.aprr_isere || {};
@@ -8051,17 +8060,6 @@ function renderTransportFlux(data = {}) {
     : (vinci.error ? vinci.error.substring(0, 80) : 'Données non disponibles'));
   _renderEventsList('vinci-list', vinciEvents, 'Trafic Vinci fluide sur Isère.');
 
-  // Réseau M
-  const resom = data?.resom_isere || {};
-  const resomDisruptions = resom.disruptions || [];
-  setRiskText('resom-status',
-    `${resom.status || 'inconnu'} · ${resomDisruptions.length ? resomDisruptions.length + ' perturbation(s)' : (resom.normal_service ? 'trafic normal' : '–')}`,
-    resomDisruptions.length > 0 ? 'orange' : (resom.status === 'online' ? 'vert' : 'jaune'),
-  );
-  setText('resom-info', resom.normal_service && !resomDisruptions.length
-    ? 'Service normal sur tous les cars Isère'
-    : (resom.error ? resom.error.substring(0, 80) : `${resomDisruptions.length} perturbation(s) réseau Isère`));
-  _renderDisruptionsList('resom-list', resomDisruptions, 'Service normal sur les cars Isère.');
 
   // Cars Région AURA
   const cars = data?.cars_region_aura || {};

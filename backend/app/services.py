@@ -6673,101 +6673,264 @@ def fetch_aprr_isere_traffic(force_refresh: bool = False) -> dict[str, Any]:
     )
 
 
-# ─── 2. Réseau M · Cars Isère ─────────────────────────────────────────────────
-_RESOM_CACHE_TTL = 120
-_resom_cache_lock = Lock()
-_resom_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "resom_isere"}
+# ─── 2. M Réseau · Trams, bus et cars de l'agglomération grenobloise ──────────
+_MRESEAU_CACHE_TTL = 120
+_mreseau_cache_lock = Lock()
+_mreseau_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "mreseau"}
+
+_MRESEAU_INFOTRAFIC_URL = "https://www.reso-m.fr/55-infotrafic.htm"
+_MRESEAU_LINES_TRAM: tuple[str, ...] = ("A", "B", "C", "D", "E")
+_MRESEAU_DISRUPTION_WORDS: frozenset[str] = frozenset({
+    "perturbation", "travaux", "déviation", "interrompu", "supprimé",
+    "retard", "incident", "modification", "info trafic", "information trafic",
+    "régulation", "ralentissement", "dégradé", "partiellement", "limité",
+    "arrêt", "suspension",
+})
 
 
-def _fetch_resom_live() -> dict[str, Any]:
-    # Source principale : page info-trafic Réseau M Isère
-    source = "https://www.reso-m.fr/55-infotrafic.htm"
-    # Fallback : GTFS-RT service alerts pour les transports Isère via transport.data.gouv.fr
-    gtfs_rt_source = (
-        "https://proxy.transport.data.gouv.fr/resource/isere-mobilites-gtfs-rt-service-alerts"
-    )
+def _parse_mreseau_level(text: str) -> str:
+    tl = text.lower()
+    if any(w in tl for w in ("interrompu", "supprimé", "totalement", "complètement")):
+        return "rouge"
+    if any(w in tl for w in ("important", "majeur", "fortement", "significatif")):
+        return "orange"
+    return "jaune"
+
+
+def _parse_mreseau_line(text: str) -> str:
+    """Identifie la ligne M Réseau depuis un texte libre."""
+    for letter in ("A", "B", "C", "D", "E"):
+        if re.search(rf'\b(?:tram(?:way)?\s+)?(?:ligne\s+)?{letter}\b', text, re.IGNORECASE):
+            return f"Tram {letter}"
+    m = re.search(r'\blignes?\s+([A-Z]?\d{{1,3}})\b', text, re.IGNORECASE)
+    if m:
+        return f"Ligne {m.group(1).upper()}"
+    m = re.search(r'\b([CEKST]\d{{1,3}})\b', text, re.IGNORECASE)
+    if m:
+        return f"Ligne {m.group(1).upper()}"
+    for special in ("Proximo", "Flexo", "Chrono", "Atoubus", "Métrocâble", "Téléphérique"):
+        if special.lower() in text.lower():
+            return special
+    return "Réseau M"
+
+
+def _fetch_mreseau_live() -> dict[str, Any]:
+    """Perturbations M Réseau — trams, bus et cars agglomération grenobloise.
+
+    Sources par ordre de priorité :
+    1. Page info-trafic officielle reso-m.fr/55-infotrafic.htm
+    2. API perturbations data.mobilites-m.fr
+    3. GTFS-RT service alerts Isère Mobilités (transport.data.gouv.fr)
+    """
     disruptions: list[dict[str, Any]] = []
     source_used = ""
     normal_service = False
+    _hdrs = {
+        "User-Agent": _BROWSER_UA,
+        "Accept": "text/html,application/xhtml+xml,application/json,*/*",
+        "Accept-Language": "fr-FR,fr;q=0.9",
+        "Referer": "https://www.reso-m.fr/",
+    }
 
-    # --- Tentative 1 : page HTML Réseau M ---
+    # ── Source 1 : scraping HTML reso-m.fr/55-infotrafic.htm ──────────────────
     try:
-        html = _http_get_text_quick(source, timeout=12)
-        text = _strip_html_tags(unescape(html))
-        # Recherche large : les libellés peuvent varier
-        for m in re.finditer(
-            r'(?:ligne|service|bus|tram|réseau|car)[^.!?]{0,400}'
-            r'(?:perturbation|déviation|suppression|retard|incident|interrompu|modifié|travaux)[^.!?]*[.!?]',
-            text, re.IGNORECASE,
+        html = ""
+        if _REQUESTS_OK and _requests is not None:
+            resp = _requests.get(_MRESEAU_INFOTRAFIC_URL, headers=_hdrs, timeout=15, verify=False)
+            resp.raise_for_status()
+            html = resp.text
+        else:
+            html = _http_get_text(_MRESEAU_INFOTRAFIC_URL, timeout=15, headers=_hdrs)
+
+        if re.search(
+            r'aucune?\s+perturbation|trafic\s+normal|service\s+normal|pas\s+de\s+perturbation|aucun\s+incident',
+            html, re.IGNORECASE,
         ):
-            snippet = m.group(0).strip()
-            line_m = re.search(r'\b([A-Z]\d+|C\d+|T\d+|E\d+|\d{1,3})\b', snippet)
-            disruptions.append({
-                "line": line_m.group(1) if line_m else "?",
-                "description": snippet[:300],
-                "type": (
-                    "suppression" if "suppression" in snippet.lower()
-                    else "déviation" if "déviation" in snippet.lower()
-                    else "perturbation"
-                ),
-            })
-        normal_service = bool(
-            re.search(r'aucune?\s+perturbation|trafic\s+normal|service\s+normal', text, re.IGNORECASE)
+            normal_service = True
+
+        seen: set[str] = set()
+
+        # Pattern 1 : divs/articles avec classe indicatrice
+        item_blocks = re.findall(
+            r'<(?:div|article|li|section)\b[^>]*class=["\'][^"\']*'
+            r'(?:info|trafic|perturbation|alerte|incident|ligne|disruption|alert)[^"\']*["\'][^>]*>'
+            r'([\s\S]{30,3000}?)'
+            r'</(?:div|article|li|section)>',
+            html, re.IGNORECASE,
         )
-        source_used = source
-    except (HTTPError, URLError, TimeoutError, RemoteDisconnected):
+        # Pattern 2 : fallback large si pattern 1 vide
+        if not item_blocks:
+            item_blocks = re.findall(
+                r'<(?:article|li)\b[^>]*>([\s\S]{40,2000}?)</(?:article|li)>',
+                html, re.IGNORECASE,
+            )
+        # Pattern 3 : paragraphes / spans contenant des mots-clés de perturbation
+        if not item_blocks:
+            item_blocks = re.findall(
+                r'<(?:p|span)\b[^>]*>([\s\S]{40,800}?)</(?:p|span)>',
+                html, re.IGNORECASE,
+            )
+
+        for block in item_blocks:
+            text = re.sub(r"<[^>]+>", " ", block)
+            text = re.sub(r"\s+", " ", unescape(text)).strip()
+            if len(text) < 30:
+                continue
+            tl = text.lower()
+            if not any(w in tl for w in _MRESEAU_DISRUPTION_WORDS):
+                continue
+            if _is_german_alert(text):
+                continue
+            key = text[:70].lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            # Titre = première phrase courte
+            title_m = re.match(r'^([^.!?\n]{10,120})', text)
+            title = title_m.group(1).strip() if title_m else text[:100]
+            line_label = _parse_mreseau_line(text)
+            level = _parse_mreseau_level(text)
+            date_m = re.search(
+                r'(?:du|le|à\s+partir\s+du)\s+(\d{{1,2}}[/\-.]\d{{1,2}}(?:[/\-.]\d{{2,4}})?)',
+                tl,
+            )
+            until_m = re.search(
+                r"(?:jusqu'au|jusqu'à|au)\s+(\d{{1,2}}[/\-.]\d{{1,2}}(?:[/\-.]\d{{2,4}})?)",
+                tl,
+            )
+            disruptions.append({
+                "title": title[:120],
+                "description": text[:400],
+                "level": level,
+                "line": line_label,
+                "mode": "Tram" if line_label.startswith("Tram") else "Bus/Car",
+                "valid_from": date_m.group(1) if date_m else "",
+                "valid_until": until_m.group(1) if until_m else "",
+            })
+
+        if disruptions or normal_service:
+            source_used = _MRESEAU_INFOTRAFIC_URL
+    except Exception:
         pass
 
-    # --- Tentative 2 : GTFS-RT JSON alerts ---
-    if not source_used:
-        try:
-            data = _http_get_json(gtfs_rt_source, timeout=10)
-            alerts = (
-                data.get("entity") or data.get("alerts") or
-                (data.get("header", {}) or {}).get("entity") or []
-            )
-            for entity in alerts:
-                alert = entity.get("alert") or entity if isinstance(entity, dict) else {}
-                header = str((alert.get("headerText") or {}).get("translation", [{}])[0].get("text", "") if isinstance(alert.get("headerText"), dict) else alert.get("headerText") or "")
-                desc = str((alert.get("descriptionText") or {}).get("translation", [{}])[0].get("text", "") if isinstance(alert.get("descriptionText"), dict) else alert.get("descriptionText") or "")
-                if header or desc:
+    # ── Source 2 : API data.mobilites-m.fr ────────────────────────────────────
+    if not disruptions and not normal_service:
+        for _api_url in (
+            "https://data.mobilites-m.fr/api/perturbations/json",
+            "https://data.mobilites-m.fr/api/disruptions/json",
+        ):
+            if disruptions:
+                break
+            try:
+                data = _http_get_json(_api_url, timeout=12, headers={
+                    "Accept": "application/json",
+                    "User-Agent": _BROWSER_UA,
+                })
+                items = (
+                    data if isinstance(data, list)
+                    else data.get("disruptions") or data.get("features") or data.get("data") or []
+                )
+                for item in items[:50]:
+                    props = item.get("properties") or item
+                    title_raw = str(
+                        props.get("cause") or props.get("title") or props.get("titre")
+                        or props.get("libelle") or ""
+                    )
+                    desc_raw = str(
+                        props.get("message") or props.get("description") or props.get("texte") or ""
+                    )
+                    if not title_raw and not desc_raw:
+                        continue
+                    combined = title_raw + " " + desc_raw
+                    line_label = _parse_mreseau_line(combined)
+                    severity = str(props.get("severity") or props.get("niveau") or "").lower()
+                    level = "rouge" if any(w in severity for w in ("high", "grave", "severe")) else "jaune"
                     disruptions.append({
-                        "line": "?",
-                        "description": (header + " " + desc).strip()[:300],
-                        "type": "perturbation",
+                        "title": title_raw[:120] or desc_raw[:80],
+                        "description": (desc_raw or title_raw)[:400],
+                        "level": level,
+                        "line": line_label,
+                        "mode": "Tram" if line_label.startswith("Tram") else "Bus/Car",
+                        "valid_from": str(props.get("start_date") or props.get("debut") or ""),
+                        "valid_until": str(props.get("end_date") or props.get("fin") or ""),
                     })
-            source_used = gtfs_rt_source
+                if disruptions:
+                    source_used = _api_url
+            except Exception:
+                continue
+
+    # ── Source 3 : GTFS-RT service alerts Isère Mobilités ────────────────────
+    if not disruptions and not normal_service:
+        try:
+            data = _http_get_json(
+                "https://proxy.transport.data.gouv.fr/resource/isere-mobilites-gtfs-rt-service-alerts",
+                timeout=10,
+                headers={"Accept": "application/json", "User-Agent": _BROWSER_UA},
+            )
+            entities = data.get("entity") or data.get("alerts") or []
+            for entity in entities[:40]:
+                alert = entity.get("alert") or (entity if isinstance(entity, dict) else {})
+
+                def _trans(field: str) -> str:
+                    raw = alert.get(field)
+                    if isinstance(raw, dict):
+                        transl = raw.get("translation") or []
+                        return str(transl[0].get("text", "") if transl else "")
+                    return str(raw or "")
+
+                header = _trans("headerText")
+                desc = _trans("descriptionText")
+                if not header and not desc:
+                    continue
+                if _is_german_alert(header + " " + desc):
+                    continue
+                combined = header + " " + desc
+                line_label = _parse_mreseau_line(combined)
+                disruptions.append({
+                    "title": header[:120] or desc[:80],
+                    "description": (desc or header)[:400],
+                    "level": "jaune",
+                    "line": line_label,
+                    "mode": "Tram" if line_label.startswith("Tram") else "Bus/Car",
+                    "valid_from": "",
+                    "valid_until": "",
+                })
+            if disruptions:
+                source_used = "isere-mobilites-gtfs-rt"
         except Exception:
             pass
 
     if not source_used:
         return {
-            "service": "Réseau M · Cars Isère",
+            "service": "M Réseau",
             "status": "degraded",
-            "source": source,
+            "source": _MRESEAU_INFOTRAFIC_URL,
             "disruptions": [],
             "disruptions_total": 0,
-            "error": "Source indisponible",
+            "normal_service": False,
+            "error": "Sources indisponibles",
             "updated_at": datetime.utcnow().isoformat() + "Z",
         }
+
     return {
-        "service": "Réseau M · Cars Isère",
+        "service": "M Réseau",
         "status": "online",
         "source": source_used,
-        "disruptions": disruptions[:10],
+        "disruptions": disruptions[:20],
         "disruptions_total": len(disruptions),
-        "normal_service": normal_service and not disruptions,
+        "normal_service": normal_service and len(disruptions) == 0,
+        "lines_tram": list(_MRESEAU_LINES_TRAM),
         "updated_at": datetime.utcnow().isoformat() + "Z",
     }
 
 
-def fetch_resom_isere_traffic(force_refresh: bool = False) -> dict[str, Any]:
+def fetch_mreseau_disruptions(force_refresh: bool = False) -> dict[str, Any]:
     return _cached_external_payload(
-        cache=_resom_cache,
-        lock=_resom_cache_lock,
-        ttl_seconds=_RESOM_CACHE_TTL,
+        cache=_mreseau_cache,
+        lock=_mreseau_cache_lock,
+        ttl_seconds=_MRESEAU_CACHE_TTL,
         force_refresh=force_refresh,
-        loader=_fetch_resom_live,
+        loader=_fetch_mreseau_live,
     )
 
 
@@ -6993,241 +7156,12 @@ def fetch_ter_aura_disruptions(force_refresh: bool = False) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# M TAG · Réseau de tram/bus de l'agglomération grenobloise
+# (M TAG fusionné dans M Réseau — voir fetch_mreseau_disruptions)
 # ---------------------------------------------------------------------------
 
-_MTAG_CACHE_TTL = 120
-_mtag_cache_lock = Lock()
-_mtag_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "mtag_grenoble"}
-
-_MTAG_LINE_KEYWORDS: tuple[str, ...] = (
-    "tram", "tramway", "ligne a", "ligne b", "ligne c", "ligne d", "ligne e",
-    "proximo", "flexo", "tag", "téléphérique", "semitag",
-    "grenoble", "échirolles", "st-martin-d'hères", "meylan", "fontaine",
-    "eybens", "poisat", "gières", "saint-martin", "seyssinet",
-)
-
-
-def _fetch_mtag_grenoble_live() -> dict[str, Any]:
-    """Perturbations M TAG (réseau tram/bus agglomération Grenoble).
-
-    Sources par ordre de priorité :
-    1. API perturbations data.mobilites-m.fr (officielle Réseau M / SEMITAG)
-    2. SIRI SX transport.data.gouv.fr filtré opérateur SEMITAG/TAG
-    3. Scraping page info-trafic reso-m.fr
-    """
-    disruptions: list[dict[str, Any]] = []
-    source_used = ""
-    _browser_hdrs = {
-        "User-Agent": _BROWSER_UA,
-        "Accept": "application/json,text/html,*/*",
-        "Accept-Language": "fr-FR,fr;q=0.9",
-    }
-
-    # ------------------------------------------------------------------
-    # Source 1 : API data.mobilites-m.fr — perturbations temps réel
-    # ------------------------------------------------------------------
-    _mobm_perturbations_urls = [
-        "https://data.mobilites-m.fr/api/perturbations/json",
-        "https://data.mobilites-m.fr/api/disruptions/json",
-        "https://data.mobilites-m.fr/api/v1/disruptions",
-    ]
-    for _url in _mobm_perturbations_urls:
-        if disruptions:
-            break
-        try:
-            data = _http_get_json(_url, timeout=12, headers=_browser_hdrs)
-            items = (
-                data if isinstance(data, list)
-                else data.get("disruptions") or data.get("features") or data.get("data") or []
-            )
-            for item in items[:50]:
-                props = item.get("properties") or item
-                title_raw = str(
-                    props.get("cause") or props.get("title") or props.get("titre")
-                    or props.get("libelle") or props.get("name") or ""
-                )
-                desc_raw = str(
-                    props.get("message") or props.get("description") or props.get("texte")
-                    or props.get("summary") or props.get("detail") or ""
-                )
-                if not title_raw and not desc_raw:
-                    continue
-                line_match = re.search(
-                    r'\b(?:Tram(?:way)?\s+)?(?:Ligne\s+)?([A-E]|[0-9]{1,2}|Proximo|Flexo|Chrono|Atoubus)\b',
-                    title_raw + " " + desc_raw,
-                    re.IGNORECASE,
-                )
-                line_label = f"Ligne {line_match.group(1).upper()}" if line_match else "Réseau M TAG"
-                level_raw = str(props.get("severity") or props.get("niveau") or props.get("impact") or "").lower()
-                level = "rouge" if any(w in level_raw for w in ("high", "grave", "severe", "critique")) else "jaune"
-                disruptions.append({
-                    "title": f"M TAG · {line_label}" if line_label not in title_raw else title_raw[:100],
-                    "description": (desc_raw or title_raw)[:400],
-                    "level": level,
-                    "line": line_label,
-                    "valid_from": str(props.get("start_date") or props.get("debut") or ""),
-                    "valid_until": str(props.get("end_date") or props.get("fin") or ""),
-                })
-            if disruptions:
-                source_used = _url
-        except Exception:
-            continue
-
-    # ------------------------------------------------------------------
-    # Source 2 : SIRI SX transport.data.gouv.fr — opérateur SEMITAG/TAG
-    # ------------------------------------------------------------------
-    if not disruptions:
-        _siri_producers = ["SEMITAG", "TAG", "TransIsere"]
-        for _producer in _siri_producers:
-            if disruptions:
-                break
-            try:
-                _siri_url = (
-                    "https://proxy.transport.data.gouv.fr/resource/"
-                    f"siri-lite-situation-exchange?Producer={_producer}"
-                )
-                xml_text = _http_get_text(
-                    _siri_url,
-                    timeout=15,
-                    headers={"User-Agent": "ope-protec/1.0", "Accept": "application/xml,text/xml,*/*"},
-                )
-                # Namespace SIRI
-                _ns = {"siri": "http://www.siri.org.uk/siri"}
-                root = ET.fromstring(xml_text)
-                situations = root.findall(".//siri:PtSituationElement", _ns) or root.findall(
-                    ".//{http://www.siri.org.uk/siri}PtSituationElement"
-                )
-                for sit in situations:
-                    def _txt(tag: str) -> str:
-                        el = sit.find(f"siri:{tag}", _ns) or sit.find(
-                            f"{{http://www.siri.org.uk/siri}}{tag}"
-                        )
-                        return (el.text or "").strip() if el is not None else ""
-
-                    summary = (
-                        _txt("Summary") or _txt("Description") or _txt("Detail")
-                    )
-                    detail = _txt("Description") or _txt("Detail") or summary
-                    if not summary:
-                        continue
-                    if _is_german_alert(summary + " " + detail):
-                        continue
-                    affects = sit.find(".//siri:LineRef", _ns) or sit.find(
-                        ".//{http://www.siri.org.uk/siri}LineRef"
-                    )
-                    line_ref = (affects.text or "").strip() if affects is not None else ""
-                    line_match = re.search(
-                        r'([A-E]|[0-9]{1,2}|Proximo|Flexo|Chrono)', line_ref or summary, re.IGNORECASE
-                    )
-                    line_label = f"Ligne {line_match.group(1).upper()}" if line_match else "Réseau M TAG"
-                    severity = _txt("Severity").lower()
-                    level = "rouge" if any(w in severity for w in ("high", "severe")) else "jaune"
-                    disruptions.append({
-                        "title": f"M TAG · {line_label}",
-                        "description": detail[:400] or summary[:400],
-                        "level": level,
-                        "line": line_label,
-                        "valid_from": _txt("StartTime"),
-                        "valid_until": _txt("EndTime"),
-                    })
-                if disruptions:
-                    source_used = _siri_url
-            except Exception:
-                continue
-
-    # ------------------------------------------------------------------
-    # Source 3 : Scraping reso-m.fr / tag.fr
-    # ------------------------------------------------------------------
-    if not disruptions:
-        _scrape_urls = [
-            ("https://www.reso-m.fr/trafic-en-temps-reel.htm", "https://www.reso-m.fr/"),
-            ("https://www.reso-m.fr/info-trafic.htm", "https://www.reso-m.fr/"),
-            ("https://www.reso-m.fr/perturbations.htm", "https://www.reso-m.fr/"),
-            ("https://www.tag.fr/3-infos-trafic.htm", "https://www.tag.fr/"),
-        ]
-        for _page_url, _referer in _scrape_urls:
-            if disruptions:
-                break
-            try:
-                html = _http_get_text(
-                    _page_url,
-                    timeout=15,
-                    headers={
-                        "User-Agent": _BROWSER_UA,
-                        "Accept": "text/html,application/xhtml+xml,*/*",
-                        "Accept-Language": "fr-FR,fr;q=0.9",
-                        "Referer": _referer,
-                    },
-                )
-                # Chercher tous les blocs texte significatifs avec mention de perturbation/ligne
-                blocks = re.findall(
-                    r'<(?:div|article|li|section)[^>]*>'
-                    r'([\s\S]{30,2000}?)'
-                    r'</(?:div|article|li|section)>',
-                    html,
-                    re.IGNORECASE,
-                )
-                seen: set[str] = set()
-                for block in blocks:
-                    text = re.sub(r"<[^>]+>", " ", block)
-                    text = re.sub(r"\s+", " ", unescape(text)).strip()
-                    if len(text) < 40:
-                        continue
-                    # Conserver seulement si la page mentionne une perturbation réelle
-                    tl = text.lower()
-                    if not any(w in tl for w in (
-                        "perturbation", "travaux", "déviation", "interrompu",
-                        "supprimé", "retard", "incident", "arrêt", "modification",
-                        "info trafic", "information trafic",
-                    )):
-                        continue
-                    if _is_german_alert(text):
-                        continue
-                    line_match = re.search(
-                        r'\b(?:Tram(?:way)?\s+)?(?:Ligne\s+)?([A-E]|[0-9]{1,2}|Proximo|Flexo|Chrono)\b',
-                        text, re.IGNORECASE,
-                    )
-                    line_label = f"Ligne {line_match.group(1).upper()}" if line_match else "Réseau M TAG"
-                    key = text[:60].lower()
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    level = "rouge" if any(w in tl for w in ("interrompu", "supprimé", "arrêt")) else "jaune"
-                    disruptions.append({
-                        "title": f"M TAG · {line_label}",
-                        "description": text[:400],
-                        "level": level,
-                        "line": line_label,
-                        "valid_from": "",
-                        "valid_until": "",
-                    })
-                if disruptions:
-                    source_used = _page_url
-            except Exception:
-                continue
-
-    normal_service = len(disruptions) == 0
-    return {
-        "service": "M TAG · Grenoble",
-        "status": "online",
-        "source": source_used or "https://www.reso-m.fr/",
-        "disruptions": disruptions[:15],
-        "disruptions_total": len(disruptions),
-        "normal_service": normal_service,
-        "lines": ["A", "B", "C", "D", "E", "Proximo", "Flexo"],
-        "updated_at": datetime.utcnow().isoformat() + "Z",
-    }
-
-
 def fetch_mtag_grenoble_disruptions(force_refresh: bool = False) -> dict[str, Any]:
-    return _cached_external_payload(
-        cache=_mtag_cache,
-        lock=_mtag_cache_lock,
-        ttl_seconds=_MTAG_CACHE_TTL,
-        force_refresh=force_refresh,
-        loader=_fetch_mtag_grenoble_live,
-    )
+    """Alias conservé pour compatibilité — délègue à fetch_mreseau_disruptions."""
+    return fetch_mreseau_disruptions(force_refresh=force_refresh)
 
 
 # ─── 5. Cars Région AURA · Transports interrégionaux ─────────────────────────
