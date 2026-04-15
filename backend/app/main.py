@@ -239,6 +239,7 @@ SERVICE_REFRESH_INTERVALS: dict[str, int] = {
     "groundwater_isere":     3600,
     "anfr_isere":           21600,   # Données quasi-statiques
     "finess_isere":         21600,
+    "france_bleu_isere":    300,    # Actualités France Bleu Isère
 }
 
 _external_risks_snapshot_lock = Lock()

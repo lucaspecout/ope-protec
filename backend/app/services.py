@@ -281,8 +281,11 @@ def _http_get_json(url: str, timeout: int = 12, headers: dict[str, str] | None =
     return json.loads(payload.decode("utf-8"))
 
 
-def _http_get_text(url: str, timeout: int = 12, ssl_context: ssl.SSLContext | None = None, retries: int = 1) -> str:
-    request = Request(url, headers={"User-Agent": "ope-protec/1.0", "Connection": "keep-alive"})
+def _http_get_text(url: str, timeout: int = 12, ssl_context: ssl.SSLContext | None = None, retries: int = 1, headers: dict[str, str] | None = None) -> str:
+    default_headers: dict[str, str] = {"User-Agent": "ope-protec/1.0", "Connection": "keep-alive"}
+    if headers:
+        default_headers.update(headers)
+    request = Request(url, headers=default_headers)
     payload = _http_get_with_retries(request=request, timeout=timeout, ssl_context=ssl_context, retries=retries)
     return payload.decode("utf-8", errors="ignore")
 
@@ -3388,10 +3391,18 @@ def _atmo_label_from_index(index_value: float | int | None) -> str:
     return "très mauvais"
 
 
+_ATMO_BROWSER_HEADERS = {
+    "User-Agent": _BROWSER_UA,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "fr-FR,fr;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+}
+
+
 def _fetch_atmo_aura_isere_air_quality_live() -> dict[str, Any]:
     source = "https://www.atmo-auvergnerhonealpes.fr/air-commune/grenoble/38185/indice-atmo"
     try:
-        page_html = _http_get_text(source, timeout=30)
+        page_html = _http_get_text(source, timeout=30, headers=_ATMO_BROWSER_HEADERS)
         settings_payload = _extract_drupal_settings_json(page_html)
         dataviz = settings_payload.get("dataviz") or {}
         indices = dataviz.get("indices") or {}
@@ -3517,9 +3528,14 @@ def _fetch_france_bleu_isere_news_live(limit: int = 12) -> dict[str, Any]:
         "https://www.francebleu.fr/rss/isere",
         "https://www.francebleu.fr/rss/infos/commune/grenoble",
     ]
+    _rss_headers = {
+        "User-Agent": _BROWSER_UA,
+        "Accept": "application/rss+xml, application/xml, text/xml, */*",
+        "Accept-Language": "fr-FR,fr;q=0.9",
+    }
     for source in rss_sources:
         try:
-            xml_payload = _http_get_text(source, timeout=15)
+            xml_payload = _http_get_text(source, timeout=15, headers=_rss_headers)
             root = ET.fromstring(xml_payload)
             items: list[dict[str, Any]] = []
             ns = {"media": "http://search.yahoo.com/mrss/", "dc": "http://purl.org/dc/elements/1.1/"}
@@ -3727,7 +3743,10 @@ def _fetch_rte_isere_electricity_live() -> dict[str, Any]:
             dataset_payload = _http_get_json(dataset_api, timeout=8)
         except Exception:
             dataset_payload = {}
-        records_payload = _http_get_json(records_api)
+        records_payload = _http_get_json(
+            records_api,
+            headers={"Accept": "application/json", "User-Agent": _BROWSER_UA},
+        )
         records = records_payload.get("results") or []
         if not records:
             raise ValueError("Aucune donnée éCO2mix disponible pour la région ARA")
@@ -4282,7 +4301,12 @@ def _isere_opendata_fetch_dataset_records(dataset_id: str, select_fields: str, l
         f"https://opendata.isere.fr/api/explore/v2.1/catalog/datasets/{dataset_id}/records"
         f"?select={encoded_fields}&limit={max(1, min(limit, 100))}"
     )
-    payload = _http_get_json(url, timeout=15, ssl_context=_opendata_isere_ssl_ctx)
+    payload = _http_get_json(
+        url,
+        timeout=15,
+        ssl_context=_opendata_isere_ssl_ctx,
+        headers={"Accept": "application/json", "User-Agent": _BROWSER_UA},
+    )
     return payload if isinstance(payload, dict) else {}
 
 
