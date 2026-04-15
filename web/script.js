@@ -56,6 +56,7 @@ const FLUX_SERVICES = [
   { key: 'electricity_isere',      label: 'RTE · Électricité',         icon: '⚡', category: 'Énergie',       interval: 180,   metric: (d) => `${d.level || '?'} · marge ${d.supply_margin_mw ?? '-'} MW` },
   { key: 'prefecture_isere',       label: 'Préfecture Isère',          icon: '🏛️', category: 'Actualités',   interval: 90,    metric: (d) => `${(d.items || []).length} actualité(s)` },
   { key: 'dauphine_isere',         label: 'Dauphiné Libéré',           icon: '📰', category: 'Actualités',   interval: 180,   metric: (d) => `${(d.items || []).length} article(s)` },
+  { key: 'france_bleu_isere',      label: 'France Bleu Isère',         icon: '📻', category: 'Actualités',   interval: 180,   metric: (d) => `${(d.items || []).length} article(s)` },
   { key: 'anfr_isere',             label: 'ANFR · Antennes mobiles',   icon: '📡', category: 'Télécom',       interval: 21600, metric: (d) => `${d.supports_total ?? 0} support(s) mobile recensés` },
   { key: 'arcep_isere',            label: 'ARCEP · Sites mobiles',     icon: '📶', category: 'Télécom',       interval: 600,   metric: (d) => `${d.outages_total ?? 0} indisponibilité(s)` },
   { key: 'isere_opendata',         label: 'Isère OpenData · Résilience', icon: '📊', category: 'Données',    interval: 1800,  metric: (d) => `${d.totals?.schools ?? 0} écoles · ${d.totals?.health_centers ?? 0} santé · ${d.totals?.food_aid_points ?? 0} aide alim.` },
@@ -573,6 +574,11 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
       ...(next.dauphine_isere || {}),
       items: keepPreviousArray((previous.dauphine_isere || {}).items, (next.dauphine_isere || {}).items),
       articles: keepPreviousArray((previous.dauphine_isere || {}).articles, (next.dauphine_isere || {}).articles),
+    },
+    france_bleu_isere: {
+      ...(previous.france_bleu_isere || {}),
+      ...(next.france_bleu_isere || {}),
+      items: keepPreviousArray((previous.france_bleu_isere || {}).items, (next.france_bleu_isere || {}).items),
     },
     georisques: {
       ...prevGeorisques,
@@ -5572,6 +5578,137 @@ function renderDauphineNews(dauphine = {}) {
   renderNewsCategoryTable(panelItems);
 }
 
+function renderFranceBleuNews(franceBleu = {}) {
+  const items = sortPrefectureItemsByRecency(Array.isArray(franceBleu.items) ? franceBleu.items : []);
+  setRiskText('francebleu-status', `${franceBleu.status || 'inconnu'} · ${items.length} article(s)`, franceBleu.status === 'online' ? 'vert' : 'jaune');
+  setText('francebleu-info', `Dernière mise à jour: ${franceBleu.updated_at ? new Date(franceBleu.updated_at).toLocaleString() : 'inconnue'}`);
+  setHtml('francebleu-news-list', items.slice(0, 7).map((item) => {
+    const title = escapeHtml(item.title || 'Article France Bleu Isère');
+    const description = escapeHtml(item.description || '');
+    const published = item.published_at ? escapeHtml(item.published_at) : 'Date non précisée';
+    const safeLink = String(item.link || '').startsWith('http') ? item.link : 'https://www.francebleu.fr/isere';
+    return `<li><strong>${title}</strong><br><span class="muted">${published}</span>${description ? `<br>${description}` : ''}<br><a href="${safeLink}" target="_blank" rel="noreferrer">Écouter/lire</a></li>`;
+  }).join('') || '<li>Aucun article France Bleu Isère disponible.</li>');
+}
+
+/* Helpers pour les badges de catégorie dans le nouveau news panel */
+function newsBadgeClass(category) {
+  if (/Sécurité/.test(category)) return 'news-article-badge--securite';
+  if (/Météo/.test(category))    return 'news-article-badge--meteo';
+  if (/Mobilité/.test(category)) return 'news-article-badge--transport';
+  if (/Institution/.test(category)) return 'news-article-badge--institution';
+  if (/Éducation/.test(category))  return 'news-article-badge--education';
+  return '';
+}
+
+function buildNewsArticleCard(item, fallbackLink) {
+  const title = escapeHtml(item.title || 'Actualité');
+  const description = item.description ? escapeHtml(item.description) : '';
+  const safeLink = String(item.link || '').startsWith('http') ? escapeHtml(item.link) : escapeHtml(fallbackLink);
+  const category = detectNewsCategory(item);
+  const badgeClass = newsBadgeClass(category);
+  const badgeShort = category.replace(' & ', '/').replace('Mobilité/transport', 'Transport').replace('Institutions locales', 'Institutions').replace('Autres actualités', 'Autres');
+  let rawDate = item.published_at || '';
+  let dateDisplay = 'Date inconnue';
+  if (rawDate) {
+    try {
+      const d = new Date(rawDate);
+      dateDisplay = d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch (_) { dateDisplay = escapeHtml(rawDate); }
+  }
+  return `<a href="${safeLink}" target="_blank" rel="noreferrer" class="news-article-card" data-category="${escapeHtml(category)}">
+    <div class="news-article-top">
+      <p class="news-article-title">${title}</p>
+      <span class="news-article-badge ${badgeClass}">${escapeHtml(badgeShort)}</span>
+    </div>
+    ${description ? `<p class="news-article-desc">${description}</p>` : ''}
+    <span class="news-article-date">${dateDisplay}</span>
+  </a>`;
+}
+
+function renderNewsPanel(prefecture = {}, dauphine = {}, franceBleu = {}) {
+  const prefItems   = sortPrefectureItemsByRecency(Array.isArray(prefecture.items)   ? prefecture.items   : []);
+  const dauphItems  = sortPrefectureItemsByRecency(Array.isArray(dauphine.items)     ? dauphine.items     : []);
+  const fbItems     = sortPrefectureItemsByRecency(Array.isArray(franceBleu.items)   ? franceBleu.items   : []);
+
+  const allItems = [...prefItems, ...dauphItems, ...fbItems];
+  const totalCount = allItems.length;
+
+  /* Compteurs par source */
+  const el = (id) => document.getElementById(id);
+  if (el('news-pref-count'))       el('news-pref-count').textContent       = String(prefItems.length);
+  if (el('news-dauphine-count'))   el('news-dauphine-count').textContent   = String(dauphItems.length);
+  if (el('news-francebleu-count')) el('news-francebleu-count').textContent = String(fbItems.length);
+  if (el('news-total-count-badge')) el('news-total-count-badge').textContent = `${totalCount} article${totalCount > 1 ? 's' : ''}`;
+
+  /* Dernière MàJ globale */
+  const latestDate = allItems.reduce((best, item) => {
+    const t = Date.parse(item.published_at || '') || 0;
+    return t > best ? t : best;
+  }, 0);
+  if (el('news-last-update')) {
+    el('news-last-update').textContent = latestDate
+      ? `MàJ ${new Date(latestDate).toLocaleString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}`
+      : '';
+  }
+
+  /* Statuts source */
+  if (el('news-pref-status'))       el('news-pref-status').textContent       = `${prefecture.status || '–'} · ${prefItems.length} actualité(s)`;
+  if (el('news-dauphine-status'))   el('news-dauphine-status').textContent   = `${dauphine.status || '–'} · ${dauphItems.length} article(s)`;
+  if (el('news-francebleu-status')) el('news-francebleu-status').textContent = `${franceBleu.status || '–'} · ${fbItems.length} article(s)`;
+
+  /* Listes d'articles */
+  const renderList = (containerId, items, fallbackLink, emptyMsg) => {
+    const container = el(containerId);
+    if (!container) return;
+    if (!items.length) {
+      container.innerHTML = `<p class="muted" style="padding:.5rem">${emptyMsg}</p>`;
+      return;
+    }
+    container.innerHTML = items.slice(0, 12).map((item) => buildNewsArticleCard(item, fallbackLink)).join('');
+  };
+  renderList('news-prefecture-list',  prefItems,  'https://www.isere.gouv.fr',     'Aucune actualité Préfecture.');
+  renderList('news-dauphine-list',    dauphItems, 'https://www.ledauphine.com/isere', 'Aucun article Dauphiné Libéré.');
+  renderList('news-francebleu-list',  fbItems,    'https://www.francebleu.fr/isere',  'Aucun article France Bleu Isère.');
+
+  /* Synthèse catégories (toutes sources) */
+  const statsGrid = el('news-stats-grid');
+  if (statsGrid) {
+    const stats = new Map();
+    allItems.forEach((item) => {
+      const cat = detectNewsCategory(item);
+      stats.set(cat, (stats.get(cat) || 0) + 1);
+    });
+    const chips = [...stats.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([cat, count]) => {
+        const cls = newsBadgeClass(cat);
+        return `<div class="news-stat-chip"><span class="${cls ? 'news-article-badge ' + cls : ''}" style="background:none;padding:0">${escapeHtml(cat)}</span><span class="news-stat-chip__count">${count}</span></div>`;
+      }).join('');
+    statsGrid.innerHTML = chips || '<span class="muted" style="font-size:.82rem">Aucune donnée disponible.</span>';
+  }
+
+  /* Filtres catégorie */
+  const filterBar = el('news-filter-bar');
+  if (filterBar && !filterBar.dataset.bound) {
+    filterBar.dataset.bound = '1';
+    filterBar.addEventListener('click', (e) => {
+      const btn = e.target.closest('.news-filter-btn');
+      if (!btn) return;
+      filterBar.querySelectorAll('.news-filter-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      const cat = btn.dataset.cat;
+      document.querySelectorAll('.news-article-card').forEach((card) => {
+        if (cat === 'all' || card.dataset.category === cat) {
+          card.classList.remove('news-article-hidden');
+        } else {
+          card.classList.add('news-article-hidden');
+        }
+      });
+    });
+  }
+}
+
 function sanitizeMeteoInformation(info = '') {
   const text = String(info || '').trim();
   const unwanted = "Consultez la carte de Vigilance de Météo-France sur l'ISERE (38) : Information sur les risques météorologiques de la journée en cours.";
@@ -7611,6 +7748,7 @@ const SVC_CARD_META = {
   electricity_isere:     { statusId: 'electricity-status',     infoId: 'electricity-info',     url: 'https://www.data.gouv.fr/datasets/donnees-eco2mix-regionales-temps-reel-1' },
   prefecture_isere:      { statusId: 'prefecture-status',      infoId: 'prefecture-info',      url: 'https://www.isere.gouv.fr' },
   dauphine_isere:        { statusId: 'dauphine-status',        infoId: 'dauphine-info',        url: 'https://www.ledauphine.com' },
+  france_bleu_isere:     { statusId: 'francebleu-status',      infoId: 'francebleu-info',      url: 'https://www.francebleu.fr/isere' },
   anfr_isere:            { statusId: 'anfr-status',            infoId: 'anfr-info',            url: 'https://www.data.gouv.fr/fr/datasets/donnees-sur-les-installations-radioelectriques-de-plus-de-5-watts-1/' },
   arcep_isere:           { statusId: 'arcep-status',           infoId: 'arcep-info',           url: 'https://www.data.gouv.fr/fr/datasets/sites-indisponibles/' },
   isere_opendata:        { statusId: 'opendata-status',        infoId: 'opendata-info',        url: 'https://opendata.isere.fr' },
@@ -7647,6 +7785,7 @@ const SVC_DETAIL_LISTS = {
   electricity_isere:     [{ id: 'electricity-list',      label: 'Données réseau' }],
   prefecture_isere:      [{ id: 'prefecture-news-list',  label: 'Actualités', titleId: 'prefecture-news-title' }],
   dauphine_isere:        [{ id: 'dauphine-news-list',    label: 'Articles' }],
+  france_bleu_isere:     [{ id: 'francebleu-news-list',  label: 'Articles France Bleu' }],
   anfr_isere:            [{ id: 'anfr-list',             label: 'Synthèse antennes' }],
   arcep_isere:           [{ id: 'arcep-list',            label: 'Indisponibilités' }],
   ter_aura:              [{ id: 'ter-aura-list',         label: 'Perturbations TER Isère' }],
@@ -7890,6 +8029,7 @@ function renderExternalRisks(data = {}) {
   const bisonFute = mergedData?.bison_fute || {};
   const prefecture = mergedData?.prefecture_isere || {};
   const dauphine = mergedData?.dauphine_isere || {};
+  const franceBleu = mergedData?.france_bleu_isere || {};
   const sncf = mergedData?.sncf_isere || {};
   const vigieau = mergedData?.vigieau || {};
   const atmo = mergedData?.atmo_aura || {};
@@ -7922,6 +8062,8 @@ function renderExternalRisks(data = {}) {
   renderBisonFuteSummary(bisonFute);
   renderPrefectureNews(prefecture);
   renderDauphineNews(dauphine);
+  renderFranceBleuNews(franceBleu);
+  renderNewsPanel(prefecture, dauphine, franceBleu);
   renderSncfAlerts(sncf);
   renderApicAlerts(apic);
   renderVigicruesFlashAlerts(vigicruesFlash);

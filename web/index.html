@@ -433,25 +433,103 @@
         </section>
 
         <section id="news-panel" class="panel view hidden" hidden>
-          <div class="panel-heading">
-            <h3>Actualités locales · Isère</h3>
-            <p class="muted">Revue de presse opérationnelle pour le département.</p>
+
+          <!-- En-tête -->
+          <div class="news-panel-header">
+            <div class="news-panel-header__left">
+              <h3 class="news-panel-title">Actualités Isère</h3>
+              <p class="news-panel-subtitle muted">Revue de presse opérationnelle — 3 sources · département 38</p>
+            </div>
+            <div class="news-panel-header__right">
+              <span class="news-panel-count-badge" id="news-total-count-badge">0 articles</span>
+              <span class="news-panel-last-update muted" id="news-last-update">–</span>
+            </div>
           </div>
 
-          <div class="panel-heading">
-            <h4>Presse locale complémentaire</h4>
-            <p class="muted">Flux Dauphiné Libéré (Isère), trié du plus récent au plus ancien avec synthèse par catégories.</p>
+          <!-- Filtre catégorie -->
+          <div class="news-filter-bar" id="news-filter-bar" role="group" aria-label="Filtrer par catégorie">
+            <button class="news-filter-btn active" data-cat="all">Toutes</button>
+            <button class="news-filter-btn" data-cat="Sécurité &amp; secours">Sécurité</button>
+            <button class="news-filter-btn" data-cat="Météo &amp; risques">Météo</button>
+            <button class="news-filter-btn" data-cat="Mobilité &amp; transport">Transport</button>
+            <button class="news-filter-btn" data-cat="Institutions locales">Institutions</button>
+            <button class="news-filter-btn" data-cat="Éducation">Éducation</button>
+            <button class="news-filter-btn" data-cat="Autres actualités">Autres</button>
           </div>
-          <p id="dauphine-status" class="service-status">-</p>
-          <p id="dauphine-info" class="muted">-</p>
-          <ul id="dauphine-news-panel-list" class="list"></ul>
-          <p class="muted">Articles analysés: <strong id="dauphine-news-count">0</strong></p>
-          <table class="users-table">
-            <thead>
-              <tr><th>Catégorie</th><th>Articles</th><th>Dernière publication</th></tr>
-            </thead>
-            <tbody id="news-categories-table-body"></tbody>
-          </table>
+
+          <!-- Grille 3 colonnes sources -->
+          <div class="news-sources-grid">
+
+            <!-- Préfecture de l'Isère -->
+            <div class="news-source-col">
+              <div class="news-source-header news-source-header--prefecture">
+                <div class="news-source-header__icon">🏛️</div>
+                <div>
+                  <div class="news-source-name">Préfecture de l'Isère</div>
+                  <div class="news-source-meta">
+                    <span class="news-source-status" id="news-pref-status">–</span>
+                    <a href="https://www.isere.gouv.fr" target="_blank" rel="noreferrer" class="news-source-link">isere.gouv.fr ↗</a>
+                  </div>
+                </div>
+              </div>
+              <div class="news-articles-list" id="news-prefecture-list">
+                <div class="news-article-skeleton"></div>
+                <div class="news-article-skeleton"></div>
+                <div class="news-article-skeleton"></div>
+              </div>
+              <p class="news-source-footer"><span id="news-pref-count">0</span> actualité(s)</p>
+            </div>
+
+            <!-- Dauphiné Libéré -->
+            <div class="news-source-col">
+              <div class="news-source-header news-source-header--dauphine">
+                <div class="news-source-header__icon">📰</div>
+                <div>
+                  <div class="news-source-name">Le Dauphiné Libéré</div>
+                  <div class="news-source-meta">
+                    <span class="news-source-status" id="news-dauphine-status">–</span>
+                    <a href="https://www.ledauphine.com/isere" target="_blank" rel="noreferrer" class="news-source-link">ledauphine.com ↗</a>
+                  </div>
+                </div>
+              </div>
+              <div class="news-articles-list" id="news-dauphine-list">
+                <div class="news-article-skeleton"></div>
+                <div class="news-article-skeleton"></div>
+                <div class="news-article-skeleton"></div>
+              </div>
+              <p class="news-source-footer"><span id="news-dauphine-count">0</span> article(s)</p>
+            </div>
+
+            <!-- France Bleu Isère -->
+            <div class="news-source-col">
+              <div class="news-source-header news-source-header--francebleu">
+                <div class="news-source-header__icon">📻</div>
+                <div>
+                  <div class="news-source-name">France Bleu Isère</div>
+                  <div class="news-source-meta">
+                    <span class="news-source-status" id="news-francebleu-status">–</span>
+                    <a href="https://www.francebleu.fr/isere" target="_blank" rel="noreferrer" class="news-source-link">francebleu.fr ↗</a>
+                  </div>
+                </div>
+              </div>
+              <div class="news-articles-list" id="news-francebleu-list">
+                <div class="news-article-skeleton"></div>
+                <div class="news-article-skeleton"></div>
+                <div class="news-article-skeleton"></div>
+              </div>
+              <p class="news-source-footer"><span id="news-francebleu-count">0</span> article(s)</p>
+            </div>
+
+          </div>
+
+          <!-- Synthèse par catégorie -->
+          <details class="news-stats-block" open>
+            <summary class="news-stats-toggle">Synthèse par catégorie</summary>
+            <div class="news-stats-grid" id="news-stats-grid">
+              <!-- injecté dynamiquement -->
+            </div>
+          </details>
+
         </section>
 
         <section id="map-panel" class="panel view hidden" hidden>
