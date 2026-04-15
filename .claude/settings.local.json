@@ -184,7 +184,8 @@
       "Bash(python -c \"import ast; ast.parse\\(open\\('app/main.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")",
       "Bash(python -c \"import ast; ast.parse\\(open\\('c:/Users/pecout/OneDrive - Alma/Documents/alerteprojet/ope-protec/backend/app/services.py', encoding='utf-8'\\).read\\(\\)\\); print\\('services.py OK'\\)\")",
       "Bash(python -c \"import ast; ast.parse\\(open\\('c:/Users/pecout/OneDrive - Alma/Documents/alerteprojet/ope-protec/backend/Dockerfile', encoding='utf-8'\\).read\\(\\)\\); print\\('Dockerfile - non-Python, ignoré'\\)\")",
-      "Bash(python -c \"import ast; ast.parse\\(open\\('c:/Users/pecout/OneDrive - Alma/Documents/alerteprojet/ope-protec/backend/app/main.py', encoding='utf-8'\\).read\\(\\)\\); print\\('main.py OK'\\)\")"
+      "Bash(python -c \"import ast; ast.parse\\(open\\('c:/Users/pecout/OneDrive - Alma/Documents/alerteprojet/ope-protec/backend/app/main.py', encoding='utf-8'\\).read\\(\\)\\); print\\('main.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('app/services.py'\\).read\\(\\)\\); print\\('OK'\\)\")"
     ]
   }
 }

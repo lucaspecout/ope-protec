@@ -7009,104 +7009,209 @@ _MTAG_LINE_KEYWORDS: tuple[str, ...] = (
 
 
 def _fetch_mtag_grenoble_live() -> dict[str, Any]:
-    """Perturbations M TAG (réseau tram/bus agglomération Grenoble)."""
-    # Source 1 : API SIRI SX transport.data.gouv.fr filtrée M TAG / Semitag
-    siri_source = "https://proxy.transport.data.gouv.fr/resource/siri-lite-situation-exchange?Producer=SNCF"
-    # Source 2 : page infos trafic officielle TAG
-    tag_trafic_url = "https://www.tag.fr/3-infos-trafic.htm"
-    # Source 3 : API perturbations Mobilités-M (anciennement Semitag)
-    mobilites_api = (
-        "https://data.mobilites-m.fr/api/lines/json"
-        "?types=ligne"
-    )
+    """Perturbations M TAG (réseau tram/bus agglomération Grenoble).
 
+    Sources par ordre de priorité :
+    1. API perturbations data.mobilites-m.fr (officielle Réseau M / SEMITAG)
+    2. SIRI SX transport.data.gouv.fr filtré opérateur SEMITAG/TAG
+    3. Scraping page info-trafic reso-m.fr
+    """
     disruptions: list[dict[str, Any]] = []
     source_used = ""
+    _browser_hdrs = {
+        "User-Agent": _BROWSER_UA,
+        "Accept": "application/json,text/html,*/*",
+        "Accept-Language": "fr-FR,fr;q=0.9",
+    }
 
-    # --- Source 1 : Scraping page infos-trafic TAG ---
-    try:
-        html = _http_get_text(
-            tag_trafic_url,
-            timeout=15,
-            headers={
-                "User-Agent": _BROWSER_UA,
-                "Accept": "text/html,application/xhtml+xml,*/*",
-                "Accept-Language": "fr-FR,fr;q=0.9",
-                "Referer": "https://www.tag.fr/",
-            },
-        )
-        # Chercher les blocs de perturbation dans la page HTML TAG
-        # Format habituel : <div class="info-trafic-..."><h3>Ligne X</h3><p>Description</p>
-        line_blocks = re.findall(
-            r'(?:<div[^>]*class=["\'][^"\']*(?:info|trafic|perturbation|alerte)[^"\']*["\'][^>]*>|<article[^>]*>)'
-            r'([\s\S]{50,1500}?)'
-            r'(?:</div>|</article>)',
-            html,
-            re.IGNORECASE,
-        )
-        seen: set[str] = set()
-        for block in line_blocks:
-            text_clean = re.sub(r"<[^>]+>", " ", block)
-            text_clean = re.sub(r"\s+", " ", unescape(text_clean)).strip()
-            if len(text_clean) < 30:
-                continue
-            # Détecter la ligne concernée
-            line_match = re.search(
-                r'\b(?:Tram(?:way)?\s+)?(?:Ligne\s+)?([A-E]|[0-9]{1,2}|Proximo|Flexo|Téléphérique)\b',
-                text_clean, re.IGNORECASE,
-            )
-            line_label = f"Ligne {line_match.group(1).upper()}" if line_match else "Réseau TAG"
-            title = f"M TAG · {line_label}"
-            key = text_clean[:50].lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            level = "rouge" if any(w in text_clean.lower() for w in ("interrompu", "supprimé", "arrêt")) else "jaune"
-            disruptions.append({
-                "title": title,
-                "description": text_clean[:400],
-                "level": level,
-                "line": line_label,
-                "valid_from": "",
-                "valid_until": "",
-            })
+    # ------------------------------------------------------------------
+    # Source 1 : API data.mobilites-m.fr — perturbations temps réel
+    # ------------------------------------------------------------------
+    _mobm_perturbations_urls = [
+        "https://data.mobilites-m.fr/api/perturbations/json",
+        "https://data.mobilites-m.fr/api/disruptions/json",
+        "https://data.mobilites-m.fr/api/v1/disruptions",
+    ]
+    for _url in _mobm_perturbations_urls:
         if disruptions:
-            source_used = tag_trafic_url
-    except Exception:
-        pass
-
-    # --- Source 2 : API Mobilités-M (données temps réel des lignes) ---
-    if not disruptions:
+            break
         try:
-            data = _http_get_json(
-                mobilites_api,
-                timeout=10,
-                headers={"Accept": "application/json", "User-Agent": _BROWSER_UA},
+            data = _http_get_json(_url, timeout=12, headers=_browser_hdrs)
+            items = (
+                data if isinstance(data, list)
+                else data.get("disruptions") or data.get("features") or data.get("data") or []
             )
-            lines = data if isinstance(data, list) else (data.get("lines") or data.get("features") or [])
-            for line_obj in lines[:40]:
-                props = line_obj.get("properties") or line_obj
-                disruption_count = int(props.get("disruptions") or props.get("nb_disruptions") or 0)
-                if disruption_count > 0:
-                    line_name = str(props.get("route_long_name") or props.get("line_name") or props.get("id") or "?")
+            for item in items[:50]:
+                props = item.get("properties") or item
+                title_raw = str(
+                    props.get("cause") or props.get("title") or props.get("titre")
+                    or props.get("libelle") or props.get("name") or ""
+                )
+                desc_raw = str(
+                    props.get("message") or props.get("description") or props.get("texte")
+                    or props.get("summary") or props.get("detail") or ""
+                )
+                if not title_raw and not desc_raw:
+                    continue
+                line_match = re.search(
+                    r'\b(?:Tram(?:way)?\s+)?(?:Ligne\s+)?([A-E]|[0-9]{1,2}|Proximo|Flexo|Chrono|Atoubus)\b',
+                    title_raw + " " + desc_raw,
+                    re.IGNORECASE,
+                )
+                line_label = f"Ligne {line_match.group(1).upper()}" if line_match else "Réseau M TAG"
+                level_raw = str(props.get("severity") or props.get("niveau") or props.get("impact") or "").lower()
+                level = "rouge" if any(w in level_raw for w in ("high", "grave", "severe", "critique")) else "jaune"
+                disruptions.append({
+                    "title": f"M TAG · {line_label}" if line_label not in title_raw else title_raw[:100],
+                    "description": (desc_raw or title_raw)[:400],
+                    "level": level,
+                    "line": line_label,
+                    "valid_from": str(props.get("start_date") or props.get("debut") or ""),
+                    "valid_until": str(props.get("end_date") or props.get("fin") or ""),
+                })
+            if disruptions:
+                source_used = _url
+        except Exception:
+            continue
+
+    # ------------------------------------------------------------------
+    # Source 2 : SIRI SX transport.data.gouv.fr — opérateur SEMITAG/TAG
+    # ------------------------------------------------------------------
+    if not disruptions:
+        _siri_producers = ["SEMITAG", "TAG", "TransIsere"]
+        for _producer in _siri_producers:
+            if disruptions:
+                break
+            try:
+                _siri_url = (
+                    "https://proxy.transport.data.gouv.fr/resource/"
+                    f"siri-lite-situation-exchange?Producer={_producer}"
+                )
+                xml_text = _http_get_text(
+                    _siri_url,
+                    timeout=15,
+                    headers={"User-Agent": "ope-protec/1.0", "Accept": "application/xml,text/xml,*/*"},
+                )
+                # Namespace SIRI
+                _ns = {"siri": "http://www.siri.org.uk/siri"}
+                root = ET.fromstring(xml_text)
+                situations = root.findall(".//siri:PtSituationElement", _ns) or root.findall(
+                    ".//{http://www.siri.org.uk/siri}PtSituationElement"
+                )
+                for sit in situations:
+                    def _txt(tag: str) -> str:
+                        el = sit.find(f"siri:{tag}", _ns) or sit.find(
+                            f"{{http://www.siri.org.uk/siri}}{tag}"
+                        )
+                        return (el.text or "").strip() if el is not None else ""
+
+                    summary = (
+                        _txt("Summary") or _txt("Description") or _txt("Detail")
+                    )
+                    detail = _txt("Description") or _txt("Detail") or summary
+                    if not summary:
+                        continue
+                    if _is_german_alert(summary + " " + detail):
+                        continue
+                    affects = sit.find(".//siri:LineRef", _ns) or sit.find(
+                        ".//{http://www.siri.org.uk/siri}LineRef"
+                    )
+                    line_ref = (affects.text or "").strip() if affects is not None else ""
+                    line_match = re.search(
+                        r'([A-E]|[0-9]{1,2}|Proximo|Flexo|Chrono)', line_ref or summary, re.IGNORECASE
+                    )
+                    line_label = f"Ligne {line_match.group(1).upper()}" if line_match else "Réseau M TAG"
+                    severity = _txt("Severity").lower()
+                    level = "rouge" if any(w in severity for w in ("high", "severe")) else "jaune"
                     disruptions.append({
-                        "title": f"M TAG · {line_name}",
-                        "description": f"{disruption_count} perturbation(s) signalée(s)",
-                        "level": "jaune",
-                        "line": line_name,
+                        "title": f"M TAG · {line_label}",
+                        "description": detail[:400] or summary[:400],
+                        "level": level,
+                        "line": line_label,
+                        "valid_from": _txt("StartTime"),
+                        "valid_until": _txt("EndTime"),
+                    })
+                if disruptions:
+                    source_used = _siri_url
+            except Exception:
+                continue
+
+    # ------------------------------------------------------------------
+    # Source 3 : Scraping reso-m.fr / tag.fr
+    # ------------------------------------------------------------------
+    if not disruptions:
+        _scrape_urls = [
+            ("https://www.reso-m.fr/trafic-en-temps-reel.htm", "https://www.reso-m.fr/"),
+            ("https://www.reso-m.fr/info-trafic.htm", "https://www.reso-m.fr/"),
+            ("https://www.reso-m.fr/perturbations.htm", "https://www.reso-m.fr/"),
+            ("https://www.tag.fr/3-infos-trafic.htm", "https://www.tag.fr/"),
+        ]
+        for _page_url, _referer in _scrape_urls:
+            if disruptions:
+                break
+            try:
+                html = _http_get_text(
+                    _page_url,
+                    timeout=15,
+                    headers={
+                        "User-Agent": _BROWSER_UA,
+                        "Accept": "text/html,application/xhtml+xml,*/*",
+                        "Accept-Language": "fr-FR,fr;q=0.9",
+                        "Referer": _referer,
+                    },
+                )
+                # Chercher tous les blocs texte significatifs avec mention de perturbation/ligne
+                blocks = re.findall(
+                    r'<(?:div|article|li|section)[^>]*>'
+                    r'([\s\S]{30,2000}?)'
+                    r'</(?:div|article|li|section)>',
+                    html,
+                    re.IGNORECASE,
+                )
+                seen: set[str] = set()
+                for block in blocks:
+                    text = re.sub(r"<[^>]+>", " ", block)
+                    text = re.sub(r"\s+", " ", unescape(text)).strip()
+                    if len(text) < 40:
+                        continue
+                    # Conserver seulement si la page mentionne une perturbation réelle
+                    tl = text.lower()
+                    if not any(w in tl for w in (
+                        "perturbation", "travaux", "déviation", "interrompu",
+                        "supprimé", "retard", "incident", "arrêt", "modification",
+                        "info trafic", "information trafic",
+                    )):
+                        continue
+                    if _is_german_alert(text):
+                        continue
+                    line_match = re.search(
+                        r'\b(?:Tram(?:way)?\s+)?(?:Ligne\s+)?([A-E]|[0-9]{1,2}|Proximo|Flexo|Chrono)\b',
+                        text, re.IGNORECASE,
+                    )
+                    line_label = f"Ligne {line_match.group(1).upper()}" if line_match else "Réseau M TAG"
+                    key = text[:60].lower()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    level = "rouge" if any(w in tl for w in ("interrompu", "supprimé", "arrêt")) else "jaune"
+                    disruptions.append({
+                        "title": f"M TAG · {line_label}",
+                        "description": text[:400],
+                        "level": level,
+                        "line": line_label,
                         "valid_from": "",
                         "valid_until": "",
                     })
-            if disruptions:
-                source_used = mobilites_api
-        except Exception:
-            pass
+                if disruptions:
+                    source_used = _page_url
+            except Exception:
+                continue
 
     normal_service = len(disruptions) == 0
     return {
         "service": "M TAG · Grenoble",
         "status": "online",
-        "source": source_used or tag_trafic_url,
+        "source": source_used or "https://www.reso-m.fr/",
         "disruptions": disruptions[:15],
         "disruptions_total": len(disruptions),
         "normal_service": normal_service,
