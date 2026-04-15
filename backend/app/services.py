@@ -7173,14 +7173,81 @@ _CARS_REGION_ISERE_KEYWORDS: tuple[str, ...] = (
 )
 
 
+def _cars_region_find_isere_disruptions(obj: Any, depth: int = 0) -> list[dict[str, Any]]:
+    """Parcourt récursivement le JSON Next.js pour trouver les lignes Isère avec perturbations."""
+    if depth > 12 or obj is None:
+        return []
+    results: list[dict[str, Any]] = []
+    if isinstance(obj, list):
+        for item in obj:
+            results.extend(_cars_region_find_isere_disruptions(item, depth + 1))
+    elif isinstance(obj, dict):
+        # Chercher un objet "réseau/groupe Isère" contenant des lignes
+        name_val = str(obj.get("name") or obj.get("label") or obj.get("title") or obj.get("network") or "").lower()
+        is_isere_network = "isère" in name_val or "isere" in name_val
+        # Chercher les lignes enfants
+        children = (
+            obj.get("lines") or obj.get("routes") or obj.get("items")
+            or obj.get("children") or obj.get("data") or []
+        )
+        if is_isere_network and isinstance(children, list):
+            for line in children:
+                if not isinstance(line, dict):
+                    continue
+                line_name = str(
+                    line.get("name") or line.get("long_name") or line.get("route_long_name")
+                    or line.get("label") or line.get("title") or ""
+                )
+                # Nombre de perturbations
+                disruption_count = int(
+                    line.get("disruptions_count") or line.get("disruptions")
+                    or line.get("nb_disruptions") or line.get("perturbations")
+                    or (len(line.get("disruptions_list") or []) if isinstance(line.get("disruptions_list"), list) else 0)
+                    or 0
+                )
+                if disruption_count <= 0:
+                    continue
+                # Détails des perturbations si disponibles
+                detail_list = line.get("disruptions_list") or line.get("alerts") or []
+                if isinstance(detail_list, list) and detail_list:
+                    for d in detail_list:
+                        if not isinstance(d, dict):
+                            continue
+                        msg = str(d.get("message") or d.get("description") or d.get("title") or d.get("cause") or "")
+                        results.append({
+                            "title": line_name[:200] or "Perturbation Cars Région Isère",
+                            "description": msg[:400] or f"Perturbation sur {line_name}",
+                            "line": line_name[:80],
+                            "level": "jaune",
+                            "effect": "perturbation",
+                            "valid_from": str(d.get("begin") or d.get("start") or ""),
+                            "valid_until": str(d.get("end") or d.get("until") or ""),
+                        })
+                else:
+                    results.append({
+                        "title": line_name[:200] or "Perturbation Cars Région Isère",
+                        "description": f"{disruption_count} perturbation(s) signalée(s) sur cette ligne",
+                        "line": line_name[:80],
+                        "level": "jaune",
+                        "effect": "perturbation",
+                        "valid_from": "",
+                        "valid_until": "",
+                    })
+        else:
+            # Continuer la traversée sur toutes les valeurs dict/list
+            for val in obj.values():
+                if isinstance(val, (dict, list)):
+                    results.extend(_cars_region_find_isere_disruptions(val, depth + 1))
+    return results
+
+
 def _fetch_cars_region_live() -> dict[str, Any]:
     """Perturbations Cars Région AURA — lignes desservant l'Isère.
 
     Sources par ordre de priorité :
-    1. GTFS-RT service alerts transport.data.gouv.fr (plusieurs slugs connus)
-    2. SIRI SX transport.data.gouv.fr filtre Cars Région
-    3. API Navitia / disruptions laregionvoustransporte.fr
-    4. Scraping page info-trafic laregionvoustransporte.fr
+    1. __NEXT_DATA__ de sim.laregionvoustransporte.fr/fr/schedules (données SSR)
+    2. GTFS-RT service alerts transport.data.gouv.fr
+    3. SIRI SX transport.data.gouv.fr filtré Cars Région
     """
     disruptions: list[dict[str, Any]] = []
     source_used = ""
@@ -7189,247 +7256,129 @@ def _fetch_cars_region_live() -> dict[str, Any]:
         "User-Agent": _BROWSER_UA,
         "Accept": "text/html,application/xhtml+xml,*/*",
         "Accept-Language": "fr-FR,fr;q=0.9",
-        "Referer": "https://www.laregionvoustransporte.fr/",
+        "Referer": "https://sim.laregionvoustransporte.fr/",
+        "Sec-Fetch-Mode": "navigate",
     }
 
-    # ── Source 1 : GTFS-RT service alerts ────────────────────────────────────
-    _GTFS_RT_CANDIDATES = (
-        "https://proxy.transport.data.gouv.fr/resource/cars-region-auvergne-rhone-alpes-gtfs-rt-service-alerts",
-        "https://proxy.transport.data.gouv.fr/resource/aura-cars-region-gtfs-rt-service-alerts",
-        "https://proxy.transport.data.gouv.fr/resource/reseau-cars-region-aura-gtfs-rt-service-alerts",
-        "https://proxy.transport.data.gouv.fr/resource/cars-region-aura-gtfs-rt-service-alerts",
-    )
-    for _gtfs_url in _GTFS_RT_CANDIDATES:
-        if disruptions:
-            break
-        try:
-            data = _http_get_json(_gtfs_url, timeout=12, headers=_hdrs_json)
-            entities = data.get("entity") or (data if isinstance(data, list) else [])
-            _found: list[dict[str, Any]] = []
-            for entity in entities:
-                alert = entity.get("alert") or (entity if isinstance(entity, dict) else {})
-                header_obj = alert.get("headerText") or {}
-                desc_obj = alert.get("descriptionText") or {}
-                header = str(
-                    header_obj.get("translation", [{}])[0].get("text", "")
-                    if isinstance(header_obj, dict) else header_obj
-                )
-                desc = str(
-                    desc_obj.get("translation", [{}])[0].get("text", "")
-                    if isinstance(desc_obj, dict) else desc_obj
-                )
-                if not header and not desc:
-                    continue
-                if _is_german_alert(header + " " + desc):
-                    continue
-                blob = f"{header} {desc}".lower()
-                # Filtre Isère : accepter si aucun département adverse mentionné,
-                # ou si "isère"/"38"/villes isèroises explicitement présents
-                has_isere = any(kw in blob for kw in _CARS_REGION_ISERE_KEYWORDS)
-                other_depts = any(
-                    d in blob for d in ("savoie", "haute-savoie", "ain ", "haute-loire", "puy-de-dôme",
-                                        "cantal", "allier", "drôme", "ardèche", "loire ", "rhône ")
-                )
-                if other_depts and not has_isere:
-                    continue  # alerte exclusivement hors-Isère
-                line_m = re.search(r'\b(?:ligne\s+)?([A-Z]?\d{2,4}|[A-Z]{1,3})\b', header + " " + desc)
-                line_label = line_m.group(1).upper() if line_m else "Cars Région"
-                _found.append({
-                    "title": (header or "Perturbation Cars Région")[:200],
-                    "description": (desc or header)[:400],
-                    "line": line_label,
-                    "level": "jaune",
-                    "effect": "perturbation",
-                    "valid_from": "",
-                    "valid_until": "",
-                })
-            if _found:
-                disruptions.extend(_found)
-                source_used = _gtfs_url
-        except Exception:
-            continue
+    # ── Source 1 : __NEXT_DATA__ de sim.laregionvoustransporte.fr/fr/schedules ─
+    # La page est une app Next.js — les lignes avec perturbations sont en SSR JSON.
+    _SCHEDULES_URL = "https://sim.laregionvoustransporte.fr/fr/schedules"
+    try:
+        html = ""
+        if _REQUESTS_OK and _requests is not None:
+            resp = _requests.get(_SCHEDULES_URL, headers=_hdrs_html, timeout=20, verify=False)
+            resp.raise_for_status()
+            html = resp.text
+        else:
+            html = _http_get_text(_SCHEDULES_URL, timeout=20, headers=_hdrs_html)
 
-    # ── Source 2 : SIRI SX transport.data.gouv.fr ────────────────────────────
+        if html:
+            # Extraire le bloc __NEXT_DATA__ (JSON SSR de Next.js)
+            nd_match = re.search(
+                r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>([\s\S]*?)</script>',
+                html, re.IGNORECASE,
+            )
+            if nd_match:
+                try:
+                    next_data = json.loads(nd_match.group(1))
+                    found = _cars_region_find_isere_disruptions(next_data)
+                    if found:
+                        disruptions.extend(found)
+                        source_used = _SCHEDULES_URL
+                except (json.JSONDecodeError, Exception):
+                    pass
+
+            # Si __NEXT_DATA__ vide, essayer de trouver buildId pour l'API _next/data
+            if not disruptions and html:
+                build_match = re.search(r'"buildId"\s*:\s*"([^"]{4,80})"', html)
+                if build_match:
+                    build_id = build_match.group(1)
+                    _next_data_url = (
+                        f"https://sim.laregionvoustransporte.fr/_next/data/{build_id}/fr/schedules.json"
+                    )
+                    try:
+                        page_data = _http_get_json(_next_data_url, timeout=15, headers=_hdrs_json)
+                        found = _cars_region_find_isere_disruptions(page_data)
+                        if found:
+                            disruptions.extend(found)
+                            source_used = _next_data_url
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    # ── Source 2 : API interne Next.js (routes /api) ──────────────────────────
     if not disruptions:
-        _siri_candidates = (
-            "https://proxy.transport.data.gouv.fr/resource/siri-lite-situation-exchange?Producer=CarsRegion",
-            "https://proxy.transport.data.gouv.fr/resource/siri-lite-situation-exchange?Producer=CARS_REGION",
-            "https://proxy.transport.data.gouv.fr/resource/siri-lite-situation-exchange?Producer=TransdevAURA",
+        _api_candidates = (
+            "https://sim.laregionvoustransporte.fr/api/lines?disrupted=true",
+            "https://sim.laregionvoustransporte.fr/api/lines/isere",
+            "https://sim.laregionvoustransporte.fr/api/disruptions?network=isere",
+            "https://sim.laregionvoustransporte.fr/api/schedules",
+            "https://sim.laregionvoustransporte.fr/api/lines",
         )
-        for _siri_url in _siri_candidates:
+        for _api_url in _api_candidates:
             if disruptions:
                 break
             try:
-                xml_text = _http_get_text(
-                    _siri_url,
-                    timeout=15,
-                    headers={"User-Agent": "ope-protec/1.0", "Accept": "application/xml,text/xml,*/*"},
-                )
-                _ns = {"siri": "http://www.siri.org.uk/siri"}
-                root = ET.fromstring(xml_text)
-                situations = root.findall(".//siri:PtSituationElement", _ns) or root.findall(
-                    ".//{http://www.siri.org.uk/siri}PtSituationElement"
-                )
-                for sit in situations:
-                    def _siri_txt(tag: str) -> str:
-                        el = sit.find(f"siri:{tag}", _ns) or sit.find(
-                            f"{{http://www.siri.org.uk/siri}}{tag}"
-                        )
-                        return (el.text or "").strip() if el is not None else ""
-
-                    summary = _siri_txt("Summary") or _siri_txt("Description") or _siri_txt("Detail")
-                    detail = _siri_txt("Description") or _siri_txt("Detail") or summary
-                    if not summary:
-                        continue
-                    if _is_german_alert(summary + " " + detail):
-                        continue
-                    blob = (summary + " " + detail).lower()
-                    has_isere = any(kw in blob for kw in _CARS_REGION_ISERE_KEYWORDS)
-                    other_depts = any(
-                        d in blob for d in ("haute-savoie", "savoie", "ain ", "haute-loire")
-                    )
-                    if other_depts and not has_isere:
-                        continue
-                    severity = _siri_txt("Severity").lower()
-                    level = "rouge" if "high" in severity or "severe" in severity else "jaune"
-                    line_m = re.search(r'\b(?:ligne\s+)?([A-Z]?\d{2,4}|[A-Z]{1,3})\b', summary)
-                    disruptions.append({
-                        "title": summary[:200],
-                        "description": detail[:400],
-                        "line": line_m.group(1).upper() if line_m else "Cars Région",
-                        "level": level,
-                        "effect": "perturbation",
-                        "valid_from": _siri_txt("StartTime"),
-                        "valid_until": _siri_txt("EndTime"),
-                    })
-                if disruptions:
-                    source_used = _siri_url
+                data = _http_get_json(_api_url, timeout=12, headers=_hdrs_json)
+                found = _cars_region_find_isere_disruptions(data)
+                if found:
+                    disruptions.extend(found)
+                    source_used = _api_url
             except Exception:
                 continue
 
-    # ── Source 3 : API Navitia laregionvoustransporte.fr ─────────────────────
+    # ── Source 3 : GTFS-RT service alerts transport.data.gouv.fr ─────────────
     if not disruptions:
-        _navitia_candidates = (
-            "https://sim.laregionvoustransporte.fr/api/v1/disruptions?count=20&depth=1",
-            "https://api.laregionvoustransporte.fr/api/v1/disruptions?count=20&depth=1",
-            "https://sim.laregionvoustransporte.fr/v1/disruptions?count=20",
+        _GTFS_RT_CANDIDATES = (
+            "https://proxy.transport.data.gouv.fr/resource/cars-region-auvergne-rhone-alpes-gtfs-rt-service-alerts",
+            "https://proxy.transport.data.gouv.fr/resource/aura-cars-region-gtfs-rt-service-alerts",
+            "https://proxy.transport.data.gouv.fr/resource/reseau-cars-region-aura-gtfs-rt-service-alerts",
         )
-        for _nav_url in _navitia_candidates:
+        for _gtfs_url in _GTFS_RT_CANDIDATES:
             if disruptions:
                 break
             try:
-                data = _http_get_json(_nav_url, timeout=12, headers=_hdrs_json)
-                items = (
-                    data.get("disruptions")
-                    or data.get("data")
-                    or (data if isinstance(data, list) else [])
-                )
-                for item in items[:40]:
-                    if not isinstance(item, dict):
+                data = _http_get_json(_gtfs_url, timeout=12, headers=_hdrs_json)
+                entities = data.get("entity") or (data if isinstance(data, list) else [])
+                _found: list[dict[str, Any]] = []
+                for entity in entities:
+                    alert = entity.get("alert") or (entity if isinstance(entity, dict) else {})
+                    header_obj = alert.get("headerText") or {}
+                    desc_obj = alert.get("descriptionText") or {}
+                    header = str(
+                        header_obj.get("translation", [{}])[0].get("text", "")
+                        if isinstance(header_obj, dict) else header_obj
+                    )
+                    desc = str(
+                        desc_obj.get("translation", [{}])[0].get("text", "")
+                        if isinstance(desc_obj, dict) else desc_obj
+                    )
+                    if not header and not desc:
                         continue
-                    msg_list = item.get("messages") or []
-                    msg_text = " ".join(
-                        str(m.get("text") or m.get("value") or "")
-                        for m in msg_list
-                        if isinstance(m, dict)
-                    )
-                    title = str(
-                        item.get("cause") or item.get("title") or item.get("severity", {}).get("name") or ""
-                    )
-                    blob = (title + " " + msg_text).lower()
+                    if _is_german_alert(header + " " + desc):
+                        continue
+                    blob = f"{header} {desc}".lower()
                     has_isere = any(kw in blob for kw in _CARS_REGION_ISERE_KEYWORDS)
                     other_depts = any(
-                        d in blob for d in ("haute-savoie", "savoie", "ain ", "haute-loire")
+                        d in blob for d in ("savoie", "haute-savoie", "ain ", "haute-loire",
+                                            "puy-de-dôme", "cantal", "allier", "drôme", "ardèche")
                     )
                     if other_depts and not has_isere:
                         continue
-                    if not title and not msg_text:
-                        continue
-                    status = str(item.get("status") or "").lower()
-                    if status not in ("active", "future", ""):
-                        continue
-                    line_m = re.search(r'\b(?:ligne\s+)?([A-Z]?\d{2,4}|[A-Z]{1,3})\b', title + " " + msg_text)
-                    disruptions.append({
-                        "title": title[:200] or msg_text[:100],
-                        "description": msg_text[:400] or title[:200],
+                    line_m = re.search(r'\b(?:ligne\s+)?([A-Z]?\d{2,4})\b', header + " " + desc)
+                    _found.append({
+                        "title": (header or "Perturbation Cars Région")[:200],
+                        "description": (desc or header)[:400],
                         "line": line_m.group(1).upper() if line_m else "Cars Région",
                         "level": "jaune",
-                        "effect": str(item.get("severity", {}).get("effect") or "perturbation"),
-                        "valid_from": str(item.get("application_periods", [{}])[0].get("begin") or ""),
-                        "valid_until": str(item.get("application_periods", [{}])[0].get("end") or ""),
-                    })
-                if disruptions:
-                    source_used = _nav_url
-            except Exception:
-                continue
-
-    # ── Source 4 : Scraping page info-trafic laregionvoustransporte.fr ───────
-    if not disruptions:
-        _scrape_candidates = (
-            "https://www.laregionvoustransporte.fr/fr/votre-region/infos-trafic",
-            "https://www.laregionvoustransporte.fr/fr/infos-trafic",
-            "https://www.laregionvoustransporte.fr/fr/perturbations",
-            "https://sim.laregionvoustransporte.fr/fr/disruptions",
-        )
-        _disruption_words = frozenset({
-            "perturbation", "travaux", "déviation", "suppression", "retard",
-            "incident", "arrêt", "modification", "remplacement", "interrompu",
-        })
-        for _page_url in _scrape_candidates:
-            if disruptions:
-                break
-            try:
-                html = ""
-                if _REQUESTS_OK and _requests is not None:
-                    resp = _requests.get(_page_url, headers=_hdrs_html, timeout=15, verify=False)
-                    resp.raise_for_status()
-                    html = resp.text
-                else:
-                    html = _http_get_text(_page_url, timeout=15, headers=_hdrs_html)
-                if not html:
-                    continue
-                seen: set[str] = set()
-                blocks = re.findall(
-                    r'<(?:div|article|li|section)\b[^>]*class=["\'][^"\']*'
-                    r'(?:info|trafic|perturbation|alerte|incident|disruption|alert)[^"\']*["\'][^>]*>'
-                    r'([\s\S]{30,2000}?)'
-                    r'</(?:div|article|li|section)>',
-                    html, re.IGNORECASE,
-                )
-                if not blocks:
-                    blocks = re.findall(
-                        r'<(?:article|li)\b[^>]*>([\s\S]{40,1500}?)</(?:article|li)>',
-                        html, re.IGNORECASE,
-                    )
-                for block in blocks:
-                    text = re.sub(r"<[^>]+>", " ", block)
-                    text = re.sub(r"\s+", " ", unescape(text)).strip()
-                    if len(text) < 30:
-                        continue
-                    tl = text.lower()
-                    if not any(w in tl for w in _disruption_words):
-                        continue
-                    if _is_german_alert(text):
-                        continue
-                    key = text[:70].lower()
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    title_m = re.match(r'^([^.!?\n]{10,120})', text)
-                    title = title_m.group(1).strip() if title_m else text[:80]
-                    line_m = re.search(r'\b(?:ligne\s+)?([A-Z]?\d{2,4}|[A-Z]{1,3})\b', text)
-                    line_label = line_m.group(1).upper() if line_m else "Cars Région"
-                    disruptions.append({
-                        "title": title[:200],
-                        "description": text[:400],
-                        "line": line_label,
-                        "level": "rouge" if any(w in tl for w in ("interrompu", "supprimé", "annulé")) else "jaune",
                         "effect": "perturbation",
                         "valid_from": "",
                         "valid_until": "",
                     })
-                if disruptions:
-                    source_used = _page_url
+                if _found:
+                    disruptions.extend(_found)
+                    source_used = _gtfs_url
             except Exception:
                 continue
 
@@ -7437,7 +7386,7 @@ def _fetch_cars_region_live() -> dict[str, Any]:
         return {
             "service": "Cars Région · Auvergne-Rhône-Alpes",
             "status": "online",
-            "source": "https://www.laregionvoustransporte.fr/",
+            "source": _SCHEDULES_URL,
             "disruptions": [],
             "disruptions_total": 0,
             "normal_service": True,

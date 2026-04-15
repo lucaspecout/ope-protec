@@ -187,7 +187,8 @@
       "Bash(python -c \"import ast; ast.parse\\(open\\('c:/Users/pecout/OneDrive - Alma/Documents/alerteprojet/ope-protec/backend/app/main.py', encoding='utf-8'\\).read\\(\\)\\); print\\('main.py OK'\\)\")",
       "Bash(python -c \"import ast; ast.parse\\(open\\('app/services.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
       "Bash(node --check \"c:/Users/pecout/OneDrive - Alma/Documents/alerteprojet/ope-protec/web/script.js\")",
-      "Bash(python -c \"import ast; ast.parse\\(open\\('app/services.py', encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('app/main.py', encoding='utf-8'\\).read\\(\\)\\); print\\('Python OK'\\)\")"
+      "Bash(python -c \"import ast; ast.parse\\(open\\('app/services.py', encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('app/main.py', encoding='utf-8'\\).read\\(\\)\\); print\\('Python OK'\\)\")",
+      "Bash(docker.exe compose:*)"
     ]
   }
 }
