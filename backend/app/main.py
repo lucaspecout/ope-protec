@@ -65,6 +65,7 @@ from .services import (
     fetch_prefecture_isere_news,
     fetch_dauphine_isere_news,
     fetch_france_bleu_isere_news,
+    fetch_mtag_grenoble_disruptions,
     fetch_finess_isere_resources,
     fetch_isere_opendata_resilience,
     fetch_hubeau_isere_groundwater,
@@ -222,6 +223,7 @@ SERVICE_REFRESH_INTERVALS: dict[str, int] = {
     "sncf_isere":             120,
     "vigicrues":              120,
     "ter_aura":               120,   # Transport
+    "mtag_grenoble":          120,   # Tram/bus Grenoble
     "resom_isere":            120,
     "vigicrues_flash_isere":  180,
     "apic_isere":             180,
@@ -1052,6 +1054,7 @@ def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str])
         "resom_isere": (lambda: fetch_resom_isere_traffic(force_refresh=refresh), {"status": "pending", "disruptions": [], "disruptions_total": 0}),
         "vinci_autoroutes": (lambda: fetch_vinci_autoroutes_isere(force_refresh=refresh), {"status": "pending", "events": [], "events_total": 0, "routes": ["A40", "A41", "A42", "A43"]}),
         "ter_aura": (lambda: fetch_ter_aura_disruptions(force_refresh=refresh), {"status": "pending", "disruptions": [], "disruptions_total": 0}),
+        "mtag_grenoble": (lambda: fetch_mtag_grenoble_disruptions(force_refresh=refresh), {"status": "pending", "disruptions": [], "disruptions_total": 0, "normal_service": True}),
         "cars_region_aura": (lambda: fetch_cars_region_aura_disruptions(force_refresh=refresh), {"status": "pending", "disruptions": [], "disruptions_total": 0}),
     }
 

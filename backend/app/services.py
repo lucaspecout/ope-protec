@@ -6832,6 +6832,20 @@ _TER_ISERE_GEO_KEYWORDS: tuple[str, ...] = (
     "romans", "valence", "chambéry", "chamb", "lyon", "genève", "briançon",
 )
 
+# Mots spécifiquement allemands qui indiquent une alerte en allemand à exclure
+_GERMAN_ALERT_WORDS: frozenset[str] = frozenset({
+    "verspätung", "zug hat", "baustelleninfo", "holzfällerarbeiten",
+    "totalunterbrechung", "verkehrs", "gleis", "bahnhof", "fahrgäste",
+    "fahrt", "ankunft", "abfahrt", "strecke zwischen", "betrieb",
+    "störung", "sperrung", "ihr zug",
+})
+
+
+def _is_german_alert(text: str) -> bool:
+    """Retourne True si le texte est clairement en allemand."""
+    lower = text.lower()
+    return sum(1 for w in _GERMAN_ALERT_WORDS if w in lower) >= 1
+
 
 _TER_SIRI_NAMESPACES = [
     "http://www.siri.org.uk/siri",
@@ -6873,47 +6887,56 @@ def _parse_siri_situations(xml_text: str, geo_keywords: tuple[str, ...]) -> list
 
 
 def _fetch_ter_aura_live() -> dict[str, Any]:
-    # Source 1 : proxy transport.data.gouv.fr SIRI SX (aggrégation nationale)
-    siri_source = "https://proxy.transport.data.gouv.fr/resource/sncf-siri-lite-situation-exchange"
-    # Source 2 : SNCF Open Data — perturbations hebdomadaires TER AURA (région 84)
+    # Source 1 (priorité) : SNCF Open Data — perturbations en français, structurées
     opendata_source = (
         "https://ressources.data.sncf.com/api/explore/v2.1/catalog/datasets/"
         "disruptions-semaines-a-venir-4-weeks/records"
-        "?limit=20&where=region_code%3D%2284%22%20AND%20reseau_name%3D%22TER%22"
+        "?limit=25&where=region_code%3D%2284%22%20AND%20reseau_name%3D%22TER%22"
+        "&order_by=date_debut%20desc"
     )
+    # Source 2 : proxy transport.data.gouv.fr SIRI SX (peut contenir des alertes en allemand)
+    siri_source = "https://proxy.transport.data.gouv.fr/resource/sncf-siri-lite-situation-exchange"
     # Source 3 : RSS TER AURA
     rss_source = "https://www.ter.sncf.com/auvergne-rhone-alpes/se-deplacer/info-trafic/rss"
 
     disruptions: list[dict[str, Any]] = []
     source_used = ""
 
-    # --- Tentative 1 : SIRI SX ---
+    # --- Tentative 1 : SNCF Open Data JSON (français garanti) ---
     try:
-        xml_payload = _http_get_text(siri_source, timeout=15)
-        disruptions = _parse_siri_situations(xml_payload, _TER_ISERE_GEO_KEYWORDS)
-        source_used = siri_source
+        data = _http_get_json(
+            opendata_source,
+            timeout=12,
+            headers={"Accept": "application/json", "User-Agent": _BROWSER_UA},
+        )
+        records = data.get("results") or data.get("records") or []
+        for rec in records:
+            fields = rec if isinstance(rec, dict) else {}
+            title = str(fields.get("titre") or fields.get("title") or "Perturbation TER").strip()
+            desc = str(fields.get("description") or fields.get("cause") or "").strip()
+            if _is_german_alert(f"{title} {desc}"):
+                continue
+            disruptions.append({
+                "title": title[:200],
+                "description": desc[:500],
+                "level": "jaune",
+                "valid_from": str(fields.get("date_debut") or fields.get("start") or ""),
+                "valid_until": str(fields.get("date_fin") or fields.get("end") or ""),
+            })
+        if records:
+            source_used = opendata_source
     except Exception:
         pass
 
-    # --- Tentative 2 : SNCF Open Data JSON ---
+    # --- Tentative 2 : SIRI SX (avec filtre anti-allemand) ---
     if not source_used:
         try:
-            data = _http_get_json(opendata_source, timeout=12)
-            records = data.get("results") or data.get("records") or []
-            for rec in records:
-                fields = rec.get("fields") or rec if isinstance(rec, dict) else {}
-                title = str(fields.get("titre") or fields.get("title") or "Perturbation TER")
-                desc = str(fields.get("description") or fields.get("cause") or "")
-                blob = f"{title} {desc}".lower()
-                if any(kw in blob for kw in _TER_ISERE_GEO_KEYWORDS):
-                    disruptions.append({
-                        "title": title[:200],
-                        "description": desc[:500],
-                        "level": "jaune",
-                        "valid_from": str(fields.get("date_debut") or fields.get("start") or ""),
-                        "valid_until": str(fields.get("date_fin") or fields.get("end") or ""),
-                    })
-            source_used = opendata_source
+            xml_payload = _http_get_text(siri_source, timeout=15)
+            raw = _parse_siri_situations(xml_payload, _TER_ISERE_GEO_KEYWORDS)
+            # Filtrer les alertes en allemand (trains internationaux)
+            disruptions = [d for d in raw if not _is_german_alert(f"{d.get('title','')} {d.get('description','')}")]
+            if raw:
+                source_used = siri_source
         except Exception:
             pass
 
@@ -6926,6 +6949,8 @@ def _fetch_ter_aura_live() -> dict[str, Any]:
             for item in root.findall(".//item")[:20]:
                 title = (item.findtext("title") or "").strip()
                 desc = _strip_html_tags(item.findtext("description") or "").strip()
+                if _is_german_alert(f"{title} {desc}"):
+                    continue
                 if any(kw in f"{title} {desc}".lower() for kw in _TER_ISERE_GEO_KEYWORDS):
                     disruptions.append({
                         "title": title[:200],
@@ -6964,6 +6989,139 @@ def fetch_ter_aura_disruptions(force_refresh: bool = False) -> dict[str, Any]:
         ttl_seconds=_TER_AURA_CACHE_TTL,
         force_refresh=force_refresh,
         loader=_fetch_ter_aura_live,
+    )
+
+
+# ---------------------------------------------------------------------------
+# M TAG · Réseau de tram/bus de l'agglomération grenobloise
+# ---------------------------------------------------------------------------
+
+_MTAG_CACHE_TTL = 120
+_mtag_cache_lock = Lock()
+_mtag_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "mtag_grenoble"}
+
+_MTAG_LINE_KEYWORDS: tuple[str, ...] = (
+    "tram", "tramway", "ligne a", "ligne b", "ligne c", "ligne d", "ligne e",
+    "proximo", "flexo", "tag", "téléphérique", "semitag",
+    "grenoble", "échirolles", "st-martin-d'hères", "meylan", "fontaine",
+    "eybens", "poisat", "gières", "saint-martin", "seyssinet",
+)
+
+
+def _fetch_mtag_grenoble_live() -> dict[str, Any]:
+    """Perturbations M TAG (réseau tram/bus agglomération Grenoble)."""
+    # Source 1 : API SIRI SX transport.data.gouv.fr filtrée M TAG / Semitag
+    siri_source = "https://proxy.transport.data.gouv.fr/resource/siri-lite-situation-exchange?Producer=SNCF"
+    # Source 2 : page infos trafic officielle TAG
+    tag_trafic_url = "https://www.tag.fr/3-infos-trafic.htm"
+    # Source 3 : API perturbations Mobilités-M (anciennement Semitag)
+    mobilites_api = (
+        "https://data.mobilites-m.fr/api/lines/json"
+        "?types=ligne"
+    )
+
+    disruptions: list[dict[str, Any]] = []
+    source_used = ""
+
+    # --- Source 1 : Scraping page infos-trafic TAG ---
+    try:
+        html = _http_get_text(
+            tag_trafic_url,
+            timeout=15,
+            headers={
+                "User-Agent": _BROWSER_UA,
+                "Accept": "text/html,application/xhtml+xml,*/*",
+                "Accept-Language": "fr-FR,fr;q=0.9",
+                "Referer": "https://www.tag.fr/",
+            },
+        )
+        # Chercher les blocs de perturbation dans la page HTML TAG
+        # Format habituel : <div class="info-trafic-..."><h3>Ligne X</h3><p>Description</p>
+        line_blocks = re.findall(
+            r'(?:<div[^>]*class=["\'][^"\']*(?:info|trafic|perturbation|alerte)[^"\']*["\'][^>]*>|<article[^>]*>)'
+            r'([\s\S]{50,1500}?)'
+            r'(?:</div>|</article>)',
+            html,
+            re.IGNORECASE,
+        )
+        seen: set[str] = set()
+        for block in line_blocks:
+            text_clean = re.sub(r"<[^>]+>", " ", block)
+            text_clean = re.sub(r"\s+", " ", unescape(text_clean)).strip()
+            if len(text_clean) < 30:
+                continue
+            # Détecter la ligne concernée
+            line_match = re.search(
+                r'\b(?:Tram(?:way)?\s+)?(?:Ligne\s+)?([A-E]|[0-9]{1,2}|Proximo|Flexo|Téléphérique)\b',
+                text_clean, re.IGNORECASE,
+            )
+            line_label = f"Ligne {line_match.group(1).upper()}" if line_match else "Réseau TAG"
+            title = f"M TAG · {line_label}"
+            key = text_clean[:50].lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            level = "rouge" if any(w in text_clean.lower() for w in ("interrompu", "supprimé", "arrêt")) else "jaune"
+            disruptions.append({
+                "title": title,
+                "description": text_clean[:400],
+                "level": level,
+                "line": line_label,
+                "valid_from": "",
+                "valid_until": "",
+            })
+        if disruptions:
+            source_used = tag_trafic_url
+    except Exception:
+        pass
+
+    # --- Source 2 : API Mobilités-M (données temps réel des lignes) ---
+    if not disruptions:
+        try:
+            data = _http_get_json(
+                mobilites_api,
+                timeout=10,
+                headers={"Accept": "application/json", "User-Agent": _BROWSER_UA},
+            )
+            lines = data if isinstance(data, list) else (data.get("lines") or data.get("features") or [])
+            for line_obj in lines[:40]:
+                props = line_obj.get("properties") or line_obj
+                disruption_count = int(props.get("disruptions") or props.get("nb_disruptions") or 0)
+                if disruption_count > 0:
+                    line_name = str(props.get("route_long_name") or props.get("line_name") or props.get("id") or "?")
+                    disruptions.append({
+                        "title": f"M TAG · {line_name}",
+                        "description": f"{disruption_count} perturbation(s) signalée(s)",
+                        "level": "jaune",
+                        "line": line_name,
+                        "valid_from": "",
+                        "valid_until": "",
+                    })
+            if disruptions:
+                source_used = mobilites_api
+        except Exception:
+            pass
+
+    normal_service = len(disruptions) == 0
+    return {
+        "service": "M TAG · Grenoble",
+        "status": "online",
+        "source": source_used or tag_trafic_url,
+        "disruptions": disruptions[:15],
+        "disruptions_total": len(disruptions),
+        "normal_service": normal_service,
+        "lines": ["A", "B", "C", "D", "E", "Proximo", "Flexo"],
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+def fetch_mtag_grenoble_disruptions(force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_mtag_cache,
+        lock=_mtag_cache_lock,
+        ttl_seconds=_MTAG_CACHE_TTL,
+        force_refresh=force_refresh,
+        loader=_fetch_mtag_grenoble_live,
     )
 
 

@@ -49,6 +49,7 @@ const FLUX_SERVICES = [
   { key: 'bison_fute',             label: 'Bison Futé',                icon: '🚗', category: 'Transport',     interval: 300,   metric: (d) => d.today?.isere?.departure ? `Départ: ${d.today.isere.departure} · Retour: ${d.today.isere.return || '?'}` : 'Trafic non disponible' },
   { key: 'sncf_isere',             label: 'SNCF Isère',                icon: '🚆', category: 'Transport',     interval: 120,   metric: (d) => `${(d.alerts || []).length} alerte(s) voie ferrée` },
   { key: 'ter_aura',               label: 'TER SNCF · AURA',           icon: '🚄', category: 'Transport',     interval: 120,   metric: (d) => `${d.disruptions_total ?? 0} perturbation(s) TER` },
+  { key: 'mtag_grenoble',          label: 'M TAG · Tram Grenoble',     icon: '🚃', category: 'Transport',     interval: 120,   metric: (d) => d.normal_service ? 'Trafic normal' : `${d.disruptions_total ?? 0} perturbation(s)` },
   { key: 'aprr_isere',             label: 'APRR/AREA · Autoroutes',    icon: '🛣️', category: 'Transport',     interval: 180,   metric: (d) => `${d.events_total ?? 0} événement(s) · ${(d.routes || []).join(' ')}` },
   { key: 'vinci_autoroutes',       label: 'Vinci Autoroutes · Isère',  icon: '🚧', category: 'Transport',     interval: 180,   metric: (d) => `${d.events_total ?? 0} événement(s) · ${(d.routes || []).join(' ')}` },
   { key: 'resom_isere',            label: 'Réseau M · Cars Isère',     icon: '🚍', category: 'Transport',     interval: 120,   metric: (d) => d.normal_service ? 'Trafic normal' : `${d.disruptions_total ?? 0} perturbation(s)` },
@@ -7754,6 +7755,7 @@ const SVC_CARD_META = {
   isere_opendata:        { statusId: 'opendata-status',        infoId: 'opendata-info',        url: 'https://opendata.isere.fr' },
   finess_isere:          { statusId: 'finess-status',          infoId: 'finess-info',          url: 'https://www.data.gouv.fr/datasets/finess-extraction-du-fichier-des-etablissements' },
   ter_aura:              { statusId: 'ter-aura-status',        infoId: 'ter-aura-info',        url: 'https://www.ter.sncf.com/auvergne-rhone-alpes/se-deplacer/info-trafic' },
+  mtag_grenoble:         { statusId: 'mtag-status',            infoId: 'mtag-info',            url: 'https://www.tag.fr/3-infos-trafic.htm' },
   aprr_isere:            { statusId: 'aprr-status',            infoId: 'aprr-info',            url: 'https://voyage.aprr.fr/information-trafic' },
   vinci_autoroutes:      { statusId: 'vinci-status',           infoId: 'vinci-info',           url: 'https://www.vinci-autoroutes.com/fr/autoroutes-temps-reel/' },
   resom_isere:           { statusId: 'resom-status',           infoId: 'resom-info',           url: 'https://www.reso-m.fr/55-infotrafic.htm' },
@@ -7789,6 +7791,7 @@ const SVC_DETAIL_LISTS = {
   anfr_isere:            [{ id: 'anfr-list',             label: 'Synthèse antennes' }],
   arcep_isere:           [{ id: 'arcep-list',            label: 'Indisponibilités' }],
   ter_aura:              [{ id: 'ter-aura-list',         label: 'Perturbations TER Isère' }],
+  mtag_grenoble:         [{ id: 'mtag-list',             label: 'Perturbations Tram/Bus Grenoble' }],
   aprr_isere:            [{ id: 'aprr-list',             label: 'Événements autoroutes Isère' }],
   vinci_autoroutes:      [{ id: 'vinci-list',            label: 'Événements Vinci Isère' }],
   resom_isere:           [{ id: 'resom-list',            label: 'Perturbations cars Isère' }],
@@ -7959,6 +7962,21 @@ function renderTransportFlux(data = {}) {
     ? (terDisruptions.length === 0 ? 'Trafic TER normal sur Isère' : `${terDisruptions.length} perturbation(s) détectée(s)`)
     : (ter.error ? ter.error.substring(0, 80) : 'Données non disponibles'));
   _renderDisruptionsList('ter-aura-list', terDisruptions, 'Trafic TER normal pour l\'Isère.');
+
+  // M TAG Tram/Bus Grenoble
+  const mtag = data?.mtag_grenoble || {};
+  const mtagDisruptions = mtag.disruptions || [];
+  const mtagLines = (mtag.lines || ['A','B','C','D','E']).join(' · ');
+  setRiskText('mtag-status',
+    mtag.normal_service !== false && mtagDisruptions.length === 0
+      ? `online · Trafic normal · ${mtagLines}`
+      : `${mtag.status || 'inconnu'} · ${mtagDisruptions.length} perturbation(s)`,
+    mtagDisruptions.length > 0 ? 'orange' : (mtag.status === 'online' ? 'vert' : 'jaune'),
+  );
+  setText('mtag-info', mtag.normal_service !== false && mtagDisruptions.length === 0
+    ? `Réseau TAG normal · Trams ${mtagLines}`
+    : (mtagDisruptions.length > 0 ? `${mtagDisruptions.length} perturbation(s) sur le réseau TAG` : (mtag.error ? mtag.error.substring(0, 80) : 'Données non disponibles')));
+  _renderDisruptionsList('mtag-list', mtagDisruptions, 'Trafic M TAG normal sur l\'agglomération grenobloise.');
 
   // APRR/AREA
   const aprr = data?.aprr_isere || {};
