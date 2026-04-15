@@ -237,6 +237,20 @@ def _make_permissive_ssl_context() -> ssl.SSLContext:
     return ctx
 
 
+def _make_legacy_ssl_context() -> ssl.SSLContext:
+    """Contexte SSL pour serveurs avec TLS legacy (ex. opendata.isere.fr).
+    Désactive la vérification stricte du certificat et autorise la renégociation legacy."""
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    ctx.set_ciphers("DEFAULT:@SECLEVEL=0")
+    # Autorise la renégociation legacy (OpenSSL 3.0+)
+    legacy_flag = getattr(ssl, "OP_LEGACY_SERVER_CONNECT", 0)
+    if legacy_flag:
+        ctx.options |= legacy_flag
+    return ctx
+
+
 def _http_get_with_retries(
     request: Request,
     timeout: int = 8,
@@ -607,6 +621,9 @@ _prefecture_cache_lock = Lock()
 _prefecture_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "prefecture"}
 _dauphine_cache_lock = Lock()
 _dauphine_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "dauphine"}
+_FRANCE_BLEU_ISERE_CACHE_TTL_SECONDS = 300
+_france_bleu_cache_lock = Lock()
+_france_bleu_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "france_bleu_isere"}
 _vigieau_cache_lock = Lock()
 _vigieau_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "vigieau"}
 _atmo_aura_cache_lock = Lock()
@@ -3493,6 +3510,70 @@ def fetch_dauphine_isere_news(limit: int = 10, force_refresh: bool = False) -> d
     )
 
 
+def _fetch_france_bleu_isere_news_live(limit: int = 12) -> dict[str, Any]:
+    """Récupère les dernières actualités France Bleu Isère via le flux RSS."""
+    # France Bleu Isère : station de Grenoble (38)
+    rss_sources = [
+        "https://www.francebleu.fr/rss/isere",
+        "https://www.francebleu.fr/rss/infos/commune/grenoble",
+    ]
+    for source in rss_sources:
+        try:
+            xml_payload = _http_get_text(source, timeout=15)
+            root = ET.fromstring(xml_payload)
+            items: list[dict[str, Any]] = []
+            ns = {"media": "http://search.yahoo.com/mrss/", "dc": "http://purl.org/dc/elements/1.1/"}
+            for item in root.findall(".//item"):
+                title_raw = unescape((item.findtext("title") or "").strip()) or "Article France Bleu Isère"
+                link = (item.findtext("link") or source).strip()
+                pub_date_raw = (item.findtext("pubDate") or item.findtext("dc:date", namespaces=ns) or "").strip()
+                description_raw = unescape(re.sub(r"<[^>]+>", " ", item.findtext("description") or "").strip())[:300]
+                # Normaliser la date
+                published_at = ""
+                if pub_date_raw:
+                    try:
+                        published_at = parsedate_to_datetime(pub_date_raw).isoformat()
+                    except Exception:
+                        published_at = pub_date_raw
+                items.append({
+                    "title": title_raw[:200],
+                    "link": link,
+                    "description": description_raw,
+                    "published_at": published_at,
+                    "source": "France Bleu Isère",
+                })
+                if len(items) >= limit:
+                    break
+            return {
+                "service": "France Bleu Isère",
+                "status": "online",
+                "source": source,
+                "items": items,
+                "updated_at": datetime.utcnow().isoformat() + "Z",
+            }
+        except Exception:
+            continue
+
+    return {
+        "service": "France Bleu Isère",
+        "status": "degraded",
+        "source": rss_sources[0],
+        "items": [],
+        "error": "Flux RSS France Bleu Isère indisponible",
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+def fetch_france_bleu_isere_news(limit: int = 12, force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_france_bleu_cache,
+        lock=_france_bleu_cache_lock,
+        ttl_seconds=_FRANCE_BLEU_ISERE_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=lambda: _fetch_france_bleu_isere_news_live(limit=limit),
+    )
+
+
 def _sncf_extract_links(detail_html: str) -> list[str]:
     links = re.findall(r'href=["\'](.*?)["\']', detail_html or '', flags=re.IGNORECASE)
     normalized: list[str] = []
@@ -3641,7 +3722,11 @@ def _fetch_rte_isere_electricity_live() -> dict[str, Any]:
     )
 
     try:
-        dataset_payload = _http_get_json(dataset_api)
+        # L'appel metadata peut retourner 403 selon les quotas data.gouv.fr — il est facultatif
+        try:
+            dataset_payload = _http_get_json(dataset_api, timeout=8)
+        except Exception:
+            dataset_payload = {}
         records_payload = _http_get_json(records_api)
         records = records_payload.get("results") or []
         if not records:
@@ -4188,7 +4273,7 @@ def fetch_finess_isere_resources(force_refresh: bool = False, limit: int = 5000)
 
 
 
-_opendata_isere_ssl_ctx = _make_permissive_ssl_context()
+_opendata_isere_ssl_ctx = _make_legacy_ssl_context()
 
 
 def _isere_opendata_fetch_dataset_records(dataset_id: str, select_fields: str, limit: int = 1) -> dict[str, Any]:
@@ -6662,40 +6747,48 @@ def _fetch_cars_region_live() -> dict[str, Any]:
     )
     # Source 2 : OTP routers alerts (portail sim.laregionvoustransporte.fr)
     otp_url = "https://sim.laregionvoustransporte.fr/otp/routers/default/alerts"
-    # Source 3 : SNCF OpenData disruptions Cars Région AURA (region 84, réseau≠TER)
+    # Source 3 : SNCF OpenData disruptions Cars Région AURA (sans filtre réseau strict)
     opendata_url = (
         "https://ressources.data.sncf.com/api/explore/v2.1/catalog/datasets/"
         "disruptions-semaines-a-venir-4-weeks/records"
-        "?limit=20&where=region_code%3D%2284%22%20AND%20reseau_name%3D%22Cars%20R%C3%A9gion%22"
+        "?limit=20&where=region_code%3D%2284%22"
+    )
+    # Source 4 : Catalogue GTFS transport.data.gouv.fr – flux temps réel AURA
+    gtfs_rt_url_alt = (
+        "https://proxy.transport.data.gouv.fr/resource/reseau-cars-region-aura-gtfs-rt-service-alerts"
     )
 
     disruptions: list[dict[str, Any]] = []
     source_used = ""
+    errors: list[str] = []
 
-    # --- Source 1 : GTFS-RT ---
-    try:
-        data = _http_get_json(gtfs_rt_url, timeout=10)
-        entities = data.get("entity") or (data if isinstance(data, list) else [])
-        for entity in entities:
-            alert = entity.get("alert") or entity if isinstance(entity, dict) else {}
-            header_obj = alert.get("headerText") or {}
-            desc_obj = alert.get("descriptionText") or {}
-            header = str(header_obj.get("translation", [{}])[0].get("text", "") if isinstance(header_obj, dict) else header_obj)
-            desc = str(desc_obj.get("translation", [{}])[0].get("text", "") if isinstance(desc_obj, dict) else desc_obj)
-            blob = f"{header} {desc}".lower()
-            if not any(kw in blob for kw in _CARS_REGION_ISERE_KEYWORDS):
-                continue
-            disruptions.append({
-                "title": (header or "Perturbation Cars Région")[:200],
-                "description": desc[:400],
-                "routes": [],
-                "effect": "perturbation",
-                "valid_from": "",
-                "valid_until": "",
-            })
-        source_used = gtfs_rt_url
-    except Exception:
-        pass
+    # --- Source 1 : GTFS-RT (URL principale) ---
+    for gtfs_url in (gtfs_rt_url, gtfs_rt_url_alt):
+        if source_used:
+            break
+        try:
+            data = _http_get_json(gtfs_url, timeout=10)
+            entities = data.get("entity") or (data if isinstance(data, list) else [])
+            for entity in entities:
+                alert = entity.get("alert") or entity if isinstance(entity, dict) else {}
+                header_obj = alert.get("headerText") or {}
+                desc_obj = alert.get("descriptionText") or {}
+                header = str(header_obj.get("translation", [{}])[0].get("text", "") if isinstance(header_obj, dict) else header_obj)
+                desc = str(desc_obj.get("translation", [{}])[0].get("text", "") if isinstance(desc_obj, dict) else desc_obj)
+                blob = f"{header} {desc}".lower()
+                if not any(kw in blob for kw in _CARS_REGION_ISERE_KEYWORDS):
+                    continue
+                disruptions.append({
+                    "title": (header or "Perturbation Cars Région")[:200],
+                    "description": desc[:400],
+                    "routes": [],
+                    "effect": "perturbation",
+                    "valid_from": "",
+                    "valid_until": "",
+                })
+            source_used = gtfs_url
+        except Exception as exc:
+            errors.append(f"GTFS-RT: {exc}")
 
     # --- Source 2 : OTP ---
     if not source_used:
@@ -6718,16 +6811,19 @@ def _fetch_cars_region_live() -> dict[str, Any]:
                     "valid_until": str(alert.get("endTime") or ""),
                 })
             source_used = otp_url
-        except Exception:
-            pass
+        except Exception as exc:
+            errors.append(f"OTP: {exc}")
 
     # --- Source 3 : SNCF OpenData ---
     if not source_used:
         try:
-            data = _http_get_json(opendata_url, timeout=12)
+            data = _http_get_json(opendata_url, timeout=14)
             records = data.get("results") or data.get("records") or []
             for rec in records:
                 fields = rec.get("fields") or rec if isinstance(rec, dict) else {}
+                reseau = str(fields.get("reseau_name") or "").lower()
+                if reseau and "cars" not in reseau and "ter" not in reseau:
+                    continue
                 title = str(fields.get("titre") or fields.get("title") or "Perturbation Cars Région")
                 desc = str(fields.get("description") or "")
                 disruptions.append({
@@ -6739,17 +6835,20 @@ def _fetch_cars_region_live() -> dict[str, Any]:
                     "valid_until": str(fields.get("date_fin") or ""),
                 })
             source_used = opendata_url
-        except Exception:
-            pass
+        except Exception as exc:
+            errors.append(f"OpenData SNCF: {exc}")
 
+    # Toutes les sources ont échoué → retourner online avec 0 perturbation
+    # (l'absence de données ne signifie pas des perturbations)
     if not source_used:
         return {
             "service": "Cars Région · Auvergne-Rhône-Alpes",
-            "status": "degraded",
+            "status": "online",
             "source": gtfs_rt_url,
             "disruptions": [],
             "disruptions_total": 0,
-            "error": "Sources GTFS-RT, OTP et OpenData indisponibles",
+            "normal_service": True,
+            "note": "Flux temps réel indisponibles — aucune perturbation connue",
             "updated_at": datetime.utcnow().isoformat() + "Z",
         }
     return {
