@@ -178,7 +178,10 @@
       "Bash(python -c \"import ast, pathlib; ast.parse\\(pathlib.Path\\('main.py'\\).read_text\\(encoding='utf-8'\\)\\); print\\('OK'\\)\")",
       "Bash(python -c \"import ast, pathlib; ast.parse\\(pathlib.Path\\('main.py'\\).read_text\\(encoding='utf-8'\\)\\); ast.parse\\(pathlib.Path\\('services.py'\\).read_text\\(encoding='utf-8'\\)\\); print\\('OK'\\)\")",
       "Bash(python -c \"import ast, pathlib; ast.parse\\(pathlib.Path\\('main.py'\\).read_text\\(encoding='utf-8'\\)\\); ast.parse\\(pathlib.Path\\('security.py'\\).read_text\\(encoding='utf-8'\\)\\); print\\('OK'\\)\")",
-      "Bash(python -c \"import ast, pathlib; [ast.parse\\(pathlib.Path\\(f\\).read_text\\(encoding='utf-8'\\)\\) or print\\(f+' OK'\\) for f in ['main.py','security.py','services.py']]\")"
+      "Bash(python -c \"import ast, pathlib; [ast.parse\\(pathlib.Path\\(f\\).read_text\\(encoding='utf-8'\\)\\) or print\\(f+' OK'\\) for f in ['main.py','security.py','services.py']]\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('app/services.py'\\).read\\(\\)\\); print\\('OK - pas d erreur de syntaxe'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('app/services.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('app/main.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")"
     ]
   }
 }

@@ -239,11 +239,20 @@ def _make_permissive_ssl_context() -> ssl.SSLContext:
 
 def _make_legacy_ssl_context() -> ssl.SSLContext:
     """Contexte SSL pour serveurs avec TLS legacy (ex. opendata.isere.fr).
-    Désactive la vérification stricte du certificat et autorise la renégociation legacy."""
+    - Désactive la vérification de certificat
+    - Force TLS 1.2 max (certains vieux serveurs rejettent TLS 1.3 avec INTERNAL_ERROR)
+    - Autorise la renégociation legacy (OpenSSL 3.0+)
+    - SECLEVEL=0 pour accepter les suites de chiffrement faibles"""
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
     ctx.set_ciphers("DEFAULT:@SECLEVEL=0")
+    # Forcer TLS 1.2 max — les serveurs legacy envoient TLSV1_ALERT_INTERNAL_ERROR
+    # quand le client propose TLS 1.3 en premier et qu'ils ne savent pas le gérer.
+    try:
+        ctx.maximum_version = ssl.TLSVersion.TLSv1_2
+    except AttributeError:
+        pass  # Python < 3.7 — ignoré
     # Autorise la renégociation legacy (OpenSSL 3.0+)
     legacy_flag = getattr(ssl, "OP_LEGACY_SERVER_CONNECT", 0)
     if legacy_flag:
@@ -3399,65 +3408,140 @@ _ATMO_BROWSER_HEADERS = {
 }
 
 
+def _atmo_build_success(source: str, today_index, today_date, tomorrow_index, tomorrow_date,
+                        today_comment: str = "", tomorrow_comment: str = "",
+                        today_sub: list | None = None, tomorrow_sub: list | None = None,
+                        has_episode: bool = False) -> dict[str, Any]:
+    return {
+        "service": "Atmo Auvergne-Rhône-Alpes",
+        "status": "online",
+        "department": "Isère",
+        "city": "Grenoble",
+        "source": source,
+        "today": {
+            "date": today_date,
+            "index": today_index,
+            "level": _atmo_level_from_index(today_index),
+            "label": _atmo_label_from_index(today_index),
+            "comment": today_comment,
+            "sub_indices": today_sub or [],
+        },
+        "tomorrow": {
+            "date": tomorrow_date,
+            "index": tomorrow_index,
+            "level": _atmo_level_from_index(tomorrow_index),
+            "label": _atmo_label_from_index(tomorrow_index),
+            "comment": tomorrow_comment,
+            "sub_indices": tomorrow_sub or [],
+        },
+        "has_pollution_episode": has_episode,
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
 def _fetch_atmo_aura_isere_air_quality_live() -> dict[str, Any]:
-    source = "https://www.atmo-auvergnerhonealpes.fr/air-commune/grenoble/38185/indice-atmo"
+    source_page = "https://www.atmo-auvergnerhonealpes.fr/air-commune/grenoble/38185/indice-atmo"
+    today_str = datetime.utcnow().date().isoformat()
+
+    # ── Source 1 : API Recosante (beta.gouv.fr) — données ATMO agrégées ──────
     try:
-        page_html = _http_get_text(source, timeout=30, headers=_ATMO_BROWSER_HEADERS)
+        recosante_url = "https://api.recosante.beta.gouv.fr/v1/?insee=38185"
+        reco = _http_get_json(
+            recosante_url,
+            timeout=15,
+            headers={"Accept": "application/json", "User-Agent": _BROWSER_UA},
+        )
+        atmo_today = reco.get("indice_atmo") or {}
+        atmo_tomorrow = reco.get("indice_atmo_J1") or reco.get("indice_atmo_tomorrow") or {}
+        today_index = atmo_today.get("indice") or atmo_today.get("value") or atmo_today.get("valeur")
+        if today_index is not None:
+            return _atmo_build_success(
+                source=source_page,
+                today_index=today_index,
+                today_date=atmo_today.get("date") or today_str,
+                tomorrow_index=atmo_tomorrow.get("indice") or atmo_tomorrow.get("value"),
+                tomorrow_date=atmo_tomorrow.get("date"),
+                today_comment=str(atmo_today.get("qualificatif") or atmo_today.get("label") or ""),
+                tomorrow_comment=str(atmo_tomorrow.get("qualificatif") or ""),
+                today_sub=atmo_today.get("sous_indices") or [],
+                tomorrow_sub=atmo_tomorrow.get("sous_indices") or [],
+                has_episode=bool(reco.get("episode_pollution")),
+            )
+    except Exception:
+        pass
+
+    # ── Source 2 : endpoint JSON natif Drupal (?_format=json) ────────────────
+    try:
+        json_url = source_page + "?_format=json"
+        drupal_json = _http_get_json(
+            json_url,
+            timeout=20,
+            headers={"Accept": "application/json", "User-Agent": _BROWSER_UA},
+        )
+        dataviz = drupal_json.get("dataviz") or drupal_json
+        indices = dataviz.get("indices") or {}
+        comments = dataviz.get("comments") or {}
+        available_dates = sorted(indices.keys())
+        if available_dates:
+            d0 = available_dates[0]
+            d1 = available_dates[1] if len(available_dates) > 1 else None
+            p0 = indices.get(d0) or {}
+            p1 = indices.get(d1) or {} if d1 else {}
+            return _atmo_build_success(
+                source=source_page,
+                today_index=p0.get("indice_atmo"),
+                today_date=d0,
+                tomorrow_index=p1.get("indice_atmo"),
+                tomorrow_date=d1,
+                today_comment=comments.get(d0, ""),
+                tomorrow_comment=comments.get(d1, "") if d1 else "",
+                today_sub=p0.get("sous_indices") or [],
+                tomorrow_sub=p1.get("sous_indices") or [],
+                has_episode=bool(dataviz.get("hasEpisodeInProgress")),
+            )
+    except Exception:
+        pass
+
+    # ── Source 3 : scraping HTML Drupal (fallback) ────────────────────────────
+    try:
+        page_html = _http_get_text(source_page, timeout=30, headers=_ATMO_BROWSER_HEADERS)
         settings_payload = _extract_drupal_settings_json(page_html)
         dataviz = settings_payload.get("dataviz") or {}
         indices = dataviz.get("indices") or {}
         comments = dataviz.get("comments") or {}
-
         available_dates = sorted(indices.keys())
-        if not available_dates:
-            raise ValueError("Indices ATMO indisponibles")
+        if available_dates:
+            d0 = available_dates[0]
+            d1 = available_dates[1] if len(available_dates) > 1 else None
+            p0 = indices.get(d0) or {}
+            p1 = indices.get(d1) or {} if d1 else {}
+            return _atmo_build_success(
+                source=source_page,
+                today_index=p0.get("indice_atmo"),
+                today_date=d0,
+                tomorrow_index=p1.get("indice_atmo"),
+                tomorrow_date=d1,
+                today_comment=comments.get(d0, ""),
+                tomorrow_comment=comments.get(d1, "") if d1 else "",
+                today_sub=p0.get("sous_indices") or [],
+                tomorrow_sub=p1.get("sous_indices") or [],
+                has_episode=bool(dataviz.get("hasEpisodeInProgress")),
+            )
+    except Exception:
+        pass
 
-        today_date = available_dates[0]
-        tomorrow_date = available_dates[1] if len(available_dates) > 1 else None
-        today_payload = indices.get(today_date) or {}
-        tomorrow_payload = indices.get(tomorrow_date) or {}
-
-        today_index = today_payload.get("indice_atmo")
-        tomorrow_index = tomorrow_payload.get("indice_atmo")
-
-        return {
-            "service": "Atmo Auvergne-Rhône-Alpes",
-            "status": "online",
-            "department": "Isère",
-            "city": "Grenoble",
-            "source": source,
-            "today": {
-                "date": today_date,
-                "index": today_index,
-                "level": _atmo_level_from_index(today_index),
-                "label": _atmo_label_from_index(today_index),
-                "comment": comments.get(today_date, ""),
-                "sub_indices": today_payload.get("sous_indices") or [],
-            },
-            "tomorrow": {
-                "date": tomorrow_date,
-                "index": tomorrow_index,
-                "level": _atmo_level_from_index(tomorrow_index),
-                "label": _atmo_label_from_index(tomorrow_index),
-                "comment": comments.get(tomorrow_date, ""),
-                "sub_indices": tomorrow_payload.get("sous_indices") or [],
-            },
-            "has_pollution_episode": bool(dataviz.get("hasEpisodeInProgress")),
-            "updated_at": comments.get("date_maj") or (datetime.utcnow().isoformat() + "Z"),
-        }
-    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
-        return {
-            "service": "Atmo Auvergne-Rhône-Alpes",
-            "status": "degraded",
-            "department": "Isère",
-            "city": "Grenoble",
-            "source": source,
-            "today": {},
-            "tomorrow": {},
-            "has_pollution_episode": False,
-            "error": str(exc),
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
+    return {
+        "service": "Atmo Auvergne-Rhône-Alpes",
+        "status": "degraded",
+        "department": "Isère",
+        "city": "Grenoble",
+        "source": source_page,
+        "today": {},
+        "tomorrow": {},
+        "has_pollution_episode": False,
+        "error": "Toutes les sources Atmo AURA indisponibles (Recosante, Drupal JSON, scraping HTML)",
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
 
 
 def fetch_prefecture_isere_news(limit: int = 7, force_refresh: bool = False) -> dict[str, Any]:
@@ -3522,16 +3606,19 @@ def fetch_dauphine_isere_news(limit: int = 10, force_refresh: bool = False) -> d
 
 
 def _fetch_france_bleu_isere_news_live(limit: int = 12) -> dict[str, Any]:
-    """Récupère les dernières actualités France Bleu Isère via le flux RSS."""
-    # France Bleu Isère : station de Grenoble (38)
+    """Récupère les dernières actualités France Bleu Isère via flux RSS (plusieurs sources)."""
+    # Ordre de préférence : France Bleu → France TV Info Isère → France 3 Alpes
     rss_sources = [
-        "https://www.francebleu.fr/rss/isere",
-        "https://www.francebleu.fr/rss/infos/commune/grenoble",
+        "https://www.francebleu.fr/rss/infos/france-bleu-isere",
+        "https://www.francebleu.fr/rss/france-bleu-isere",
+        "https://www.francetvinfo.fr/france/auvergne-rhone-alpes/isere.rss",
+        "https://france3-regions.francetvinfo.fr/auvergne-rhone-alpes/isere/rss",
     ]
     _rss_headers = {
         "User-Agent": _BROWSER_UA,
         "Accept": "application/rss+xml, application/xml, text/xml, */*",
         "Accept-Language": "fr-FR,fr;q=0.9",
+        "Referer": "https://www.google.com/",
     }
     for source in rss_sources:
         try:
@@ -3729,24 +3816,35 @@ def _rte_electricity_risk_level(supply_margin_mw: int | float | None) -> str:
 
 
 def _fetch_rte_isere_electricity_live() -> dict[str, Any]:
-    dataset_api = "https://www.data.gouv.fr/api/1/datasets/donnees-eco2mix-regionales-temps-reel-1/"
-    records_api = (
-        "https://odre.opendatasoft.com/api/explore/v2.1/catalog/datasets/eco2mix-regional-tr/records"
+    # opendata.reseaux-energies.fr = nouveau domaine officiel ODRE (remplace odre.opendatasoft.com)
+    _RTE_API_DOMAINS = [
+        "https://opendata.reseaux-energies.fr",
+        "https://odre.opendatasoft.com",
+    ]
+    _records_path = (
+        "/api/explore/v2.1/catalog/datasets/eco2mix-regional-tr/records"
         "?select=code_insee_region,libelle_region,date_heure,consommation,thermique,nucleaire,eolien,solaire,hydraulique,bioenergies,ech_physiques"
         "&where=code_insee_region%3D%2784%27%20and%20consommation%20is%20not%20null"
         "&order_by=date_heure%20desc&limit=1"
     )
+    records_api = _RTE_API_DOMAINS[0] + _records_path
 
     try:
-        # L'appel metadata peut retourner 403 selon les quotas data.gouv.fr — il est facultatif
-        try:
-            dataset_payload = _http_get_json(dataset_api, timeout=8)
-        except Exception:
-            dataset_payload = {}
-        records_payload = _http_get_json(
-            records_api,
-            headers={"Accept": "application/json", "User-Agent": _BROWSER_UA},
-        )
+        dataset_payload: dict[str, Any] = {}
+
+        # Essaie les deux domaines ODRE dans l'ordre
+        records_payload: dict[str, Any] = {}
+        for domain in _RTE_API_DOMAINS:
+            try:
+                records_payload = _http_get_json(
+                    domain + _records_path,
+                    timeout=12,
+                    headers={"Accept": "application/json", "User-Agent": _BROWSER_UA},
+                )
+                records_api = domain + _records_path
+                break
+            except (HTTPError, URLError, TimeoutError):
+                continue
         records = records_payload.get("results") or []
         if not records:
             raise ValueError("Aucune donnée éCO2mix disponible pour la région ARA")
@@ -5938,7 +6036,10 @@ def _fetch_anfr_isere_antennas_live() -> dict[str, Any]:
     dataset_id = "551d4ff3c751df55da0cd89f"
     source = "https://www.data.gouv.fr/fr/datasets/donnees-sur-les-installations-radioelectriques-de-plus-de-5-watts-1/"
     try:
-        dataset = _http_get_json(f"https://www.data.gouv.fr/api/1/datasets/{dataset_id}/")
+        dataset = _http_get_json(
+            f"https://www.data.gouv.fr/api/1/datasets/{dataset_id}/",
+            headers={"Accept": "application/json", "User-Agent": _BROWSER_UA},
+        )
         resources = dataset.get("resources") or []
         candidates = [
             resource for resource in resources
@@ -6119,7 +6220,10 @@ def _fetch_arcep_isere_mobile_outages_live() -> dict[str, Any]:
     dataset_id = "5f7c7fae9cd6c79b58da3e20"
     source = "https://www.data.gouv.fr/fr/datasets/sites-indisponibles/"
     try:
-        dataset = _http_get_json(f"https://www.data.gouv.fr/api/1/datasets/{dataset_id}/")
+        dataset = _http_get_json(
+            f"https://www.data.gouv.fr/api/1/datasets/{dataset_id}/",
+            headers={"Accept": "application/json", "User-Agent": _BROWSER_UA},
+        )
         resources = dataset.get("resources") or []
         candidates = [resource for resource in resources if str(resource.get("url") or "").endswith(".geojson")]
         if not candidates:
