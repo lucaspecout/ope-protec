@@ -7801,7 +7801,7 @@ const SVC_CARD_META = {
   mreseau:               { statusId: 'mreseau-status',         infoId: 'mreseau-info',         url: 'https://www.reso-m.fr/55-infotrafic.htm' },
   aprr_isere:            { statusId: 'aprr-status',            infoId: 'aprr-info',            url: 'https://voyage.aprr.fr/information-trafic' },
   vinci_autoroutes:      { statusId: 'vinci-status',           infoId: 'vinci-info',           url: 'https://www.vinci-autoroutes.com/fr/autoroutes-temps-reel/' },
-  cars_region_aura:      { statusId: 'cars-region-status',     infoId: 'cars-region-info',     url: 'https://sim.laregionvoustransporte.fr/fr/schedules' },
+  cars_region_aura:      { statusId: 'cars-region-status',     infoId: 'cars-region-info',     url: 'https://www.laregionvoustransporte.fr/fr/votre-region/infos-trafic' },
 };
 
 const SVC_CAT_COLORS = {

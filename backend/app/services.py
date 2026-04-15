@@ -7174,122 +7174,284 @@ _CARS_REGION_ISERE_KEYWORDS: tuple[str, ...] = (
 
 
 def _fetch_cars_region_live() -> dict[str, Any]:
-    # Source 1 : API GTFS-RT service alerts Région AURA (transport.data.gouv.fr)
-    gtfs_rt_url = (
-        "https://proxy.transport.data.gouv.fr/resource/aura-cars-region-gtfs-rt-service-alerts"
-    )
-    # Source 2 : OTP routers alerts (portail sim.laregionvoustransporte.fr)
-    otp_url = "https://sim.laregionvoustransporte.fr/otp/routers/default/alerts"
-    # Source 3 : SNCF OpenData disruptions Cars Région AURA (sans filtre réseau strict)
-    opendata_url = (
-        "https://ressources.data.sncf.com/api/explore/v2.1/catalog/datasets/"
-        "disruptions-semaines-a-venir-4-weeks/records"
-        "?limit=20&where=region_code%3D%2284%22"
-    )
-    # Source 4 : Catalogue GTFS transport.data.gouv.fr – flux temps réel AURA
-    gtfs_rt_url_alt = (
-        "https://proxy.transport.data.gouv.fr/resource/reseau-cars-region-aura-gtfs-rt-service-alerts"
-    )
+    """Perturbations Cars Région AURA — lignes desservant l'Isère.
 
+    Sources par ordre de priorité :
+    1. GTFS-RT service alerts transport.data.gouv.fr (plusieurs slugs connus)
+    2. SIRI SX transport.data.gouv.fr filtre Cars Région
+    3. API Navitia / disruptions laregionvoustransporte.fr
+    4. Scraping page info-trafic laregionvoustransporte.fr
+    """
     disruptions: list[dict[str, Any]] = []
     source_used = ""
-    errors: list[str] = []
+    _hdrs_json = {"Accept": "application/json", "User-Agent": _BROWSER_UA}
+    _hdrs_html = {
+        "User-Agent": _BROWSER_UA,
+        "Accept": "text/html,application/xhtml+xml,*/*",
+        "Accept-Language": "fr-FR,fr;q=0.9",
+        "Referer": "https://www.laregionvoustransporte.fr/",
+    }
 
-    # --- Source 1 : GTFS-RT (URL principale) ---
-    for gtfs_url in (gtfs_rt_url, gtfs_rt_url_alt):
-        if source_used:
+    # ── Source 1 : GTFS-RT service alerts ────────────────────────────────────
+    _GTFS_RT_CANDIDATES = (
+        "https://proxy.transport.data.gouv.fr/resource/cars-region-auvergne-rhone-alpes-gtfs-rt-service-alerts",
+        "https://proxy.transport.data.gouv.fr/resource/aura-cars-region-gtfs-rt-service-alerts",
+        "https://proxy.transport.data.gouv.fr/resource/reseau-cars-region-aura-gtfs-rt-service-alerts",
+        "https://proxy.transport.data.gouv.fr/resource/cars-region-aura-gtfs-rt-service-alerts",
+    )
+    for _gtfs_url in _GTFS_RT_CANDIDATES:
+        if disruptions:
             break
         try:
-            data = _http_get_json(gtfs_url, timeout=10)
+            data = _http_get_json(_gtfs_url, timeout=12, headers=_hdrs_json)
             entities = data.get("entity") or (data if isinstance(data, list) else [])
+            _found: list[dict[str, Any]] = []
             for entity in entities:
-                alert = entity.get("alert") or entity if isinstance(entity, dict) else {}
+                alert = entity.get("alert") or (entity if isinstance(entity, dict) else {})
                 header_obj = alert.get("headerText") or {}
                 desc_obj = alert.get("descriptionText") or {}
-                header = str(header_obj.get("translation", [{}])[0].get("text", "") if isinstance(header_obj, dict) else header_obj)
-                desc = str(desc_obj.get("translation", [{}])[0].get("text", "") if isinstance(desc_obj, dict) else desc_obj)
-                blob = f"{header} {desc}".lower()
-                if not any(kw in blob for kw in _CARS_REGION_ISERE_KEYWORDS):
+                header = str(
+                    header_obj.get("translation", [{}])[0].get("text", "")
+                    if isinstance(header_obj, dict) else header_obj
+                )
+                desc = str(
+                    desc_obj.get("translation", [{}])[0].get("text", "")
+                    if isinstance(desc_obj, dict) else desc_obj
+                )
+                if not header and not desc:
                     continue
-                disruptions.append({
+                if _is_german_alert(header + " " + desc):
+                    continue
+                blob = f"{header} {desc}".lower()
+                # Filtre Isère : accepter si aucun département adverse mentionné,
+                # ou si "isère"/"38"/villes isèroises explicitement présents
+                has_isere = any(kw in blob for kw in _CARS_REGION_ISERE_KEYWORDS)
+                other_depts = any(
+                    d in blob for d in ("savoie", "haute-savoie", "ain ", "haute-loire", "puy-de-dôme",
+                                        "cantal", "allier", "drôme", "ardèche", "loire ", "rhône ")
+                )
+                if other_depts and not has_isere:
+                    continue  # alerte exclusivement hors-Isère
+                line_m = re.search(r'\b(?:ligne\s+)?([A-Z]?\d{2,4}|[A-Z]{1,3})\b', header + " " + desc)
+                line_label = line_m.group(1).upper() if line_m else "Cars Région"
+                _found.append({
                     "title": (header or "Perturbation Cars Région")[:200],
-                    "description": desc[:400],
-                    "routes": [],
+                    "description": (desc or header)[:400],
+                    "line": line_label,
+                    "level": "jaune",
                     "effect": "perturbation",
                     "valid_from": "",
                     "valid_until": "",
                 })
-            source_used = gtfs_url
-        except Exception as exc:
-            errors.append(f"GTFS-RT: {exc}")
+            if _found:
+                disruptions.extend(_found)
+                source_used = _gtfs_url
+        except Exception:
+            continue
 
-    # --- Source 2 : OTP ---
-    if not source_used:
-        try:
-            data = _http_get_json(otp_url, timeout=12)
-            alerts = data if isinstance(data, list) else (data.get("alerts") or data.get("items") or [])
-            for alert in alerts:
-                if not isinstance(alert, dict):
-                    continue
-                header = str(alert.get("headerText") or alert.get("header") or alert.get("title") or "")
-                desc = str(alert.get("descriptionText") or alert.get("description") or "")
-                if not any(kw in f"{header} {desc}".lower() for kw in _CARS_REGION_ISERE_KEYWORDS):
-                    continue
-                disruptions.append({
-                    "title": (header or "Perturbation Cars Région")[:200],
-                    "description": desc[:400],
-                    "routes": [],
-                    "effect": str(alert.get("effect") or "perturbation"),
-                    "valid_from": str(alert.get("startTime") or ""),
-                    "valid_until": str(alert.get("endTime") or ""),
-                })
-            source_used = otp_url
-        except Exception as exc:
-            errors.append(f"OTP: {exc}")
+    # ── Source 2 : SIRI SX transport.data.gouv.fr ────────────────────────────
+    if not disruptions:
+        _siri_candidates = (
+            "https://proxy.transport.data.gouv.fr/resource/siri-lite-situation-exchange?Producer=CarsRegion",
+            "https://proxy.transport.data.gouv.fr/resource/siri-lite-situation-exchange?Producer=CARS_REGION",
+            "https://proxy.transport.data.gouv.fr/resource/siri-lite-situation-exchange?Producer=TransdevAURA",
+        )
+        for _siri_url in _siri_candidates:
+            if disruptions:
+                break
+            try:
+                xml_text = _http_get_text(
+                    _siri_url,
+                    timeout=15,
+                    headers={"User-Agent": "ope-protec/1.0", "Accept": "application/xml,text/xml,*/*"},
+                )
+                _ns = {"siri": "http://www.siri.org.uk/siri"}
+                root = ET.fromstring(xml_text)
+                situations = root.findall(".//siri:PtSituationElement", _ns) or root.findall(
+                    ".//{http://www.siri.org.uk/siri}PtSituationElement"
+                )
+                for sit in situations:
+                    def _siri_txt(tag: str) -> str:
+                        el = sit.find(f"siri:{tag}", _ns) or sit.find(
+                            f"{{http://www.siri.org.uk/siri}}{tag}"
+                        )
+                        return (el.text or "").strip() if el is not None else ""
 
-    # --- Source 3 : SNCF OpenData ---
-    if not source_used:
-        try:
-            data = _http_get_json(opendata_url, timeout=14)
-            records = data.get("results") or data.get("records") or []
-            for rec in records:
-                fields = rec.get("fields") or rec if isinstance(rec, dict) else {}
-                reseau = str(fields.get("reseau_name") or "").lower()
-                if reseau and "cars" not in reseau and "ter" not in reseau:
-                    continue
-                title = str(fields.get("titre") or fields.get("title") or "Perturbation Cars Région")
-                desc = str(fields.get("description") or "")
-                disruptions.append({
-                    "title": title[:200],
-                    "description": desc[:400],
-                    "routes": [],
-                    "effect": "perturbation",
-                    "valid_from": str(fields.get("date_debut") or ""),
-                    "valid_until": str(fields.get("date_fin") or ""),
-                })
-            source_used = opendata_url
-        except Exception as exc:
-            errors.append(f"OpenData SNCF: {exc}")
+                    summary = _siri_txt("Summary") or _siri_txt("Description") or _siri_txt("Detail")
+                    detail = _siri_txt("Description") or _siri_txt("Detail") or summary
+                    if not summary:
+                        continue
+                    if _is_german_alert(summary + " " + detail):
+                        continue
+                    blob = (summary + " " + detail).lower()
+                    has_isere = any(kw in blob for kw in _CARS_REGION_ISERE_KEYWORDS)
+                    other_depts = any(
+                        d in blob for d in ("haute-savoie", "savoie", "ain ", "haute-loire")
+                    )
+                    if other_depts and not has_isere:
+                        continue
+                    severity = _siri_txt("Severity").lower()
+                    level = "rouge" if "high" in severity or "severe" in severity else "jaune"
+                    line_m = re.search(r'\b(?:ligne\s+)?([A-Z]?\d{2,4}|[A-Z]{1,3})\b', summary)
+                    disruptions.append({
+                        "title": summary[:200],
+                        "description": detail[:400],
+                        "line": line_m.group(1).upper() if line_m else "Cars Région",
+                        "level": level,
+                        "effect": "perturbation",
+                        "valid_from": _siri_txt("StartTime"),
+                        "valid_until": _siri_txt("EndTime"),
+                    })
+                if disruptions:
+                    source_used = _siri_url
+            except Exception:
+                continue
 
-    # Toutes les sources ont échoué → retourner online avec 0 perturbation
-    # (l'absence de données ne signifie pas des perturbations)
+    # ── Source 3 : API Navitia laregionvoustransporte.fr ─────────────────────
+    if not disruptions:
+        _navitia_candidates = (
+            "https://sim.laregionvoustransporte.fr/api/v1/disruptions?count=20&depth=1",
+            "https://api.laregionvoustransporte.fr/api/v1/disruptions?count=20&depth=1",
+            "https://sim.laregionvoustransporte.fr/v1/disruptions?count=20",
+        )
+        for _nav_url in _navitia_candidates:
+            if disruptions:
+                break
+            try:
+                data = _http_get_json(_nav_url, timeout=12, headers=_hdrs_json)
+                items = (
+                    data.get("disruptions")
+                    or data.get("data")
+                    or (data if isinstance(data, list) else [])
+                )
+                for item in items[:40]:
+                    if not isinstance(item, dict):
+                        continue
+                    msg_list = item.get("messages") or []
+                    msg_text = " ".join(
+                        str(m.get("text") or m.get("value") or "")
+                        for m in msg_list
+                        if isinstance(m, dict)
+                    )
+                    title = str(
+                        item.get("cause") or item.get("title") or item.get("severity", {}).get("name") or ""
+                    )
+                    blob = (title + " " + msg_text).lower()
+                    has_isere = any(kw in blob for kw in _CARS_REGION_ISERE_KEYWORDS)
+                    other_depts = any(
+                        d in blob for d in ("haute-savoie", "savoie", "ain ", "haute-loire")
+                    )
+                    if other_depts and not has_isere:
+                        continue
+                    if not title and not msg_text:
+                        continue
+                    status = str(item.get("status") or "").lower()
+                    if status not in ("active", "future", ""):
+                        continue
+                    line_m = re.search(r'\b(?:ligne\s+)?([A-Z]?\d{2,4}|[A-Z]{1,3})\b', title + " " + msg_text)
+                    disruptions.append({
+                        "title": title[:200] or msg_text[:100],
+                        "description": msg_text[:400] or title[:200],
+                        "line": line_m.group(1).upper() if line_m else "Cars Région",
+                        "level": "jaune",
+                        "effect": str(item.get("severity", {}).get("effect") or "perturbation"),
+                        "valid_from": str(item.get("application_periods", [{}])[0].get("begin") or ""),
+                        "valid_until": str(item.get("application_periods", [{}])[0].get("end") or ""),
+                    })
+                if disruptions:
+                    source_used = _nav_url
+            except Exception:
+                continue
+
+    # ── Source 4 : Scraping page info-trafic laregionvoustransporte.fr ───────
+    if not disruptions:
+        _scrape_candidates = (
+            "https://www.laregionvoustransporte.fr/fr/votre-region/infos-trafic",
+            "https://www.laregionvoustransporte.fr/fr/infos-trafic",
+            "https://www.laregionvoustransporte.fr/fr/perturbations",
+            "https://sim.laregionvoustransporte.fr/fr/disruptions",
+        )
+        _disruption_words = frozenset({
+            "perturbation", "travaux", "déviation", "suppression", "retard",
+            "incident", "arrêt", "modification", "remplacement", "interrompu",
+        })
+        for _page_url in _scrape_candidates:
+            if disruptions:
+                break
+            try:
+                html = ""
+                if _REQUESTS_OK and _requests is not None:
+                    resp = _requests.get(_page_url, headers=_hdrs_html, timeout=15, verify=False)
+                    resp.raise_for_status()
+                    html = resp.text
+                else:
+                    html = _http_get_text(_page_url, timeout=15, headers=_hdrs_html)
+                if not html:
+                    continue
+                seen: set[str] = set()
+                blocks = re.findall(
+                    r'<(?:div|article|li|section)\b[^>]*class=["\'][^"\']*'
+                    r'(?:info|trafic|perturbation|alerte|incident|disruption|alert)[^"\']*["\'][^>]*>'
+                    r'([\s\S]{30,2000}?)'
+                    r'</(?:div|article|li|section)>',
+                    html, re.IGNORECASE,
+                )
+                if not blocks:
+                    blocks = re.findall(
+                        r'<(?:article|li)\b[^>]*>([\s\S]{40,1500}?)</(?:article|li)>',
+                        html, re.IGNORECASE,
+                    )
+                for block in blocks:
+                    text = re.sub(r"<[^>]+>", " ", block)
+                    text = re.sub(r"\s+", " ", unescape(text)).strip()
+                    if len(text) < 30:
+                        continue
+                    tl = text.lower()
+                    if not any(w in tl for w in _disruption_words):
+                        continue
+                    if _is_german_alert(text):
+                        continue
+                    key = text[:70].lower()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    title_m = re.match(r'^([^.!?\n]{10,120})', text)
+                    title = title_m.group(1).strip() if title_m else text[:80]
+                    line_m = re.search(r'\b(?:ligne\s+)?([A-Z]?\d{2,4}|[A-Z]{1,3})\b', text)
+                    line_label = line_m.group(1).upper() if line_m else "Cars Région"
+                    disruptions.append({
+                        "title": title[:200],
+                        "description": text[:400],
+                        "line": line_label,
+                        "level": "rouge" if any(w in tl for w in ("interrompu", "supprimé", "annulé")) else "jaune",
+                        "effect": "perturbation",
+                        "valid_from": "",
+                        "valid_until": "",
+                    })
+                if disruptions:
+                    source_used = _page_url
+            except Exception:
+                continue
+
     if not source_used:
         return {
             "service": "Cars Région · Auvergne-Rhône-Alpes",
             "status": "online",
-            "source": gtfs_rt_url,
+            "source": "https://www.laregionvoustransporte.fr/",
             "disruptions": [],
             "disruptions_total": 0,
             "normal_service": True,
             "note": "Flux temps réel indisponibles — aucune perturbation connue",
             "updated_at": datetime.utcnow().isoformat() + "Z",
         }
+
     return {
         "service": "Cars Région · Auvergne-Rhône-Alpes",
         "status": "online",
         "source": source_used,
-        "disruptions": disruptions[:10],
+        "disruptions": disruptions[:20],
         "disruptions_total": len(disruptions),
+        "normal_service": False,
         "updated_at": datetime.utcnow().isoformat() + "Z",
     }
 
