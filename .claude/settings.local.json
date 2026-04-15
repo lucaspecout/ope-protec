@@ -181,7 +181,9 @@
       "Bash(python -c \"import ast, pathlib; [ast.parse\\(pathlib.Path\\(f\\).read_text\\(encoding='utf-8'\\)\\) or print\\(f+' OK'\\) for f in ['main.py','security.py','services.py']]\")",
       "Bash(python -c \"import ast; ast.parse\\(open\\('app/services.py'\\).read\\(\\)\\); print\\('OK - pas d erreur de syntaxe'\\)\")",
       "Bash(python -c \"import ast; ast.parse\\(open\\('app/services.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")",
-      "Bash(python -c \"import ast; ast.parse\\(open\\('app/main.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")"
+      "Bash(python -c \"import ast; ast.parse\\(open\\('app/main.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('c:/Users/pecout/OneDrive - Alma/Documents/alerteprojet/ope-protec/backend/app/services.py', encoding='utf-8'\\).read\\(\\)\\); print\\('services.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('c:/Users/pecout/OneDrive - Alma/Documents/alerteprojet/ope-protec/backend/Dockerfile', encoding='utf-8'\\).read\\(\\)\\); print\\('Dockerfile - non-Python, ignoré'\\)\")"
     ]
   }
 }

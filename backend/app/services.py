@@ -21,6 +21,13 @@ from urllib.request import Request, urlopen
 import xml.etree.ElementTree as ET
 import zipfile
 
+try:
+    import requests as _requests
+    _REQUESTS_OK = True
+except ImportError:
+    _requests = None  # type: ignore[assignment]
+    _REQUESTS_OK = False
+
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from sqlalchemy import delete
@@ -3411,7 +3418,10 @@ _ATMO_BROWSER_HEADERS = {
 def _atmo_build_success(source: str, today_index, today_date, tomorrow_index, tomorrow_date,
                         today_comment: str = "", tomorrow_comment: str = "",
                         today_sub: list | None = None, tomorrow_sub: list | None = None,
-                        has_episode: bool = False) -> dict[str, Any]:
+                        has_episode: bool = False,
+                        level_fn=None, label_fn=None) -> dict[str, Any]:
+    lf = level_fn or _atmo_level_from_index
+    lb = label_fn or _atmo_label_from_index
     return {
         "service": "Atmo Auvergne-Rhône-Alpes",
         "status": "online",
@@ -3421,16 +3431,16 @@ def _atmo_build_success(source: str, today_index, today_date, tomorrow_index, to
         "today": {
             "date": today_date,
             "index": today_index,
-            "level": _atmo_level_from_index(today_index),
-            "label": _atmo_label_from_index(today_index),
+            "level": lf(today_index),
+            "label": lb(today_index),
             "comment": today_comment,
             "sub_indices": today_sub or [],
         },
         "tomorrow": {
             "date": tomorrow_date,
             "index": tomorrow_index,
-            "level": _atmo_level_from_index(tomorrow_index),
-            "label": _atmo_label_from_index(tomorrow_index),
+            "level": lf(tomorrow_index),
+            "label": lb(tomorrow_index),
             "comment": tomorrow_comment,
             "sub_indices": tomorrow_sub or [],
         },
@@ -3439,94 +3449,183 @@ def _atmo_build_success(source: str, today_index, today_date, tomorrow_index, to
     }
 
 
+def _euaqi_level(aqi: float | int | None) -> str:
+    """Convertit un European AQI (0-100+) en niveau de vigilance."""
+    if aqi is None:
+        return "inconnu"
+    if aqi <= 20:
+        return "vert"
+    if aqi <= 40:
+        return "jaune"
+    if aqi <= 80:
+        return "orange"
+    return "rouge"
+
+
+def _euaqi_label(aqi: float | int | None) -> str:
+    if aqi is None:
+        return "inconnu"
+    if aqi <= 20:
+        return "bon"
+    if aqi <= 40:
+        return "modéré"
+    if aqi <= 60:
+        return "dégradé"
+    if aqi <= 80:
+        return "mauvais"
+    return "très mauvais"
+
+
 def _fetch_atmo_aura_isere_air_quality_live() -> dict[str, Any]:
     source_page = "https://www.atmo-auvergnerhonealpes.fr/air-commune/grenoble/38185/indice-atmo"
     today_str = datetime.utcnow().date().isoformat()
+    tomorrow_str = (datetime.utcnow().date() + timedelta(days=1)).isoformat()
 
-    # ── Source 1 : API Recosante (beta.gouv.fr) — données ATMO agrégées ──────
+    # ── Source 1 : Open-Meteo AQI — API gratuite, sans auth, très fiable ─────
+    # Grenoble : lat=45.1885, lon=5.7245
     try:
-        recosante_url = "https://api.recosante.beta.gouv.fr/v1/?insee=38185"
-        reco = _http_get_json(
-            recosante_url,
-            timeout=15,
+        openmeteo_url = (
+            "https://air-quality-api.open-meteo.com/v1/air-quality"
+            "?latitude=45.1885&longitude=5.7245"
+            "&hourly=european_aqi"
+            "&timezone=Europe%2FParis&forecast_days=2"
+        )
+        om = _http_get_json(
+            openmeteo_url,
+            timeout=12,
             headers={"Accept": "application/json", "User-Agent": _BROWSER_UA},
         )
-        atmo_today = reco.get("indice_atmo") or {}
-        atmo_tomorrow = reco.get("indice_atmo_J1") or reco.get("indice_atmo_tomorrow") or {}
-        today_index = atmo_today.get("indice") or atmo_today.get("value") or atmo_today.get("valeur")
-        if today_index is not None:
+        hourly = om.get("hourly") or {}
+        times = hourly.get("time") or []
+        aqis = hourly.get("european_aqi") or []
+        # Chercher la valeur de l'heure courante (ou la plus récente du jour)
+        now_hour = datetime.utcnow().strftime("%Y-%m-%dT%H:00")
+        today_aqi: int | None = None
+        tomorrow_aqi: int | None = None
+        for t, v in zip(times, aqis):
+            if v is None:
+                continue
+            if str(t).startswith(today_str) and today_aqi is None:
+                today_aqi = int(v)
+            if str(t).startswith(tomorrow_str) and tomorrow_aqi is None:
+                tomorrow_aqi = int(v)
+        if today_aqi is not None:
             return _atmo_build_success(
-                source=source_page,
-                today_index=today_index,
-                today_date=atmo_today.get("date") or today_str,
-                tomorrow_index=atmo_tomorrow.get("indice") or atmo_tomorrow.get("value"),
-                tomorrow_date=atmo_tomorrow.get("date"),
-                today_comment=str(atmo_today.get("qualificatif") or atmo_today.get("label") or ""),
-                tomorrow_comment=str(atmo_tomorrow.get("qualificatif") or ""),
-                today_sub=atmo_today.get("sous_indices") or [],
-                tomorrow_sub=atmo_tomorrow.get("sous_indices") or [],
-                has_episode=bool(reco.get("episode_pollution")),
+                source="https://open-meteo.com/en/docs/air-quality-api",
+                today_index=today_aqi,
+                today_date=today_str,
+                tomorrow_index=tomorrow_aqi,
+                tomorrow_date=tomorrow_str if tomorrow_aqi is not None else None,
+                today_comment=f"Indice européen AQI ({today_aqi}/100)",
+                tomorrow_comment=f"Prévision AQI ({tomorrow_aqi}/100)" if tomorrow_aqi else "",
+                level_fn=_euaqi_level,
+                label_fn=_euaqi_label,
             )
     except Exception:
         pass
 
-    # ── Source 2 : endpoint JSON natif Drupal (?_format=json) ────────────────
+    # ── Source 2 : API Recosante (beta.gouv.fr) ───────────────────────────────
+    for reco_url in [
+        "https://api.recosante.beta.gouv.fr/v1/?insee=38185",
+        "https://api.recosante.beta.gouv.fr/v1/?commune=38185",
+    ]:
+        try:
+            reco = _http_get_json(
+                reco_url,
+                timeout=15,
+                headers={"Accept": "application/json", "User-Agent": _BROWSER_UA},
+            )
+            # Plusieurs structures possibles selon la version de l'API
+            atmo_raw = (
+                reco.get("indice_atmo")
+                or (reco.get("data") or {}).get("indice_atmo")
+                or {}
+            )
+            atmo_j1 = (
+                reco.get("indice_atmo_J1") or reco.get("indice_atmo_j1")
+                or reco.get("indice_atmo_tomorrow") or {}
+            )
+            today_index = (
+                atmo_raw.get("indice") or atmo_raw.get("value")
+                or atmo_raw.get("valeur") or atmo_raw.get("code_qual")
+            )
+            if today_index is not None:
+                return _atmo_build_success(
+                    source=source_page,
+                    today_index=today_index,
+                    today_date=atmo_raw.get("date") or atmo_raw.get("date_ech") or today_str,
+                    tomorrow_index=atmo_j1.get("indice") or atmo_j1.get("value"),
+                    tomorrow_date=atmo_j1.get("date") or atmo_j1.get("date_ech"),
+                    today_comment=str(atmo_raw.get("qualificatif") or atmo_raw.get("label") or ""),
+                    tomorrow_comment=str(atmo_j1.get("qualificatif") or ""),
+                    today_sub=atmo_raw.get("sous_indices") or [],
+                    tomorrow_sub=atmo_j1.get("sous_indices") or [],
+                    has_episode=bool(reco.get("episode_pollution")),
+                )
+        except Exception:
+            continue
+
+    # ── Source 3 : endpoint JSON natif Drupal (?_format=json) ────────────────
     try:
-        json_url = source_page + "?_format=json"
         drupal_json = _http_get_json(
-            json_url,
+            source_page + "?_format=json",
             timeout=20,
             headers={"Accept": "application/json", "User-Agent": _BROWSER_UA},
         )
         dataviz = drupal_json.get("dataviz") or drupal_json
         indices = dataviz.get("indices") or {}
-        comments = dataviz.get("comments") or {}
         available_dates = sorted(indices.keys())
         if available_dates:
-            d0 = available_dates[0]
-            d1 = available_dates[1] if len(available_dates) > 1 else None
-            p0 = indices.get(d0) or {}
-            p1 = indices.get(d1) or {} if d1 else {}
+            d0, d1 = available_dates[0], (available_dates[1] if len(available_dates) > 1 else None)
+            p0, p1 = indices.get(d0) or {}, (indices.get(d1) or {} if d1 else {})
+            comments = dataviz.get("comments") or {}
             return _atmo_build_success(
-                source=source_page,
-                today_index=p0.get("indice_atmo"),
-                today_date=d0,
-                tomorrow_index=p1.get("indice_atmo"),
-                tomorrow_date=d1,
-                today_comment=comments.get(d0, ""),
-                tomorrow_comment=comments.get(d1, "") if d1 else "",
-                today_sub=p0.get("sous_indices") or [],
-                tomorrow_sub=p1.get("sous_indices") or [],
+                source=source_page, today_index=p0.get("indice_atmo"), today_date=d0,
+                tomorrow_index=p1.get("indice_atmo"), tomorrow_date=d1,
+                today_comment=comments.get(d0, ""), tomorrow_comment=comments.get(d1, "") if d1 else "",
+                today_sub=p0.get("sous_indices") or [], tomorrow_sub=p1.get("sous_indices") or [],
                 has_episode=bool(dataviz.get("hasEpisodeInProgress")),
             )
     except Exception:
         pass
 
-    # ── Source 3 : scraping HTML Drupal (fallback) ────────────────────────────
+    # ── Source 4 : scraping HTML Drupal avec patterns étendus ────────────────
     try:
         page_html = _http_get_text(source_page, timeout=30, headers=_ATMO_BROWSER_HEADERS)
-        settings_payload = _extract_drupal_settings_json(page_html)
-        dataviz = settings_payload.get("dataviz") or {}
-        indices = dataviz.get("indices") or {}
-        comments = dataviz.get("comments") or {}
-        available_dates = sorted(indices.keys())
-        if available_dates:
-            d0 = available_dates[0]
-            d1 = available_dates[1] if len(available_dates) > 1 else None
-            p0 = indices.get(d0) or {}
-            p1 = indices.get(d1) or {} if d1 else {}
-            return _atmo_build_success(
-                source=source_page,
-                today_index=p0.get("indice_atmo"),
-                today_date=d0,
-                tomorrow_index=p1.get("indice_atmo"),
-                tomorrow_date=d1,
-                today_comment=comments.get(d0, ""),
-                tomorrow_comment=comments.get(d1, "") if d1 else "",
-                today_sub=p0.get("sous_indices") or [],
-                tomorrow_sub=p1.get("sous_indices") or [],
-                has_episode=bool(dataviz.get("hasEpisodeInProgress")),
-            )
+        # Patterns Drupal classiques + variantes
+        extra_patterns = [
+            r'drupalSettings\s*=\s*({.*?});\s*(?:\/\/|</script>)',
+            r'window\.drupalSettings\s*=\s*({.*?});\s*(?:\/\/|</script>)',
+            r'"dataviz"\s*:\s*\{.*?"indices"\s*:\s*\{.*?\}\s*\}',
+        ]
+        settings_payload = None
+        try:
+            settings_payload = _extract_drupal_settings_json(page_html)
+        except ValueError:
+            for pat in extra_patterns:
+                m = re.search(pat, page_html, re.DOTALL)
+                if m:
+                    try:
+                        settings_payload = json.loads(m.group(1))
+                        break
+                    except Exception:
+                        pass
+        if settings_payload:
+            dataviz = settings_payload.get("dataviz") or {}
+            indices = dataviz.get("indices") or {}
+            available_dates = sorted(indices.keys())
+            if available_dates:
+                d0, d1 = available_dates[0], (available_dates[1] if len(available_dates) > 1 else None)
+                p0, p1 = indices.get(d0) or {}, (indices.get(d1) or {} if d1 else {})
+                comments = dataviz.get("comments") or {}
+                return _atmo_build_success(
+                    source=source_page, today_index=p0.get("indice_atmo"), today_date=d0,
+                    tomorrow_index=p1.get("indice_atmo"), tomorrow_date=d1,
+                    today_comment=comments.get(d0, ""),
+                    tomorrow_comment=comments.get(d1, "") if d1 else "",
+                    today_sub=p0.get("sous_indices") or [], tomorrow_sub=p1.get("sous_indices") or [],
+                    has_episode=bool(dataviz.get("hasEpisodeInProgress")),
+                )
     except Exception:
         pass
 
@@ -3539,7 +3638,7 @@ def _fetch_atmo_aura_isere_air_quality_live() -> dict[str, Any]:
         "today": {},
         "tomorrow": {},
         "has_pollution_episode": False,
-        "error": "Toutes les sources Atmo AURA indisponibles (Recosante, Drupal JSON, scraping HTML)",
+        "error": "Toutes les sources Atmo AURA indisponibles (Open-Meteo, Recosante, Drupal JSON, HTML)",
         "updated_at": datetime.utcnow().isoformat() + "Z",
     }
 
@@ -3824,7 +3923,8 @@ def _fetch_rte_isere_electricity_live() -> dict[str, Any]:
     _records_path = (
         "/api/explore/v2.1/catalog/datasets/eco2mix-regional-tr/records"
         "?select=code_insee_region,libelle_region,date_heure,consommation,thermique,nucleaire,eolien,solaire,hydraulique,bioenergies,ech_physiques"
-        "&where=code_insee_region%3D%2784%27%20and%20consommation%20is%20not%20null"
+        # ODS v2.1 ODSQL : les littéraux chaîne utilisent des guillemets doubles (%22), pas simples (%27)
+        "&where=code_insee_region%3D%2284%22%20and%20consommation%20is%20not%20null"
         "&order_by=date_heure%20desc&limit=1"
     )
     records_api = _RTE_API_DOMAINS[0] + _records_path
@@ -4399,12 +4499,20 @@ def _isere_opendata_fetch_dataset_records(dataset_id: str, select_fields: str, l
         f"https://opendata.isere.fr/api/explore/v2.1/catalog/datasets/{dataset_id}/records"
         f"?select={encoded_fields}&limit={max(1, min(limit, 100))}"
     )
-    payload = _http_get_json(
-        url,
-        timeout=15,
-        ssl_context=_opendata_isere_ssl_ctx,
-        headers={"Accept": "application/json", "User-Agent": _BROWSER_UA},
-    )
+    hdrs = {"Accept": "application/json", "User-Agent": _BROWSER_UA}
+
+    # Priorité : requests (gestion SSL intégrée + verify=False) si disponible
+    if _REQUESTS_OK and _requests is not None:
+        try:
+            resp = _requests.get(url, headers=hdrs, timeout=15, verify=False)
+            resp.raise_for_status()
+            payload = resp.json()
+            return payload if isinstance(payload, dict) else {}
+        except Exception:
+            pass  # Fallback urllib ci-dessous
+
+    # Fallback : urllib avec contexte SSL legacy (TLS 1.2 max + SECLEVEL=0)
+    payload = _http_get_json(url, timeout=15, ssl_context=_opendata_isere_ssl_ctx, headers=hdrs)
     return payload if isinstance(payload, dict) else {}
 
 
