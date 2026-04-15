@@ -602,6 +602,46 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
       radon_distribution: nextGeorisques.radon_distribution || prevGeorisques.radon_distribution || null,
       ppr_categories: nextGeorisques.ppr_categories || prevGeorisques.ppr_categories || null,
     },
+    // ── Transport — protège les listes de perturbations contre le statut "pending" ──
+    ter_aura: mergeServiceSlot(previous.ter_aura || {}, next.ter_aura || {}, (p, n) => ({
+      ...p, ...n,
+      disruptions: keepPreviousArray(p.disruptions, n.disruptions),
+      disruptions_total: keepPreviousValue(p.disruptions_total, n.disruptions_total),
+    })),
+    mtag_grenoble: mergeServiceSlot(previous.mtag_grenoble || {}, next.mtag_grenoble || {}, (p, n) => ({
+      ...p, ...n,
+      disruptions: keepPreviousArray(p.disruptions, n.disruptions),
+      disruptions_total: keepPreviousValue(p.disruptions_total, n.disruptions_total),
+    })),
+    aprr_isere: mergeServiceSlot(previous.aprr_isere || {}, next.aprr_isere || {}, (p, n) => ({
+      ...p, ...n,
+      events: keepPreviousArray(p.events, n.events),
+      events_total: keepPreviousValue(p.events_total, n.events_total),
+    })),
+    vinci_autoroutes: mergeServiceSlot(previous.vinci_autoroutes || {}, next.vinci_autoroutes || {}, (p, n) => ({
+      ...p, ...n,
+      events: keepPreviousArray(p.events, n.events),
+      events_total: keepPreviousValue(p.events_total, n.events_total),
+    })),
+    resom_isere: mergeServiceSlot(previous.resom_isere || {}, next.resom_isere || {}, (p, n) => ({
+      ...p, ...n,
+      disruptions: keepPreviousArray(p.disruptions, n.disruptions),
+      disruptions_total: keepPreviousValue(p.disruptions_total, n.disruptions_total),
+    })),
+    cars_region_aura: mergeServiceSlot(previous.cars_region_aura || {}, next.cars_region_aura || {}, (p, n) => ({
+      ...p, ...n,
+      disruptions: keepPreviousArray(p.disruptions, n.disruptions),
+      disruptions_total: keepPreviousValue(p.disruptions_total, n.disruptions_total),
+    })),
+    electricity_isere: mergeServiceSlot(previous.electricity_isere || {}, next.electricity_isere || {}, (p, n) => ({
+      ...p, ...n,
+      level: keepPreviousValue(p.level, n.level),
+      supply_margin_mw: keepPreviousValue(p.supply_margin_mw, n.supply_margin_mw),
+    })),
+    isere_opendata: mergeServiceSlot(previous.isere_opendata || {}, next.isere_opendata || {}, (p, n) => ({
+      ...p, ...n,
+      totals: (n.totals && Object.keys(n.totals).length > 0) ? n.totals : (p.totals || {}),
+    })),
   };
 }
 
@@ -6706,6 +6746,15 @@ function buildCriticalRisksMarkup(dashboard = {}, externalRisks = {}) {
     : (externalRisks?.georisques || {});
 
   risks.push(`<li><strong>Itinisère</strong> · ${(itinisereEvents || []).length} événement(s) actif(s) · Statut ${escapeHtml(externalRisks?.itinisere?.status || 'inconnu')}</li>`);
+
+  const terDisruptions = Number(externalRisks?.ter_aura?.disruptions_total ?? (externalRisks?.ter_aura?.disruptions || []).length);
+  if (terDisruptions > 0) {
+    risks.push(`<li><strong>TER SNCF AURA</strong> · <span class="risk-jaune">${terDisruptions} perturbation(s)</span> sur le réseau TER en Isère.</li>`);
+  }
+  const mtagDisruptions = Number(externalRisks?.mtag_grenoble?.disruptions_total ?? (externalRisks?.mtag_grenoble?.disruptions || []).length);
+  if (mtagDisruptions > 0) {
+    risks.push(`<li><strong>M TAG Grenoble</strong> · <span class="risk-jaune">${mtagDisruptions} perturbation(s)</span> tram/bus agglomération grenobloise.</li>`);
+  }
   const apicAlerts = Number((externalRisks?.apic_isere?.alerts_total ?? (externalRisks?.apic_isere?.alerts || []).length) || 0);
   const vfAlerts = Number((externalRisks?.vigicrues_flash_isere?.alerts_total ?? (externalRisks?.vigicrues_flash_isere?.alerts || []).length) || 0);
   if (apicAlerts > 0) {
@@ -7755,7 +7804,7 @@ const SVC_CARD_META = {
   isere_opendata:        { statusId: 'opendata-status',        infoId: 'opendata-info',        url: 'https://opendata.isere.fr' },
   finess_isere:          { statusId: 'finess-status',          infoId: 'finess-info',          url: 'https://www.data.gouv.fr/datasets/finess-extraction-du-fichier-des-etablissements' },
   ter_aura:              { statusId: 'ter-aura-status',        infoId: 'ter-aura-info',        url: 'https://www.ter.sncf.com/auvergne-rhone-alpes/se-deplacer/info-trafic' },
-  mtag_grenoble:         { statusId: 'mtag-status',            infoId: 'mtag-info',            url: 'https://www.tag.fr/3-infos-trafic.htm' },
+  mtag_grenoble:         { statusId: 'mtag-status',            infoId: 'mtag-info',            url: 'https://www.reso-m.fr/' },
   aprr_isere:            { statusId: 'aprr-status',            infoId: 'aprr-info',            url: 'https://voyage.aprr.fr/information-trafic' },
   vinci_autoroutes:      { statusId: 'vinci-status',           infoId: 'vinci-info',           url: 'https://www.vinci-autoroutes.com/fr/autoroutes-temps-reel/' },
   resom_isere:           { statusId: 'resom-status',           infoId: 'resom-info',           url: 'https://www.reso-m.fr/55-infotrafic.htm' },
