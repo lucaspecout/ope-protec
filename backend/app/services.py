@@ -7037,9 +7037,26 @@ def _parse_siri_situations(xml_text: str, geo_keywords: tuple[str, ...]) -> list
                 continue
             severity = (_txt("Severity") or "").lower()
             level = "rouge" if severity in ("severe", "verysevere") else "orange" if severity in ("normal", "moderate") else "jaune"
+            # Lignes affectées depuis affects/AffectedLine ou AffectedRoute
+            affected_lines: list[str] = []
+            for tag in ("AffectedLine/LineRef", "AffectedRoute/LineRef", "LineRef"):
+                refs = situation.findall(f".//{prefix}{tag}") or situation.findall(f".//{tag}")
+                for r in refs:
+                    val = (r.text or "").strip()
+                    if val and val not in affected_lines:
+                        affected_lines.append(val)
+            # Cause détaillée
+            cause = _txt("ReasonName") or _txt("Reason") or ""
+            advice = _txt("Advice") or ""
+            detail = description
+            if cause and cause.lower() not in detail.lower():
+                detail = f"{cause} — {detail}" if detail else cause
+            if advice and advice.lower() not in detail.lower():
+                detail = f"{detail} | Conseil : {advice}" if detail else f"Conseil : {advice}"
             disruptions.append({
                 "title": summary or "Perturbation TER",
-                "description": description[:500],
+                "description": detail[:600],
+                "line": ", ".join(affected_lines[:3]) if affected_lines else "",
                 "level": level,
                 "valid_from": _txt("ValidityPeriod/StartTime") or _txt("StartTime"),
                 "valid_until": _txt("ValidityPeriod/EndTime") or _txt("EndTime"),
@@ -7076,15 +7093,35 @@ def _fetch_ter_aura_live() -> dict[str, Any]:
         for rec in records:
             fields = rec if isinstance(rec, dict) else {}
             title = str(fields.get("titre") or fields.get("title") or "Perturbation TER").strip()
-            desc = str(fields.get("description") or fields.get("cause") or "").strip()
+            desc = str(
+                fields.get("description") or fields.get("cause_detail") or
+                fields.get("texte") or fields.get("message") or ""
+            ).strip()
+            # Enrichir la description avec la cause si distincte du titre
+            cause = str(fields.get("cause") or fields.get("type_evenement") or "").strip()
+            if cause and cause.lower() not in title.lower() and cause.lower() not in desc.lower():
+                desc = f"{cause} — {desc}" if desc else cause
             if _is_german_alert(f"{title} {desc}"):
                 continue
+            # Ligne / axe impacté
+            line_raw = str(
+                fields.get("ligne_impactee") or fields.get("ligne") or
+                fields.get("axe") or fields.get("line") or ""
+            ).strip()
+            # Période de validité
+            valid_from = str(fields.get("date_debut") or fields.get("start_date") or fields.get("start") or "")
+            valid_until = str(fields.get("date_fin") or fields.get("end_date") or fields.get("end") or "")
+            # Niveau de gravité
+            gravity = str(fields.get("gravite") or fields.get("severity") or "").lower()
+            level = "rouge" if any(w in gravity for w in ("fort", "severe", "critiqu")) else \
+                    "orange" if any(w in gravity for w in ("moyen", "modera")) else "jaune"
             disruptions.append({
                 "title": title[:200],
-                "description": desc[:500],
-                "level": "jaune",
-                "valid_from": str(fields.get("date_debut") or fields.get("start") or ""),
-                "valid_until": str(fields.get("date_fin") or fields.get("end") or ""),
+                "description": desc[:600],
+                "line": line_raw[:80] if line_raw else "",
+                "level": level,
+                "valid_from": valid_from,
+                "valid_until": valid_until,
             })
         if records:
             source_used = opendata_source
@@ -7115,12 +7152,18 @@ def _fetch_ter_aura_live() -> dict[str, Any]:
                 if _is_german_alert(f"{title} {desc}"):
                     continue
                 if any(kw in f"{title} {desc}".lower() for kw in _TER_ISERE_GEO_KEYWORDS):
+                    # Extraire ligne depuis le titre si possible (ex: "Ligne Grenoble - Valence")
+                    line_m = re.search(
+                        r'(?:ligne\s+|axe\s+|tgv\s+)?([A-Z][a-z]+(?:\s*[-–]\s*[A-Z][a-z]+)+)',
+                        title, re.IGNORECASE
+                    )
                     disruptions.append({
                         "title": title[:200],
-                        "description": desc[:400],
+                        "description": desc[:600],
+                        "line": line_m.group(1)[:80] if line_m else "",
                         "level": "jaune",
                         "valid_from": (item.findtext("pubDate") or "").strip(),
-                        "valid_until": "",
+                        "valid_until": (item.findtext("dc:date") or "").strip(),
                     })
         except Exception:
             pass

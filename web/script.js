@@ -7966,17 +7966,50 @@ function renderGroundwaterDetail(gw = {}) {
 
 /* ── Nouveaux flux transport ─────────────────────────────────────────────── */
 
+function _fmtDate(raw) {
+  if (!raw) return '';
+  try {
+    const d = new Date(raw);
+    if (isNaN(d.getTime())) return String(raw).substring(0, 30);
+    return d.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  } catch { return String(raw).substring(0, 30); }
+}
+
 function _renderDisruptionsList(listId, items, emptyMsg = 'Aucune perturbation signalée.') {
   const lvlColor = { rouge: '#c22f43', orange: '#b46a00', jaune: '#9a7700', vert: '#2f9e44', inconnu: '#5f7190' };
+  const lvlLabel = { rouge: '🔴 Critique', orange: '🟠 Important', jaune: '🟡 Info', vert: '🟢 Normal', inconnu: 'ℹ️ Info' };
   setHtml(listId, items.slice(0, 10).map((d) => {
     const level = d.level || d.effect || 'inconnu';
     const color = lvlColor[level] || lvlColor.inconnu;
-    const from = d.valid_from ? ` · dès ${new Date(d.valid_from).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}` : '';
-    const road = d.road ? ` · <strong>${escapeHtml(d.road)}</strong>` : (d.line ? ` · Ligne ${escapeHtml(d.line)}` : '');
-    const routes = Array.isArray(d.routes) && d.routes.length ? ` · lignes ${d.routes.slice(0, 3).map(escapeHtml).join(', ')}` : '';
-    return `<li style="border-left:3px solid ${color};padding-left:.5rem">
-      <strong style="color:${color}">${escapeHtml(level)}</strong>${road}${routes}${from}<br>
-      <span style="font-size:.78rem">${escapeHtml((d.title || d.description || 'Perturbation').substring(0, 160))}</span>
+    const badge = lvlLabel[level] || level;
+
+    // Ligne / axe impacté
+    const lineStr = d.road
+      ? `<strong>${escapeHtml(d.road)}</strong>`
+      : d.line ? `<strong>${escapeHtml(d.line)}</strong>` : '';
+    const routesStr = Array.isArray(d.routes) && d.routes.length
+      ? `Lignes : ${d.routes.slice(0, 4).map(escapeHtml).join(', ')}`
+      : '';
+    const lineHtml = lineStr || routesStr
+      ? `<span style="font-size:.8rem;color:#333"> · ${lineStr || routesStr}</span>` : '';
+
+    // Dates de validité
+    const fromStr = _fmtDate(d.valid_from);
+    const untilStr = _fmtDate(d.valid_until);
+    const dateHtml = fromStr || untilStr
+      ? `<br><span style="font-size:.76rem;color:#666">📅 ${fromStr && untilStr ? `Du ${escapeHtml(fromStr)} au ${escapeHtml(untilStr)}` : fromStr ? `Depuis le ${escapeHtml(fromStr)}` : `Jusqu'au ${escapeHtml(untilStr)}`}</span>`
+      : '';
+
+    // Titre + description
+    const title = (d.title || '').substring(0, 200);
+    const desc = (d.description || '').substring(0, 450);
+    const bodyHtml = title && desc && desc.toLowerCase() !== title.toLowerCase()
+      ? `<strong style="font-size:.85rem">${escapeHtml(title)}</strong><br><span style="font-size:.79rem;color:#444">${escapeHtml(desc)}</span>`
+      : `<span style="font-size:.85rem">${escapeHtml(title || desc || 'Perturbation')}</span>`;
+
+    return `<li style="border-left:3px solid ${color};padding-left:.6rem;margin-bottom:.5rem;padding-top:.1rem">
+      <span style="font-size:.78rem;font-weight:600;color:${color}">${badge}</span>${lineHtml}${dateHtml}<br>
+      ${bodyHtml}
     </li>`;
   }).join('') || `<li class="muted">${emptyMsg}</li>`);
 }
