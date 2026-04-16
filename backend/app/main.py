@@ -10,7 +10,7 @@ from typing import Callable
 import asyncio
 import json
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -2355,7 +2355,7 @@ def get_notif_settings(_: User = Depends(require_roles("admin", "ope"))):
 
 
 @app.put("/api/notifications/settings")
-def save_notif_settings(payload: dict, _: User = Depends(require_roles("admin", "ope"))):
+def save_notif_settings(payload: dict = Body(...), _: User = Depends(require_roles("admin", "ope"))):
     if not _REDIS_OK or _redis is None:
         raise HTTPException(503, "Redis indisponible — paramètres non sauvegardables")
     try:
@@ -2366,7 +2366,7 @@ def save_notif_settings(payload: dict, _: User = Depends(require_roles("admin", 
 
 
 @app.post("/api/notifications/test")
-def test_notif(payload: dict, _: User = Depends(require_roles("admin", "ope"))):
+def test_notif(payload: dict = Body(...), _: User = Depends(require_roles("admin", "ope"))):
     webhook_url = str(payload.get("webhook_url") or "").strip()
     if not webhook_url:
         raise HTTPException(400, "webhook_url requis")
