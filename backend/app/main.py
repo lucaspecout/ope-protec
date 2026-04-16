@@ -2080,7 +2080,8 @@ def revoke_share(token: str, db: Session = Depends(get_db), _: User = Depends(re
 # NOTIFICATIONS DISCORD (Webhook)
 # ─────────────────────────────────────────────────────────────────────────────
 
-_NOTIF_SETTINGS_KEY = "notif:settings"
+_NOTIF_SETTINGS_KEY = "notif:settings"   # ancien format (migration)
+_NOTIF_RULES_KEY = "notif:rules"          # nouveau format : list de règles
 _NOTIF_LAST_KEY_PREFIX = "notif:last:"
 _NOTIF_LOG_KEY = "notif:log"
 _NOTIF_MAX_LOG = 50
@@ -2238,7 +2239,7 @@ def _send_discord_webhook(webhook_url: str, payload: dict) -> tuple[bool, str]:
 
 
 def _load_notif_settings() -> dict:
-    """Charge les paramètres de notification depuis Redis."""
+    """Charge les paramètres de notification depuis Redis (ancien format, conservé pour compat)."""
     if not _REDIS_OK or _redis is None:
         return {}
     try:
@@ -2246,6 +2247,45 @@ def _load_notif_settings() -> dict:
         return json.loads(raw) if raw else {}
     except Exception:
         return {}
+
+
+def _load_notif_rules() -> list[dict]:
+    """Charge toutes les règles de notification depuis Redis.
+    Migre automatiquement depuis l'ancien format notif:settings si besoin."""
+    if not _REDIS_OK or _redis is None:
+        return []
+    try:
+        raw = _redis.get(_NOTIF_RULES_KEY)
+        if raw:
+            return json.loads(raw)
+        # Migration depuis l'ancien format
+        old = _load_notif_settings()
+        if old.get("discord_webhook"):
+            import uuid as _uuid
+            rule: dict = {
+                "id": _uuid.uuid4().hex[:8],
+                "name": "Alertes par défaut",
+                "enabled": bool(old.get("enabled", True)),
+                "discord_webhook": str(old.get("discord_webhook", "")),
+                "cooldown_minutes": int(old.get("cooldown_minutes") or 60),
+                "quiet_hours": old.get("quiet_hours") or {"enabled": False, "start": "22:00", "end": "07:00"},
+                "services": old.get("services") or {},
+            }
+            rules = [rule]
+            _redis.set(_NOTIF_RULES_KEY, json.dumps(rules, default=str))
+            return rules
+        return []
+    except Exception:
+        return []
+
+
+def _save_notif_rules(rules: list[dict]) -> None:
+    if not _REDIS_OK or _redis is None:
+        return
+    try:
+        _redis.set(_NOTIF_RULES_KEY, json.dumps(rules, default=str))
+    except Exception:
+        pass
 
 
 def _save_notif_log(entry: dict) -> None:
@@ -2259,77 +2299,82 @@ def _save_notif_log(entry: dict) -> None:
         pass
 
 
+def _check_notif_quiet(quiet: dict, now_utc: "datetime") -> bool:
+    """Retourne True si on est dans une plage silencieuse."""
+    if not quiet.get("enabled"):
+        return False
+    try:
+        start_h, start_m = map(int, quiet.get("start", "22:00").split(":"))
+        end_h, end_m = map(int, quiet.get("end", "07:00").split(":"))
+        now_min = now_utc.hour * 60 + now_utc.minute
+        start_min = start_h * 60 + start_m
+        end_min = end_h * 60 + end_m
+        return (start_min > end_min and (now_min >= start_min or now_min < end_min)) \
+            or (start_min <= end_min and start_min <= now_min < end_min)
+    except Exception:
+        return False
+
+
 def _check_and_send_notifications(service_key: str, data: dict) -> None:
-    """Vérifie si une notification doit être envoyée pour un service après mise à jour.
+    """Vérifie si une notification doit être envoyée pour chaque règle active.
     Appelé dans un thread background — ne lève jamais d'exception."""
     try:
-        settings_d = _load_notif_settings()
-        if not settings_d.get("enabled"):
-            return
-        webhook_url = str(settings_d.get("discord_webhook") or "").strip()
-        if not webhook_url:
-            return
-
-        svc_cfg = (settings_d.get("services") or {}).get(service_key) or {}
-        if not svc_cfg.get("enabled"):
-            return
-
-        threshold = str(svc_cfg.get("threshold") or "orange").lower()
+        rules = _load_notif_rules()
         current_level = _extract_service_level(service_key, data)
-
-        # Comparer niveau courant vs seuil configuré
-        if _LEVEL_ORDER.get(current_level, 0) < _LEVEL_ORDER.get(threshold, 1):
-            return
-
-        # Heures silencieuses
         now_utc = datetime.utcnow()
-        quiet = settings_d.get("quiet_hours") or {}
-        if quiet.get("enabled"):
+
+        for rule in rules:
             try:
-                start_h, start_m = map(int, quiet.get("start", "22:00").split(":"))
-                end_h, end_m = map(int, quiet.get("end", "07:00").split(":"))
-                now_min = now_utc.hour * 60 + now_utc.minute
-                start_min = start_h * 60 + start_m
-                end_min = end_h * 60 + end_m
-                in_quiet = (start_min > end_min and (now_min >= start_min or now_min < end_min)) \
-                    or (start_min <= end_min and start_min <= now_min < end_min)
-                if in_quiet:
-                    return
+                if not rule.get("enabled"):
+                    continue
+                webhook_url = str(rule.get("discord_webhook") or "").strip()
+                if not webhook_url:
+                    continue
+                rule_id = str(rule.get("id", "default"))
+
+                svc_cfg = (rule.get("services") or {}).get(service_key) or {}
+                if not svc_cfg.get("enabled"):
+                    continue
+
+                threshold = str(svc_cfg.get("threshold") or "orange").lower()
+                if _LEVEL_ORDER.get(current_level, 0) < _LEVEL_ORDER.get(threshold, 1):
+                    continue
+
+                if _check_notif_quiet(rule.get("quiet_hours") or {}, now_utc):
+                    continue
+
+                cooldown_min = int(rule.get("cooldown_minutes") or 60)
+                if _REDIS_OK and _redis is not None:
+                    last_key = f"{_NOTIF_LAST_KEY_PREFIX}{rule_id}:{service_key}"
+                    last_sent = _redis.get(last_key)
+                    if last_sent:
+                        try:
+                            last_dt = datetime.fromisoformat(last_sent.decode() if isinstance(last_sent, bytes) else last_sent)
+                            if (now_utc - last_dt).total_seconds() < cooldown_min * 60:
+                                continue
+                        except Exception:
+                            pass
+
+                embed_payload = _build_discord_embed(service_key, current_level, data)
+                ok, detail = _send_discord_webhook(webhook_url, embed_payload)
+
+                log_entry = {
+                    "rule_id": rule_id,
+                    "rule_name": rule.get("name", ""),
+                    "service": service_key,
+                    "label": _SERVICE_LABELS.get(service_key, service_key),
+                    "level": current_level,
+                    "sent_at": now_utc.isoformat() + "Z",
+                    "success": ok,
+                    "detail": detail,
+                }
+                _save_notif_log(log_entry)
+
+                if _REDIS_OK and _redis is not None:
+                    last_key = f"{_NOTIF_LAST_KEY_PREFIX}{rule_id}:{service_key}"
+                    _redis.setex(last_key, cooldown_min * 60, now_utc.isoformat())
             except Exception:
-                pass
-
-        # Cooldown : ne pas renvoyer la même alerte avant N minutes
-        cooldown_min = int(settings_d.get("cooldown_minutes") or 60)
-        if _REDIS_OK and _redis is not None:
-            last_key = _NOTIF_LAST_KEY_PREFIX + service_key
-            last_sent = _redis.get(last_key)
-            if last_sent:
-                try:
-                    last_dt = datetime.fromisoformat(last_sent)
-                    if (now_utc - last_dt).total_seconds() < cooldown_min * 60:
-                        return
-                except Exception:
-                    pass
-
-        # Envoyer
-        payload = _build_discord_embed(service_key, current_level, data)
-        ok, detail = _send_discord_webhook(webhook_url, payload)
-
-        # Enregistrer dans le log
-        log_entry = {
-            "service": service_key,
-            "label": _SERVICE_LABELS.get(service_key, service_key),
-            "level": current_level,
-            "sent_at": now_utc.isoformat() + "Z",
-            "success": ok,
-            "detail": detail,
-        }
-        _save_notif_log(log_entry)
-
-        # Mettre à jour le timestamp de dernière notification (TTL = cooldown)
-        if _REDIS_OK and _redis is not None:
-            _redis.setex(_NOTIF_LAST_KEY_PREFIX + service_key, cooldown_min * 60, now_utc.isoformat())
-
+                continue
     except Exception:
         pass
 
@@ -2347,26 +2392,67 @@ def _update_service_slot_with_notif(key: str, result: dict) -> None:
 _update_service_slot = _update_service_slot_with_notif  # type: ignore[assignment]
 
 
-# ── Endpoints notification ────────────────────────────────────────────────────
+# ── Endpoints notification (multi-règles) ─────────────────────────────────────
 
-@app.get("/api/notifications/settings")
-def get_notif_settings(_: User = Depends(require_roles("admin", "ope"))):
-    return _load_notif_settings()
+def _sanitize_rule(body: dict, existing: dict | None = None) -> dict:
+    import uuid as _uuid
+    base = existing or {}
+    return {
+        "id": base.get("id") or _uuid.uuid4().hex[:8],
+        "name": str(body.get("name") or base.get("name") or "Notification")[:80],
+        "enabled": bool(body.get("enabled") if "enabled" in body else base.get("enabled", True)),
+        "discord_webhook": str(body.get("discord_webhook") or base.get("discord_webhook") or "").strip()[:500],
+        "cooldown_minutes": max(5, min(1440, int(body.get("cooldown_minutes") or base.get("cooldown_minutes") or 60))),
+        "quiet_hours": body.get("quiet_hours") or base.get("quiet_hours") or {"enabled": False, "start": "22:00", "end": "07:00"},
+        "services": body.get("services") or base.get("services") or {},
+    }
 
 
-@app.put("/api/notifications/settings")
-async def save_notif_settings(request: Request, _: User = Depends(require_roles("admin", "ope"))):
+@app.get("/api/notifications")
+def list_notif_rules(_: User = Depends(require_roles("admin", "ope"))):
+    return {"rules": _load_notif_rules()}
+
+
+@app.post("/api/notifications")
+async def create_notif_rule(request: Request, _: User = Depends(require_roles("admin", "ope"))):
     if not _REDIS_OK or _redis is None:
-        raise HTTPException(503, "Redis indisponible — paramètres non sauvegardables")
+        raise HTTPException(503, "Redis indisponible")
     try:
-        payload = await request.json()
+        body = await request.json()
     except Exception:
         raise HTTPException(400, "Corps JSON invalide")
+    rules = _load_notif_rules()
+    rule = _sanitize_rule(body)
+    rules.append(rule)
+    _save_notif_rules(rules)
+    return rule
+
+
+@app.put("/api/notifications/{rule_id}")
+async def update_notif_rule(rule_id: str, request: Request, _: User = Depends(require_roles("admin", "ope"))):
+    if not _REDIS_OK or _redis is None:
+        raise HTTPException(503, "Redis indisponible")
     try:
-        _redis.set(_NOTIF_SETTINGS_KEY, json.dumps(payload, default=str))
-    except Exception as exc:
-        raise HTTPException(500, str(exc))
-    return {"status": "saved"}
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "Corps JSON invalide")
+    rules = _load_notif_rules()
+    for i, r in enumerate(rules):
+        if r.get("id") == rule_id:
+            rules[i] = _sanitize_rule(body, r)
+            _save_notif_rules(rules)
+            return rules[i]
+    raise HTTPException(404, "Règle introuvable")
+
+
+@app.delete("/api/notifications/{rule_id}")
+def delete_notif_rule(rule_id: str, _: User = Depends(require_roles("admin", "ope"))):
+    rules = _load_notif_rules()
+    new_rules = [r for r in rules if r.get("id") != rule_id]
+    if len(new_rules) == len(rules):
+        raise HTTPException(404, "Règle introuvable")
+    _save_notif_rules(new_rules)
+    return {"deleted": rule_id}
 
 
 @app.post("/api/notifications/test")

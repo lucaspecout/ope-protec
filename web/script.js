@@ -10277,7 +10277,7 @@ document.getElementById('event-form')?.addEventListener('submit', async (event) 
 })();
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   NOTIFICATIONS WHATSAPP
+   NOTIFICATIONS DISCORD — MULTI-RÈGLES
    ═══════════════════════════════════════════════════════════════════════════ */
 
 const _NOTIF_SERVICES = [
@@ -10305,6 +10305,9 @@ const _NOTIF_LEVELS = [
   { value: 'rouge',  label: '🔴 Rouge uniquement' },
 ];
 
+// État local
+let _notifRules = [];
+
 function _notifToast(msg, type = 'info') {
   const el = document.getElementById('notif-toast');
   if (!el) return;
@@ -10317,117 +10320,250 @@ function _notifToast(msg, type = 'info') {
   setTimeout(() => { if (el) el.innerHTML = ''; }, 5000);
 }
 
-function _notifRenderServices(cfg) {
-  const list = document.getElementById('notif-services-list');
-  if (!list) return;
-  let html = '';
-  let lastCat = null;
-  _NOTIF_SERVICES.forEach(svc => {
-    if (svc.cat !== lastCat) {
-      html += `<div style="padding:.35rem 1rem;background:#f0f2f5;font-size:.72rem;font-weight:700;
-        color:#888;letter-spacing:.08em;text-transform:uppercase;border-bottom:1px solid #e4e7eb">
-        ${escapeHtml(svc.cat)}</div>`;
-      lastCat = svc.cat;
-    }
-    const svCfg = ((cfg || {}).services || {})[svc.key] || {};
-    const checkedEnabled = svCfg.enabled ? 'checked' : '';
-    const threshold = svCfg.threshold || 'orange';
-    const opts = _NOTIF_LEVELS.map(l =>
-      `<option value="${l.value}"${threshold === l.value ? ' selected' : ''}>${escapeHtml(l.label)}</option>`
-    ).join('');
-    html += `<div style="display:flex;align-items:center;gap:.75rem;padding:.6rem 1rem;
-      border-bottom:1px solid #f0f2f5">
-      <span style="font-size:1.1rem;width:26px;text-align:center">${svc.icon}</span>
-      <span style="flex:1;font-size:.87rem;font-weight:500">${escapeHtml(svc.label)}</span>
-      <select data-notif-key="${escapeHtml(svc.key)}" class="notif-threshold-sel"
-        style="width:145px;padding:.25rem .4rem;border:1.5px solid #d1d9e0;border-radius:6px;font-size:.78rem">
-        ${opts}
-      </select>
-      <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:.83rem">
-        <input type="checkbox" data-notif-key="${escapeHtml(svc.key)}" class="notif-svc-chk" ${checkedEnabled} />
-        Actif
-      </label>
+// ── Rendu de la liste des règles ──────────────────────────────────────────
+
+function _notifRenderRules() {
+  const container = document.getElementById('notif-rules-list');
+  if (!container) return;
+  if (!_notifRules.length) {
+    container.innerHTML = `<div class="notif-empty-state">
+      <div style="font-size:2.2rem;margin-bottom:.5rem">🔔</div>
+      <p style="font-weight:600;margin-bottom:.25rem">Aucune notification configurée</p>
+      <p style="font-size:.85rem;color:#888">Cliquez sur <strong>+ Nouvelle notification</strong> pour commencer.</p>
     </div>`;
-  });
-  list.innerHTML = html || '<div class="muted" style="padding:1rem">Aucun service</div>';
+    return;
+  }
+  container.innerHTML = _notifRules.map(r => _notifRuleCardHtml(r)).join('');
 }
 
-function _notifCollect() {
+function _notifRuleCardHtml(rule) {
+  const webhookDisplay = rule.discord_webhook
+    ? rule.discord_webhook.replace('https://discord.com/api/webhooks/', 'webhooks/…/').substring(0, 38) + '…'
+    : 'Aucun webhook configuré';
+  const svcs = rule.services || {};
+  const activeSvcCount = Object.values(svcs).filter(s => s && s.enabled).length;
+  const enabledBadge = rule.enabled
+    ? '<span class="notif-badge notif-badge--on">● Actif</span>'
+    : '<span class="notif-badge notif-badge--off">○ Inactif</span>';
+
+  // Groupement des services par catégorie pour le tableau
+  const cats = [...new Set(_NOTIF_SERVICES.map(s => s.cat))];
+  const svcRows = _NOTIF_SERVICES.map(svc => {
+    const cfg = svcs[svc.key] || {};
+    const checked = cfg.enabled ? 'checked' : '';
+    const optionsHtml = _NOTIF_LEVELS.map(l =>
+      `<option value="${l.value}" ${cfg.threshold === l.value ? 'selected' : ''}>${l.label}</option>`
+    ).join('');
+    return `<tr>
+      <td style="padding:.35rem .5rem;font-size:.83rem">${svc.icon} ${escapeHtml(svc.label)}</td>
+      <td style="padding:.35rem .5rem">
+        <select data-svc-key="${escapeHtml(svc.key)}" class="nrs-threshold"
+          style="font-size:.78rem;padding:.2rem .35rem;border:1.5px solid #d1d9e0;border-radius:6px;background:#fff">${optionsHtml}</select>
+      </td>
+      <td style="padding:.35rem .5rem;text-align:center">
+        <input type="checkbox" data-svc-key="${escapeHtml(svc.key)}" class="nrs-svc-chk" ${checked} />
+      </td>
+    </tr>`;
+  }).join('');
+
+  const qh = rule.quiet_hours || {};
+  const qChecked = qh.enabled ? 'checked' : '';
+  const cooldown = rule.cooldown_minutes || 60;
+
+  return `<div class="notif-rule-card" data-rule-id="${escapeHtml(rule.id)}">
+    <div class="notif-rule-head" onclick="document.querySelector('.notif-rule-card[data-rule-id=\\'${escapeHtml(rule.id)}\\']').classList.toggle('expanded')">
+      <span class="notif-rule-icon">🔔</span>
+      <div class="notif-rule-meta">
+        <div class="notif-rule-name">${escapeHtml(rule.name || 'Notification')}</div>
+        <div class="notif-rule-url">${escapeHtml(webhookDisplay)}</div>
+      </div>
+      <span style="font-size:.78rem;color:#888;white-space:nowrap">${activeSvcCount} service(s)</span>
+      ${enabledBadge}
+      <button class="ghost notif-action-btn" onclick="event.stopPropagation();_notifToggleEnabled('${escapeHtml(rule.id)}')"
+        style="font-size:.78rem;padding:.25rem .6rem">${rule.enabled ? 'Désactiver' : 'Activer'}</button>
+      <button class="notif-delete-btn" onclick="event.stopPropagation();_notifDelete('${escapeHtml(rule.id)}')"
+        title="Supprimer">🗑️</button>
+      <span class="notif-chevron">▼</span>
+    </div>
+    <div class="notif-rule-body">
+      <div class="form notif-field-row">
+        <label style="flex:1">Nom de la notification
+          <input type="text" class="nrb-name" value="${escapeHtml(rule.name || '')}" placeholder="Ex: Alertes critiques" />
+        </label>
+      </div>
+      <div class="form notif-field-row">
+        <label style="flex:1">URL du Webhook Discord
+          <input type="url" class="nrb-webhook" value="${escapeHtml(rule.discord_webhook || '')}"
+            placeholder="https://discord.com/api/webhooks/..." style="font-size:.82rem" />
+        </label>
+        <button type="button" class="nrb-test-btn"
+          style="background:#5865f2;color:#fff;border:none;padding:.5rem .9rem;border-radius:8px;font-weight:600;cursor:pointer;font-size:.85rem;white-space:nowrap;align-self:flex-end"
+          onclick="_notifTestInCard(this)">📤 Tester</button>
+      </div>
+      <div class="notif-field-row" style="display:flex;gap:1rem;flex-wrap:wrap;align-items:flex-end;margin-bottom:.75rem">
+        <label style="min-width:200px">Cooldown entre 2 alertes (min)
+          <input type="number" class="nrb-cooldown" value="${cooldown}" min="5" max="1440"
+            style="width:100px;display:block;margin-top:.25rem" />
+        </label>
+        <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;background:#f7f9fc;border:1px solid #e4e7eb;border-radius:8px;padding:.5rem .75rem">
+          <span style="font-size:.83rem;font-weight:600">🌙 Heures silencieuses :</span>
+          <label style="display:flex;align-items:center;gap:.35rem;margin:0;cursor:pointer;font-size:.82rem">
+            <input type="checkbox" class="nrb-quiet-enabled" ${qChecked} /> Activer
+          </label>
+          <span style="font-size:.82rem;color:#666">De</span>
+          <input type="time" class="nrb-quiet-start" value="${escapeHtml(qh.start || '22:00')}"
+            style="width:95px;padding:.28rem .45rem;border:1.5px solid #d1d9e0;border-radius:6px;font-size:.82rem" />
+          <span style="font-size:.82rem;color:#666">à</span>
+          <input type="time" class="nrb-quiet-end" value="${escapeHtml(qh.end || '07:00')}"
+            style="width:95px;padding:.28rem .45rem;border:1.5px solid #d1d9e0;border-radius:6px;font-size:.82rem" />
+        </div>
+      </div>
+      <div style="margin-bottom:.75rem">
+        <div style="font-size:.82rem;font-weight:600;color:#1a3568;margin-bottom:.4rem">Services à surveiller :</div>
+        <div style="border:1px solid #e4e7eb;border-radius:8px;overflow:hidden;max-height:320px;overflow-y:auto">
+          <table style="width:100%;border-collapse:collapse">
+            <thead style="background:#f4f6fb;position:sticky;top:0">
+              <tr>
+                <th style="text-align:left;padding:.35rem .5rem;font-size:.78rem;font-weight:600;color:#5f7190">Service</th>
+                <th style="text-align:left;padding:.35rem .5rem;font-size:.78rem;font-weight:600;color:#5f7190">Seuil minimum</th>
+                <th style="text-align:center;padding:.35rem .5rem;font-size:.78rem;font-weight:600;color:#5f7190">Actif</th>
+              </tr>
+            </thead>
+            <tbody>${svcRows}</tbody>
+          </table>
+        </div>
+      </div>
+      <div style="display:flex;gap:.5rem">
+        <button onclick="_notifSaveRule('${escapeHtml(rule.id)}', this.closest('.notif-rule-body'))">💾 Enregistrer</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function _notifCollectFromBody(body) {
+  const name = (body.querySelector('.nrb-name')?.value || '').trim() || 'Notification';
+  const webhook = (body.querySelector('.nrb-webhook')?.value || '').trim();
+  const cooldown = parseInt(body.querySelector('.nrb-cooldown')?.value) || 60;
+  const quietEnabled = !!(body.querySelector('.nrb-quiet-enabled')?.checked);
+  const quietStart = body.querySelector('.nrb-quiet-start')?.value || '22:00';
+  const quietEnd = body.querySelector('.nrb-quiet-end')?.value || '07:00';
   const services = {};
-  document.querySelectorAll('.notif-svc-chk').forEach(cb => {
-    const key = cb.dataset.notifKey;
-    const sel = document.querySelector(`.notif-threshold-sel[data-notif-key="${key}"]`);
+  body.querySelectorAll('.nrs-svc-chk').forEach(cb => {
+    const key = cb.dataset.svcKey;
+    const sel = body.querySelector(`.nrs-threshold[data-svc-key="${key}"]`);
     services[key] = { enabled: cb.checked, threshold: sel ? sel.value : 'orange' };
   });
-  return {
-    enabled: !!(document.getElementById('notif-master-enabled') || {}).checked,
-    discord_webhook: ((document.getElementById('notif-discord-webhook') || {}).value || '').trim(),
-    cooldown_minutes: parseInt((document.getElementById('notif-cooldown') || {}).value) || 60,
-    quiet_hours: {
-      enabled: !!(document.getElementById('notif-quiet-enabled') || {}).checked,
-      start: ((document.getElementById('notif-quiet-start') || {}).value) || '22:00',
-      end:   ((document.getElementById('notif-quiet-end')   || {}).value) || '07:00',
-    },
-    services,
-  };
-}
-
-function _notifApply(s) {
-  const set = (id, val) => { const el = document.getElementById(id); if (el) el[typeof val === 'boolean' ? 'checked' : 'value'] = val; };
-  set('notif-master-enabled', !!s.enabled);
-  set('notif-discord-webhook', s.discord_webhook || '');
-  set('notif-cooldown',   s.cooldown_minutes || 60);
-  const qh = s.quiet_hours || {};
-  set('notif-quiet-enabled', !!qh.enabled);
-  set('notif-quiet-start', qh.start || '22:00');
-  set('notif-quiet-end',   qh.end   || '07:00');
-  _notifRenderServices(s);
+  return { name, discord_webhook: webhook, cooldown_minutes: cooldown,
+    quiet_hours: { enabled: quietEnabled, start: quietStart, end: quietEnd }, services };
 }
 
 async function _notifLoad() {
   try {
-    const data = await api('/api/notifications/settings');
-    _notifApply(data || {});
+    const data = await api('/api/notifications');
+    _notifRules = (data || {}).rules || [];
+    _notifRenderRules();
   } catch(e) {
-    _notifRenderServices({});
-    _notifToast('Impossible de charger la configuration : ' + (e.message || e), 'error');
+    _notifToast('Impossible de charger les notifications : ' + (e.message || e), 'error');
+    _notifRenderRules();
   }
 }
 
-async function _notifSave() {
-  const btn = document.getElementById('notif-save-btn');
+async function _notifCreateNew() {
+  const btn = document.getElementById('notif-new-btn');
   if (btn) btn.disabled = true;
   try {
-    await api('/api/notifications/settings', {
-      method: 'PUT',
+    const rule = await api('/api/notifications', {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(_notifCollect()),
+      body: JSON.stringify({ name: 'Nouvelle notification', enabled: true,
+        discord_webhook: '', cooldown_minutes: 60,
+        quiet_hours: { enabled: false, start: '22:00', end: '07:00' }, services: {} }),
     });
-    _notifToast('Configuration enregistrée', 'success');
+    _notifRules.push(rule);
+    _notifRenderRules();
+    // Auto-expand la nouvelle carte
+    setTimeout(() => {
+      const card = document.querySelector(`.notif-rule-card[data-rule-id="${rule.id}"]`);
+      if (card) { card.classList.add('expanded'); card.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
+    }, 50);
   } catch(e) {
-    _notifToast('Erreur sauvegarde : ' + (e.message || e), 'error');
+    _notifToast('Erreur création : ' + (e.message || e), 'error');
   } finally {
     if (btn) btn.disabled = false;
   }
 }
 
-async function _notifTest() {
-  const webhook_url = ((document.getElementById('notif-discord-webhook') || {}).value || '').trim();
-  if (!webhook_url) { _notifToast('Renseignez l\'URL du webhook Discord avant de tester', 'error'); return; }
-  const btn = document.getElementById('notif-test-btn');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Envoi…'; }
+async function _notifSaveRule(ruleId, body) {
+  const payload = _notifCollectFromBody(body);
+  const rule = _notifRules.find(r => r.id === ruleId);
+  payload.enabled = rule ? rule.enabled : true;
+  try {
+    const updated = await api(`/api/notifications/${ruleId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const idx = _notifRules.findIndex(r => r.id === ruleId);
+    if (idx >= 0) _notifRules[idx] = updated;
+    _notifRenderRules();
+    // Ré-expand la carte sauvegardée
+    setTimeout(() => {
+      const card = document.querySelector(`.notif-rule-card[data-rule-id="${updated.id}"]`);
+      if (card) card.classList.add('expanded');
+    }, 50);
+    _notifToast('✅ Notification enregistrée', 'success');
+  } catch(e) {
+    _notifToast('Erreur sauvegarde : ' + (e.message || e), 'error');
+  }
+}
+
+async function _notifToggleEnabled(ruleId) {
+  const rule = _notifRules.find(r => r.id === ruleId);
+  if (!rule) return;
+  try {
+    const updated = await api(`/api/notifications/${ruleId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...rule, enabled: !rule.enabled }),
+    });
+    const idx = _notifRules.findIndex(r => r.id === ruleId);
+    if (idx >= 0) _notifRules[idx] = updated;
+    _notifRenderRules();
+  } catch(e) {
+    _notifToast('Erreur : ' + (e.message || e), 'error');
+  }
+}
+
+async function _notifDelete(ruleId) {
+  if (!confirm('Supprimer cette notification définitivement ?')) return;
+  try {
+    await api(`/api/notifications/${ruleId}`, { method: 'DELETE' });
+    _notifRules = _notifRules.filter(r => r.id !== ruleId);
+    _notifRenderRules();
+    _notifToast('Notification supprimée', 'success');
+  } catch(e) {
+    _notifToast('Erreur suppression : ' + (e.message || e), 'error');
+  }
+}
+
+async function _notifTestInCard(btn) {
+  const body = btn.closest('.notif-rule-body');
+  const webhook = (body?.querySelector('.nrb-webhook')?.value || '').trim();
+  if (!webhook) { _notifToast('Renseignez l\'URL du webhook Discord', 'error'); return; }
+  const origText = btn.textContent;
+  btn.disabled = true; btn.textContent = '⏳ Envoi…';
   try {
     const r = await api('/api/notifications/test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ webhook_url }),
+      body: JSON.stringify({ webhook_url: webhook }),
     });
     if (r.success) _notifToast('✅ Message test envoyé — vérifiez votre canal Discord', 'success');
     else _notifToast('❌ Échec : ' + (r.detail || 'Erreur inconnue'), 'error');
   } catch(e) {
     _notifToast('Erreur : ' + (e.message || e), 'error');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '📤 Tester le webhook'; }
+    btn.disabled = false; btn.textContent = origText;
   }
 }
 
@@ -10437,7 +10573,7 @@ async function _notifLoadLog() {
   try {
     const data = await api('/api/notifications/log');
     const entries = (data || {}).entries || [];
-    if (!entries.length) { el.innerHTML = '<div class="muted">Aucune notification envoyée pour l\'instant.</div>'; return; }
+    if (!entries.length) { el.innerHTML = '<div class="muted" style="padding:.75rem">Aucune notification envoyée pour l\'instant.</div>'; return; }
     const LVL_EM = { rouge: '🔴', orange: '🟠', jaune: '🟡', vert: '🟢' };
     el.innerHTML = entries.map(e => {
       const em = LVL_EM[e.level] || 'ℹ️';
@@ -10447,6 +10583,7 @@ async function _notifLoadLog() {
       return `<div style="display:flex;gap:.6rem;align-items:flex-start;padding:.5rem .6rem;border-bottom:1px solid #f0f2f5">
         <span>${em}</span>
         <div style="flex:1">
+          ${e.rule_name ? `<span style="font-size:.72rem;background:#edf3ff;color:#2e5c96;border-radius:4px;padding:.1rem .35rem;margin-right:.35rem">${escapeHtml(e.rule_name)}</span>` : ''}
           <span style="font-weight:500">${escapeHtml(e.label || e.service)}</span>
           <span style="color:#999;font-size:.76rem;margin-left:.5rem">${escapeHtml(dateStr)} ${ok}</span>
           ${e.detail ? `<div style="color:#777;font-size:.77rem">${escapeHtml(e.detail)}</div>` : ''}
@@ -10460,7 +10597,6 @@ async function _notifLoadLog() {
 
 // Brancher les boutons une fois le DOM prêt
 document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('notif-save-btn')?.addEventListener('click', _notifSave);
-  document.getElementById('notif-test-btn')?.addEventListener('click', _notifTest);
+  document.getElementById('notif-new-btn')?.addEventListener('click', _notifCreateNew);
   document.getElementById('notif-log-refresh-btn')?.addEventListener('click', _notifLoadLog);
 });

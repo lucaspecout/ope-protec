@@ -894,82 +894,37 @@
             <tbody id="users-table"></tbody>
           </table>
         </section>
-        <!-- ── Notifications WhatsApp ── -->
+        <!-- ── Notifications Discord ── -->
         <section id="notifications-panel" class="panel view hidden" hidden>
-          <div class="flux-header">
+          <div class="flux-header" style="margin-bottom:1rem">
             <div>
               <h3>🔔 Notifications Discord</h3>
-              <p class="muted">Recevez des alertes automatiques sur Discord quand un service dépasse un seuil configuré.</p>
+              <p class="muted">Créez plusieurs règles d'alerte, chacune avec son propre webhook Discord et ses services.</p>
             </div>
-            <button id="notif-save-btn" type="button">💾 Enregistrer</button>
+            <button id="notif-new-btn" type="button">+ Nouvelle notification</button>
           </div>
 
-          <!-- Aide Discord Webhook -->
-          <div id="notif-help-box" style="background:#eef0fb;border:1px solid #5865f2;border-radius:10px;padding:1rem 1.25rem;margin-bottom:1rem;font-size:.85rem;line-height:1.6">
-            <strong>🎮 Configuration Discord Webhook (gratuit)</strong>
-            <ol style="padding-left:1.2em;margin-top:.4rem">
+          <!-- Aide webhook (collapsible) -->
+          <details class="notif-help-box">
+            <summary>🎮 Comment obtenir une URL de webhook Discord ?</summary>
+            <ol>
               <li>Dans Discord, ouvrez le canal cible → <strong>Paramètres du canal</strong> → <strong>Intégrations</strong> → <strong>Webhooks</strong></li>
-              <li>Cliquez <strong>Nouveau webhook</strong>, donnez-lui un nom (ex : CRISIS38), puis <strong>Copier l'URL du webhook</strong></li>
-              <li>Collez l'URL ci-dessous et cliquez <strong>Test</strong> pour vérifier.</li>
+              <li>Cliquez <strong>Nouveau webhook</strong>, donnez-lui un nom (ex : CRISIS38)</li>
+              <li>Cliquez <strong>Copier l'URL du webhook</strong> et collez-la dans le champ de la notification</li>
             </ol>
-          </div>
+          </details>
 
-          <!-- Config Discord -->
-          <div class="form" style="display:grid;grid-template-columns:1fr auto;gap:1rem;margin-bottom:1rem;align-items:end">
-            <label>URL du Webhook Discord
-              <input type="url" id="notif-discord-webhook" placeholder="https://discord.com/api/webhooks/..." style="font-size:.83rem" />
-            </label>
-            <button type="button" id="notif-test-btn" style="background:#5865f2;color:#fff;border:none;padding:.5rem 1rem;border-radius:8px;font-weight:600;cursor:pointer;font-size:.88rem;white-space:nowrap">
-              📤 Tester le webhook
-            </button>
-          </div>
+          <div id="notif-toast" class="notif-toast-bar"></div>
 
-          <!-- Cooldown -->
-          <div class="form" style="margin-bottom:1rem">
-            <label style="max-width:320px">Délai minimum entre 2 alertes du même service (minutes)
-              <input type="number" id="notif-cooldown" min="5" max="1440" value="60" />
-            </label>
-          </div>
-
-          <!-- Heures silencieuses -->
-          <div style="background:#f7f9fc;border:1px solid #e4e7eb;border-radius:10px;padding:.9rem 1.1rem;margin-bottom:1rem;display:flex;align-items:center;flex-wrap:wrap;gap:.75rem">
-            <strong style="font-size:.88rem">🌙 Heures silencieuses (UTC) :</strong>
-            <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin:0">
-              <input type="checkbox" id="notif-quiet-enabled" />
-              <span style="font-size:.85rem">Activer</span>
-            </label>
-            <span style="font-size:.85rem;color:#666">De</span>
-            <input type="time" id="notif-quiet-start" value="22:00" style="width:100px;padding:.3rem .5rem;border:1.5px solid #d1d9e0;border-radius:6px;font-size:.85rem" />
-            <span style="font-size:.85rem;color:#666">à</span>
-            <input type="time" id="notif-quiet-end" value="07:00" style="width:100px;padding:.3rem .5rem;border:1.5px solid #d1d9e0;border-radius:6px;font-size:.85rem" />
-            <span style="font-size:.78rem;color:#999">(aucune alerte envoyée pendant cette plage)</span>
-          </div>
-
-          <!-- Toggle global -->
-          <div style="display:flex;align-items:center;justify-content:space-between;background:#f0f2f5;border-radius:8px;padding:.7rem 1rem;margin-bottom:.5rem">
-            <div>
-              <strong>Notifications actives</strong>
-              <p class="muted" style="font-size:.8rem;margin:0">Active/désactive toutes les alertes Discord</p>
-            </div>
-            <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
-              <input type="checkbox" id="notif-master-enabled" />
-              <span style="font-size:.85rem;font-weight:500">Activer</span>
-            </label>
-          </div>
-
-          <div id="notif-toast" style="min-height:32px;margin:.5rem 0"></div>
-
-          <!-- Liste des services -->
-          <div id="notif-services-list" style="border:1px solid #e4e7eb;border-radius:10px;overflow:hidden;margin-bottom:1rem">
-            <div class="muted" style="padding:1rem;text-align:center">Chargement…</div>
-          </div>
+          <!-- Liste des règles (générée dynamiquement) -->
+          <div id="notif-rules-list"></div>
 
           <!-- Journal -->
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
+          <div class="notif-log-head">
             <strong>📋 Journal des notifications envoyées</strong>
             <button type="button" id="notif-log-refresh-btn" style="font-size:.78rem;padding:.25rem .6rem">Actualiser</button>
           </div>
-          <div id="notif-log-list" style="border:1px solid #e4e7eb;border-radius:10px;padding:.75rem;max-height:300px;overflow-y:auto;font-size:.83rem">
+          <div id="notif-log-list" class="notif-log-list">
             <div class="muted">Chargement…</div>
           </div>
         </section>

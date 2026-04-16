@@ -2969,3 +2969,115 @@ details[open] .news-stats-toggle::before { content: '▾ '; }
   .news-filter-bar { padding: .5rem .8rem; }
   .news-panel-header { padding: .85rem .9rem .5rem; }
 }
+
+/* ── Notifications Discord — multi-règles ─────────────────────────────────── */
+
+.notif-help-box {
+  background: #eef0fb;
+  border: 1px solid #5865f2;
+  border-radius: 10px;
+  padding: .7rem 1.1rem;
+  margin-bottom: 1rem;
+  font-size: .85rem;
+  line-height: 1.6;
+}
+.notif-help-box summary {
+  font-weight: 600;
+  cursor: pointer;
+  color: #3c4fc4;
+}
+.notif-help-box ol {
+  margin: .4rem 0 0;
+  padding-left: 1.2em;
+}
+
+.notif-toast-bar { min-height: 28px; margin: .25rem 0 .75rem; }
+
+.notif-empty-state {
+  text-align: center;
+  padding: 2.5rem 1rem;
+  border: 2px dashed #dde2ea;
+  border-radius: 12px;
+  color: #5f7190;
+  margin-bottom: 1rem;
+}
+
+/* Card */
+.notif-rule-card {
+  border: 1px solid #e4e7eb;
+  border-radius: 12px;
+  margin-bottom: .75rem;
+  overflow: hidden;
+  transition: box-shadow .18s;
+}
+.notif-rule-card:hover { box-shadow: 0 2px 12px rgba(26,53,104,.08); }
+
+/* Card header */
+.notif-rule-head {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: .8rem 1rem;
+  background: #f8fafc;
+  cursor: pointer;
+  user-select: none;
+  flex-wrap: wrap;
+}
+.notif-rule-head:hover { background: #f0f4fb; }
+.notif-rule-icon { font-size: 1.15rem; flex-shrink: 0; }
+.notif-rule-meta { flex: 1; min-width: 0; }
+.notif-rule-name { font-weight: 600; font-size: .93rem; color: var(--primary); }
+.notif-rule-url { font-size: .76rem; color: #888; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Badges */
+.notif-badge { font-size: .78rem; font-weight: 600; white-space: nowrap; }
+.notif-badge--on { color: #1b8a4f; }
+.notif-badge--off { color: #999; }
+
+/* Action buttons */
+.notif-action-btn { font-size: .78rem; padding: .25rem .6rem; }
+.notif-delete-btn {
+  background: transparent;
+  border: 1px solid #f5c6cb;
+  color: #d53f56;
+  border-radius: 6px;
+  padding: .25rem .5rem;
+  cursor: pointer;
+  font-size: .85rem;
+  line-height: 1;
+}
+.notif-delete-btn:hover { background: #fff0f2; }
+
+/* Chevron */
+.notif-chevron {
+  font-size: .72rem;
+  color: #aab;
+  transition: transform .18s;
+  flex-shrink: 0;
+}
+.notif-rule-card.expanded .notif-chevron { transform: rotate(180deg); }
+
+/* Card body */
+.notif-rule-body {
+  display: none;
+  padding: 1rem 1.1rem;
+  border-top: 1px solid #e4e7eb;
+  background: #fff;
+}
+.notif-rule-card.expanded .notif-rule-body { display: block; }
+.notif-field-row { display: flex; align-items: flex-end; gap: .75rem; margin-bottom: .75rem; }
+
+/* Log */
+.notif-log-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 1.25rem 0 .5rem;
+}
+.notif-log-list {
+  border: 1px solid #e4e7eb;
+  border-radius: 10px;
+  max-height: 300px;
+  overflow-y: auto;
+  font-size: .83rem;
+}
