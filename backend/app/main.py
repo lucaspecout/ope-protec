@@ -1198,6 +1198,26 @@ def isere_external_risks(
     return get_external_risks_payload(refresh=refresh, db=db)
 
 
+@app.post("/external/isere/risks/{service_key}/refresh")
+def isere_refresh_one_service(
+    service_key: str,
+    _: User = Depends(require_roles(*READ_ROLES)),
+):
+    """Force le rafraîchissement immédiat d'un seul service externe.
+    La requête retourne immédiatement le snapshot actuel ;
+    la mise à jour réelle arrive via SSE ou au prochain GET /external/isere/risks."""
+    if service_key not in SERVICE_REFRESH_INTERVALS:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=f"Service inconnu : {service_key}")
+    Thread(target=_refresh_one_service, args=(service_key,), daemon=True).start()
+    snapshot = _get_external_risks_snapshot()
+    return {
+        "service_key": service_key,
+        "status": "refresh_triggered",
+        "current": snapshot.get(service_key, {}),
+    }
+
+
 @app.get("/operations/bootstrap")
 def operations_bootstrap(
     refresh: bool = False,

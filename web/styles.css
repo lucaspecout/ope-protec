@@ -569,6 +569,11 @@ label { display: block; margin-bottom: .8rem; }
 .flux-age.stale { color: var(--danger); }
 .flux-age.unknown { color: var(--muted); font-weight: 400; }
 .flux-interval { font-size: .72rem; color: var(--muted); }
+.flux-force-btn { margin-top: .15rem; padding: .18rem .45rem; font-size: .78rem; border: 1px solid var(--line); border-radius: 6px; background: #f3f5fa; color: #4a5a80; cursor: pointer; transition: background .15s, color .15s, transform .2s; line-height: 1; }
+.flux-force-btn:hover { background: #e6eaf5; color: #1a2a50; }
+.flux-force-btn--loading { color: var(--muted); pointer-events: none; animation: flux-spin .8s linear infinite; }
+.flux-row--refreshing { opacity: .7; }
+@keyframes flux-spin { to { transform: rotate(360deg); } }
 .flux-raw-details { margin-top: .8rem; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 .flux-raw-details > summary { cursor: pointer; padding: .6rem .95rem; font-weight: 600; background: #f6f8fc; list-style: none; font-size: .88rem; color: #4a5a80; }
 .flux-raw-details > summary::-webkit-details-marker { display: none; }

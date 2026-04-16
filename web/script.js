@@ -8368,6 +8368,7 @@ function renderApiInterconnections(data = {}) {
       <div class="flux-row-meta">
         <span class="flux-age ${ageCss}" data-updated-at="${updatedAt || ''}" data-interval="${svc.interval}">${escapeHtml(ageText)}</span>
         <span class="flux-interval">${escapeHtml(nextText)}</span>
+        <button class="flux-force-btn" data-action="force-refresh-service" data-service-key="${escapeHtml(svc.key)}" title="Forcer l'actualisation maintenant">⟳</button>
       </div>
     </div>`;
   }).join('');
@@ -10635,3 +10636,33 @@ document.addEventListener('click', (e) => {
 document.addEventListener('click', (e) => {
   if (e.target.id === 'notif-log-refresh-btn') _notifLoadLog();
 });
+
+// Force-refresh d'un service individuel (panel API Interconnexions)
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-action="force-refresh-service"]');
+  if (!btn) return;
+  e.stopPropagation();
+  const key = btn.dataset.serviceKey;
+  if (!key) return;
+  _forceRefreshService(key, btn);
+});
+
+async function _forceRefreshService(serviceKey, btn) {
+  if (btn.classList.contains('flux-force-btn--loading')) return;
+  btn.classList.add('flux-force-btn--loading');
+  btn.disabled = true;
+  const row = btn.closest('.flux-row');
+  if (row) row.classList.add('flux-row--refreshing');
+  try {
+    await api(`/external/isere/risks/${encodeURIComponent(serviceKey)}/refresh`, { method: 'POST' });
+    // Attendre 2s que le thread backend ait fini, puis recharger le panel
+    await new Promise((r) => setTimeout(r, 2000));
+    await loadApiInterconnections(true);
+  } catch (_) {
+    // silencieux — l'erreur sera visible dans le statut du service
+  } finally {
+    btn.classList.remove('flux-force-btn--loading');
+    btn.disabled = false;
+    if (row) row.classList.remove('flux-row--refreshing');
+  }
+}
