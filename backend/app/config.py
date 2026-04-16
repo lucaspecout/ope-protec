@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     db_pool_timeout_seconds: int = 30
     db_pool_recycle_seconds: int = 1800
     external_fetch_workers: int = 18
+    # RTE data.rte-france.com — base64(client_id:client_secret)
+    rte_ecowatt_b64: str = ""
+    rte_consumption_b64: str = ""
 
     class Config:
         env_file = ".env"

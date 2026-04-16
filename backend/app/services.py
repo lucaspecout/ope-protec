@@ -662,6 +662,9 @@ _sncf_isere_cache_lock = Lock()
 _sncf_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "sncf_isere"}
 _rte_electricity_cache_lock = Lock()
 _rte_electricity_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "rte_electricity"}
+# Cache des tokens OAuth2 RTE (valides ~2h, on les renouvelle 5min avant expiry)
+_rte_oauth_tokens: dict[str, dict[str, Any]] = {}
+_rte_oauth_lock = Lock()
 _finess_isere_cache_lock = Lock()
 _finess_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "finess_isere"}
 _finess_isere_communes_lock = Lock()
@@ -3925,123 +3928,141 @@ def _rte_electricity_risk_level(supply_margin_mw: int | float | None) -> str:
     return "rouge"
 
 
+def _rte_get_oauth_token(b64_creds: str, cache_key: str) -> str:
+    """Récupère (ou renouvelle) un token OAuth2 RTE via client_credentials.
+    Les tokens sont valides ~2h ; on les renouvelle 5min avant expiry."""
+    with _rte_oauth_lock:
+        cached = _rte_oauth_tokens.get(cache_key)
+        if cached and datetime.utcnow() < cached["expires_at"]:
+            return str(cached["token"])
+
+    if not (_REQUESTS_OK and _requests is not None):
+        raise RuntimeError("requests non disponible pour l'auth RTE")
+
+    resp = _requests.post(
+        "https://digital.iservices.rte-france.com/token/oauth/",
+        headers={
+            "Authorization": f"Basic {b64_creds}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        data="grant_type=client_credentials",
+        timeout=15,
+        verify=True,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    token = data["access_token"]
+    expires_in = int(data.get("expires_in", 7200))
+
+    with _rte_oauth_lock:
+        _rte_oauth_tokens[cache_key] = {
+            "token": token,
+            "expires_at": datetime.utcnow() + timedelta(seconds=max(expires_in - 300, 60)),
+        }
+    return str(token)
+
+
 def _fetch_rte_isere_electricity_live() -> dict[str, Any]:
-    _hdrs = {"Accept": "application/json", "User-Agent": _BROWSER_UA}
-    _BASE_ODRE = "https://odre.opendatasoft.com"
-    _BASE_ODRE2 = "https://opendata.reseaux-energies.fr"
-    source_used = _BASE_ODRE
-    last_error = "Aucune stratégie n'a abouti"
+    from app.config import settings as _settings  # import local pour éviter le circular
 
-    def _req(base: str, path: str, params: dict) -> Any:
-        """GET JSON via requests (verify=False pour éviter les soucis de CA dans Docker)."""
-        url = base + path
-        resp = _requests.get(url, params=params, headers=_hdrs, timeout=18, verify=False)
-        resp.raise_for_status()
-        return resp.json(), url
+    _RTE_BASE = "https://digital.iservices.rte-france.com"
+    ecowatt_b64 = (_settings.rte_ecowatt_b64 or "").strip()
+    consumption_b64 = (_settings.rte_consumption_b64 or "").strip()
 
-    def _try_v2(base: str) -> dict | None:
-        """ODS v2.1 ODSQL — filtre serveur par code_insee_region="84"."""
-        data, url = _req(base,
-            "/api/explore/v2.1/catalog/datasets/eco2mix-regional-tr/records",
-            {"where": 'code_insee_region="84" and consommation is not null',
-             "order_by": "date_heure desc", "limit": "1"})
-        results = data.get("results") or []
-        if results:
-            nonlocal source_used; source_used = url
-            return results[0]
-        return None
-
-    def _try_v1(base: str) -> dict | None:
-        """ODS v1 search — refine par facette code_insee_region."""
-        data, url = _req(base,
-            "/api/records/1.0/search/",
-            {"dataset": "eco2mix-regional-tr",
-             "refine.libelle_region": "Auvergne-Rh\u00f4ne-Alpes",
-             "sort": "-date_heure", "rows": "1"})
-        records = data.get("records") or []
-        if records:
-            fields = records[0].get("fields") or {}
-            if fields:
-                nonlocal source_used; source_used = url
-                return fields
-        return None
-
-    def _try_all_filter(base: str) -> dict | None:
-        """Fetch les 20 derniers enregistrements sans filtre et filtre côté Python."""
-        data, url = _req(base,
-            "/api/explore/v2.1/catalog/datasets/eco2mix-regional-tr/records",
-            {"order_by": "date_heure desc", "limit": "20"})
-        for rec in (data.get("results") or []):
-            if str(rec.get("code_insee_region", "")) == "84" and rec.get("consommation") is not None:
-                nonlocal source_used; source_used = url
-                return rec
-        return None
-
-    latest: dict | None = None
-    if _REQUESTS_OK and _requests is not None:
-        strategies = [
-            ("v2.1 ODSQL odre.opendatasoft.com",      lambda: _try_v2(_BASE_ODRE)),
-            ("v2.1 ODSQL opendata.reseaux-energies.fr", lambda: _try_v2(_BASE_ODRE2)),
-            ("v1 refine odre.opendatasoft.com",         lambda: _try_v1(_BASE_ODRE)),
-            ("v1 refine opendata.reseaux-energies.fr",  lambda: _try_v1(_BASE_ODRE2)),
-            ("fetch-all+filtre odre.opendatasoft.com",  lambda: _try_all_filter(_BASE_ODRE)),
-            ("fetch-all+filtre opendata.reseaux-energies.fr", lambda: _try_all_filter(_BASE_ODRE2)),
-        ]
-        for name, fn in strategies:
-            try:
-                result = fn()
-                if result:
-                    latest = result
-                    break
-            except Exception as exc:
-                last_error = f"[{name}] {exc}"
-                continue
-
-    if not latest:
+    if not ecowatt_b64:
         return {
-            "service": "RTE éCO2mix régional",
+            "service": "RTE · Ecowatt & Consommation",
             "status": "degraded",
-            "department": "Isère (38)",
-            "scope": "Proxy régional Auvergne-Rhône-Alpes (code INSEE 84)",
-            "source": source_used,
+            "department": "France (national)",
+            "scope": "Signal Ecowatt RTE",
+            "source": "https://data.rte-france.com",
             "level": "inconnu",
-            "error": last_error,
+            "error": "RTE_ECOWATT_B64 non configuré",
             "updated_at": datetime.utcnow().isoformat() + "Z",
         }
 
-    consumption = int(latest.get("consommation") or 0)
-    production_breakdown = {
-        "nucleaire":    int(latest.get("nucleaire")    or 0),
-        "hydraulique":  int(latest.get("hydraulique")  or 0),
-        "solaire":      int(latest.get("solaire")      or 0),
-        "eolien":       int(latest.get("eolien")       or 0),
-        "thermique":    int(latest.get("thermique")    or 0),
-        "bioenergies":  int(latest.get("bioenergies")  or 0),
-    }
-    regional_generation = sum(production_breakdown.values())
-    supply_margin_mw = regional_generation - consumption
-    exchange = int(latest.get("ech_physiques") or 0)
-    level = _rte_electricity_risk_level(supply_margin_mw)
+    errors: list[str] = []
 
-    return {
-        "service": "RTE éCO2mix régional",
-        "status": "online",
-        "department": "Isère (38)",
-        "scope": "Proxy régional Auvergne-Rhône-Alpes (code INSEE 84)",
-        "source": source_used,
-        "dataset": {
-            "title": "Données éCO2mix régionales temps réel",
-            "page": "https://www.data.gouv.fr/datasets/donnees-eco2mix-regionales-temps-reel-1",
-        },
-        "observed_at": latest.get("date_heure"),
-        "level": level,
-        "consumption_mw": consumption,
-        "regional_generation_mw": regional_generation,
-        "supply_margin_mw": supply_margin_mw,
-        "exchange_mw": exchange,
-        "production_breakdown_mw": production_breakdown,
+    # ── 1. Signal Ecowatt (vert / orange / rouge) ──────────────────────────
+    ecowatt_level = "inconnu"
+    ecowatt_message = ""
+    ecowatt_today: dict[str, Any] = {}
+    try:
+        token = _rte_get_oauth_token(ecowatt_b64, "ecowatt")
+        resp = _requests.get(
+            f"{_RTE_BASE}/open_api/ecowatt/v5/signals",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=15,
+            verify=True,
+        )
+        resp.raise_for_status()
+        signals = resp.json().get("signals") or []
+        if signals:
+            today = signals[0]  # premier signal = aujourd'hui
+            dval = int(today.get("dvalue") or 1)
+            ecowatt_level = {1: "vert", 2: "orange", 3: "rouge"}.get(dval, "inconnu")
+            ecowatt_message = str(today.get("message") or "")
+            ecowatt_today = {
+                "jour": today.get("Jour") or today.get("jour"),
+                "dvalue": dval,
+                "level": ecowatt_level,
+                "message": ecowatt_message,
+                "generation_forecast_mw": today.get("GenerationForecast"),
+            }
+    except Exception as exc:
+        errors.append(f"Ecowatt: {exc}")
+
+    # ── 2. Consommation nationale temps réel ───────────────────────────────
+    consumption_mw: int | None = None
+    consumption_observed_at: str | None = None
+    if consumption_b64:
+        try:
+            token2 = _rte_get_oauth_token(consumption_b64, "consumption")
+            resp2 = _requests.get(
+                f"{_RTE_BASE}/open_api/consumption/v1/short_term",
+                headers={"Authorization": f"Bearer {token2}"},
+                timeout=15,
+                verify=True,
+            )
+            resp2.raise_for_status()
+            short_terms = resp2.json().get("short_term") or []
+            # On cherche la valeur la plus récente (type REALISED ou la dernière valeur)
+            now_utc = datetime.utcnow()
+            best_value: int | None = None
+            best_dt: str | None = None
+            for bloc in short_terms:
+                for val in (bloc.get("values") or []):
+                    try:
+                        start = val.get("start_date") or ""
+                        v = val.get("value")
+                        if v is not None and start:
+                            best_value = int(v)
+                            best_dt = start
+                    except Exception:
+                        pass
+            consumption_mw = best_value
+            consumption_observed_at = best_dt
+        except Exception as exc:
+            errors.append(f"Consumption: {exc}")
+
+    status = "online" if ecowatt_level != "inconnu" else "degraded"
+
+    result: dict[str, Any] = {
+        "service": "RTE · Ecowatt & Consommation",
+        "status": status,
+        "department": "France (national)",
+        "scope": "Signal Ecowatt RTE + Consommation nationale temps réel",
+        "source": f"{_RTE_BASE}/open_api/ecowatt/v5/signals",
+        "level": ecowatt_level,
+        "ecowatt": ecowatt_today,
         "updated_at": datetime.utcnow().isoformat() + "Z",
     }
+    if consumption_mw is not None:
+        result["consumption_mw"] = consumption_mw
+        result["observed_at"] = consumption_observed_at
+    if errors:
+        result["warnings"] = errors
+    return result
 
 
 def fetch_rte_isere_electricity_status(force_refresh: bool = False) -> dict[str, Any]:
