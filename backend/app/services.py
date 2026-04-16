@@ -3928,8 +3928,8 @@ def _rte_electricity_risk_level(supply_margin_mw: int | float | None) -> str:
 def _fetch_rte_isere_electricity_live() -> dict[str, Any]:
     # opendata.reseaux-energies.fr = nouveau domaine officiel ODRE (remplace odre.opendatasoft.com)
     _RTE_API_DOMAINS = [
-        "https://opendata.reseaux-energies.fr",
         "https://odre.opendatasoft.com",
+        "https://opendata.reseaux-energies.fr",
     ]
     _records_path = (
         "/api/explore/v2.1/catalog/datasets/eco2mix-regional-tr/records"
@@ -3954,7 +3954,7 @@ def _fetch_rte_isere_electricity_live() -> dict[str, Any]:
                 )
                 records_api = domain + _records_path
                 break
-            except (HTTPError, URLError, TimeoutError):
+            except Exception:
                 continue
         records = records_payload.get("results") or []
         if not records:
