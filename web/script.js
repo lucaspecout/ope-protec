@@ -10398,7 +10398,11 @@ async function _notifSave() {
   const btn = document.getElementById('notif-save-btn');
   if (btn) btn.disabled = true;
   try {
-    await api('/api/notifications/settings', { method: 'PUT', body: _notifCollect() });
+    await api('/api/notifications/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(_notifCollect()),
+    });
     _notifToast('Configuration enregistrée', 'success');
   } catch(e) {
     _notifToast('Erreur sauvegarde : ' + (e.message || e), 'error');
@@ -10413,7 +10417,11 @@ async function _notifTest() {
   const btn = document.getElementById('notif-test-btn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Envoi…'; }
   try {
-    const r = await api('/api/notifications/test', { method: 'POST', body: { webhook_url } });
+    const r = await api('/api/notifications/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ webhook_url }),
+    });
     if (r.success) _notifToast('✅ Message test envoyé — vérifiez votre canal Discord', 'success');
     else _notifToast('❌ Échec : ' + (r.detail || 'Erreur inconnue'), 'error');
   } catch(e) {
