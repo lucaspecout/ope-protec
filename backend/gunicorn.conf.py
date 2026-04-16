@@ -1,7 +1,7 @@
 # Configuration Gunicorn optimisée pour FastAPI / UvicornWorker
 # Séparation des responsabilités : les paramètres lourds ici, pas dans CMD Docker.
 
-workers = 3
+workers = 2
 worker_class = "uvicorn.workers.UvicornWorker"
 bind = "0.0.0.0:8000"
 

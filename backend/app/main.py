@@ -92,6 +92,8 @@ from .services import (
     fetch_helipads_isere,
     get_static_data_status,
     collect_all_static_data,
+    _redis,
+    _REDIS_OK,
 )
 
 Base.metadata.create_all(bind=engine)

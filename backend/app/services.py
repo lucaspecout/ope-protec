@@ -21,6 +21,17 @@ from urllib.request import Request, urlopen
 import xml.etree.ElementTree as ET
 import zipfile
 
+import warnings as _warnings
+# Supprimer les avertissements de version urllib3/requests (conflit de packaging)
+_warnings.filterwarnings("ignore", message="urllib3.*doesn't match a supported version", category=Warning)
+_warnings.filterwarnings("ignore", message="charset_normalizer.*doesn't match", category=Warning)
+# Supprimer les avertissements SSL pour les hôtes externes sans cert valide
+try:
+    import urllib3 as _urllib3
+    _urllib3.disable_warnings(_urllib3.exceptions.InsecureRequestWarning)
+except Exception:
+    pass
+
 try:
     import requests as _requests
     _REQUESTS_OK = True
