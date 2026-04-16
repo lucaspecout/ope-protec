@@ -10337,6 +10337,7 @@ function _notifRenderRules() {
 }
 
 function _notifRuleCardHtml(rule) {
+  const id = rule.id;
   const webhookDisplay = rule.discord_webhook
     ? rule.discord_webhook.replace('https://discord.com/api/webhooks/', 'webhooks/…/').substring(0, 38) + '…'
     : 'Aucun webhook configuré';
@@ -10346,8 +10347,6 @@ function _notifRuleCardHtml(rule) {
     ? '<span class="notif-badge notif-badge--on">● Actif</span>'
     : '<span class="notif-badge notif-badge--off">○ Inactif</span>';
 
-  // Groupement des services par catégorie pour le tableau
-  const cats = [...new Set(_NOTIF_SERVICES.map(s => s.cat))];
   const svcRows = _NOTIF_SERVICES.map(svc => {
     const cfg = svcs[svc.key] || {};
     const checked = cfg.enabled ? 'checked' : '';
@@ -10370,8 +10369,9 @@ function _notifRuleCardHtml(rule) {
   const qChecked = qh.enabled ? 'checked' : '';
   const cooldown = rule.cooldown_minutes || 60;
 
-  return `<div class="notif-rule-card" data-rule-id="${escapeHtml(rule.id)}">
-    <div class="notif-rule-head" onclick="document.querySelector('.notif-rule-card[data-rule-id=\\'${escapeHtml(rule.id)}\\']').classList.toggle('expanded')">
+  // Tous les boutons utilisent data-action + data-rule-id pour la délégation d'événements
+  return `<div class="notif-rule-card" data-rule-id="${escapeHtml(id)}">
+    <div class="notif-rule-head" data-action="toggle-card" data-rule-id="${escapeHtml(id)}">
       <span class="notif-rule-icon">🔔</span>
       <div class="notif-rule-meta">
         <div class="notif-rule-name">${escapeHtml(rule.name || 'Notification')}</div>
@@ -10379,9 +10379,9 @@ function _notifRuleCardHtml(rule) {
       </div>
       <span style="font-size:.78rem;color:#888;white-space:nowrap">${activeSvcCount} service(s)</span>
       ${enabledBadge}
-      <button class="ghost notif-action-btn" onclick="event.stopPropagation();_notifToggleEnabled('${escapeHtml(rule.id)}')"
+      <button class="ghost notif-action-btn" data-action="toggle-enabled" data-rule-id="${escapeHtml(id)}"
         style="font-size:.78rem;padding:.25rem .6rem">${rule.enabled ? 'Désactiver' : 'Activer'}</button>
-      <button class="notif-delete-btn" onclick="event.stopPropagation();_notifDelete('${escapeHtml(rule.id)}')"
+      <button class="notif-delete-btn" data-action="delete" data-rule-id="${escapeHtml(id)}"
         title="Supprimer">🗑️</button>
       <span class="notif-chevron">▼</span>
     </div>
@@ -10396,9 +10396,8 @@ function _notifRuleCardHtml(rule) {
           <input type="url" class="nrb-webhook" value="${escapeHtml(rule.discord_webhook || '')}"
             placeholder="https://discord.com/api/webhooks/..." style="font-size:.82rem" />
         </label>
-        <button type="button" class="nrb-test-btn"
-          style="background:#5865f2;color:#fff;border:none;padding:.5rem .9rem;border-radius:8px;font-weight:600;cursor:pointer;font-size:.85rem;white-space:nowrap;align-self:flex-end"
-          onclick="_notifTestInCard(this)">📤 Tester</button>
+        <button type="button" class="nrb-test-btn" data-action="test-webhook"
+          style="background:#5865f2;color:#fff;border:none;padding:.5rem .9rem;border-radius:8px;font-weight:600;cursor:pointer;font-size:.85rem;white-space:nowrap;align-self:flex-end">📤 Tester</button>
       </div>
       <div class="notif-field-row" style="display:flex;gap:1rem;flex-wrap:wrap;align-items:flex-end;margin-bottom:.75rem">
         <label style="min-width:200px">Cooldown entre 2 alertes (min)
@@ -10434,7 +10433,7 @@ function _notifRuleCardHtml(rule) {
         </div>
       </div>
       <div style="display:flex;gap:.5rem">
-        <button onclick="_notifSaveRule('${escapeHtml(rule.id)}', this.closest('.notif-rule-body'))">💾 Enregistrer</button>
+        <button data-action="save" data-rule-id="${escapeHtml(id)}">💾 Enregistrer</button>
       </div>
     </div>
   </div>`;
@@ -10595,8 +10594,44 @@ async function _notifLoadLog() {
   }
 }
 
-// Brancher les boutons une fois le DOM prêt
-document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('notif-new-btn')?.addEventListener('click', _notifCreateNew);
-  document.getElementById('notif-log-refresh-btn')?.addEventListener('click', _notifLoadLog);
+// Délégation d'événements sur le conteneur des règles
+// (fonctionne même avec le HTML généré dynamiquement)
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('[data-action]');
+  if (!el) return;
+  const panel = document.getElementById('notifications-panel');
+  if (!panel || !panel.contains(el)) return;
+
+  const action = el.dataset.action;
+  const ruleId = el.dataset.ruleId;
+
+  if (action === 'toggle-card') {
+    const card = document.querySelector(`.notif-rule-card[data-rule-id="${ruleId}"]`);
+    if (card) card.classList.toggle('expanded');
+    return;
+  }
+  if (action === 'toggle-enabled') {
+    e.stopPropagation();
+    _notifToggleEnabled(ruleId);
+    return;
+  }
+  if (action === 'delete') {
+    e.stopPropagation();
+    _notifDelete(ruleId);
+    return;
+  }
+  if (action === 'save') {
+    const body = el.closest('.notif-rule-body');
+    if (body) _notifSaveRule(ruleId, body);
+    return;
+  }
+  if (action === 'test-webhook') {
+    _notifTestInCard(el);
+    return;
+  }
+});
+
+// Journal
+document.addEventListener('click', (e) => {
+  if (e.target.id === 'notif-log-refresh-btn') _notifLoadLog();
 });
