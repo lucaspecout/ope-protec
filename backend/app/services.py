@@ -3926,102 +3926,122 @@ def _rte_electricity_risk_level(supply_margin_mw: int | float | None) -> str:
 
 
 def _fetch_rte_isere_electricity_live() -> dict[str, Any]:
-    # API v1 (search) : syntaxe refine. au lieu de where= ODSQL — différent mécanisme, moins bloqué
-    _ENDPOINTS = [
-        {
-            "url": "https://odre.opendatasoft.com/api/records/1.0/search/",
-            "params": {
-                "dataset": "eco2mix-regional-tr",
-                "refine.code_insee_region": "84",
-                "sort": "-date_heure",
-                "rows": "1",
-            },
-            "result_key": "records",
-            "record_path": "fields",
-        },
-        {
-            "url": "https://opendata.reseaux-energies.fr/api/records/1.0/search/",
-            "params": {
-                "dataset": "eco2mix-regional-tr",
-                "refine.code_insee_region": "84",
-                "sort": "-date_heure",
-                "rows": "1",
-            },
-            "result_key": "records",
-            "record_path": "fields",
-        },
-    ]
-    records_api = _ENDPOINTS[0]["url"]
     _hdrs = {"Accept": "application/json", "User-Agent": _BROWSER_UA}
+    _BASE_ODRE = "https://odre.opendatasoft.com"
+    _BASE_ODRE2 = "https://opendata.reseaux-energies.fr"
+    source_used = _BASE_ODRE
+    last_error = "Aucune stratégie n'a abouti"
 
-    try:
-        dataset_payload: dict[str, Any] = {}
+    def _req(base: str, path: str, params: dict) -> Any:
+        """GET JSON via requests (verify=False pour éviter les soucis de CA dans Docker)."""
+        url = base + path
+        resp = _requests.get(url, params=params, headers=_hdrs, timeout=18, verify=False)
+        resp.raise_for_status()
+        return resp.json(), url
 
-        latest: dict[str, Any] = {}
-        for ep in _ENDPOINTS:
+    def _try_v2(base: str) -> dict | None:
+        """ODS v2.1 ODSQL — filtre serveur par code_insee_region="84"."""
+        data, url = _req(base,
+            "/api/explore/v2.1/catalog/datasets/eco2mix-regional-tr/records",
+            {"where": 'code_insee_region="84" and consommation is not null',
+             "order_by": "date_heure desc", "limit": "1"})
+        results = data.get("results") or []
+        if results:
+            nonlocal source_used; source_used = url
+            return results[0]
+        return None
+
+    def _try_v1(base: str) -> dict | None:
+        """ODS v1 search — refine par facette code_insee_region."""
+        data, url = _req(base,
+            "/api/records/1.0/search/",
+            {"dataset": "eco2mix-regional-tr",
+             "refine.libelle_region": "Auvergne-Rh\u00f4ne-Alpes",
+             "sort": "-date_heure", "rows": "1"})
+        records = data.get("records") or []
+        if records:
+            fields = records[0].get("fields") or {}
+            if fields:
+                nonlocal source_used; source_used = url
+                return fields
+        return None
+
+    def _try_all_filter(base: str) -> dict | None:
+        """Fetch les 20 derniers enregistrements sans filtre et filtre côté Python."""
+        data, url = _req(base,
+            "/api/explore/v2.1/catalog/datasets/eco2mix-regional-tr/records",
+            {"order_by": "date_heure desc", "limit": "20"})
+        for rec in (data.get("results") or []):
+            if str(rec.get("code_insee_region", "")) == "84" and rec.get("consommation") is not None:
+                nonlocal source_used; source_used = url
+                return rec
+        return None
+
+    latest: dict | None = None
+    if _REQUESTS_OK and _requests is not None:
+        strategies = [
+            ("v2.1 ODSQL odre.opendatasoft.com",      lambda: _try_v2(_BASE_ODRE)),
+            ("v2.1 ODSQL opendata.reseaux-energies.fr", lambda: _try_v2(_BASE_ODRE2)),
+            ("v1 refine odre.opendatasoft.com",         lambda: _try_v1(_BASE_ODRE)),
+            ("v1 refine opendata.reseaux-energies.fr",  lambda: _try_v1(_BASE_ODRE2)),
+            ("fetch-all+filtre odre.opendatasoft.com",  lambda: _try_all_filter(_BASE_ODRE)),
+            ("fetch-all+filtre opendata.reseaux-energies.fr", lambda: _try_all_filter(_BASE_ODRE2)),
+        ]
+        for name, fn in strategies:
             try:
-                if _REQUESTS_OK and _requests is not None:
-                    resp = _requests.get(ep["url"], params=ep["params"], headers=_hdrs, timeout=15, verify=True)
-                    resp.raise_for_status()
-                    data = resp.json()
-                else:
-                    from urllib.parse import urlencode
-                    data = _http_get_json(ep["url"] + "?" + urlencode(ep["params"]), timeout=12, headers=_hdrs)
-                records = data.get(ep["result_key"]) or []
-                if records:
-                    latest = records[0].get(ep["record_path"]) or {}
-                    records_api = ep["url"]
+                result = fn()
+                if result:
+                    latest = result
                     break
-            except Exception:
+            except Exception as exc:
+                last_error = f"[{name}] {exc}"
                 continue
-        if not latest:
-            raise ValueError("Aucune donnée éCO2mix disponible pour la région ARA")
 
-        latest = records[0]
-        consumption = int(latest.get("consommation") or 0)
-        production_breakdown = {
-            "nucleaire": int(latest.get("nucleaire") or 0),
-            "hydraulique": int(latest.get("hydraulique") or 0),
-            "solaire": int(latest.get("solaire") or 0),
-            "eolien": int(latest.get("eolien") or 0),
-            "thermique": int(latest.get("thermique") or 0),
-            "bioenergies": int(latest.get("bioenergies") or 0),
-        }
-        regional_generation = sum(production_breakdown.values())
-        supply_margin_mw = regional_generation - consumption
-        exchange = int(latest.get("ech_physiques") or 0)
-        level = _rte_electricity_risk_level(supply_margin_mw)
-
-        return {
-            "service": "RTE éCO2mix régional",
-            "status": "online",
-            "department": "Isère (38)",
-            "scope": "Proxy régional Auvergne-Rhône-Alpes (code INSEE 84)",
-            "source": records_api,
-            "dataset": {
-                "title": dataset_payload.get("title", "Données éCO2mix régionales temps réel"),
-                "page": dataset_payload.get("page", "https://www.data.gouv.fr/datasets/donnees-eco2mix-regionales-temps-reel-1"),
-            },
-            "observed_at": latest.get("date_heure"),
-            "level": level,
-            "consumption_mw": consumption,
-            "regional_generation_mw": regional_generation,
-            "supply_margin_mw": supply_margin_mw,
-            "exchange_mw": exchange,
-            "production_breakdown_mw": production_breakdown,
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
-    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
+    if not latest:
         return {
             "service": "RTE éCO2mix régional",
             "status": "degraded",
             "department": "Isère (38)",
             "scope": "Proxy régional Auvergne-Rhône-Alpes (code INSEE 84)",
-            "source": records_api,
+            "source": source_used,
             "level": "inconnu",
-            "error": str(exc),
+            "error": last_error,
             "updated_at": datetime.utcnow().isoformat() + "Z",
         }
+
+    consumption = int(latest.get("consommation") or 0)
+    production_breakdown = {
+        "nucleaire":    int(latest.get("nucleaire")    or 0),
+        "hydraulique":  int(latest.get("hydraulique")  or 0),
+        "solaire":      int(latest.get("solaire")      or 0),
+        "eolien":       int(latest.get("eolien")       or 0),
+        "thermique":    int(latest.get("thermique")    or 0),
+        "bioenergies":  int(latest.get("bioenergies")  or 0),
+    }
+    regional_generation = sum(production_breakdown.values())
+    supply_margin_mw = regional_generation - consumption
+    exchange = int(latest.get("ech_physiques") or 0)
+    level = _rte_electricity_risk_level(supply_margin_mw)
+
+    return {
+        "service": "RTE éCO2mix régional",
+        "status": "online",
+        "department": "Isère (38)",
+        "scope": "Proxy régional Auvergne-Rhône-Alpes (code INSEE 84)",
+        "source": source_used,
+        "dataset": {
+            "title": "Données éCO2mix régionales temps réel",
+            "page": "https://www.data.gouv.fr/datasets/donnees-eco2mix-regionales-temps-reel-1",
+        },
+        "observed_at": latest.get("date_heure"),
+        "level": level,
+        "consumption_mw": consumption,
+        "regional_generation_mw": regional_generation,
+        "supply_margin_mw": supply_margin_mw,
+        "exchange_mw": exchange,
+        "production_breakdown_mw": production_breakdown,
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
 
 
 def fetch_rte_isere_electricity_status(force_refresh: bool = False) -> dict[str, Any]:
