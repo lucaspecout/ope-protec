@@ -3926,7 +3926,6 @@ def _rte_electricity_risk_level(supply_margin_mw: int | float | None) -> str:
 
 
 def _fetch_rte_isere_electricity_live() -> dict[str, Any]:
-    # opendata.reseaux-energies.fr = nouveau domaine officiel ODRE (remplace odre.opendatasoft.com)
     _RTE_API_DOMAINS = [
         "https://odre.opendatasoft.com",
         "https://opendata.reseaux-energies.fr",
@@ -3934,25 +3933,27 @@ def _fetch_rte_isere_electricity_live() -> dict[str, Any]:
     _records_path = (
         "/api/explore/v2.1/catalog/datasets/eco2mix-regional-tr/records"
         "?select=code_insee_region,libelle_region,date_heure,consommation,thermique,nucleaire,eolien,solaire,hydraulique,bioenergies,ech_physiques"
-        # ODS v2.1 ODSQL : les littéraux chaîne utilisent des guillemets doubles (%22), pas simples (%27)
-        "&where=code_insee_region%3D%2284%22%20and%20consommation%20is%20not%20null"
+        '&where=code_insee_region%3D%2284%22%20and%20consommation%20is%20not%20null'
         "&order_by=date_heure%20desc&limit=1"
     )
     records_api = _RTE_API_DOMAINS[0] + _records_path
+    _hdrs = {"Accept": "application/json", "User-Agent": _BROWSER_UA}
 
     try:
         dataset_payload: dict[str, Any] = {}
 
-        # Essaie les deux domaines ODRE dans l'ordre
+        # Essaie les deux domaines ODRE dans l'ordre, via requests si dispo sinon urllib
         records_payload: dict[str, Any] = {}
         for domain in _RTE_API_DOMAINS:
+            url = domain + _records_path
             try:
-                records_payload = _http_get_json(
-                    domain + _records_path,
-                    timeout=12,
-                    headers={"Accept": "application/json", "User-Agent": _BROWSER_UA},
-                )
-                records_api = domain + _records_path
+                if _REQUESTS_OK and _requests is not None:
+                    resp = _requests.get(url, headers=_hdrs, timeout=15, verify=True)
+                    resp.raise_for_status()
+                    records_payload = resp.json()
+                else:
+                    records_payload = _http_get_json(url, timeout=12, headers=_hdrs)
+                records_api = url
                 break
             except Exception:
                 continue
