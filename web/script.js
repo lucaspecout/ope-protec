@@ -73,7 +73,7 @@ const PANEL_TITLES = {
   'logs-panel': 'Main courante opérationnelle',
   'map-panel': 'Carte stratégique Isère',
   'users-panel': 'Gestion des utilisateurs',
-  'notifications-panel': 'Notifications WhatsApp',
+  'notifications-panel': 'Notifications Discord',
 };
 
 const RESOURCE_TYPE_META = {
@@ -10361,8 +10361,7 @@ function _notifCollect() {
   });
   return {
     enabled: !!(document.getElementById('notif-master-enabled') || {}).checked,
-    whatsapp_phone: ((document.getElementById('notif-wa-phone') || {}).value || '').trim(),
-    whatsapp_apikey: ((document.getElementById('notif-wa-apikey') || {}).value || '').trim(),
+    discord_webhook: ((document.getElementById('notif-discord-webhook') || {}).value || '').trim(),
     cooldown_minutes: parseInt((document.getElementById('notif-cooldown') || {}).value) || 60,
     quiet_hours: {
       enabled: !!(document.getElementById('notif-quiet-enabled') || {}).checked,
@@ -10376,8 +10375,7 @@ function _notifCollect() {
 function _notifApply(s) {
   const set = (id, val) => { const el = document.getElementById(id); if (el) el[typeof val === 'boolean' ? 'checked' : 'value'] = val; };
   set('notif-master-enabled', !!s.enabled);
-  set('notif-wa-phone',   s.whatsapp_phone || '');
-  set('notif-wa-apikey',  s.whatsapp_apikey || '');
+  set('notif-discord-webhook', s.discord_webhook || '');
   set('notif-cooldown',   s.cooldown_minutes || 60);
   const qh = s.quiet_hours || {};
   set('notif-quiet-enabled', !!qh.enabled);
@@ -10410,19 +10408,18 @@ async function _notifSave() {
 }
 
 async function _notifTest() {
-  const phone  = ((document.getElementById('notif-wa-phone')   || {}).value || '').trim();
-  const apikey = ((document.getElementById('notif-wa-apikey')  || {}).value || '').trim();
-  if (!phone || !apikey) { _notifToast('Renseignez le numéro et la clé API avant de tester', 'error'); return; }
+  const webhook_url = ((document.getElementById('notif-discord-webhook') || {}).value || '').trim();
+  if (!webhook_url) { _notifToast('Renseignez l\'URL du webhook Discord avant de tester', 'error'); return; }
   const btn = document.getElementById('notif-test-btn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Envoi…'; }
   try {
-    const r = await api('/api/notifications/test', { method: 'POST', body: { phone, apikey } });
-    if (r.success) _notifToast('✅ Message test envoyé — vérifiez votre WhatsApp', 'success');
-    else _notifToast('❌ Échec : ' + (r.detail || 'Erreur'), 'error');
+    const r = await api('/api/notifications/test', { method: 'POST', body: { webhook_url } });
+    if (r.success) _notifToast('✅ Message test envoyé — vérifiez votre canal Discord', 'success');
+    else _notifToast('❌ Échec : ' + (r.detail || 'Erreur inconnue'), 'error');
   } catch(e) {
     _notifToast('Erreur : ' + (e.message || e), 'error');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '📤 Envoyer un message test'; }
+    if (btn) { btn.disabled = false; btn.textContent = '📤 Tester le webhook'; }
   }
 }
 

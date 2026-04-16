@@ -2077,7 +2077,7 @@ def revoke_share(token: str, db: Session = Depends(get_db), _: User = Depends(re
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# NOTIFICATIONS WHATSAPP (CallMeBot)
+# NOTIFICATIONS DISCORD (Webhook)
 # ─────────────────────────────────────────────────────────────────────────────
 
 _NOTIF_SETTINGS_KEY = "notif:settings"
@@ -2163,72 +2163,78 @@ def _extract_service_level(key: str, data: dict) -> str:
     return raw if raw in _LEVEL_ORDER else "vert"
 
 
-def _build_whatsapp_message(service_key: str, level: str, data: dict) -> str:
-    """Construit le message WhatsApp pour une alerte."""
+def _build_discord_embed(service_key: str, level: str, data: dict) -> dict:
+    """Construit le payload Discord (embed) pour une alerte."""
     label = _SERVICE_LABELS.get(service_key, service_key)
     emoji = {"rouge": "🔴", "orange": "🟠", "jaune": "🟡", "vert": "🟢"}.get(level, "ℹ️")
+    color = {"rouge": 0xE74C3C, "orange": 0xE67E22, "jaune": 0xF1C40F, "vert": 0x2ECC71}.get(level, 0x95A5A6)
     now = datetime.utcnow().strftime("%d/%m/%Y %H:%M UTC")
 
-    lines = [f"{emoji} *ALERTE ISERE — {label}*", f"Niveau : *{level.upper()}*"]
+    desc_lines = [f"**Niveau : {level.upper()}**"]
 
-    # Résumé spécifique par service
     if service_key == "meteo_france":
         alerts = data.get("alerts") or []
         if alerts:
-            lines.append(f"Phénomène : {alerts[0].get('phenomenon', '?')} ({alerts[0].get('department', '38')})")
+            desc_lines.append(f"Phénomène : {alerts[0].get('phenomenon', '?')} ({alerts[0].get('department', '38')})")
     elif service_key == "vigicrues":
         stations = data.get("stations") or []
         if stations:
             s = stations[0]
-            lines.append(f"Station : {s.get('name', '?')} — cote {s.get('current_level_m', '?')} m")
+            desc_lines.append(f"Station : {s.get('name', '?')} — cote {s.get('current_level_m', '?')} m")
     elif service_key in ("ter_aura", "mreseau", "cars_region_aura"):
         n = int(data.get("disruptions_total") or len(data.get("disruptions") or []))
-        lines.append(f"{n} perturbation(s) détectée(s)")
-        disps = (data.get("disruptions") or [])[:2]
-        for d in disps:
-            t = str(d.get("title") or d.get("description") or "")[:80]
+        desc_lines.append(f"{n} perturbation(s) détectée(s)")
+        for d in (data.get("disruptions") or [])[:2]:
+            t = str(d.get("title") or d.get("description") or "")[:100]
             if t:
-                lines.append(f"  • {t}")
+                desc_lines.append(f"• {t}")
     elif service_key in ("aprr_isere", "vinci_autoroutes"):
         n = int(data.get("events_total") or len(data.get("events") or []))
-        lines.append(f"{n} événement(s) sur autoroute")
-        evts = (data.get("events") or [])[:2]
-        for e in evts:
-            t = str(e.get("title") or e.get("description") or "")[:80]
+        desc_lines.append(f"{n} événement(s) sur autoroute")
+        for e in (data.get("events") or [])[:2]:
+            t = str(e.get("title") or e.get("description") or "")[:100]
             if t:
-                lines.append(f"  • {e.get('road', '')} {t}")
+                desc_lines.append(f"• {e.get('road', '')} {t}")
     elif service_key == "electricity_isere":
         margin = data.get("supply_margin_mw")
         if margin is not None:
-            lines.append(f"Marge d'approvisionnement : {margin} MW")
+            desc_lines.append(f"Marge d'approvisionnement : {margin} MW")
     elif service_key == "atmo_aura":
         today = data.get("today") or {}
         lbl = today.get("label") or ""
         idx = today.get("index") or ""
         if lbl:
-            lines.append(f"Indice qualité air : {idx} — {lbl}")
+            desc_lines.append(f"Indice qualité air : {idx} — {lbl}")
 
-    lines.append(f"_📍 Isère — {now}_")
-    lines.append("_Via CRISIS38 · Centre opérationnel_")
-    return "\n".join(lines)
+    desc_lines.append(f"\n📍 Isère — {now}")
+
+    return {
+        "username": "CRISIS38",
+        "embeds": [{
+            "title": f"{emoji} ALERTE ISÈRE — {label}",
+            "description": "\n".join(desc_lines),
+            "color": color,
+            "footer": {"text": "CRISIS38 · Centre opérationnel Isère"},
+        }]
+    }
 
 
-def _send_whatsapp_callmebot(phone: str, apikey: str, message: str) -> tuple[bool, str]:
-    """Envoie un message WhatsApp via CallMeBot. Retourne (success, detail)."""
-    import urllib.request, urllib.parse
+def _send_discord_webhook(webhook_url: str, payload: dict) -> tuple[bool, str]:
+    """Envoie un message sur un canal Discord via Webhook. Retourne (success, detail)."""
+    import urllib.request
     try:
-        url = "https://api.callmebot.com/whatsapp.php?" + urllib.parse.urlencode({
-            "phone": phone,
-            "text": message,
-            "apikey": apikey,
-        })
-        req = urllib.request.Request(url, headers={"User-Agent": "CRISIS38/1.0"})
+        body = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            webhook_url,
+            data=body,
+            method="POST",
+            headers={"Content-Type": "application/json", "User-Agent": "CRISIS38/1.0"},
+        )
         with urllib.request.urlopen(req, timeout=15) as resp:
-            body = resp.read().decode("utf-8", errors="replace")[:300]
-            ok = resp.status == 200 and "Message queued" in body
-            return ok, body[:100]
+            # Discord renvoie 204 No Content en cas de succès
+            return resp.status in (200, 204), f"HTTP {resp.status}"
     except Exception as exc:
-        return False, str(exc)[:100]
+        return False, str(exc)[:150]
 
 
 def _load_notif_settings() -> dict:
@@ -2260,9 +2266,8 @@ def _check_and_send_notifications(service_key: str, data: dict) -> None:
         settings_d = _load_notif_settings()
         if not settings_d.get("enabled"):
             return
-        phone = str(settings_d.get("whatsapp_phone") or "").strip()
-        apikey = str(settings_d.get("whatsapp_apikey") or "").strip()
-        if not phone or not apikey:
+        webhook_url = str(settings_d.get("discord_webhook") or "").strip()
+        if not webhook_url:
             return
 
         svc_cfg = (settings_d.get("services") or {}).get(service_key) or {}
@@ -2307,8 +2312,8 @@ def _check_and_send_notifications(service_key: str, data: dict) -> None:
                     pass
 
         # Envoyer
-        message = _build_whatsapp_message(service_key, current_level, data)
-        ok, detail = _send_whatsapp_callmebot(phone, apikey, message)
+        payload = _build_discord_embed(service_key, current_level, data)
+        ok, detail = _send_discord_webhook(webhook_url, payload)
 
         # Enregistrer dans le log
         log_entry = {
@@ -2362,16 +2367,22 @@ def save_notif_settings(payload: dict, _: User = Depends(require_roles("admin", 
 
 @app.post("/api/notifications/test")
 def test_notif(payload: dict, _: User = Depends(require_roles("admin", "ope"))):
-    phone = str(payload.get("phone") or "").strip()
-    apikey = str(payload.get("apikey") or "").strip()
-    if not phone or not apikey:
-        raise HTTPException(400, "phone et apikey requis")
-    msg = (
-        "✅ *Test CRISIS38*\n"
-        "Les notifications WhatsApp sont correctement configurées.\n"
-        f"_Envoyé le {datetime.utcnow().strftime('%d/%m/%Y %H:%M UTC')}_"
-    )
-    ok, detail = _send_whatsapp_callmebot(phone, apikey, msg)
+    webhook_url = str(payload.get("webhook_url") or "").strip()
+    if not webhook_url:
+        raise HTTPException(400, "webhook_url requis")
+    test_payload = {
+        "username": "CRISIS38",
+        "embeds": [{
+            "title": "✅ Test CRISIS38",
+            "description": (
+                "Les notifications Discord sont correctement configurées.\n"
+                f"Envoyé le {datetime.utcnow().strftime('%d/%m/%Y %H:%M UTC')}"
+            ),
+            "color": 0x2ECC71,
+            "footer": {"text": "CRISIS38 · Centre opérationnel Isère"},
+        }]
+    }
+    ok, detail = _send_discord_webhook(webhook_url, test_payload)
     return {"success": ok, "detail": detail}
 
 

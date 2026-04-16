@@ -898,39 +898,37 @@
         <section id="notifications-panel" class="panel view hidden" hidden>
           <div class="flux-header">
             <div>
-              <h3>🔔 Notifications WhatsApp</h3>
-              <p class="muted">Recevez des alertes automatiques sur WhatsApp quand un service dépasse un seuil configuré.</p>
+              <h3>🔔 Notifications Discord</h3>
+              <p class="muted">Recevez des alertes automatiques sur Discord quand un service dépasse un seuil configuré.</p>
             </div>
             <button id="notif-save-btn" type="button">💾 Enregistrer</button>
           </div>
 
-          <!-- Aide CallMeBot -->
-          <div id="notif-help-box" style="background:#fffde7;border:1px solid #f9a825;border-radius:10px;padding:1rem 1.25rem;margin-bottom:1rem;font-size:.85rem;line-height:1.6">
-            <strong>📱 Configuration CallMeBot (gratuit)</strong>
+          <!-- Aide Discord Webhook -->
+          <div id="notif-help-box" style="background:#eef0fb;border:1px solid #5865f2;border-radius:10px;padding:1rem 1.25rem;margin-bottom:1rem;font-size:.85rem;line-height:1.6">
+            <strong>🎮 Configuration Discord Webhook (gratuit)</strong>
             <ol style="padding-left:1.2em;margin-top:.4rem">
-              <li>Ajoutez ce numéro dans vos contacts WhatsApp : <code style="background:#fff3cd;padding:.1rem .3rem;border-radius:4px">+34 644 59 07 40</code></li>
-              <li>Envoyez-lui le message : <code style="background:#fff3cd;padding:.1rem .3rem;border-radius:4px">I allow callmebot to send me messages</code></li>
-              <li>Vous recevrez votre clé API par WhatsApp (ex: <code style="background:#fff3cd;padding:.1rem .3rem;border-radius:4px">1234567</code>)</li>
-              <li>Renseignez votre numéro et la clé ci-dessous, puis cliquez <strong>Test</strong>.</li>
+              <li>Dans Discord, ouvrez le canal cible → <strong>Paramètres du canal</strong> → <strong>Intégrations</strong> → <strong>Webhooks</strong></li>
+              <li>Cliquez <strong>Nouveau webhook</strong>, donnez-lui un nom (ex : CRISIS38), puis <strong>Copier l'URL du webhook</strong></li>
+              <li>Collez l'URL ci-dessous et cliquez <strong>Test</strong> pour vérifier.</li>
             </ol>
           </div>
 
-          <!-- Config WhatsApp -->
-          <div class="form" style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem">
-            <label>Numéro WhatsApp (format international)
-              <input type="tel" id="notif-wa-phone" placeholder="+33612345678" />
+          <!-- Config Discord -->
+          <div class="form" style="display:grid;grid-template-columns:1fr auto;gap:1rem;margin-bottom:1rem;align-items:end">
+            <label>URL du Webhook Discord
+              <input type="url" id="notif-discord-webhook" placeholder="https://discord.com/api/webhooks/..." style="font-size:.83rem" />
             </label>
-            <label>Clé API CallMeBot
-              <input type="text" id="notif-wa-apikey" placeholder="1234567" />
-            </label>
-            <label>Délai minimum entre 2 alertes du même service (minutes)
+            <button type="button" id="notif-test-btn" style="background:#5865f2;color:#fff;border:none;padding:.5rem 1rem;border-radius:8px;font-weight:600;cursor:pointer;font-size:.88rem;white-space:nowrap">
+              📤 Tester le webhook
+            </button>
+          </div>
+
+          <!-- Cooldown -->
+          <div class="form" style="margin-bottom:1rem">
+            <label style="max-width:320px">Délai minimum entre 2 alertes du même service (minutes)
               <input type="number" id="notif-cooldown" min="5" max="1440" value="60" />
             </label>
-            <div style="display:flex;align-items:flex-end;padding-bottom:.1rem">
-              <button type="button" id="notif-test-btn" style="background:#25d366;color:#fff;border:none;padding:.5rem 1rem;border-radius:8px;font-weight:600;cursor:pointer;font-size:.88rem">
-                📤 Envoyer un message test
-              </button>
-            </div>
           </div>
 
           <!-- Heures silencieuses -->
@@ -951,7 +949,7 @@
           <div style="display:flex;align-items:center;justify-content:space-between;background:#f0f2f5;border-radius:8px;padding:.7rem 1rem;margin-bottom:.5rem">
             <div>
               <strong>Notifications actives</strong>
-              <p class="muted" style="font-size:.8rem;margin:0">Active/désactive toutes les alertes WhatsApp</p>
+              <p class="muted" style="font-size:.8rem;margin:0">Active/désactive toutes les alertes Discord</p>
             </div>
             <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
               <input type="checkbox" id="notif-master-enabled" />
