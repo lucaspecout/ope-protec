@@ -66,7 +66,7 @@
           <button class="menu-btn" data-target="map-panel" data-icon="🗺️"><span class="menu-label">Carte Isère</span></button>
           <button class="menu-btn" data-target="users-panel" data-icon="👤"><span class="menu-label">Utilisateurs</span></button>
           <button class="menu-btn" data-target="api-panel" data-icon="🧩"><span class="menu-label">Interconnexions API</span></button>
-          <a href="/notifications.html" class="menu-btn" style="text-decoration:none;display:flex;align-items:center;gap:.5rem" target="_blank"><span style="font-size:1.1rem">🔔</span><span class="menu-label">Notifications</span></a>
+          <button class="menu-btn" data-target="notifications-panel" data-icon="🔔"><span class="menu-label">Notifications</span></button>
         </nav>
         <button id="logout-btn" class="danger">Déconnexion</button>
       </aside>
@@ -894,6 +894,88 @@
             <tbody id="users-table"></tbody>
           </table>
         </section>
+        <!-- ── Notifications WhatsApp ── -->
+        <section id="notifications-panel" class="panel view hidden" hidden>
+          <div class="flux-header">
+            <div>
+              <h3>🔔 Notifications WhatsApp</h3>
+              <p class="muted">Recevez des alertes automatiques sur WhatsApp quand un service dépasse un seuil configuré.</p>
+            </div>
+            <button id="notif-save-btn" type="button">💾 Enregistrer</button>
+          </div>
+
+          <!-- Aide CallMeBot -->
+          <div id="notif-help-box" style="background:#fffde7;border:1px solid #f9a825;border-radius:10px;padding:1rem 1.25rem;margin-bottom:1rem;font-size:.85rem;line-height:1.6">
+            <strong>📱 Configuration CallMeBot (gratuit)</strong>
+            <ol style="padding-left:1.2em;margin-top:.4rem">
+              <li>Ajoutez ce numéro dans vos contacts WhatsApp : <code style="background:#fff3cd;padding:.1rem .3rem;border-radius:4px">+34 644 59 07 40</code></li>
+              <li>Envoyez-lui le message : <code style="background:#fff3cd;padding:.1rem .3rem;border-radius:4px">I allow callmebot to send me messages</code></li>
+              <li>Vous recevrez votre clé API par WhatsApp (ex: <code style="background:#fff3cd;padding:.1rem .3rem;border-radius:4px">1234567</code>)</li>
+              <li>Renseignez votre numéro et la clé ci-dessous, puis cliquez <strong>Test</strong>.</li>
+            </ol>
+          </div>
+
+          <!-- Config WhatsApp -->
+          <div class="form" style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem">
+            <label>Numéro WhatsApp (format international)
+              <input type="tel" id="notif-wa-phone" placeholder="+33612345678" />
+            </label>
+            <label>Clé API CallMeBot
+              <input type="text" id="notif-wa-apikey" placeholder="1234567" />
+            </label>
+            <label>Délai minimum entre 2 alertes du même service (minutes)
+              <input type="number" id="notif-cooldown" min="5" max="1440" value="60" />
+            </label>
+            <div style="display:flex;align-items:flex-end;padding-bottom:.1rem">
+              <button type="button" id="notif-test-btn" style="background:#25d366;color:#fff;border:none;padding:.5rem 1rem;border-radius:8px;font-weight:600;cursor:pointer;font-size:.88rem">
+                📤 Envoyer un message test
+              </button>
+            </div>
+          </div>
+
+          <!-- Heures silencieuses -->
+          <div style="background:#f7f9fc;border:1px solid #e4e7eb;border-radius:10px;padding:.9rem 1.1rem;margin-bottom:1rem;display:flex;align-items:center;flex-wrap:wrap;gap:.75rem">
+            <strong style="font-size:.88rem">🌙 Heures silencieuses (UTC) :</strong>
+            <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin:0">
+              <input type="checkbox" id="notif-quiet-enabled" />
+              <span style="font-size:.85rem">Activer</span>
+            </label>
+            <span style="font-size:.85rem;color:#666">De</span>
+            <input type="time" id="notif-quiet-start" value="22:00" style="width:100px;padding:.3rem .5rem;border:1.5px solid #d1d9e0;border-radius:6px;font-size:.85rem" />
+            <span style="font-size:.85rem;color:#666">à</span>
+            <input type="time" id="notif-quiet-end" value="07:00" style="width:100px;padding:.3rem .5rem;border:1.5px solid #d1d9e0;border-radius:6px;font-size:.85rem" />
+            <span style="font-size:.78rem;color:#999">(aucune alerte envoyée pendant cette plage)</span>
+          </div>
+
+          <!-- Toggle global -->
+          <div style="display:flex;align-items:center;justify-content:space-between;background:#f0f2f5;border-radius:8px;padding:.7rem 1rem;margin-bottom:.5rem">
+            <div>
+              <strong>Notifications actives</strong>
+              <p class="muted" style="font-size:.8rem;margin:0">Active/désactive toutes les alertes WhatsApp</p>
+            </div>
+            <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
+              <input type="checkbox" id="notif-master-enabled" />
+              <span style="font-size:.85rem;font-weight:500">Activer</span>
+            </label>
+          </div>
+
+          <div id="notif-toast" style="min-height:32px;margin:.5rem 0"></div>
+
+          <!-- Liste des services -->
+          <div id="notif-services-list" style="border:1px solid #e4e7eb;border-radius:10px;overflow:hidden;margin-bottom:1rem">
+            <div class="muted" style="padding:1rem;text-align:center">Chargement…</div>
+          </div>
+
+          <!-- Journal -->
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
+            <strong>📋 Journal des notifications envoyées</strong>
+            <button type="button" id="notif-log-refresh-btn" style="font-size:.78rem;padding:.25rem .6rem">Actualiser</button>
+          </div>
+          <div id="notif-log-list" style="border:1px solid #e4e7eb;border-radius:10px;padding:.75rem;max-height:300px;overflow-y:auto;font-size:.83rem">
+            <div class="muted">Chargement…</div>
+          </div>
+        </section>
+
         <dialog id="situation-kpi-modal" class="municipality-details-modal situation-kpi-modal">
           <div class="municipality-details-modal__head">
             <h4 id="situation-kpi-modal-title">Détail KPI</h4>

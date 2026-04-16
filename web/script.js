@@ -73,6 +73,7 @@ const PANEL_TITLES = {
   'logs-panel': 'Main courante opérationnelle',
   'map-panel': 'Carte stratégique Isère',
   'users-panel': 'Gestion des utilisateurs',
+  'notifications-panel': 'Notifications WhatsApp',
 };
 
 const RESOURCE_TYPE_META = {
@@ -1929,6 +1930,10 @@ function setActivePanel(panelId) {
     loadApiInterconnections(false).catch((error) => {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
     });
+  }
+  if (panelId === 'notifications-panel' && token) {
+    _notifLoad();
+    _notifLoadLog();
   }
 }
 
@@ -10270,3 +10275,187 @@ document.getElementById('event-form')?.addEventListener('submit', async (event) 
     // Ne pas afficher de message d'erreur — l'utilisateur peut simplement se connecter.
   }
 })();
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   NOTIFICATIONS WHATSAPP
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const _NOTIF_SERVICES = [
+  { key: 'meteo_france',          label: 'Météo-France',               icon: '⛅', cat: 'Météo' },
+  { key: 'apic_isere',            label: 'APIC · Pluie intense',       icon: '🌧️', cat: 'Météo' },
+  { key: 'vigicrues',             label: 'Vigicrues',                  icon: '🌊', cat: 'Eau' },
+  { key: 'vigicrues_flash_isere', label: 'Vigicrues Flash',            icon: '⚡', cat: 'Eau' },
+  { key: 'vigieau',               label: 'Vigieau · Restrictions eau', icon: '💧', cat: 'Eau' },
+  { key: 'atmo_aura',             label: "Atmo AURA · Qualité de l'air", icon: '🌫️', cat: 'Environnement' },
+  { key: 'itinisere',             label: 'Itinisère · Transports',     icon: '🚌', cat: 'Transport' },
+  { key: 'sncf_isere',            label: 'SNCF Isère',                 icon: '🚆', cat: 'Transport' },
+  { key: 'ter_aura',              label: 'TER SNCF · AURA',            icon: '🚄', cat: 'Transport' },
+  { key: 'mreseau',               label: 'M Réseau · Grenoble',        icon: '🚊', cat: 'Transport' },
+  { key: 'aprr_isere',            label: 'APRR/AREA · Autoroutes',     icon: '🛣️', cat: 'Transport' },
+  { key: 'vinci_autoroutes',      label: 'Vinci Autoroutes · Isère',   icon: '🚧', cat: 'Transport' },
+  { key: 'cars_region_aura',      label: 'Cars Région · AURA',         icon: '🚐', cat: 'Transport' },
+  { key: 'electricity_isere',     label: 'RTE · Électricité',          icon: '⚡', cat: 'Énergie' },
+  { key: 'prefecture_isere',      label: 'Préfecture Isère',           icon: '🏛️', cat: 'Actualités' },
+  { key: 'france_bleu_isere',     label: 'France Bleu Isère',          icon: '📻', cat: 'Actualités' },
+];
+
+const _NOTIF_LEVELS = [
+  { value: 'jaune',  label: '🟡 Jaune (tout)' },
+  { value: 'orange', label: '🟠 Orange et +' },
+  { value: 'rouge',  label: '🔴 Rouge uniquement' },
+];
+
+function _notifToast(msg, type = 'info') {
+  const el = document.getElementById('notif-toast');
+  if (!el) return;
+  const colors = { success: '#e8f5e9', error: '#ffebee', info: '#e3f2fd' };
+  const borders = { success: '#a5d6a7', error: '#ef9a9a', info: '#90caf9' };
+  const textc   = { success: '#2e7d32', error: '#c62828', info: '#1565c0' };
+  el.innerHTML = `<div style="padding:.55rem .9rem;border-radius:8px;font-size:.85rem;font-weight:500;
+    background:${colors[type]||colors.info};border:1px solid ${borders[type]||borders.info};
+    color:${textc[type]||textc.info}">${escapeHtml(msg)}</div>`;
+  setTimeout(() => { if (el) el.innerHTML = ''; }, 5000);
+}
+
+function _notifRenderServices(cfg) {
+  const list = document.getElementById('notif-services-list');
+  if (!list) return;
+  let html = '';
+  let lastCat = null;
+  _NOTIF_SERVICES.forEach(svc => {
+    if (svc.cat !== lastCat) {
+      html += `<div style="padding:.35rem 1rem;background:#f0f2f5;font-size:.72rem;font-weight:700;
+        color:#888;letter-spacing:.08em;text-transform:uppercase;border-bottom:1px solid #e4e7eb">
+        ${escapeHtml(svc.cat)}</div>`;
+      lastCat = svc.cat;
+    }
+    const svCfg = ((cfg || {}).services || {})[svc.key] || {};
+    const checkedEnabled = svCfg.enabled ? 'checked' : '';
+    const threshold = svCfg.threshold || 'orange';
+    const opts = _NOTIF_LEVELS.map(l =>
+      `<option value="${l.value}"${threshold === l.value ? ' selected' : ''}>${escapeHtml(l.label)}</option>`
+    ).join('');
+    html += `<div style="display:flex;align-items:center;gap:.75rem;padding:.6rem 1rem;
+      border-bottom:1px solid #f0f2f5">
+      <span style="font-size:1.1rem;width:26px;text-align:center">${svc.icon}</span>
+      <span style="flex:1;font-size:.87rem;font-weight:500">${escapeHtml(svc.label)}</span>
+      <select data-notif-key="${escapeHtml(svc.key)}" class="notif-threshold-sel"
+        style="width:145px;padding:.25rem .4rem;border:1.5px solid #d1d9e0;border-radius:6px;font-size:.78rem">
+        ${opts}
+      </select>
+      <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:.83rem">
+        <input type="checkbox" data-notif-key="${escapeHtml(svc.key)}" class="notif-svc-chk" ${checkedEnabled} />
+        Actif
+      </label>
+    </div>`;
+  });
+  list.innerHTML = html || '<div class="muted" style="padding:1rem">Aucun service</div>';
+}
+
+function _notifCollect() {
+  const services = {};
+  document.querySelectorAll('.notif-svc-chk').forEach(cb => {
+    const key = cb.dataset.notifKey;
+    const sel = document.querySelector(`.notif-threshold-sel[data-notif-key="${key}"]`);
+    services[key] = { enabled: cb.checked, threshold: sel ? sel.value : 'orange' };
+  });
+  return {
+    enabled: !!(document.getElementById('notif-master-enabled') || {}).checked,
+    whatsapp_phone: ((document.getElementById('notif-wa-phone') || {}).value || '').trim(),
+    whatsapp_apikey: ((document.getElementById('notif-wa-apikey') || {}).value || '').trim(),
+    cooldown_minutes: parseInt((document.getElementById('notif-cooldown') || {}).value) || 60,
+    quiet_hours: {
+      enabled: !!(document.getElementById('notif-quiet-enabled') || {}).checked,
+      start: ((document.getElementById('notif-quiet-start') || {}).value) || '22:00',
+      end:   ((document.getElementById('notif-quiet-end')   || {}).value) || '07:00',
+    },
+    services,
+  };
+}
+
+function _notifApply(s) {
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el[typeof val === 'boolean' ? 'checked' : 'value'] = val; };
+  set('notif-master-enabled', !!s.enabled);
+  set('notif-wa-phone',   s.whatsapp_phone || '');
+  set('notif-wa-apikey',  s.whatsapp_apikey || '');
+  set('notif-cooldown',   s.cooldown_minutes || 60);
+  const qh = s.quiet_hours || {};
+  set('notif-quiet-enabled', !!qh.enabled);
+  set('notif-quiet-start', qh.start || '22:00');
+  set('notif-quiet-end',   qh.end   || '07:00');
+  _notifRenderServices(s);
+}
+
+async function _notifLoad() {
+  try {
+    const data = await api('/api/notifications/settings');
+    _notifApply(data || {});
+  } catch(e) {
+    _notifRenderServices({});
+    _notifToast('Impossible de charger la configuration : ' + (e.message || e), 'error');
+  }
+}
+
+async function _notifSave() {
+  const btn = document.getElementById('notif-save-btn');
+  if (btn) btn.disabled = true;
+  try {
+    await api('/api/notifications/settings', { method: 'PUT', body: _notifCollect() });
+    _notifToast('Configuration enregistrée', 'success');
+  } catch(e) {
+    _notifToast('Erreur sauvegarde : ' + (e.message || e), 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function _notifTest() {
+  const phone  = ((document.getElementById('notif-wa-phone')   || {}).value || '').trim();
+  const apikey = ((document.getElementById('notif-wa-apikey')  || {}).value || '').trim();
+  if (!phone || !apikey) { _notifToast('Renseignez le numéro et la clé API avant de tester', 'error'); return; }
+  const btn = document.getElementById('notif-test-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Envoi…'; }
+  try {
+    const r = await api('/api/notifications/test', { method: 'POST', body: { phone, apikey } });
+    if (r.success) _notifToast('✅ Message test envoyé — vérifiez votre WhatsApp', 'success');
+    else _notifToast('❌ Échec : ' + (r.detail || 'Erreur'), 'error');
+  } catch(e) {
+    _notifToast('Erreur : ' + (e.message || e), 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '📤 Envoyer un message test'; }
+  }
+}
+
+async function _notifLoadLog() {
+  const el = document.getElementById('notif-log-list');
+  if (!el) return;
+  try {
+    const data = await api('/api/notifications/log');
+    const entries = (data || {}).entries || [];
+    if (!entries.length) { el.innerHTML = '<div class="muted">Aucune notification envoyée pour l\'instant.</div>'; return; }
+    const LVL_EM = { rouge: '🔴', orange: '🟠', jaune: '🟡', vert: '🟢' };
+    el.innerHTML = entries.map(e => {
+      const em = LVL_EM[e.level] || 'ℹ️';
+      const ok = e.success ? '✅' : '❌';
+      let dateStr = '';
+      try { dateStr = new Date(e.sent_at).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }); } catch {}
+      return `<div style="display:flex;gap:.6rem;align-items:flex-start;padding:.5rem .6rem;border-bottom:1px solid #f0f2f5">
+        <span>${em}</span>
+        <div style="flex:1">
+          <span style="font-weight:500">${escapeHtml(e.label || e.service)}</span>
+          <span style="color:#999;font-size:.76rem;margin-left:.5rem">${escapeHtml(dateStr)} ${ok}</span>
+          ${e.detail ? `<div style="color:#777;font-size:.77rem">${escapeHtml(e.detail)}</div>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    el.innerHTML = '<div class="muted">Journal indisponible</div>';
+  }
+}
+
+// Brancher les boutons une fois le DOM prêt
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('notif-save-btn')?.addEventListener('click', _notifSave);
+  document.getElementById('notif-test-btn')?.addEventListener('click', _notifTest);
+  document.getElementById('notif-log-refresh-btn')?.addEventListener('click', _notifLoadLog);
+});
