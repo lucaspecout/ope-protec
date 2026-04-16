@@ -227,7 +227,7 @@ SERVICE_REFRESH_INTERVALS: dict[str, int] = {
     "mreseau":                120,   # M Réseau trams + bus + cars Grenoble
     "vigicrues_flash_isere":  180,
     "apic_isere":             180,
-    "electricity_isere":      180,
+    "electricity_isere":     1800,   # Ecowatt = signal journalier, 30 min suffit
     "dauphine_isere":         180,
     "aprr_isere":             180,
     "vinci_autoroutes":       180,

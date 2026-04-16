@@ -624,7 +624,7 @@ _DAUPHINE_CACHE_TTL_SECONDS = 300
 _VIGIEAU_CACHE_TTL_SECONDS = 900
 _ATMO_AURA_CACHE_TTL_SECONDS = 900
 _SNCF_ISERE_CACHE_TTL_SECONDS = 180
-_RTE_ELECTRICITY_CACHE_TTL_SECONDS = 300
+_RTE_ELECTRICITY_CACHE_TTL_SECONDS = 1800  # Ecowatt = signal journalier
 _FINESS_ISERE_CACHE_TTL_SECONDS = 43200
 _FINESS_ISERE_MAX_LIMIT = 20000
 _FINESS_ISERE_STABLE_CSV_URL = "https://static.data.gouv.fr/resources/finess-extraction-du-fichier-des-etablissements/20260312-094547/etalab-cs1100507-stock-20260311-0343.csv"
@@ -3929,8 +3929,21 @@ def _rte_electricity_risk_level(supply_margin_mw: int | float | None) -> str:
 
 
 def _rte_get_oauth_token(b64_creds: str, cache_key: str) -> str:
-    """Récupère (ou renouvelle) un token OAuth2 RTE via client_credentials.
-    Les tokens sont valides ~2h ; on les renouvelle 5min avant expiry."""
+    """Récupère (ou renouvelle) un token OAuth2 RTE.
+    Priorité : Redis (partagé entre workers) → mémoire locale → fetch réseau.
+    Les tokens RTE sont valides 2h ; on les renouvelle 10min avant expiry."""
+    redis_key = f"rte_oauth_token:{cache_key}"
+
+    # 1. Redis — partagé entre tous les workers Gunicorn
+    if _REDIS_OK and _redis is not None:
+        try:
+            cached_token = _redis.get(redis_key)
+            if cached_token:
+                return cached_token.decode() if isinstance(cached_token, bytes) else str(cached_token)
+        except Exception:
+            pass
+
+    # 2. Mémoire locale (fallback si Redis KO)
     with _rte_oauth_lock:
         cached = _rte_oauth_tokens.get(cache_key)
         if cached and datetime.utcnow() < cached["expires_at"]:
@@ -3951,15 +3964,22 @@ def _rte_get_oauth_token(b64_creds: str, cache_key: str) -> str:
     )
     resp.raise_for_status()
     data = resp.json()
-    token = data["access_token"]
+    token = str(data["access_token"])
     expires_in = int(data.get("expires_in", 7200))
+    ttl = max(expires_in - 600, 300)  # renouvelle 10min avant expiry
 
+    # Stocker dans Redis (partagé) et en mémoire locale
+    if _REDIS_OK and _redis is not None:
+        try:
+            _redis.setex(redis_key, ttl, token)
+        except Exception:
+            pass
     with _rte_oauth_lock:
         _rte_oauth_tokens[cache_key] = {
             "token": token,
-            "expires_at": datetime.utcnow() + timedelta(seconds=max(expires_in - 300, 60)),
+            "expires_at": datetime.utcnow() + timedelta(seconds=ttl),
         }
-    return str(token)
+    return token
 
 
 def _fetch_rte_isere_electricity_live() -> dict[str, Any]:
@@ -3984,33 +4004,34 @@ def _fetch_rte_isere_electricity_live() -> dict[str, Any]:
     errors: list[str] = []
 
     # ── 1. Signal Ecowatt (vert / orange / rouge) ──────────────────────────
+    # Le 429 propage jusqu'à _refresh_one_service qui conservera alors le slot précédent.
     ecowatt_level = "inconnu"
     ecowatt_message = ""
     ecowatt_today: dict[str, Any] = {}
-    try:
-        token = _rte_get_oauth_token(ecowatt_b64, "ecowatt")
-        resp = _requests.get(
-            f"{_RTE_BASE}/open_api/ecowatt/v5/signals",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=15,
-            verify=True,
-        )
-        resp.raise_for_status()
-        signals = resp.json().get("signals") or []
-        if signals:
-            today = signals[0]  # premier signal = aujourd'hui
-            dval = int(today.get("dvalue") or 1)
-            ecowatt_level = {1: "vert", 2: "orange", 3: "rouge"}.get(dval, "inconnu")
-            ecowatt_message = str(today.get("message") or "")
-            ecowatt_today = {
-                "jour": today.get("Jour") or today.get("jour"),
-                "dvalue": dval,
-                "level": ecowatt_level,
-                "message": ecowatt_message,
-                "generation_forecast_mw": today.get("GenerationForecast"),
-            }
-    except Exception as exc:
-        errors.append(f"Ecowatt: {exc}")
+    token = _rte_get_oauth_token(ecowatt_b64, "ecowatt")
+    resp_ecowatt = _requests.get(
+        f"{_RTE_BASE}/open_api/ecowatt/v5/signals",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=15,
+        verify=True,
+    )
+    if resp_ecowatt.status_code == 429:
+        retry_after = resp_ecowatt.headers.get("Retry-After", "?")
+        raise RuntimeError(f"Rate limit RTE Ecowatt 429 — retry-after {retry_after}s")
+    resp_ecowatt.raise_for_status()
+    signals = resp_ecowatt.json().get("signals") or []
+    if signals:
+        today_sig = signals[0]
+        dval = int(today_sig.get("dvalue") or 1)
+        ecowatt_level = {1: "vert", 2: "orange", 3: "rouge"}.get(dval, "inconnu")
+        ecowatt_message = str(today_sig.get("message") or "")
+        ecowatt_today = {
+            "jour": today_sig.get("Jour") or today_sig.get("jour"),
+            "dvalue": dval,
+            "level": ecowatt_level,
+            "message": ecowatt_message,
+            "generation_forecast_mw": today_sig.get("GenerationForecast"),
+        }
 
     # ── 2. Consommation nationale temps réel ───────────────────────────────
     consumption_mw: int | None = None
