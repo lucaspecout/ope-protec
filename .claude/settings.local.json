@@ -207,7 +207,8 @@
       "Bash(grep -oE 'href=\"[^\"?]{1,80}\"')",
       "Bash(python3)",
       "Bash(curl -s http://tipi.bison-fute.gouv.fr/bison-fute-ouvert/publicationsDIR/Evenementiel-DIR/cnir/RecapTraficFranceEntiere.html --max-time 20 -o /tmp/recap_trafic.html)",
-      "Bash(curl -s \"http://tipi.bison-fute.gouv.fr/bison-fute-ouvert/publicationsDIR/Evenementiel-DIR/cnir/RecapTraficFranceEntiere.html\" --max-time 20)"
+      "Bash(curl -s \"http://tipi.bison-fute.gouv.fr/bison-fute-ouvert/publicationsDIR/Evenementiel-DIR/cnir/RecapTraficFranceEntiere.html\" --max-time 20)",
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('main.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")"
     ]
   }
 }

@@ -2074,3 +2074,319 @@ def revoke_share(token: str, db: Session = Depends(get_db), _: User = Depends(re
     share.active = False
     db.commit()
     return {"status": "revoked"}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NOTIFICATIONS WHATSAPP (CallMeBot)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_NOTIF_SETTINGS_KEY = "notif:settings"
+_NOTIF_LAST_KEY_PREFIX = "notif:last:"
+_NOTIF_LOG_KEY = "notif:log"
+_NOTIF_MAX_LOG = 50
+
+_LEVEL_ORDER: dict[str, int] = {"vert": 0, "jaune": 1, "orange": 2, "rouge": 3}
+
+# Mapping service → libellé lisible
+_SERVICE_LABELS: dict[str, str] = {
+    "meteo_france": "Météo-France",
+    "apic_isere": "APIC · Pluie intense",
+    "vigicrues": "Vigicrues",
+    "vigicrues_flash_isere": "Vigicrues Flash",
+    "vigieau": "Vigieau · Restrictions eau",
+    "atmo_aura": "Atmo AURA · Qualité air",
+    "georisques": "Géorisques",
+    "itinisere": "Itinisère · Transports",
+    "sncf_isere": "SNCF Isère",
+    "ter_aura": "TER SNCF · AURA",
+    "mreseau": "M Réseau · Grenoble",
+    "aprr_isere": "APRR/AREA · Autoroutes",
+    "vinci_autoroutes": "Vinci Autoroutes",
+    "cars_region_aura": "Cars Région · AURA",
+    "electricity_isere": "RTE · Électricité",
+    "prefecture_isere": "Préfecture Isère",
+    "france_bleu_isere": "France Bleu Isère",
+    "bison_fute": "Bison Futé",
+}
+
+
+def _extract_service_level(key: str, data: dict) -> str:
+    """Retourne le niveau d'alerte normalisé (vert/jaune/orange/rouge) pour un service."""
+    if not data or data.get("status") in ("pending", "unavailable"):
+        return "vert"
+
+    # Météo / vigilance
+    if key == "meteo_france":
+        return str(data.get("level") or "vert").lower()
+    if key == "apic_isere":
+        return "jaune" if (data.get("alerts_total") or 0) > 0 else "vert"
+    if key == "vigicrues":
+        raw = str(data.get("water_alert_level") or "vert").lower()
+        return raw if raw in _LEVEL_ORDER else "vert"
+    if key == "vigicrues_flash_isere":
+        n = int(data.get("alerts_total") or 0)
+        return "orange" if n > 0 else "vert"
+    if key == "vigieau":
+        return "jaune" if len(data.get("alerts") or []) > 0 else "vert"
+    if key == "atmo_aura":
+        idx = int((data.get("today") or {}).get("index") or 0)
+        if idx >= 7: return "rouge"
+        if idx >= 5: return "orange"
+        if idx >= 3: return "jaune"
+        return "vert"
+
+    # Transport
+    if key in ("ter_aura", "mreseau", "cars_region_aura"):
+        n = int(data.get("disruptions_total") or len(data.get("disruptions") or []))
+        return "jaune" if n > 0 else "vert"
+    if key in ("aprr_isere", "vinci_autoroutes", "itinisere"):
+        n = int(data.get("events_total") or len(data.get("events") or []))
+        if n == 0:
+            return "vert"
+        # Prendre le pire niveau parmi les événements
+        worst = "jaune"
+        for evt in (data.get("events") or [])[:10]:
+            lvl = str(evt.get("level") or evt.get("severity") or "jaune").lower()
+            if _LEVEL_ORDER.get(lvl, 1) > _LEVEL_ORDER.get(worst, 1):
+                worst = lvl
+        return worst
+    if key == "sncf_isere":
+        return "jaune" if len(data.get("alerts") or []) > 0 else "vert"
+
+    # Énergie
+    if key == "electricity_isere":
+        raw = str(data.get("level") or "vert").lower()
+        return raw if raw in _LEVEL_ORDER else "vert"
+
+    # Fallback générique
+    raw = str(data.get("level") or data.get("alert_level") or "vert").lower()
+    return raw if raw in _LEVEL_ORDER else "vert"
+
+
+def _build_whatsapp_message(service_key: str, level: str, data: dict) -> str:
+    """Construit le message WhatsApp pour une alerte."""
+    label = _SERVICE_LABELS.get(service_key, service_key)
+    emoji = {"rouge": "🔴", "orange": "🟠", "jaune": "🟡", "vert": "🟢"}.get(level, "ℹ️")
+    now = datetime.utcnow().strftime("%d/%m/%Y %H:%M UTC")
+
+    lines = [f"{emoji} *ALERTE ISERE — {label}*", f"Niveau : *{level.upper()}*"]
+
+    # Résumé spécifique par service
+    if service_key == "meteo_france":
+        alerts = data.get("alerts") or []
+        if alerts:
+            lines.append(f"Phénomène : {alerts[0].get('phenomenon', '?')} ({alerts[0].get('department', '38')})")
+    elif service_key == "vigicrues":
+        stations = data.get("stations") or []
+        if stations:
+            s = stations[0]
+            lines.append(f"Station : {s.get('name', '?')} — cote {s.get('current_level_m', '?')} m")
+    elif service_key in ("ter_aura", "mreseau", "cars_region_aura"):
+        n = int(data.get("disruptions_total") or len(data.get("disruptions") or []))
+        lines.append(f"{n} perturbation(s) détectée(s)")
+        disps = (data.get("disruptions") or [])[:2]
+        for d in disps:
+            t = str(d.get("title") or d.get("description") or "")[:80]
+            if t:
+                lines.append(f"  • {t}")
+    elif service_key in ("aprr_isere", "vinci_autoroutes"):
+        n = int(data.get("events_total") or len(data.get("events") or []))
+        lines.append(f"{n} événement(s) sur autoroute")
+        evts = (data.get("events") or [])[:2]
+        for e in evts:
+            t = str(e.get("title") or e.get("description") or "")[:80]
+            if t:
+                lines.append(f"  • {e.get('road', '')} {t}")
+    elif service_key == "electricity_isere":
+        margin = data.get("supply_margin_mw")
+        if margin is not None:
+            lines.append(f"Marge d'approvisionnement : {margin} MW")
+    elif service_key == "atmo_aura":
+        today = data.get("today") or {}
+        lbl = today.get("label") or ""
+        idx = today.get("index") or ""
+        if lbl:
+            lines.append(f"Indice qualité air : {idx} — {lbl}")
+
+    lines.append(f"_📍 Isère — {now}_")
+    lines.append("_Via CRISIS38 · Centre opérationnel_")
+    return "\n".join(lines)
+
+
+def _send_whatsapp_callmebot(phone: str, apikey: str, message: str) -> tuple[bool, str]:
+    """Envoie un message WhatsApp via CallMeBot. Retourne (success, detail)."""
+    import urllib.request, urllib.parse
+    try:
+        url = "https://api.callmebot.com/whatsapp.php?" + urllib.parse.urlencode({
+            "phone": phone,
+            "text": message,
+            "apikey": apikey,
+        })
+        req = urllib.request.Request(url, headers={"User-Agent": "CRISIS38/1.0"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = resp.read().decode("utf-8", errors="replace")[:300]
+            ok = resp.status == 200 and "Message queued" in body
+            return ok, body[:100]
+    except Exception as exc:
+        return False, str(exc)[:100]
+
+
+def _load_notif_settings() -> dict:
+    """Charge les paramètres de notification depuis Redis."""
+    if not _REDIS_OK or _redis is None:
+        return {}
+    try:
+        raw = _redis.get(_NOTIF_SETTINGS_KEY)
+        return json.loads(raw) if raw else {}
+    except Exception:
+        return {}
+
+
+def _save_notif_log(entry: dict) -> None:
+    """Ajoute une entrée au journal des notifications (Redis list, max 50)."""
+    if not _REDIS_OK or _redis is None:
+        return
+    try:
+        _redis.lpush(_NOTIF_LOG_KEY, json.dumps(entry, default=str))
+        _redis.ltrim(_NOTIF_LOG_KEY, 0, _NOTIF_MAX_LOG - 1)
+    except Exception:
+        pass
+
+
+def _check_and_send_notifications(service_key: str, data: dict) -> None:
+    """Vérifie si une notification doit être envoyée pour un service après mise à jour.
+    Appelé dans un thread background — ne lève jamais d'exception."""
+    try:
+        settings_d = _load_notif_settings()
+        if not settings_d.get("enabled"):
+            return
+        phone = str(settings_d.get("whatsapp_phone") or "").strip()
+        apikey = str(settings_d.get("whatsapp_apikey") or "").strip()
+        if not phone or not apikey:
+            return
+
+        svc_cfg = (settings_d.get("services") or {}).get(service_key) or {}
+        if not svc_cfg.get("enabled"):
+            return
+
+        threshold = str(svc_cfg.get("threshold") or "orange").lower()
+        current_level = _extract_service_level(service_key, data)
+
+        # Comparer niveau courant vs seuil configuré
+        if _LEVEL_ORDER.get(current_level, 0) < _LEVEL_ORDER.get(threshold, 1):
+            return
+
+        # Heures silencieuses
+        now_utc = datetime.utcnow()
+        quiet = settings_d.get("quiet_hours") or {}
+        if quiet.get("enabled"):
+            try:
+                start_h, start_m = map(int, quiet.get("start", "22:00").split(":"))
+                end_h, end_m = map(int, quiet.get("end", "07:00").split(":"))
+                now_min = now_utc.hour * 60 + now_utc.minute
+                start_min = start_h * 60 + start_m
+                end_min = end_h * 60 + end_m
+                in_quiet = (start_min > end_min and (now_min >= start_min or now_min < end_min)) \
+                    or (start_min <= end_min and start_min <= now_min < end_min)
+                if in_quiet:
+                    return
+            except Exception:
+                pass
+
+        # Cooldown : ne pas renvoyer la même alerte avant N minutes
+        cooldown_min = int(settings_d.get("cooldown_minutes") or 60)
+        if _REDIS_OK and _redis is not None:
+            last_key = _NOTIF_LAST_KEY_PREFIX + service_key
+            last_sent = _redis.get(last_key)
+            if last_sent:
+                try:
+                    last_dt = datetime.fromisoformat(last_sent)
+                    if (now_utc - last_dt).total_seconds() < cooldown_min * 60:
+                        return
+                except Exception:
+                    pass
+
+        # Envoyer
+        message = _build_whatsapp_message(service_key, current_level, data)
+        ok, detail = _send_whatsapp_callmebot(phone, apikey, message)
+
+        # Enregistrer dans le log
+        log_entry = {
+            "service": service_key,
+            "label": _SERVICE_LABELS.get(service_key, service_key),
+            "level": current_level,
+            "sent_at": now_utc.isoformat() + "Z",
+            "success": ok,
+            "detail": detail,
+        }
+        _save_notif_log(log_entry)
+
+        # Mettre à jour le timestamp de dernière notification (TTL = cooldown)
+        if _REDIS_OK and _redis is not None:
+            _redis.setex(_NOTIF_LAST_KEY_PREFIX + service_key, cooldown_min * 60, now_utc.isoformat())
+
+    except Exception:
+        pass
+
+
+# Injecter le hook dans _update_service_slot
+_orig_update_service_slot = _update_service_slot
+
+
+def _update_service_slot_with_notif(key: str, result: dict) -> None:
+    _orig_update_service_slot(key, result)
+    # Lancer la vérification en thread séparé pour ne pas bloquer la boucle de refresh
+    Thread(target=_check_and_send_notifications, args=(key, result), daemon=True).start()
+
+
+_update_service_slot = _update_service_slot_with_notif  # type: ignore[assignment]
+
+
+# ── Endpoints notification ────────────────────────────────────────────────────
+
+@app.get("/api/notifications/settings")
+def get_notif_settings(_: User = Depends(require_roles("admin", "ope"))):
+    return _load_notif_settings()
+
+
+@app.put("/api/notifications/settings")
+def save_notif_settings(payload: dict, _: User = Depends(require_roles("admin", "ope"))):
+    if not _REDIS_OK or _redis is None:
+        raise HTTPException(503, "Redis indisponible — paramètres non sauvegardables")
+    try:
+        _redis.set(_NOTIF_SETTINGS_KEY, json.dumps(payload, default=str))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+    return {"status": "saved"}
+
+
+@app.post("/api/notifications/test")
+def test_notif(payload: dict, _: User = Depends(require_roles("admin", "ope"))):
+    phone = str(payload.get("phone") or "").strip()
+    apikey = str(payload.get("apikey") or "").strip()
+    if not phone or not apikey:
+        raise HTTPException(400, "phone et apikey requis")
+    msg = (
+        "✅ *Test CRISIS38*\n"
+        "Les notifications WhatsApp sont correctement configurées.\n"
+        f"_Envoyé le {datetime.utcnow().strftime('%d/%m/%Y %H:%M UTC')}_"
+    )
+    ok, detail = _send_whatsapp_callmebot(phone, apikey, msg)
+    return {"success": ok, "detail": detail}
+
+
+@app.get("/api/notifications/log")
+def get_notif_log(_: User = Depends(require_roles("admin", "ope"))):
+    if not _REDIS_OK or _redis is None:
+        return {"entries": []}
+    try:
+        raw_list = _redis.lrange(_NOTIF_LOG_KEY, 0, _NOTIF_MAX_LOG - 1)
+        entries = []
+        for r in raw_list:
+            try:
+                entries.append(json.loads(r))
+            except Exception:
+                pass
+        return {"entries": entries}
+    except Exception:
+        return {"entries": []}

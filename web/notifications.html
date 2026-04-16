@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CRISIS38 · Notifications WhatsApp</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', sans-serif; background: #f0f2f5; color: #1a1d23; min-height: 100vh; }
+
+    /* ── Header ── */
+    .top-bar {
+      background: #1a1d23; color: #fff; display: flex; align-items: center;
+      gap: 1rem; padding: .75rem 1.5rem; position: sticky; top: 0; z-index: 100;
+      box-shadow: 0 2px 8px rgba(0,0,0,.3);
+    }
+    .top-bar a { color: #8bb6f0; font-size: .85rem; text-decoration: none; }
+    .top-bar a:hover { text-decoration: underline; }
+    .top-bar h1 { font-size: 1rem; font-weight: 600; flex: 1; }
+    .top-bar .badge-connected { background: #25d366; color: #fff; font-size: .7rem; padding: .2rem .5rem; border-radius: 20px; font-weight: 600; }
+
+    /* ── Layout ── */
+    .page { max-width: 900px; margin: 0 auto; padding: 1.5rem; display: flex; flex-direction: column; gap: 1.5rem; }
+
+    /* ── Cards ── */
+    .card { background: #fff; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.08); overflow: hidden; }
+    .card-head {
+      padding: .9rem 1.25rem; border-bottom: 1px solid #e8ecf0;
+      display: flex; align-items: center; gap: .6rem;
+      font-weight: 600; font-size: .95rem;
+    }
+    .card-head .icon { font-size: 1.2rem; }
+    .card-body { padding: 1.25rem; }
+
+    /* ── Form elements ── */
+    label { display: block; font-size: .85rem; font-weight: 500; color: #555; margin-bottom: .3rem; }
+    input[type="text"], input[type="tel"], input[type="number"], select {
+      width: 100%; padding: .5rem .75rem; border: 1.5px solid #d1d9e0; border-radius: 8px;
+      font-family: inherit; font-size: .9rem; background: #fafbfc;
+      transition: border-color .15s;
+    }
+    input:focus, select:focus { outline: none; border-color: #4a90d9; background: #fff; }
+    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
+    .field-row.full { grid-template-columns: 1fr; }
+    .field { }
+
+    /* ── Toggle switch ── */
+    .toggle-wrap { display: flex; align-items: center; gap: .75rem; }
+    .toggle { position: relative; width: 44px; height: 24px; flex-shrink: 0; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider {
+      position: absolute; inset: 0; background: #ccc; border-radius: 24px; cursor: pointer;
+      transition: background .2s;
+    }
+    .toggle-slider::before {
+      content: ''; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px;
+      background: #fff; border-radius: 50%; transition: transform .2s;
+      box-shadow: 0 1px 3px rgba(0,0,0,.2);
+    }
+    .toggle input:checked + .toggle-slider { background: #25d366; }
+    .toggle input:checked + .toggle-slider::before { transform: translateX(20px); }
+
+    /* ── Master toggle ── */
+    .master-toggle-wrap {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: .75rem 1.25rem; background: #f7f9fc; border-bottom: 1px solid #e8ecf0;
+    }
+    .master-toggle-wrap .toggle-label { font-weight: 600; font-size: .95rem; }
+    .master-toggle-wrap .toggle-hint { font-size: .8rem; color: #888; }
+
+    /* ── Services list ── */
+    .services-list { display: flex; flex-direction: column; gap: 0; }
+    .svc-row {
+      display: flex; align-items: center; gap: 1rem; padding: .75rem 1.25rem;
+      border-bottom: 1px solid #f0f2f5; transition: background .1s;
+    }
+    .svc-row:last-child { border-bottom: none; }
+    .svc-row:hover { background: #f9fafb; }
+    .svc-icon { font-size: 1.2rem; width: 28px; text-align: center; flex-shrink: 0; }
+    .svc-label { flex: 1; font-size: .88rem; font-weight: 500; }
+    .svc-category { font-size: .74rem; color: #999; font-weight: 400; display: block; }
+    .svc-threshold { width: 130px; flex-shrink: 0; }
+    .svc-threshold select { padding: .3rem .5rem; font-size: .8rem; }
+    .svc-toggle { flex-shrink: 0; }
+
+    /* ── Category separator ── */
+    .category-sep {
+      padding: .4rem 1.25rem; background: #f0f2f5;
+      font-size: .72rem; font-weight: 700; color: #888; letter-spacing: .08em; text-transform: uppercase;
+      border-bottom: 1px solid #e4e7eb;
+    }
+
+    /* ── Buttons ── */
+    .btn { display: inline-flex; align-items: center; gap: .4rem; padding: .55rem 1.1rem; border-radius: 8px; border: none; font-family: inherit; font-size: .88rem; font-weight: 600; cursor: pointer; transition: opacity .15s, transform .1s; }
+    .btn:active { transform: scale(.97); }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-primary { background: #1a73e8; color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: #1558b0; }
+    .btn-success { background: #25d366; color: #fff; }
+    .btn-success:hover:not(:disabled) { background: #1aad50; }
+    .btn-outline { background: transparent; border: 1.5px solid #d1d9e0; color: #444; }
+    .btn-outline:hover { background: #f5f7fa; }
+    .btn-danger { background: #e53935; color: #fff; }
+    .action-row { display: flex; gap: .75rem; flex-wrap: wrap; margin-top: 1rem; }
+
+    /* ── Alerts / toast ── */
+    .toast {
+      padding: .7rem 1rem; border-radius: 8px; font-size: .87rem; font-weight: 500;
+      display: flex; align-items: center; gap: .5rem; animation: fadeIn .2s ease;
+    }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; } }
+    .toast-success { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
+    .toast-error   { background: #ffebee; color: #c62828; border: 1px solid #ef9a9a; }
+    .toast-info    { background: #e3f2fd; color: #1565c0; border: 1px solid #90caf9; }
+    #toast-zone { min-height: 40px; }
+
+    /* ── Notification log ── */
+    .log-list { display: flex; flex-direction: column; gap: .5rem; max-height: 380px; overflow-y: auto; }
+    .log-entry {
+      display: flex; align-items: flex-start; gap: .75rem; padding: .6rem .9rem;
+      border-radius: 8px; border: 1px solid #e8ecf0; background: #fafbfc; font-size: .83rem;
+    }
+    .log-entry.ok  { border-left: 3px solid #25d366; }
+    .log-entry.err { border-left: 3px solid #e53935; }
+    .log-level { font-weight: 700; min-width: 55px; }
+    .log-service { flex: 1; font-weight: 500; }
+    .log-date { color: #999; font-size: .76rem; white-space: nowrap; }
+    .log-detail { color: #777; font-size: .77rem; margin-top: .1rem; }
+
+    /* ── Help box ── */
+    .help-box { background: #fffde7; border: 1px solid #f9a825; border-radius: 10px; padding: 1rem 1.25rem; font-size: .85rem; line-height: 1.6; }
+    .help-box ol { padding-left: 1.2em; margin-top: .5rem; }
+    .help-box li { margin-bottom: .3rem; }
+    .help-box code { background: #fff3cd; padding: .1rem .3rem; border-radius: 4px; font-family: monospace; }
+    .help-box a { color: #e65100; }
+
+    /* ── Quiet hours ── */
+    .quiet-row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+    .quiet-row input[type="time"] {
+      width: 110px; padding: .4rem .6rem; border: 1.5px solid #d1d9e0; border-radius: 8px;
+      font-family: inherit; font-size: .88rem;
+    }
+
+    /* ── Loading ── */
+    .loading { color: #888; font-size: .9rem; padding: 1rem; text-align: center; }
+
+    @media(max-width: 600px) {
+      .field-row { grid-template-columns: 1fr; }
+      .svc-threshold { width: 100px; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="top-bar">
+  <a href="/">← Retour à CRISIS38</a>
+  <h1>🔔 Notifications WhatsApp</h1>
+  <span id="redis-badge" class="badge-connected" style="display:none">Redis ✓</span>
+</div>
+
+<div class="page">
+
+  <!-- Toast zone -->
+  <div id="toast-zone"></div>
+
+  <!-- Aide CallMeBot -->
+  <div class="help-box">
+    <strong>📱 Configuration CallMeBot (gratuit)</strong>
+    <ol>
+      <li>Ajoutez ce numéro à vos contacts WhatsApp : <code>+34 644 59 07 40</code></li>
+      <li>Envoyez-lui le message : <code>I allow callmebot to send me messages</code></li>
+      <li>Vous recevrez votre clé API par WhatsApp (ex: <code>1234567</code>)</li>
+      <li>Renseignez votre numéro et la clé ci-dessous, puis testez.</li>
+    </ol>
+    <div style="margin-top:.5rem;font-size:.8rem;color:#777">
+      Limite gratuite : ~120 messages/jour. Votre numéro doit avoir WhatsApp actif.
+    </div>
+  </div>
+
+  <!-- Config WhatsApp -->
+  <div class="card">
+    <div class="card-head"><span class="icon">📱</span> Connexion WhatsApp</div>
+    <div class="card-body">
+      <div class="field-row">
+        <div class="field">
+          <label for="wa-phone">Numéro WhatsApp (format international)</label>
+          <input type="tel" id="wa-phone" placeholder="+33612345678" />
+        </div>
+        <div class="field">
+          <label for="wa-apikey">Clé API CallMeBot</label>
+          <input type="text" id="wa-apikey" placeholder="1234567" />
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label for="cooldown">Délai minimum entre 2 alertes du même service (minutes)</label>
+          <input type="number" id="cooldown" min="5" max="1440" value="60" />
+        </div>
+        <div class="field" style="display:flex;flex-direction:column;justify-content:flex-end">
+          <div class="action-row" style="margin-top:0">
+            <button class="btn btn-success" id="btn-test">📤 Envoyer un message test</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Heures silencieuses -->
+  <div class="card">
+    <div class="card-head"><span class="icon">🌙</span> Heures silencieuses</div>
+    <div class="card-body">
+      <p style="font-size:.85rem;color:#666;margin-bottom:.75rem">Aucune notification envoyée pendant cette plage horaire (heure UTC).</p>
+      <div class="quiet-row">
+        <label class="toggle-wrap" style="gap:.6rem;cursor:pointer">
+          <span class="toggle">
+            <input type="checkbox" id="quiet-enabled" />
+            <span class="toggle-slider"></span>
+          </span>
+          <span style="font-size:.88rem;font-weight:500">Activer les heures silencieuses</span>
+        </label>
+        <span style="font-size:.85rem;color:#666">De</span>
+        <input type="time" id="quiet-start" value="22:00" />
+        <span style="font-size:.85rem;color:#666">à</span>
+        <input type="time" id="quiet-end" value="07:00" />
+        <span style="font-size:.8rem;color:#999">(ex: 22:00 → 07:00 = nuit)</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Activation globale + services -->
+  <div class="card">
+    <div class="master-toggle-wrap">
+      <div>
+        <div class="toggle-label">Notifications actives</div>
+        <div class="toggle-hint">Activer/désactiver toutes les notifications</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="notif-enabled" />
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+
+    <div class="services-list" id="services-list">
+      <div class="loading">Chargement des services…</div>
+    </div>
+  </div>
+
+  <!-- Actions globales -->
+  <div class="action-row">
+    <button class="btn btn-primary" id="btn-save">💾 Enregistrer la configuration</button>
+    <button class="btn btn-outline" id="btn-reload">🔄 Recharger depuis le serveur</button>
+  </div>
+
+  <!-- Journal -->
+  <div class="card">
+    <div class="card-head" style="justify-content:space-between">
+      <span><span class="icon">📋</span> Journal des notifications envoyées</span>
+      <button class="btn btn-outline" id="btn-refresh-log" style="padding:.3rem .7rem;font-size:.78rem">Actualiser</button>
+    </div>
+    <div class="card-body">
+      <div class="log-list" id="log-list"><div class="loading">Chargement…</div></div>
+    </div>
+  </div>
+
+</div><!-- /page -->
+
+<script>
+'use strict';
+
+// ── Services définition ──────────────────────────────────────────────────────
+const SERVICES = [
+  // Météo
+  { key: 'meteo_france',           label: 'Météo-France',                    icon: '⛅', cat: 'Météo' },
+  { key: 'apic_isere',             label: 'APIC · Pluie intense',            icon: '🌧️', cat: 'Météo' },
+  // Eau
+  { key: 'vigicrues',              label: 'Vigicrues',                       icon: '🌊', cat: 'Eau' },
+  { key: 'vigicrues_flash_isere',  label: 'Vigicrues Flash',                 icon: '⚡', cat: 'Eau' },
+  { key: 'vigieau',                label: 'Vigieau · Restrictions eau',      icon: '💧', cat: 'Eau' },
+  // Environnement
+  { key: 'atmo_aura',              label: "Atmo AURA · Qualité de l'air",    icon: '🌫️', cat: 'Environnement' },
+  // Transport
+  { key: 'itinisere',              label: 'Itinisère · Transports',          icon: '🚌', cat: 'Transport' },
+  { key: 'sncf_isere',             label: 'SNCF Isère',                      icon: '🚆', cat: 'Transport' },
+  { key: 'ter_aura',               label: 'TER SNCF · AURA',                 icon: '🚄', cat: 'Transport' },
+  { key: 'mreseau',                label: 'M Réseau · Grenoble',             icon: '🚊', cat: 'Transport' },
+  { key: 'aprr_isere',             label: 'APRR/AREA · Autoroutes',          icon: '🛣️', cat: 'Transport' },
+  { key: 'vinci_autoroutes',       label: 'Vinci Autoroutes · Isère',        icon: '🚧', cat: 'Transport' },
+  { key: 'cars_region_aura',       label: 'Cars Région · AURA',              icon: '🚐', cat: 'Transport' },
+  // Énergie
+  { key: 'electricity_isere',      label: 'RTE · Électricité',               icon: '⚡', cat: 'Énergie' },
+  // Actualités
+  { key: 'prefecture_isere',       label: 'Préfecture Isère',                icon: '🏛️', cat: 'Actualités' },
+  { key: 'france_bleu_isere',      label: 'France Bleu Isère',               icon: '📻', cat: 'Actualités' },
+];
+
+const LEVELS = [
+  { value: 'jaune',  label: '🟡 Jaune (tout)', color: '#9a7700' },
+  { value: 'orange', label: '🟠 Orange+',      color: '#b46a00' },
+  { value: 'rouge',  label: '🔴 Rouge seul',   color: '#c22f43' },
+];
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+const token = localStorage.getItem('access_token');
+if (!token) { window.location.href = '/'; }
+
+function authHeaders() {
+  return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };
+}
+
+// ── Utils ────────────────────────────────────────────────────────────────────
+function toast(msg, type = 'info') {
+  const z = document.getElementById('toast-zone');
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.textContent = msg;
+  z.innerHTML = '';
+  z.appendChild(el);
+  setTimeout(() => el.remove(), 5000);
+}
+
+function fmtDate(iso) {
+  if (!iso) return '';
+  try {
+    return new Date(iso).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+  } catch { return iso.substring(0, 16); }
+}
+
+// ── Render services list ─────────────────────────────────────────────────────
+let _cfg = {};
+
+function renderServices(cfg) {
+  _cfg = cfg;
+  const list = document.getElementById('services-list');
+  let html = '';
+  let lastCat = null;
+
+  SERVICES.forEach(svc => {
+    if (svc.cat !== lastCat) {
+      html += `<div class="category-sep">${svc.cat}</div>`;
+      lastCat = svc.cat;
+    }
+    const svCfg = (cfg.services || {})[svc.key] || {};
+    const enabled = svCfg.enabled !== false ? false : false; // default off
+    const checkedEnabled = svCfg.enabled ? 'checked' : '';
+    const threshold = svCfg.threshold || 'orange';
+
+    const levelOptions = LEVELS.map(l =>
+      `<option value="${l.value}" ${threshold === l.value ? 'selected' : ''}>${l.label}</option>`
+    ).join('');
+
+    html += `
+      <div class="svc-row">
+        <span class="svc-icon">${svc.icon}</span>
+        <div class="svc-label">
+          ${svc.label}
+          <span class="svc-category">${svc.cat}</span>
+        </div>
+        <div class="svc-threshold">
+          <select data-key="${svc.key}" class="threshold-select" title="Niveau d'alerte minimum">
+            ${levelOptions}
+          </select>
+        </div>
+        <div class="svc-toggle">
+          <label class="toggle" title="Activer les notifications pour ce service">
+            <input type="checkbox" data-key="${svc.key}" class="svc-check" ${checkedEnabled} />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>`;
+  });
+
+  list.innerHTML = html;
+}
+
+// ── Collect current form state ────────────────────────────────────────────────
+function collectSettings() {
+  const services = {};
+  document.querySelectorAll('.svc-check').forEach(cb => {
+    const key = cb.dataset.key;
+    const sel = document.querySelector(`.threshold-select[data-key="${key}"]`);
+    services[key] = { enabled: cb.checked, threshold: sel ? sel.value : 'orange' };
+  });
+  return {
+    enabled: document.getElementById('notif-enabled').checked,
+    whatsapp_phone: document.getElementById('wa-phone').value.trim(),
+    whatsapp_apikey: document.getElementById('wa-apikey').value.trim(),
+    cooldown_minutes: parseInt(document.getElementById('cooldown').value) || 60,
+    quiet_hours: {
+      enabled: document.getElementById('quiet-enabled').checked,
+      start: document.getElementById('quiet-start').value || '22:00',
+      end: document.getElementById('quiet-end').value || '07:00',
+    },
+    services,
+  };
+}
+
+// ── Apply settings to form ────────────────────────────────────────────────────
+function applySettings(s) {
+  document.getElementById('notif-enabled').checked = !!s.enabled;
+  document.getElementById('wa-phone').value = s.whatsapp_phone || '';
+  document.getElementById('wa-apikey').value = s.whatsapp_apikey || '';
+  document.getElementById('cooldown').value = s.cooldown_minutes || 60;
+  const qh = s.quiet_hours || {};
+  document.getElementById('quiet-enabled').checked = !!qh.enabled;
+  document.getElementById('quiet-start').value = qh.start || '22:00';
+  document.getElementById('quiet-end').value = qh.end || '07:00';
+  renderServices(s);
+}
+
+// ── Load settings from server ─────────────────────────────────────────────────
+async function loadSettings() {
+  try {
+    const r = await fetch('/api/notifications/settings', { headers: authHeaders() });
+    if (r.status === 401) { window.location.href = '/'; return; }
+    const data = await r.json();
+    applySettings(data || {});
+    document.getElementById('redis-badge').style.display = 'inline';
+  } catch(e) {
+    toast('Impossible de charger la configuration : ' + e.message, 'error');
+    renderServices({});
+  }
+}
+
+// ── Save settings ─────────────────────────────────────────────────────────────
+document.getElementById('btn-save').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-save');
+  btn.disabled = true;
+  try {
+    const payload = collectSettings();
+    const r = await fetch('/api/notifications/settings', {
+      method: 'PUT',
+      headers: authHeaders(),
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    toast('Configuration enregistrée avec succès', 'success');
+  } catch(e) {
+    toast('Erreur lors de la sauvegarde : ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// ── Reload ────────────────────────────────────────────────────────────────────
+document.getElementById('btn-reload').addEventListener('click', async () => {
+  await loadSettings();
+  toast('Configuration rechargée', 'info');
+});
+
+// ── Test notification ─────────────────────────────────────────────────────────
+document.getElementById('btn-test').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-test');
+  const phone = document.getElementById('wa-phone').value.trim();
+  const apikey = document.getElementById('wa-apikey').value.trim();
+  if (!phone || !apikey) {
+    toast('Renseignez votre numéro et la clé API avant de tester', 'error');
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = '⏳ Envoi en cours…';
+  try {
+    const r = await fetch('/api/notifications/test', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ phone, apikey }),
+    });
+    const data = await r.json();
+    if (data.success) {
+      toast('✅ Message test envoyé sur WhatsApp ! Vérifiez votre téléphone.', 'success');
+    } else {
+      toast('❌ Échec de l\'envoi : ' + (data.detail || 'Erreur inconnue'), 'error');
+    }
+  } catch(e) {
+    toast('Erreur : ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '📤 Envoyer un message test';
+  }
+});
+
+// ── Notification log ──────────────────────────────────────────────────────────
+const LEVEL_COLORS = { rouge: '#c22f43', orange: '#b46a00', jaune: '#9a7700', vert: '#2f9e44' };
+const LEVEL_EMOJI  = { rouge: '🔴', orange: '🟠', jaune: '🟡', vert: '🟢' };
+
+async function loadLog() {
+  const el = document.getElementById('log-list');
+  try {
+    const r = await fetch('/api/notifications/log', { headers: authHeaders() });
+    const data = await r.json();
+    const entries = data.entries || [];
+    if (!entries.length) {
+      el.innerHTML = '<div class="loading">Aucune notification envoyée pour l\'instant.</div>';
+      return;
+    }
+    el.innerHTML = entries.map(e => {
+      const em = LEVEL_EMOJI[e.level] || 'ℹ️';
+      const cl = e.success ? 'ok' : 'err';
+      const sentIcon = e.success ? '✅' : '❌';
+      return `<div class="log-entry ${cl}">
+        <span style="font-size:1.1rem">${em}</span>
+        <div style="flex:1">
+          <div style="display:flex;gap:.5rem;align-items:baseline">
+            <span class="log-service">${e.label || e.service}</span>
+            <span class="log-date">${fmtDate(e.sent_at)}</span>
+            <span style="font-size:.78rem">${sentIcon}</span>
+          </div>
+          <div class="log-detail">${e.detail || ''}</div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    el.innerHTML = '<div class="loading">Impossible de charger le journal.</div>';
+  }
+}
+
+document.getElementById('btn-refresh-log').addEventListener('click', loadLog);
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+loadSettings();
+loadLog();
+</script>
+</body>
+</html>
