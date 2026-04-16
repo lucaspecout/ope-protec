@@ -6627,38 +6627,172 @@ _aprr_isere_cache_lock = Lock()
 _aprr_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "aprr_isere"}
 _APRR_ISERE_ROUTES = ["A41", "A43", "A48", "A51"]
 
+# Routes APRR/AREA passant par ou desservant l'Isère
+_APRR_ISERE_ROAD_SET: frozenset[str] = frozenset({
+    "A41", "A43", "A48", "A51", "A480", "A49",
+})
+_APRR_ROAD_PATTERN = re.compile(r'\b(A41|A43|A48|A51|A480|A49)\b', re.IGNORECASE)
 
-_APRR_ROAD_PATTERN = re.compile(r'\bA(41|43|48|51)\b', re.IGNORECASE)
+# URL de la synthèse nationale Bison Futé — inclut DATEX2 de APRR/AREA/Escota (réseau concédé)
+_BISON_RECAP_URL = (
+    "http://tipi.bison-fute.gouv.fr/bison-fute-ouvert/publicationsDIR/"
+    "Evenementiel-DIR/cnir/RecapTraficFranceEntiere.html"
+)
+
+
+def _parse_bison_recap_aprr(html: str) -> list[dict[str, Any]]:
+    """Extrait les événements APRR/AREA depuis la page HTML récapitulative Bison Futé.
+
+    La page contient des blocs <div class="interligne"> structurés avec des <span qname="...">
+    pour chaque champ (axe, nature, commune, commentaire, origine…).
+    Elle agrège tous les opérateurs y compris les réseaux concédés (SCA APRR/AREA DATEXII).
+    """
+    events: list[dict[str, Any]] = []
+
+    def _span(block: str, qname: str) -> str:
+        m = re.search(rf'qname="{re.escape(qname)}"[^>]*>(.*?)</span>', block, re.DOTALL)
+        return re.sub(r"<[^>]+>", "", m.group(1)).strip() if m else ""
+
+    def _importance_to_level(stars: str) -> str:
+        s = stars.strip()
+        if s.count("*") >= 3:
+            return "rouge"
+        if s.count("*") >= 2:
+            return "orange"
+        return "jaune"
+
+    blocks = re.findall(r'<div class="interligne">(.*?)</div>', html, re.DOTALL)
+    for block in blocks:
+        road_raw = _span(block, "axe")
+        road = road_raw.strip().upper()
+
+        # Garder seulement les routes Isère APRR/AREA
+        if not _APRR_ROAD_PATTERN.search(road):
+            continue
+
+        importance = _span(block, "importance_vr_reduit") or _span(block, "importance_vr")
+        level = _importance_to_level(importance)
+
+        # Type d'événement
+        nature = (
+            _span(block, "nature_restriction")
+            or _span(block, "nature_obstacle")
+            or _span(block, "nature_bouchon")
+            or "Événement"
+        )
+
+        # Localisation
+        commune = _span(block, "commune")
+        pr = _span(block, "pr")
+        direction = _span(block, "sens_par_pole") or _span(block, "sens_cardinal")
+        bretelle = _span(block, "bretelle") or _span(block, "complementaire")
+
+        # Description publique
+        commentaire = _span(block, "commentaire_public")
+
+        # Heure de fin prévue
+        end_time = (
+            _span(block, "horodate_fin_complet_ve_evt_encours")
+            or _span(block, "horodate_fin_complet_ve")
+            or _span(block, "separator-date")
+        )
+
+        # Opérateur source (APRR / AREA / Escota / …)
+        origine = _span(block, "origine_vr")
+
+        # Construction du titre et de la description
+        title_parts = [nature, road.strip()]
+        if direction:
+            title_parts.append(direction)
+        title = " · ".join(p for p in title_parts if p)
+
+        desc_parts = []
+        if commune:
+            desc_parts.append(f"à {commune}")
+        if pr:
+            desc_parts.append(f"PR {pr}")
+        if bretelle:
+            desc_parts.append(bretelle)
+        if commentaire:
+            desc_parts.append(commentaire)
+        if end_time:
+            desc_parts.append(f"Prévu jusqu'au : {end_time}")
+        if origine:
+            desc_parts.append(f"[{origine}]")
+        description = " — ".join(p for p in desc_parts if p)
+
+        events.append({
+            "title": title[:160],
+            "description": description[:500],
+            "road": road.strip(),
+            "type": nature[:60],
+            "level": level,
+            "start": "",
+            "end": end_time[:60] if end_time else "",
+            "severity": level,
+            "source": "Bison Futé / APRR AREA DATEXII",
+        })
+
+    return events
 
 
 def _fetch_aprr_isere_live() -> dict[str, Any]:
-    """Filtre les événements Bison Futé DATEX2 pour les routes APRR/AREA en Isère.
-    Source fiable et déjà rafraîchie toutes les 5 min — aucun scraping SPA nécessaire."""
-    bison_data = fetch_bison_fute_live_events()
-    all_events: list[dict[str, Any]] = bison_data.get("events") or []
+    """Événements temps réel APRR/AREA sur A41/A43/A48/A51 via Bison Futé récapitulatif national.
+
+    La page RecapTraficFranceEntiere.html agrège le DATEX2 de TOUS les opérateurs
+    (DIR pour le réseau non-concédé ET SCA APRR/AREA/Escota pour le réseau concédé).
+    C'est la seule source publique accessible sans authentification pour les autoroutes APRR.
+    """
     events: list[dict[str, Any]] = []
-    for evt in all_events:
-        road = str(evt.get("road") or "")
-        blob = f"{road} {evt.get('title', '')} {evt.get('description', '')} {evt.get('location_summary', '')}"
-        if _APRR_ROAD_PATTERN.search(blob):
-            events.append({
-                "title": str(evt.get("title") or "Événement trafic")[:120],
-                "type": str(evt.get("category") or "inconnu"),
-                "road": road,
-                "description": str(evt.get("description") or "")[:400],
-                "lat": evt.get("lat") or _ISERE_ROAD_COORDS.get(road, (45.19, 5.73))[0],
-                "lon": evt.get("lon") or _ISERE_ROAD_COORDS.get(road, (45.19, 5.73))[1],
-                "start": str(evt.get("validity_start") or ""),
-                "end": str(evt.get("validity_end") or ""),
-                "severity": str(evt.get("severity") or "jaune"),
-            })
+    source_used = _BISON_RECAP_URL
+
+    try:
+        hdrs = {"User-Agent": _BROWSER_UA, "Accept": "text/html,*/*"}
+        if _REQUESTS_OK and _requests is not None:
+            resp = _requests.get(_BISON_RECAP_URL, headers=hdrs, timeout=20, verify=False)
+            resp.raise_for_status()
+            html = resp.content.decode("iso-8859-1", errors="replace")
+        else:
+            html = _http_get_text(_BISON_RECAP_URL, timeout=20, headers=hdrs)
+
+        if html:
+            events = _parse_bison_recap_aprr(html)
+    except Exception:
+        pass
+
+    # Fallback : filtrer le DATEX2 RRN (réseau non-concédé, peu de routes APRR mais parfois utile)
+    if not events:
+        try:
+            bison_data = fetch_bison_fute_live_events()
+            all_events: list[dict[str, Any]] = bison_data.get("events") or []
+            for evt in all_events:
+                road = str(evt.get("road") or "")
+                blob = f"{road} {evt.get('title', '')} {evt.get('description', '')} {evt.get('location_summary', '')}"
+                if _APRR_ROAD_PATTERN.search(blob):
+                    events.append({
+                        "title": str(evt.get("title") or "Événement trafic")[:120],
+                        "type": str(evt.get("category") or "inconnu"),
+                        "road": road,
+                        "description": str(evt.get("description") or "")[:400],
+                        "start": str(evt.get("validity_start") or ""),
+                        "end": str(evt.get("validity_end") or ""),
+                        "level": str(evt.get("severity") or "jaune"),
+                        "severity": str(evt.get("severity") or "jaune"),
+                        "source": "Bison Futé DATEX2 RRN",
+                    })
+            if events:
+                source_used = "https://www.bison-fute.gouv.fr (DATEX2 RRN)"
+        except Exception:
+            pass
+
     return {
         "service": "APRR/AREA · Autoroutes Isère",
         "status": "online",
-        "source": "https://www.bison-fute.gouv.fr (DATEX2)",
+        "source": source_used,
         "routes": _APRR_ISERE_ROUTES,
-        "events": events[:10],
+        "events": events[:15],
         "events_total": len(events),
+        "normal_service": len(events) == 0,
         "updated_at": datetime.utcnow().isoformat() + "Z",
     }
 

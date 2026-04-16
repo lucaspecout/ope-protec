@@ -8015,12 +8015,32 @@ function _renderDisruptionsList(listId, items, emptyMsg = 'Aucune perturbation s
 }
 
 function _renderEventsList(listId, items, emptyMsg = 'Aucun événement signalé.') {
-  const typeIcon = { accident: '⚠️', travaux: '🔧', chantier: '🔧', perturbation: '⚡', bouchon: '🚗', inconnu: 'ℹ️' };
-  setHtml(listId, items.slice(0, 10).map((e) => {
-    const icon = typeIcon[e.type] || typeIcon.inconnu;
-    const road = e.road ? ` · <strong>${escapeHtml(e.road)}</strong>` : '';
-    const dates = e.start ? ` · dès ${new Date(e.start).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}` : '';
-    return `<li>${icon}${road}${dates} — ${escapeHtml((e.title || e.description || 'Événement').substring(0, 160))}</li>`;
+  const typeIcon = { accident: '⚠️', travaux: '🔧', chantier: '🔧', perturbation: '⚡', bouchon: '🚗', inconnu: 'ℹ️', pannevehicule: '🚘', panne: '🚘' };
+  const lvlColor = { rouge: '#c22f43', orange: '#b46a00', jaune: '#9a7700', vert: '#2f9e44', inconnu: '#5f7190' };
+  const lvlLabel = { rouge: '🔴 Critique', orange: '🟠 Important', jaune: '🟡 Info', vert: '🟢 Normal', inconnu: 'ℹ️ Info' };
+  setHtml(listId, items.slice(0, 12).map((e) => {
+    const typeKey = (e.type || '').toLowerCase().replace(/\s+/g, '').replace(/[-_]/g, '');
+    const icon = typeIcon[typeKey] || (typeKey.includes('panne') ? '🚘' : typeKey.includes('accident') ? '⚠️' : typeKey.includes('travaux') || typeKey.includes('chantier') ? '🔧' : 'ℹ️');
+    const level = e.level || e.severity || 'jaune';
+    const color = lvlColor[level] || lvlColor.jaune;
+    const badge = lvlLabel[level] || level;
+    const road = e.road ? `<strong>${escapeHtml(e.road)}</strong>` : '';
+
+    // Date de fin
+    const endStr = e.end ? ` · jusqu'au <em>${escapeHtml(e.end)}</em>` : '';
+    const startStr = e.start ? ` · depuis ${_fmtDate(e.start)}` : '';
+
+    // Titre + description
+    const title = (e.title || '').substring(0, 200);
+    const desc = (e.description || '').substring(0, 400);
+    const bodyHtml = title && desc && desc.toLowerCase() !== title.toLowerCase()
+      ? `<strong style="font-size:.84rem">${escapeHtml(title)}</strong><br><span style="font-size:.79rem;color:#444">${escapeHtml(desc)}</span>`
+      : `<span style="font-size:.84rem">${escapeHtml(title || desc || 'Événement')}</span>`;
+
+    return `<li style="border-left:3px solid ${color};padding-left:.6rem;margin-bottom:.5rem">
+      <span style="font-size:.78rem;font-weight:600;color:${color}">${badge}</span> ${icon}${road ? ' · ' + road : ''}${endStr}${startStr}<br>
+      ${bodyHtml}
+    </li>`;
   }).join('') || `<li class="muted">${emptyMsg}</li>`);
 }
 

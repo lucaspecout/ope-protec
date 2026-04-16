@@ -190,7 +190,24 @@
       "Bash(python -c \"import ast; ast.parse\\(open\\('app/services.py', encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('app/main.py', encoding='utf-8'\\).read\\(\\)\\); print\\('Python OK'\\)\")",
       "Bash(docker.exe compose:*)",
       "Bash(python3 -c \"import ast; ast.parse\\(open\\('services.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
-      "Bash(python3 -c \"import ast; ast.parse\\(open\\('services.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")"
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('services.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(grep -oE '\"[^\"]{5,120}\\(api|json|events|traffic|incidents|trafic\\)[^\"]{0,80}\"')",
+      "Bash(grep -oE 'drupal-settings-json[^<]{0,2000}')",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(x.get\\('title',''\\),x.get\\('id',''\\)\\) for x in \\(d if isinstance\\(d,list\\) else d.get\\('data',d.get\\('datasets',[]\\)\\)\\)[:10]]\")",
+      "Bash(grep -oE '\"[^\"]{5,200}\"')",
+      "Bash(python3 -c \" import sys,json d=json.load\\(sys.stdin\\) for r in d.get\\('data',[]\\): print\\(r.get\\('title',''\\),'|',r.get\\('id',''\\)\\) for res in r.get\\('resources',[]\\)[:5]: print\\(' ->',res.get\\('url',''\\),'|',res.get\\('format',''\\)\\) \")",
+      "Bash(python3 -c \" import sys,json try: d=json.load\\(sys.stdin\\) items = d if isinstance\\(d,list\\) else d.get\\('data',d.get\\('datasets',[]\\)\\) for r in items[:10]: print\\(r.get\\('title',''\\),'|',r.get\\('id',''\\)\\) except: print\\('no json'\\) \" echo \"=== Check proxy.transport.data.gouv for APRR ===\" curl -s \"https://transport.data.gouv.fr/api/datasets?q=autoroute+datex\" --max-time 10)",
+      "Bash(python3 -c \" import sys,json try: d=json.load\\(sys.stdin\\) items = d if isinstance\\(d,list\\) else d.get\\('data',d.get\\('datasets',[]\\)\\) for r in items[:10]: print\\(r.get\\('title',''\\),'|'\\) for res in r.get\\('resources',[]\\)[:3]: print\\(' url:', res.get\\('url',''\\), '|', res.get\\('format',''\\)\\) except: print\\('no json'\\) \")",
+      "Bash(curl -s \"https://wt3.autoroutes-trafic.fr/authentication/authenticate.js\" --max-time 10)",
+      "Bash(python3 -c \" import sys, json try: d = json.load\\(sys.stdin\\) items = d if isinstance\\(d, list\\) else d.get\\('situations', d.get\\('events', d.get\\('data', []\\)\\)\\) for i in \\(items[:5] if isinstance\\(items, list\\) else []\\): print\\(json.dumps\\(i, ensure_ascii=False\\)[:300]\\) print\\('TOTAL:', len\\(items\\) if isinstance\\(items, list\\) else 'unknown'\\) except Exception as e: print\\('ERROR:', e\\) sys.stdin.seek\\(0\\) print\\(sys.stdin.read\\(\\)[:500]\\) \")",
+      "Bash(python3 -c \" import sys,json d=json.load\\(sys.stdin\\) for r in d.get\\('data',[]\\): print\\(r.get\\('title',''\\)[:80], '|', r.get\\('id',''\\)\\) for res in r.get\\('resources',[]\\)[:3]: print\\(' ->', res.get\\('url',''\\)[:100]\\) \")",
+      "Bash(grep -oE 'href=\"[^\"]{1,50}\"')",
+      "Bash(grep -oE 'href=\"[^\"?]{1,60}\"')",
+      "Bash(python3 -c \" import sys,json d=json.load\\(sys.stdin\\) for r in d.get\\('data',[]\\): print\\(r.get\\('title',''\\)[:80]\\) for res in r.get\\('resources',[]\\)[:2]: print\\(' ->', res.get\\('url',''\\)[:100]\\) \")",
+      "Bash(grep -oE 'href=\"[^\"?]{1,80}\"')",
+      "Bash(python3)",
+      "Bash(curl -s http://tipi.bison-fute.gouv.fr/bison-fute-ouvert/publicationsDIR/Evenementiel-DIR/cnir/RecapTraficFranceEntiere.html --max-time 20 -o /tmp/recap_trafic.html)",
+      "Bash(curl -s \"http://tipi.bison-fute.gouv.fr/bison-fute-ouvert/publicationsDIR/Evenementiel-DIR/cnir/RecapTraficFranceEntiere.html\" --max-time 20)"
     ]
   }
 }
