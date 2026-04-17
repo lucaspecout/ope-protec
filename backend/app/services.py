@@ -279,6 +279,35 @@ def _make_legacy_ssl_context() -> ssl.SSLContext:
     return ctx
 
 
+class _TLS12Adapter(_requests.adapters.HTTPAdapter):
+    """HTTPAdapter qui force TLS 1.2 max + SECLEVEL=0.
+    Nécessaire pour les serveurs gouv (opendata.isere.fr) qui rejettent TLS 1.3
+    avec TLSV1_ALERT_INTERNAL_ERROR depuis Docker/Linux OpenSSL 3.x."""
+    def init_poolmanager(self, *args: Any, **kwargs: Any) -> None:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        ctx.set_ciphers("DEFAULT:@SECLEVEL=0")
+        try:
+            ctx.maximum_version = ssl.TLSVersion.TLSv1_2
+        except AttributeError:
+            pass
+        legacy_flag = getattr(ssl, "OP_LEGACY_SERVER_CONNECT", 0)
+        if legacy_flag:
+            ctx.options |= legacy_flag
+        kwargs["ssl_context"] = ctx
+        super().init_poolmanager(*args, **kwargs)  # type: ignore[misc]
+
+
+def _requests_get_tls12(url: str, *, headers: dict[str, str] | None = None, timeout: int = 15) -> Any:
+    """GET via requests en forçant TLS 1.2 max. Pour serveurs legacy gouv."""
+    session = _requests.Session()
+    session.mount("https://", _TLS12Adapter())
+    resp = session.get(url, headers=headers or {}, timeout=timeout)
+    resp.raise_for_status()
+    return resp
+
+
 def _http_get_with_retries(
     request: Request,
     timeout: int = 8,
@@ -4641,15 +4670,14 @@ def _isere_opendata_fetch_dataset_records(dataset_id: str, select_fields: str, l
     )
     hdrs = {"Accept": "application/json", "User-Agent": _BROWSER_UA}
 
-    # Priorité : requests (gestion SSL intégrée + verify=False) si disponible
-    if _REQUESTS_OK and _requests is not None:
-        try:
-            resp = _requests.get(url, headers=hdrs, timeout=15, verify=False)
-            resp.raise_for_status()
-            payload = resp.json()
-            return payload if isinstance(payload, dict) else {}
-        except Exception:
-            pass  # Fallback urllib ci-dessous
+    # requests + TLS12Adapter : force TLS 1.2 max pour éviter TLSV1_ALERT_INTERNAL_ERROR
+    # sur opendata.isere.fr depuis Docker/Linux OpenSSL 3.x
+    try:
+        resp = _requests_get_tls12(url, headers=hdrs, timeout=15)
+        payload = resp.json()
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        pass  # Fallback urllib ci-dessous
 
     # Fallback : urllib avec contexte SSL legacy (TLS 1.2 max + SECLEVEL=0)
     payload = _http_get_json(url, timeout=15, ssl_context=_opendata_isere_ssl_ctx, headers=hdrs)
