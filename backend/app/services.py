@@ -6,6 +6,7 @@ import io
 from email.utils import parsedate_to_datetime
 from html import unescape
 from http.client import RemoteDisconnected, IncompleteRead
+import requests as _requests
 import json
 from pathlib import Path
 import re
@@ -304,6 +305,29 @@ def _http_get_with_retries(
             backoff = retry_delay_seconds * (2 ** attempt)
             sleep(backoff + uniform(0, 0.35))
     raise last_error or RuntimeError("Échec HTTP inattendu")
+
+
+def _http_stream_large_file(url: str, timeout: int = 120, retries: int = 3, headers: dict[str, str] | None = None) -> bytes:
+    request_headers = {"User-Agent": "ope-protec/1.0"}
+    if headers:
+        request_headers.update(headers)
+    last_error: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            with _requests.get(url, headers=request_headers, stream=True, timeout=timeout) as resp:
+                resp.raise_for_status()
+                chunks: list[bytes] = []
+                for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                    if chunk:
+                        chunks.append(chunk)
+                return b"".join(chunks)
+        except Exception as exc:
+            last_error = exc
+            if attempt >= retries:
+                raise
+            backoff = 2.0 * (2 ** attempt) + uniform(0, 0.5)
+            sleep(backoff)
+    raise last_error or RuntimeError("Échec téléchargement fichier volumineux")
 
 
 def _http_get_json(url: str, timeout: int = 12, headers: dict[str, str] | None = None, ssl_context: ssl.SSLContext | None = None) -> Any:
@@ -6259,11 +6283,10 @@ def _fetch_anfr_isere_antennas_live() -> dict[str, Any]:
             reverse=True,
         )[0]
 
-        archive_bytes = _http_get_with_retries(
-            Request(str(latest_resource.get("url")), headers={"User-Agent": "ope-protec/1.0"}),
+        archive_bytes = _http_stream_large_file(
+            str(latest_resource.get("url")),
             timeout=120,
             retries=2,
-            retry_delay_seconds=2.0,
         )
         with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
             with archive.open("SUP_SUPPORT.txt") as handle:
