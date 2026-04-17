@@ -233,7 +233,8 @@
       "WebFetch(domain:api.franceseisme.fr)",
       "WebFetch(domain:www.grenoble.fr)",
       "WebFetch(domain:www.placegrenet.fr)",
-      "Bash(python -c \"from app.services import fetch_placegrenet_news, fetch_grenoble_metro_news, fetch_ars_aura_health_alerts, fetch_seismes_isere; print\\('OK'\\)\")"
+      "Bash(python -c \"from app.services import fetch_placegrenet_news, fetch_grenoble_metro_news, fetch_ars_aura_health_alerts, fetch_seismes_isere; print\\('OK'\\)\")",
+      "Bash(powershell.exe -Command \"docker compose -f 'c:/Users/lucme/Music/opeprotec/ope-protec/docker-compose.yml' exec api python -c \\\\\"from app.services import _fetch_aprr_isere_live; import json; r = _fetch_aprr_isere_live\\(\\); print\\(json.dumps\\(r, ensure_ascii=False, indent=2\\)[:3000]\\)\\\\\"\")"
     ]
   }
 }

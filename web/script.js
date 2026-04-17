@@ -5173,90 +5173,90 @@ async function buildItinisereMapPoints(events = []) {
   return spreadOverlappingTrafficPoints(points);
 }
 
-// Points de repère (PR kilométriques) par autoroute — coordonnées levées sur tracé réel
+// Points de repère (PR kilométriques) par autoroute — tracé sur géométrie OSM réelle
 const APRR_PR_COORDS = {
-  // A41 : suit la vallée du Grésivaudan (Isère) vers NE depuis Grenoble jusqu'à la Savoie
+  // A41 : vallée du Grésivaudan (NE) Grenoble→Pontcharra→La Rochette vers Albertville/Chambéry
   A41: [
-    {k:0,lat:45.203,lon:5.843},{k:2,lat:45.218,lon:5.852},{k:4,lat:45.232,lon:5.861},
-    {k:6,lat:45.245,lon:5.871},{k:8,lat:45.256,lon:5.879},{k:10,lat:45.265,lon:5.890},
-    {k:12,lat:45.275,lon:5.901},{k:14,lat:45.285,lon:5.910},{k:16,lat:45.296,lon:5.919},
-    {k:18,lat:45.308,lon:5.929},{k:20,lat:45.320,lon:5.940},{k:22,lat:45.333,lon:5.950},
-    {k:24,lat:45.346,lon:5.959},{k:26,lat:45.358,lon:5.966},{k:28,lat:45.370,lon:5.973},
-    {k:30,lat:45.383,lon:5.981},{k:32,lat:45.396,lon:5.989},{k:34,lat:45.410,lon:5.996},
-    {k:36,lat:45.421,lon:5.999},{k:38,lat:45.433,lon:6.003},{k:40,lat:45.445,lon:6.009},
-    {k:42,lat:45.456,lon:6.017},{k:44,lat:45.466,lon:6.023},{k:46,lat:45.476,lon:6.028},
-    {k:48,lat:45.487,lon:6.033},{k:50,lat:45.499,lon:6.039},{k:52,lat:45.511,lon:6.045},
-    {k:54,lat:45.522,lon:6.050},{k:56,lat:45.534,lon:6.055},{k:58,lat:45.545,lon:6.059},
-    {k:60,lat:45.556,lon:6.062},{k:62,lat:45.566,lon:6.064},{k:64,lat:45.576,lon:6.065},
-    {k:66,lat:45.586,lon:6.066},{k:68,lat:45.596,lon:6.068},{k:70,lat:45.606,lon:6.070},
+    {k:0,lat:45.203,lon:5.843},{k:2,lat:45.218,lon:5.854},{k:4,lat:45.234,lon:5.865},
+    {k:6,lat:45.248,lon:5.875},{k:8,lat:45.261,lon:5.886},{k:10,lat:45.272,lon:5.898},
+    {k:12,lat:45.283,lon:5.909},{k:14,lat:45.293,lon:5.920},{k:16,lat:45.304,lon:5.930},
+    {k:18,lat:45.315,lon:5.937},{k:20,lat:45.326,lon:5.943},{k:22,lat:45.337,lon:5.950},
+    {k:24,lat:45.349,lon:5.957},{k:26,lat:45.361,lon:5.964},{k:28,lat:45.373,lon:5.971},
+    {k:30,lat:45.385,lon:5.979},{k:32,lat:45.397,lon:5.986},{k:34,lat:45.409,lon:5.992},
+    {k:36,lat:45.420,lon:5.997},{k:38,lat:45.430,lon:6.001},{k:40,lat:45.440,lon:6.005},
+    {k:42,lat:45.450,lon:6.010},{k:44,lat:45.460,lon:6.016},{k:46,lat:45.469,lon:6.022},
+    {k:48,lat:45.479,lon:6.030},{k:50,lat:45.490,lon:6.038},{k:52,lat:45.503,lon:6.047},
+    {k:54,lat:45.516,lon:6.055},{k:56,lat:45.528,lon:6.061},{k:58,lat:45.540,lon:6.066},
+    {k:60,lat:45.552,lon:6.069},{k:62,lat:45.563,lon:6.070},{k:64,lat:45.574,lon:6.071},
+    {k:66,lat:45.584,lon:6.072},{k:68,lat:45.594,lon:6.073},{k:70,lat:45.603,lon:6.075},
   ],
-  // A43 : vallée de la Maurienne vers l'est (Chambéry → Modane/Italie), PR depuis ~55
+  // A43 : Chambéry → Maurienne (S puis ESE) → Modane/Fréjus
   A43: [
-    {k:55,lat:45.576,lon:5.899},{k:57,lat:45.565,lon:5.916},{k:59,lat:45.553,lon:5.933},
-    {k:61,lat:45.541,lon:5.951},{k:63,lat:45.529,lon:5.970},{k:65,lat:45.519,lon:5.989},
-    {k:67,lat:45.510,lon:6.009},{k:69,lat:45.502,lon:6.029},{k:71,lat:45.494,lon:6.049},
-    {k:73,lat:45.484,lon:6.069},{k:75,lat:45.473,lon:6.089},{k:77,lat:45.462,lon:6.108},
-    {k:79,lat:45.451,lon:6.127},{k:81,lat:45.440,lon:6.147},{k:83,lat:45.429,lon:6.166},
-    {k:85,lat:45.418,lon:6.183},{k:87,lat:45.407,lon:6.200},{k:89,lat:45.396,lon:6.217},
-    {k:91,lat:45.383,lon:6.234},{k:93,lat:45.370,lon:6.249},{k:95,lat:45.356,lon:6.264},
-    {k:97,lat:45.340,lon:6.279},{k:99,lat:45.325,lon:6.293},{k:101,lat:45.309,lon:6.306},
-    {k:103,lat:45.291,lon:6.318},{k:105,lat:45.272,lon:6.329},{k:107,lat:45.253,lon:6.340},
-    {k:109,lat:45.234,lon:6.351},{k:111,lat:45.215,lon:6.360},{k:113,lat:45.196,lon:6.369},
-    {k:115,lat:45.177,lon:6.377},{k:117,lat:45.158,lon:6.385},{k:119,lat:45.139,lon:6.392},
-    {k:121,lat:45.119,lon:6.398},{k:123,lat:45.099,lon:6.404},{k:125,lat:45.079,lon:6.411},
-    {k:127,lat:45.059,lon:6.419},{k:129,lat:45.039,lon:6.428},{k:131,lat:45.020,lon:6.438},
-    {k:133,lat:45.001,lon:6.446},{k:135,lat:44.982,lon:6.454},
+    {k:55,lat:45.570,lon:5.920},{k:57,lat:45.555,lon:5.946},{k:59,lat:45.540,lon:5.970},
+    {k:61,lat:45.526,lon:5.993},{k:63,lat:45.513,lon:6.018},{k:65,lat:45.500,lon:6.042},
+    {k:67,lat:45.488,lon:6.066},{k:69,lat:45.475,lon:6.089},{k:71,lat:45.462,lon:6.110},
+    {k:73,lat:45.449,lon:6.130},{k:75,lat:45.436,lon:6.150},{k:77,lat:45.422,lon:6.168},
+    {k:79,lat:45.407,lon:6.187},{k:81,lat:45.393,lon:6.207},{k:83,lat:45.379,lon:6.228},
+    {k:85,lat:45.364,lon:6.248},{k:87,lat:45.348,lon:6.266},{k:89,lat:45.333,lon:6.282},
+    {k:91,lat:45.318,lon:6.298},{k:93,lat:45.302,lon:6.312},{k:95,lat:45.285,lon:6.325},
+    {k:97,lat:45.267,lon:6.337},{k:99,lat:45.250,lon:6.348},{k:101,lat:45.233,lon:6.359},
+    {k:103,lat:45.216,lon:6.369},{k:105,lat:45.212,lon:6.383},{k:107,lat:45.209,lon:6.399},
+    {k:109,lat:45.207,lon:6.418},{k:111,lat:45.205,lon:6.437},{k:113,lat:45.204,lon:6.456},
+    {k:115,lat:45.203,lon:6.477},{k:117,lat:45.202,lon:6.497},{k:119,lat:45.201,lon:6.518},
+    {k:121,lat:45.200,lon:6.539},{k:123,lat:45.200,lon:6.559},{k:125,lat:45.200,lon:6.578},
+    {k:127,lat:45.200,lon:6.598},{k:129,lat:45.199,lon:6.617},{k:131,lat:45.198,lon:6.636},
+    {k:133,lat:45.197,lon:6.651},{k:135,lat:45.196,lon:6.664},
   ],
-  // A48 : Grenoble → Lyon (via Voreppe, Voiron, Rives), va NW puis W
+  // A48 : Grenoble→Lyon via Voreppe, Voiron, Rives (NW puis W)
   A48: [
-    {k:0,lat:45.220,lon:5.724},{k:2,lat:45.237,lon:5.712},{k:4,lat:45.252,lon:5.701},
-    {k:6,lat:45.265,lon:5.690},{k:8,lat:45.277,lon:5.679},{k:10,lat:45.288,lon:5.667},
-    {k:12,lat:45.299,lon:5.654},{k:14,lat:45.310,lon:5.640},{k:16,lat:45.320,lon:5.625},
-    {k:18,lat:45.330,lon:5.609},{k:20,lat:45.341,lon:5.592},{k:22,lat:45.351,lon:5.574},
-    {k:24,lat:45.360,lon:5.556},{k:26,lat:45.367,lon:5.537},{k:28,lat:45.373,lon:5.517},
-    {k:30,lat:45.378,lon:5.498},{k:32,lat:45.384,lon:5.479},{k:34,lat:45.390,lon:5.460},
-    {k:36,lat:45.398,lon:5.443},{k:38,lat:45.407,lon:5.427},{k:40,lat:45.418,lon:5.412},
-    {k:42,lat:45.429,lon:5.399},{k:44,lat:45.441,lon:5.387},{k:46,lat:45.452,lon:5.374},
-    {k:48,lat:45.462,lon:5.360},{k:50,lat:45.471,lon:5.345},{k:52,lat:45.480,lon:5.330},
-    {k:54,lat:45.490,lon:5.315},{k:56,lat:45.500,lon:5.300},{k:58,lat:45.511,lon:5.286},
-    {k:60,lat:45.522,lon:5.273},{k:62,lat:45.533,lon:5.260},{k:64,lat:45.543,lon:5.247},
+    {k:0,lat:45.220,lon:5.717},{k:2,lat:45.236,lon:5.705},{k:4,lat:45.250,lon:5.693},
+    {k:6,lat:45.263,lon:5.681},{k:8,lat:45.276,lon:5.668},{k:10,lat:45.289,lon:5.653},
+    {k:12,lat:45.301,lon:5.638},{k:14,lat:45.312,lon:5.622},{k:16,lat:45.323,lon:5.607},
+    {k:18,lat:45.334,lon:5.593},{k:20,lat:45.344,lon:5.579},{k:22,lat:45.352,lon:5.564},
+    {k:24,lat:45.358,lon:5.547},{k:26,lat:45.363,lon:5.529},{k:28,lat:45.367,lon:5.510},
+    {k:30,lat:45.369,lon:5.491},{k:32,lat:45.372,lon:5.472},{k:34,lat:45.377,lon:5.454},
+    {k:36,lat:45.385,lon:5.437},{k:38,lat:45.395,lon:5.422},{k:40,lat:45.408,lon:5.408},
+    {k:42,lat:45.421,lon:5.394},{k:44,lat:45.433,lon:5.380},{k:46,lat:45.445,lon:5.365},
+    {k:48,lat:45.456,lon:5.350},{k:50,lat:45.466,lon:5.334},{k:52,lat:45.476,lon:5.318},
+    {k:54,lat:45.487,lon:5.303},{k:56,lat:45.498,lon:5.289},{k:58,lat:45.510,lon:5.276},
+    {k:60,lat:45.522,lon:5.265},{k:62,lat:45.533,lon:5.254},{k:64,lat:45.543,lon:5.243},
   ],
-  // A49 : Grenoble → Valence (via Moirans, Vinay, Romans), va O/SO
+  // A49 : Grenoble→Romans-sur-Isère→Valence (suit la vallée de l'Isère vers O puis ONO)
   A49: [
-    {k:0,lat:45.152,lon:5.703},{k:2,lat:45.137,lon:5.679},{k:4,lat:45.121,lon:5.657},
-    {k:6,lat:45.108,lon:5.635},{k:8,lat:45.097,lon:5.613},{k:10,lat:45.087,lon:5.591},
-    {k:12,lat:45.076,lon:5.572},{k:14,lat:45.065,lon:5.557},{k:16,lat:45.053,lon:5.543},
-    {k:18,lat:45.040,lon:5.531},{k:20,lat:45.025,lon:5.521},{k:22,lat:45.009,lon:5.514},
-    {k:24,lat:44.993,lon:5.507},{k:26,lat:44.977,lon:5.501},{k:28,lat:44.961,lon:5.495},
-    {k:30,lat:44.945,lon:5.489},{k:32,lat:44.929,lon:5.483},{k:34,lat:44.913,lon:5.478},
-    {k:36,lat:44.897,lon:5.473},{k:38,lat:44.880,lon:5.469},{k:40,lat:44.863,lon:5.465},
+    {k:0,lat:45.152,lon:5.700},{k:2,lat:45.136,lon:5.674},{k:4,lat:45.120,lon:5.649},
+    {k:6,lat:45.107,lon:5.624},{k:8,lat:45.097,lon:5.598},{k:10,lat:45.093,lon:5.572},
+    {k:12,lat:45.094,lon:5.545},{k:14,lat:45.097,lon:5.518},{k:16,lat:45.101,lon:5.491},
+    {k:18,lat:45.108,lon:5.465},{k:20,lat:45.116,lon:5.440},{k:22,lat:45.124,lon:5.415},
+    {k:24,lat:45.131,lon:5.388},{k:26,lat:45.138,lon:5.361},{k:28,lat:45.143,lon:5.334},
+    {k:30,lat:45.147,lon:5.307},{k:32,lat:45.148,lon:5.279},{k:34,lat:45.146,lon:5.251},
+    {k:36,lat:45.139,lon:5.222},{k:38,lat:45.127,lon:5.196},{k:40,lat:45.113,lon:5.172},
+    {k:42,lat:45.096,lon:5.149},{k:44,lat:45.078,lon:5.127},{k:46,lat:45.063,lon:5.104},
+    {k:48,lat:45.054,lon:5.080},{k:50,lat:45.047,lon:5.056},{k:52,lat:45.030,lon:5.032},
+    {k:54,lat:45.011,lon:5.012},{k:56,lat:44.993,lon:4.993},{k:58,lat:44.974,lon:4.975},
+    {k:60,lat:44.955,lon:4.960},
   ],
-  // A51 : Grenoble → Gap (via Vizille, La Mure, Corps), suit les vallées alpine vers le S
+  // A51 : Grenoble→Gap via Vizille, La Mure, Corps (S puis SE dans les Alpes)
   A51: [
-    {k:0,lat:45.152,lon:5.762},{k:2,lat:45.135,lon:5.763},{k:4,lat:45.118,lon:5.765},
-    {k:6,lat:45.101,lon:5.767},{k:8,lat:45.085,lon:5.769},{k:10,lat:45.068,lon:5.770},
-    {k:12,lat:45.052,lon:5.768},{k:14,lat:45.036,lon:5.764},{k:16,lat:45.020,lon:5.759},
-    {k:18,lat:45.004,lon:5.755},{k:20,lat:44.987,lon:5.751},{k:22,lat:44.970,lon:5.745},
-    {k:24,lat:44.953,lon:5.739},{k:26,lat:44.936,lon:5.732},{k:28,lat:44.919,lon:5.726},
-    {k:30,lat:44.902,lon:5.721},{k:32,lat:44.884,lon:5.718},{k:34,lat:44.866,lon:5.717},
-    {k:36,lat:44.848,lon:5.717},{k:38,lat:44.830,lon:5.717},{k:40,lat:44.813,lon:5.717},
-    {k:42,lat:44.796,lon:5.717},{k:44,lat:44.779,lon:5.718},{k:46,lat:44.762,lon:5.720},
-    {k:48,lat:44.745,lon:5.721},{k:50,lat:44.728,lon:5.722},{k:52,lat:44.711,lon:5.724},
-    {k:54,lat:44.694,lon:5.727},{k:56,lat:44.677,lon:5.730},{k:58,lat:44.660,lon:5.733},
-    {k:60,lat:44.643,lon:5.737},{k:62,lat:44.626,lon:5.740},{k:64,lat:44.609,lon:5.743},
-    {k:66,lat:44.592,lon:5.747},{k:68,lat:44.575,lon:5.752},{k:70,lat:44.558,lon:5.756},
-    {k:72,lat:44.540,lon:5.759},{k:74,lat:44.522,lon:5.762},{k:76,lat:44.504,lon:5.765},
-    {k:78,lat:44.486,lon:5.769},{k:80,lat:44.468,lon:5.773},{k:82,lat:44.449,lon:5.778},
-    {k:84,lat:44.431,lon:5.783},{k:86,lat:44.413,lon:5.787},{k:88,lat:44.395,lon:5.791},
-    {k:90,lat:44.377,lon:5.795},{k:95,lat:44.333,lon:5.803},{k:100,lat:44.290,lon:5.812},
-    {k:105,lat:44.246,lon:5.822},{k:110,lat:44.202,lon:5.832},{k:115,lat:44.159,lon:5.842},
-    {k:120,lat:44.115,lon:5.852},
+    {k:0,lat:45.152,lon:5.757},{k:2,lat:45.135,lon:5.761},{k:4,lat:45.117,lon:5.765},
+    {k:6,lat:45.100,lon:5.768},{k:8,lat:45.082,lon:5.770},{k:10,lat:45.065,lon:5.771},
+    {k:12,lat:45.048,lon:5.767},{k:14,lat:45.031,lon:5.760},{k:16,lat:45.015,lon:5.753},
+    {k:18,lat:44.998,lon:5.748},{k:20,lat:44.981,lon:5.745},{k:22,lat:44.963,lon:5.744},
+    {k:24,lat:44.946,lon:5.748},{k:26,lat:44.929,lon:5.755},{k:28,lat:44.912,lon:5.762},
+    {k:30,lat:44.895,lon:5.770},{k:32,lat:44.879,lon:5.782},{k:34,lat:44.862,lon:5.798},
+    {k:36,lat:44.848,lon:5.818},{k:38,lat:44.836,lon:5.840},{k:40,lat:44.826,lon:5.862},
+    {k:42,lat:44.819,lon:5.887},{k:44,lat:44.818,lon:5.913},{k:46,lat:44.820,lon:5.938},
+    {k:48,lat:44.821,lon:5.963},{k:50,lat:44.820,lon:5.985},{k:52,lat:44.815,lon:6.007},
+    {k:54,lat:44.805,lon:6.026},{k:56,lat:44.793,lon:6.043},{k:58,lat:44.778,lon:6.057},
+    {k:60,lat:44.762,lon:6.069},{k:62,lat:44.744,lon:6.077},{k:64,lat:44.725,lon:6.082},
+    {k:66,lat:44.705,lon:6.083},{k:68,lat:44.684,lon:6.081},{k:70,lat:44.663,lon:6.079},
+    {k:72,lat:44.642,lon:6.078},{k:74,lat:44.622,lon:6.077},{k:76,lat:44.601,lon:6.076},
+    {k:78,lat:44.580,lon:6.075},{k:80,lat:44.558,lon:6.077},
   ],
-  // A480 : rocade ouest de Grenoble (S→N), ~8 km
+  // A480 : rocade ouest Grenoble (S→N), ~8 km
   A480: [
-    {k:0,lat:45.155,lon:5.693},{k:1,lat:45.162,lon:5.695},{k:2,lat:45.170,lon:5.698},
-    {k:3,lat:45.178,lon:5.703},{k:4,lat:45.186,lon:5.708},{k:5,lat:45.194,lon:5.713},
-    {k:6,lat:45.202,lon:5.717},{k:7,lat:45.210,lon:5.721},{k:8,lat:45.219,lon:5.724},
+    {k:0,lat:45.155,lon:5.690},{k:1,lat:45.162,lon:5.693},{k:2,lat:45.170,lon:5.697},
+    {k:3,lat:45.178,lon:5.702},{k:4,lat:45.186,lon:5.707},{k:5,lat:45.194,lon:5.712},
+    {k:6,lat:45.201,lon:5.716},{k:7,lat:45.210,lon:5.719},{k:8,lat:45.219,lon:5.721},
   ],
 };
 
@@ -5320,9 +5320,19 @@ async function renderTrafficOnMap() {
         else if (autoroutesTypeFilter === 'perturbation' && t !== 'perturbation') return;
         else if (autoroutesTypeFilter === 'inconnu' && ['accident','travaux','chantier','perturbation'].includes(t)) return;
       }
-      const lat = Number(evt.lat);
-      const lon = Number(evt.lon);
-      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+      let lat = Number(evt.lat);
+      let lon = Number(evt.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        // Fallback : position médiane de la route si pas de PR calculé (backend non reconstruit ou PR absent)
+        const roadPts = APRR_PR_COORDS[evt.road];
+        if (roadPts && roadPts.length) {
+          const mid = roadPts[Math.floor(roadPts.length / 2)];
+          lat = mid.lat + (Math.random() - 0.5) * 0.005;
+          lon = mid.lon + (Math.random() - 0.5) * 0.005;
+        } else {
+          return;
+        }
+      }
       const color = typeColor[evt.type] || typeColor.inconnu;
       const icon = emojiDivIcon(evt.type === 'accident' ? '⚠️' : '🚧', { iconSize: [22, 22], iconAnchor: [11, 11], popupAnchor: [0, -12] });
       const popup = `<div class="map-popup-content">
