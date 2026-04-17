@@ -5667,6 +5667,49 @@ function renderFranceBleuNews(franceBleu = {}) {
   }).join('') || '<li>Aucun article France Bleu Isère disponible.</li>');
 }
 
+function _renderNewsSvcCard(statusId, listId, data, fallbackLink, emptyMsg) {
+  const items = sortPrefectureItemsByRecency(Array.isArray(data.items) ? data.items : []);
+  setRiskText(statusId, `${data.status || 'inconnu'} · ${items.length} article(s)`, data.status === 'online' ? 'vert' : 'jaune');
+  setHtml(listId, items.slice(0, 7).map((item) => {
+    const title = escapeHtml(item.title || 'Article');
+    const published = item.published_at ? escapeHtml(item.published_at) : '';
+    const safeLink = String(item.link || '').startsWith('http') ? item.link : fallbackLink;
+    return `<li><strong>${title}</strong>${published ? `<br><span class="muted">${published}</span>` : ''}<br><a href="${safeLink}" target="_blank" rel="noreferrer">Lire ↗</a></li>`;
+  }).join('') || `<li>${emptyMsg}</li>`);
+}
+
+function renderPlacegrenetNews(data = {}) {
+  _renderNewsSvcCard('placegrenet-svc-status', 'placegrenet-svc-list', data, 'https://www.placegrenet.fr', "Aucun article Place Gre'net.");
+}
+
+function renderGrenobleMetroNews(data = {}) {
+  _renderNewsSvcCard('grenoble-metro-svc-status', 'grenoble-metro-svc-list', data, 'https://www.grenoblealpesmetropole.fr', 'Aucune actualité Métropole.');
+}
+
+function renderArsAuraAlerts(data = {}) {
+  const items = sortPrefectureItemsByRecency(Array.isArray(data.items) ? data.items : []);
+  setRiskText('ars-aura-svc-status', `${data.status || 'inconnu'} · ${items.length} alerte(s)`, data.status === 'online' ? 'vert' : 'jaune');
+  setHtml('ars-aura-svc-list', items.slice(0, 7).map((item) => {
+    const title = escapeHtml(item.title || 'Alerte sanitaire');
+    const published = item.published_at ? escapeHtml(item.published_at) : '';
+    const safeLink = String(item.link || '').startsWith('http') ? item.link : 'https://www.auvergne-rhone-alpes.ars.sante.fr';
+    return `<li><strong>${title}</strong>${published ? `<br><span class="muted">${published}</span>` : ''}<br><a href="${safeLink}" target="_blank" rel="noreferrer">Détails ↗</a></li>`;
+  }).join('') || '<li>Aucune alerte sanitaire ARS.</li>');
+}
+
+function renderSeismesIsere(data = {}) {
+  const items = Array.isArray(data.items) ? data.items : [];
+  setRiskText('seismes-svc-status', `${data.status || 'inconnu'} · ${items.length} séisme(s)`, data.status === 'online' ? 'vert' : 'jaune');
+  setText('seismes-svc-info', items.length ? `Dernier : ${escapeHtml(items[0]?.title || '')}` : 'Aucun séisme détecté récemment');
+  setHtml('seismes-svc-list', items.slice(0, 8).map((item) => {
+    const mag = item.magnitude != null ? `M${item.magnitude}` : '';
+    const place = escapeHtml(item.place || '');
+    const depth = item.depth_km != null ? ` · ${item.depth_km} km` : '';
+    const published = item.published_at ? `<br><span class="muted">${escapeHtml(item.published_at)}</span>` : '';
+    return `<li><strong>${mag} — ${place}</strong>${depth}${published}</li>`;
+  }).join('') || '<li>Aucun séisme détecté récemment.</li>');
+}
+
 /* Helpers pour les badges de catégorie dans le nouveau news panel */
 function newsBadgeClass(category) {
   if (/Sécurité/.test(category)) return 'news-article-badge--securite';
@@ -7919,6 +7962,10 @@ const SVC_CARD_META = {
   prefecture_isere:      { statusId: 'prefecture-status',      infoId: 'prefecture-info',      url: 'https://www.isere.gouv.fr' },
   dauphine_isere:        { statusId: 'dauphine-status',        infoId: 'dauphine-info',        url: 'https://www.ledauphine.com' },
   france_bleu_isere:     { statusId: 'francebleu-status',      infoId: 'francebleu-info',      url: 'https://www.francebleu.fr/isere' },
+  placegrenet:           { statusId: 'placegrenet-svc-status', infoId: null,                   url: 'https://www.placegrenet.fr' },
+  grenoble_metro:        { statusId: 'grenoble-metro-svc-status', infoId: null,                url: 'https://www.grenoblealpesmetropole.fr' },
+  ars_aura:              { statusId: 'ars-aura-svc-status',    infoId: null,                   url: 'https://www.auvergne-rhone-alpes.ars.sante.fr/alertes-sanitaires-en-cours' },
+  seismes_isere:         { statusId: 'seismes-svc-status',     infoId: 'seismes-svc-info',     url: 'https://www.franceseisme.fr' },
   anfr_isere:            { statusId: 'anfr-status',            infoId: 'anfr-info',            url: 'https://www.data.gouv.fr/fr/datasets/donnees-sur-les-installations-radioelectriques-de-plus-de-5-watts-1/' },
   arcep_isere:           { statusId: 'arcep-status',           infoId: 'arcep-info',           url: 'https://www.data.gouv.fr/fr/datasets/sites-indisponibles/' },
   isere_opendata:        { statusId: 'opendata-status',        infoId: 'opendata-info',        url: 'https://opendata.isere.fr' },
@@ -7963,6 +8010,10 @@ const SVC_DETAIL_LISTS = {
   aprr_isere:            [{ id: 'aprr-list',             label: 'Événements autoroutes Isère' }],
   vinci_autoroutes:      [{ id: 'vinci-list',            label: 'Événements Vinci Isère' }],
   cars_region_aura:      [{ id: 'cars-region-list',      label: 'Perturbations cars Région AURA' }],
+  placegrenet:           [{ id: 'placegrenet-svc-list',  label: "Derniers articles Place Gre'net" }],
+  grenoble_metro:        [{ id: 'grenoble-metro-svc-list', label: 'Actualités Grenoble Alpes Métropole' }],
+  ars_aura:              [{ id: 'ars-aura-svc-list',     label: 'Alertes sanitaires ARS AURA' }],
+  seismes_isere:         [{ id: 'seismes-svc-list',      label: 'Séismes récents Isère' }],
 };
 
 function buildServiceCards() {
@@ -8311,6 +8362,10 @@ function renderExternalRisks(data = {}) {
   renderPrefectureNews(prefecture);
   renderDauphineNews(dauphine);
   renderFranceBleuNews(franceBleu);
+  renderPlacegrenetNews(placegrenet);
+  renderGrenobleMetroNews(grenobleMétropole);
+  renderArsAuraAlerts(arsAura);
+  renderSeismesIsere(seismesIsere);
   renderNewsPanel(prefecture, dauphine, franceBleu, placegrenet, grenobleMétropole, arsAura, seismesIsere);
   renderSncfAlerts(sncf);
   renderApicAlerts(apic);
