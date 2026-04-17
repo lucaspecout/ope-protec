@@ -5,7 +5,7 @@ from copy import deepcopy
 import io
 from email.utils import parsedate_to_datetime
 from html import unescape
-from http.client import RemoteDisconnected
+from http.client import RemoteDisconnected, IncompleteRead
 import json
 from pathlib import Path
 import re
@@ -239,7 +239,7 @@ def _is_retryable_network_error(exc: Exception) -> bool:
         return True
     if isinstance(exc, HTTPError):
         return exc.code in _RETRYABLE_HTTP_STATUS_CODES
-    if isinstance(exc, RemoteDisconnected):
+    if isinstance(exc, (RemoteDisconnected, IncompleteRead)):
         return True
     if isinstance(exc, URLError):
         reason = str(exc.reason).lower() if getattr(exc, "reason", None) is not None else ""
@@ -284,13 +284,20 @@ def _http_get_with_retries(
     retries: int = 1,
     retry_delay_seconds: float = 0.5,
     ssl_context: ssl.SSLContext | None = None,
+    chunk_size: int = 1024 * 1024,
 ) -> bytes:
     last_error: Exception | None = None
     for attempt in range(retries + 1):
         try:
             with urlopen(request, timeout=timeout, context=ssl_context) as response:
-                return response.read()
-        except (HTTPError, URLError, TimeoutError, RemoteDisconnected) as exc:
+                chunks: list[bytes] = []
+                while True:
+                    chunk = response.read(chunk_size)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                return b"".join(chunks)
+        except (HTTPError, URLError, TimeoutError, RemoteDisconnected, IncompleteRead) as exc:
             last_error = exc
             if attempt >= retries or not _is_retryable_network_error(exc):
                 raise
@@ -6254,9 +6261,9 @@ def _fetch_anfr_isere_antennas_live() -> dict[str, Any]:
 
         archive_bytes = _http_get_with_retries(
             Request(str(latest_resource.get("url")), headers={"User-Agent": "ope-protec/1.0"}),
-            timeout=80,
-            retries=1,
-            retry_delay_seconds=1.2,
+            timeout=120,
+            retries=2,
+            retry_delay_seconds=2.0,
         )
         with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
             with archive.open("SUP_SUPPORT.txt") as handle:
