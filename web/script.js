@@ -8623,6 +8623,7 @@ async function loadLogs(preloaded = null) {
   saveSnapshot(STORAGE_KEYS.logsSnapshot, cachedLogs);
   renderLogsList();
   renderSituationOverview();
+  updateEventDetailPanel();
 }
 
 async function loadEvents(preloaded = null) {
@@ -10201,7 +10202,7 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
     resetLogFormState();
     if (errorTarget) errorTarget.textContent = '';
     syncLogScopeFields();
-    await refreshAll();
+    await loadLogs();
   } catch (error) {
     if (errorTarget) errorTarget.textContent = sanitizeErrorMessage(error.message);
   }
