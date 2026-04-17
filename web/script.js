@@ -217,6 +217,7 @@ let bisonLayer = null;
 let bisonCameraLayer = null;
 let photoCameraLayer = null;
 let autorouteLayer = null;
+let prAutorouteLayer = null;
 let institutionLayer = null;
 let populationLayer = null;
 let mapTileLayer = null;
@@ -2793,6 +2794,7 @@ function initMap() {
   bisonCameraLayer = window.L.layerGroup().addTo(leafletMap);
   photoCameraLayer = window.L.layerGroup().addTo(leafletMap);
   autorouteLayer = window.L.layerGroup().addTo(leafletMap);
+  prAutorouteLayer = window.L.layerGroup();
   institutionLayer = window.L.layerGroup().addTo(leafletMap);
   populationLayer = window.L.layerGroup().addTo(leafletMap);
   montagneLayer = window.L.layerGroup(); // ajouté à la carte uniquement si filtre activé
@@ -5171,6 +5173,42 @@ async function buildItinisereMapPoints(events = []) {
   return spreadOverlappingTrafficPoints(points);
 }
 
+// Points de repère (PR kilométriques) par autoroute pour affichage cartographique
+const APRR_PR_COORDS = {
+  A41:  [{k:0,lat:45.203,lon:5.843},{k:5,lat:45.237,lon:5.870},{k:10,lat:45.268,lon:5.898},{k:15,lat:45.303,lon:5.927},{k:20,lat:45.338,lon:5.956},{k:25,lat:45.375,lon:5.979},{k:30,lat:45.411,lon:6.001},{k:35,lat:45.444,lon:6.016},{k:40,lat:45.476,lon:6.031},{k:45,lat:45.509,lon:6.044},{k:50,lat:45.541,lon:6.056},{k:60,lat:45.598,lon:6.070},{k:70,lat:45.649,lon:6.098},{k:80,lat:45.698,lon:6.140}],
+  A43:  [{k:55,lat:45.592,lon:5.283},{k:60,lat:45.570,lon:5.330},{k:65,lat:45.555,lon:5.376},{k:70,lat:45.537,lon:5.427},{k:75,lat:45.519,lon:5.478},{k:80,lat:45.504,lon:5.524},{k:85,lat:45.486,lon:5.572},{k:90,lat:45.469,lon:5.611},{k:95,lat:45.454,lon:5.651},{k:100,lat:45.413,lon:5.702},{k:105,lat:45.367,lon:5.756},{k:110,lat:45.331,lon:5.781},{k:115,lat:45.295,lon:5.806},{k:120,lat:45.258,lon:5.831},{k:125,lat:45.225,lon:5.855},{k:130,lat:45.190,lon:5.875},{k:135,lat:45.150,lon:5.896}],
+  A48:  [{k:0,lat:45.183,lon:5.683},{k:5,lat:45.212,lon:5.657},{k:10,lat:45.241,lon:5.630},{k:15,lat:45.275,lon:5.606},{k:20,lat:45.308,lon:5.581},{k:25,lat:45.343,lon:5.549},{k:30,lat:45.378,lon:5.517},{k:35,lat:45.411,lon:5.480},{k:40,lat:45.443,lon:5.442},{k:45,lat:45.477,lon:5.404},{k:50,lat:45.511,lon:5.365},{k:55,lat:45.537,lon:5.330},{k:60,lat:45.562,lon:5.297}],
+  A49:  [{k:0,lat:45.136,lon:5.700},{k:5,lat:45.112,lon:5.655},{k:10,lat:45.088,lon:5.609},{k:15,lat:45.059,lon:5.583},{k:20,lat:45.030,lon:5.557},{k:25,lat:44.997,lon:5.539},{k:30,lat:44.964,lon:5.521},{k:35,lat:44.932,lon:5.506},{k:40,lat:44.900,lon:5.490}],
+  A51:  [{k:0,lat:45.140,lon:5.695},{k:10,lat:45.070,lon:5.691},{k:20,lat:44.980,lon:5.685},{k:30,lat:44.900,lon:5.688},{k:40,lat:44.820,lon:5.692},{k:50,lat:44.740,lon:5.696},{k:60,lat:44.660,lon:5.700},{k:70,lat:44.579,lon:5.716},{k:80,lat:44.498,lon:5.732},{k:90,lat:44.415,lon:5.761},{k:100,lat:44.330,lon:5.790},{k:110,lat:44.242,lon:5.820},{k:120,lat:44.150,lon:5.850}],
+  A480: [{k:0,lat:45.155,lon:5.695},{k:2,lat:45.172,lon:5.703},{k:4,lat:45.189,lon:5.711},{k:6,lat:45.205,lon:5.719},{k:8,lat:45.220,lon:5.727}],
+};
+
+function renderPrAutorouteLayer() {
+  if (!prAutorouteLayer || typeof window.L === 'undefined') return;
+  prAutorouteLayer.clearLayers();
+  const show = document.getElementById('filter-pr-autoroutes')?.checked ?? false;
+  if (!show) {
+    if (leafletMap && leafletMap.hasLayer(prAutorouteLayer)) leafletMap.removeLayer(prAutorouteLayer);
+    return;
+  }
+  if (leafletMap && !leafletMap.hasLayer(prAutorouteLayer)) leafletMap.addLayer(prAutorouteLayer);
+  const roadColors = { A41: '#2563eb', A43: '#7c3aed', A48: '#059669', A49: '#d97706', A51: '#dc2626', A480: '#0891b2' };
+  Object.entries(APRR_PR_COORDS).forEach(([road, pts]) => {
+    const color = roadColors[road] || '#555';
+    pts.forEach(({ k, lat, lon }) => {
+      const icon = window.L.divIcon({
+        className: '',
+        html: `<div style="background:${color};color:#fff;font-size:9px;font-weight:700;padding:1px 3px;border-radius:3px;border:1px solid rgba(0,0,0,.3);white-space:nowrap;line-height:1.3;box-shadow:0 1px 3px rgba(0,0,0,.4)">${road} ${k}</div>`,
+        iconAnchor: [0, 8],
+        popupAnchor: [0, -10],
+      });
+      const marker = window.L.marker([lat, lon], { icon });
+      marker.bindPopup(`<strong>${road} — PR ${k}</strong><br><small>${lat.toFixed(4)}, ${lon.toFixed(4)}</small>`);
+      marker.addTo(prAutorouteLayer);
+    });
+  });
+}
+
 async function renderTrafficOnMap() {
   if (!itinisereLayer || !bisonLayer || !bisonCameraLayer || !photoCameraLayer || typeof window.L === 'undefined') return;
   const renderSequence = ++trafficRenderSequence;
@@ -5183,6 +5221,13 @@ async function renderTrafficOnMap() {
 
   // ── Événements autoroutes APRR/AREA + Vinci (avec coordonnées) ──
   const showAutoroutes = document.getElementById('filter-autoroutes')?.checked ?? true;
+  if (autorouteLayer) {
+    if (!showAutoroutes) {
+      if (leafletMap.hasLayer(autorouteLayer)) leafletMap.removeLayer(autorouteLayer);
+    } else {
+      if (!leafletMap.hasLayer(autorouteLayer)) leafletMap.addLayer(autorouteLayer);
+    }
+  }
   if (autorouteLayer && showAutoroutes) {
     const typeColor = { accident: '#c22f43', travaux: '#f07800', chantier: '#f07800', perturbation: '#e6a800', inconnu: '#5f7190' };
     const allRoadEvents = [
@@ -5259,6 +5304,7 @@ async function renderTrafficOnMap() {
 
 
 
+  renderPrAutorouteLayer();
   updateMapSummary();
 }
 
@@ -9769,7 +9815,7 @@ function bindAppInteractions() {
     'filter-resources-telecom', 'filter-resources-telecom-type',
     'filter-resources-active',
   ]);
-  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras', 'filter-autoroutes'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras', 'filter-autoroutes', 'filter-pr-autoroutes'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       if (RESOURCE_ONLY_FILTERS.has(id)) {
         // Rendu immédiat depuis le cache
