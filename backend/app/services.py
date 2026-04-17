@@ -3763,6 +3763,8 @@ def _fetch_france_bleu_isere_news_live(limit: int = 12) -> dict[str, Any]:
         "Accept": "application/rss+xml, application/xml, text/xml, */*",
         "Accept-Language": "fr-FR,fr;q=0.9",
         "Referer": "https://www.google.com/",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
     }
     for source in rss_sources:
         try:
@@ -3791,6 +3793,8 @@ def _fetch_france_bleu_isere_news_live(limit: int = 12) -> dict[str, Any]:
                 })
                 if len(items) >= limit:
                     break
+            if not items:
+                continue
             return {
                 "service": "France Bleu Isère",
                 "status": "online",
