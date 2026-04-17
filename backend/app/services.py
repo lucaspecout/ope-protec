@@ -3762,13 +3762,12 @@ def fetch_dauphine_isere_news(limit: int = 10, force_refresh: bool = False) -> d
 
 
 def _fetch_france_bleu_isere_news_live(limit: int = 12) -> dict[str, Any]:
-    """Récupère les dernières actualités France Bleu Isère via flux RSS (plusieurs sources)."""
-    # Ordre de préférence : France Bleu → France TV Info Isère → France 3 Alpes
+    """Récupère les dernières actualités Isère via flux RSS (plusieurs sources)."""
+    # france3-regions en tête : RSS le plus frais (articles du jour).
+    # francetvinfo en secours. Les URLs France Bleu sont mortes depuis leur migration Radio France.
     rss_sources = [
-        "https://www.francebleu.fr/rss/infos/france-bleu-isere",
-        "https://www.francebleu.fr/rss/france-bleu-isere",
-        "https://www.francetvinfo.fr/france/auvergne-rhone-alpes/isere.rss",
         "https://france3-regions.francetvinfo.fr/auvergne-rhone-alpes/isere/rss",
+        "https://www.francetvinfo.fr/france/auvergne-rhone-alpes/isere.rss",
     ]
     _rss_headers = {
         "User-Agent": _BROWSER_UA,
