@@ -1075,10 +1075,10 @@ function formatLogLine(log = {}) {
   const place = log.location ? ` · 📍 ${escapeHtml(log.location)}` : '';
   const source = log.source ? ` · Source: ${escapeHtml(log.source)}` : '';
   const owner = log.assigned_to ? ` · 👤 ${escapeHtml(log.assigned_to)}` : '';
-  const next = log.next_update_due ? ` · ⏱️ MAJ ${new Date(log.next_update_due).toLocaleString()}` : '';
+  const next = log.next_update_due ? ` · ⏱️ MAJ ${safeDateToLocale(log.next_update_due)}` : '';
   const actions = log.actions_taken ? `<div class="muted">Actions: ${escapeHtml(log.actions_taken)}</div>` : '';
   const deleteAction = canEdit() ? `<div class="map-inline-actions"><button type="button" class="ghost inline-action" data-log-edit="${log.id}">Modifier</button><button type="button" class="ghost inline-action danger" data-log-delete="${log.id}">Supprimer MCO</button></div>` : '';
-  return `<li><strong>${new Date(log.event_time || log.created_at).toLocaleString()}</strong> · <span class="badge neutral">${formatLogScope(log)}${municipality}</span> ${log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢'} <strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'MCO')}</strong> · <span class="muted">${escapeHtml(getEventTitle(log.event_id))}</span>${place}${owner}${source}${next}<div>${escapeHtml(log.description || '')}</div>${actions}${deleteAction}</li>`;
+  return `<li><strong>${safeDateToLocale(log.event_time || log.created_at)}</strong> ·<span class="badge neutral">${formatLogScope(log)}${municipality}</span> ${log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢'} <strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'MCO')}</strong> · <span class="muted">${escapeHtml(getEventTitle(log.event_id))}</span>${place}${owner}${source}${next}<div>${escapeHtml(log.description || '')}</div>${actions}${deleteAction}</li>`;
 }
 
 function formatLogScope(log = {}) {
@@ -6685,8 +6685,20 @@ async function submitMunicipalityUploadForm(form, municipalityId) {
   if (refreshed) await openMunicipalityDetailsModal(refreshed);
 }
 
+function parseUtcTimestamp(value) {
+  if (!value) return new Date(0);
+  const s = String(value);
+  // La DB stocke TIMESTAMP WITHOUT TIME ZONE en UTC.
+  // FastAPI sérialise sans 'Z' → JS traite comme heure locale → décalage +2h en été.
+  // On force UTC en ajoutant 'Z' si aucune info de timezone n'est présente.
+  if (s.includes('T') && !/[Z+\-]\d{2}:?\d{2}$/.test(s) && !s.endsWith('Z')) {
+    return new Date(s + 'Z');
+  }
+  return new Date(s);
+}
+
 function safeDateToLocale(value, options = {}) {
-  const timestamp = new Date(value || 0);
+  const timestamp = parseUtcTimestamp(value);
   return Number.isFinite(timestamp.getTime()) && timestamp.getTime() > 0
     ? timestamp.toLocaleString('fr-FR', options)
     : '-';
@@ -6697,7 +6709,7 @@ function safeDateToLocale(value, options = {}) {
  * Utilisé dans la MCO pour rendre les entrées récentes immédiatement lisibles.
  */
 function timeAgo(value) {
-  const date = new Date(value || 0);
+  const date = parseUtcTimestamp(value);
   if (!Number.isFinite(date.getTime()) || date.getTime() <= 0) return '';
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
   if (seconds < 30)  return 'à l\'instant';
@@ -6801,7 +6813,7 @@ function buildOpenEventsSituationMarkup(events = []) {
     const worstLevel = eventLogs.reduce((max, l) => riskRank(l.danger_level) > riskRank(max) ? (l.danger_level || 'vert') : max, 'vert');
     const icon = LOG_LEVEL_EMOJI[normalizeLevel(worstLevel)] || '🟢';
     const lvlColor = levelColor(worstLevel);
-    const lastLog = eventLogs.sort((a, b) => new Date(b.event_time || b.created_at) - new Date(a.event_time || a.created_at))[0];
+    const lastLog = eventLogs.sort((a, b) => parseUtcTimestamp(b.event_time || b.created_at) - parseUtcTimestamp(a.event_time || a.created_at))[0];
     const lastLogLine = lastLog
       ? `<div class="muted" style="font-size:0.82em;margin-top:2px">Dernière MCO : ${escapeHtml(lastLog.description || lastLog.event_type || 'MCO')}${lastLog.assigned_to ? ` · 👤 ${escapeHtml(lastLog.assigned_to)}` : ''} · ${escapeHtml(safeDateToLocale(lastLog.event_time || lastLog.created_at))}</div>`
       : '';
@@ -8605,7 +8617,7 @@ function buildLogTableRow(log = {}) {
     log.location ? `<span class="mco-meta-chip">📍 ${escapeHtml(log.location)}</span>` : '',
     log.source ? `<span class="mco-meta-chip">🗣️ ${escapeHtml(log.source)}</span>` : '',
     log.assigned_to ? `<span class="mco-meta-chip">👤 ${escapeHtml(log.assigned_to)}</span>` : '',
-    log.next_update_due ? `<span class="mco-meta-chip">⏱️ MAJ ${new Date(log.next_update_due).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>` : '',
+    log.next_update_due ? `<span class="mco-meta-chip">⏱️ MAJ ${safeDateToLocale(log.next_update_due, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>` : '',
   ].filter(Boolean).join('');
 
   const actionsBtns = canEdit()
@@ -8635,7 +8647,7 @@ function renderLogsList() {
     filtered = [];
   }
 
-  filtered.sort((a, b) => new Date(b.event_time || b.created_at).getTime() - new Date(a.event_time || a.created_at).getTime());
+  filtered.sort((a, b) => parseUtcTimestamp(b.event_time || b.created_at).getTime() - parseUtcTimestamp(a.event_time || a.created_at).getTime());
 
   setText('logs-count', String(filtered.length));
   setHtml('logs-table-stream', filtered.map((log) => buildLogTableRow(log)).join('')
