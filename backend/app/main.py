@@ -2212,58 +2212,244 @@ def _extract_service_level(key: str, data: dict) -> str:
     return raw if raw in _LEVEL_ORDER else "vert"
 
 
-def _build_discord_embed(service_key: str, level: str, data: dict) -> dict:
-    """Construit le payload Discord (embed) pour une alerte."""
+def _build_discord_embed(service_key: str, level: str, data: dict, reason: str = "") -> dict:
+    """Construit le payload Discord (embed riche) pour une alerte."""
     label = _SERVICE_LABELS.get(service_key, service_key)
     emoji = {"rouge": "🔴", "orange": "🟠", "jaune": "🟡", "vert": "🟢"}.get(level, "ℹ️")
-    color = {"rouge": 0xE74C3C, "orange": 0xE67E22, "jaune": 0xF1C40F, "vert": 0x2ECC71}.get(level, 0x95A5A6)
-    now = datetime.utcnow().strftime("%d/%m/%Y %H:%M UTC")
+    color = {"rouge": 0xC0392B, "orange": 0xE67E22, "jaune": 0xF1C40F, "vert": 0x27AE60}.get(level, 0x95A5A6)
+    now_iso = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")  # format ISO pour Discord timestamp
 
-    desc_lines = [f"**Niveau : {level.upper()}**"]
+    def _f(name: str, value: str, inline: bool = True) -> dict:
+        return {"name": name, "value": value[:1024] or "–", "inline": inline}
 
+    def _trunc(s: str, n: int = 80) -> str:
+        s = str(s or "").strip()
+        return s[:n] + "…" if len(s) > n else s
+
+    fields: list[dict] = []
+    description = f"**Niveau : {level.upper()}**"
+    if reason:
+        desc_map = {
+            "nouvelle alerte": "🆕 Nouvelle alerte déclenchée",
+            "retour alerte après retour au vert": "🔁 Alerte réapparue après retour au vert",
+        }
+        desc_reason = desc_map.get(reason) or f"📢 {reason.capitalize()}"
+        description += f"\n{desc_reason}"
+
+    # ── Météo-France ──────────────────────────────────────────────────────────
     if service_key == "meteo_france":
-        alerts = data.get("alerts") or []
-        if alerts:
-            desc_lines.append(f"Phénomène : {alerts[0].get('phenomenon', '?')} ({alerts[0].get('department', '38')})")
+        current = data.get("current_alerts") or data.get("alerts") or []
+        tomorrow = data.get("tomorrow_alerts") or []
+        if current:
+            lines = []
+            for a in current[:6]:
+                ph = str(a.get("phenomenon") or a.get("title") or "?")
+                lv = str(a.get("level") or "?")
+                lines.append(f"• **{ph}** — {lv}")
+            fields.append(_f("⚠️ Alertes J0 (en cours)", "\n".join(lines), inline=False))
+        if tomorrow:
+            lines2 = []
+            for a in tomorrow[:4]:
+                ph = str(a.get("phenomenon") or a.get("title") or "?")
+                lv = str(a.get("level") or "?")
+                lines2.append(f"• **{ph}** — {lv}")
+            fields.append(_f("📅 Alertes J1 (demain)", "\n".join(lines2), inline=False))
+        if data.get("bulletin_title"):
+            fields.append(_f("📋 Bulletin", _trunc(data["bulletin_title"], 150), inline=False))
+
+    # ── Vigicrues ─────────────────────────────────────────────────────────────
     elif service_key == "vigicrues":
-        stations = data.get("stations") or []
-        if stations:
-            s = stations[0]
-            desc_lines.append(f"Station : {s.get('name', '?')} — cote {s.get('current_level_m', '?')} m")
+        alert_stations = [s for s in (data.get("stations") or []) if _LEVEL_ORDER.get(str(s.get("level") or "vert"), 0) >= _LEVEL_ORDER.get("orange", 1)]
+        troncons = [t for t in (data.get("troncons") or []) if _LEVEL_ORDER.get(str(t.get("level") or "vert"), 0) >= _LEVEL_ORDER.get("orange", 1)]
+        if alert_stations:
+            lines = []
+            for s in alert_stations[:6]:
+                lv = str(s.get("level") or "?")
+                h = s.get("height_m") or s.get("current_level_m") or "?"
+                lines.append(f"• **{s.get('station') or s.get('code', '?')}** ({s.get('river','')}) — {lv} — {h} m")
+            fields.append(_f(f"🌊 Stations en alerte ({len(alert_stations)})", "\n".join(lines), inline=False))
+        if troncons:
+            lines2 = [f"• **{t.get('name') or t.get('code','?')}** — {t.get('level','?')}" for t in troncons[:4]]
+            fields.append(_f("🗺️ Tronçons concernés", "\n".join(lines2), inline=False))
+
+    # ── Vigicrues Flash ───────────────────────────────────────────────────────
+    elif service_key == "vigicrues_flash_isere":
+        alerts = data.get("alerts") or []
+        total = int(data.get("alerts_total") or len(alerts))
+        fields.append(_f("⚡ Crues rapides", f"{total} avertissement(s)", inline=True))
+        if alerts:
+            lines = [f"• **{a.get('zone') or a.get('commune','?')}** — {a.get('level','?')}" for a in alerts[:5]]
+            fields.append(_f("📍 Zones concernées", "\n".join(lines), inline=False))
+
+    # ── APIC ─────────────────────────────────────────────────────────────────
+    elif service_key == "apic_isere":
+        alerts = data.get("alerts") or []
+        total = int(data.get("alerts_total") or len(alerts))
+        fields.append(_f("🌧️ Pluie intense", f"{total} avertissement(s)", inline=True))
+        if alerts:
+            lines = [f"• **{a.get('zone') or a.get('commune','?')}** — {a.get('level','?')}" for a in alerts[:5]]
+            fields.append(_f("📍 Communes concernées", "\n".join(lines), inline=False))
+
+    # ── Itinisère / Transports ────────────────────────────────────────────────
+    elif service_key == "itinisere":
+        events = data.get("events") or []
+        total = int(data.get("events_total") or len(events))
+        fields.append(_f("🚌 Perturbations", str(total), inline=True))
+        if events:
+            lines = []
+            for e in events[:5]:
+                title = _trunc(e.get("title") or e.get("description") or "?", 90)
+                cat = str(e.get("category") or e.get("type") or "")
+                lines.append(f"• **{title}**{(' · ' + cat) if cat else ''}")
+            fields.append(_f("📋 Détail", "\n".join(lines), inline=False))
+
+    # ── SNCF ──────────────────────────────────────────────────────────────────
+    elif service_key == "sncf_isere":
+        alerts = data.get("alerts") or []
+        total = int(data.get("alerts_total") or len(alerts))
+        fields.append(_f("🚆 Alertes voie ferrée", str(total), inline=True))
+        if alerts:
+            lines = []
+            for a in alerts[:5]:
+                title = _trunc(a.get("title") or "?", 90)
+                desc = _trunc(a.get("description") or "", 60)
+                lines.append(f"• **{title}**{(chr(10) + '  ' + desc) if desc else ''}")
+            fields.append(_f("📋 Alertes", "\n".join(lines), inline=False))
+
+    # ── TER AURA / M Réseau / Cars Région ────────────────────────────────────
     elif service_key in ("ter_aura", "mreseau", "cars_region_aura"):
-        n = int(data.get("disruptions_total") or len(data.get("disruptions") or []))
-        desc_lines.append(f"{n} perturbation(s) détectée(s)")
-        for d in (data.get("disruptions") or [])[:2]:
-            t = str(d.get("title") or d.get("description") or "")[:100]
-            if t:
-                desc_lines.append(f"• {t}")
+        disruptions = data.get("disruptions") or []
+        total = int(data.get("disruptions_total") or len(disruptions))
+        icon = {"ter_aura": "🚄", "mreseau": "🚊", "cars_region_aura": "🚐"}.get(service_key, "🚌")
+        fields.append(_f(f"{icon} Perturbations", str(total), inline=True))
+        if data.get("normal_service") is False or total > 0:
+            fields.append(_f("🔴 Service", "Perturbé" if total > 0 else "Normal", inline=True))
+        if disruptions:
+            lines = []
+            for d in disruptions[:5]:
+                title = _trunc(d.get("title") or d.get("description") or "?", 90)
+                cause = str(d.get("cause") or d.get("type") or "")
+                lines.append(f"• **{title}**{(' · ' + cause) if cause else ''}")
+            fields.append(_f("📋 Perturbations", "\n".join(lines), inline=False))
+
+    # ── APRR / Vinci Autoroutes ───────────────────────────────────────────────
     elif service_key in ("aprr_isere", "vinci_autoroutes"):
-        n = int(data.get("events_total") or len(data.get("events") or []))
-        desc_lines.append(f"{n} événement(s) sur autoroute")
-        for e in (data.get("events") or [])[:2]:
-            t = str(e.get("title") or e.get("description") or "")[:100]
-            if t:
-                desc_lines.append(f"• {e.get('road', '')} {t}")
-    elif service_key == "electricity_isere":
-        margin = data.get("supply_margin_mw")
-        if margin is not None:
-            desc_lines.append(f"Marge d'approvisionnement : {margin} MW")
+        events = data.get("events") or []
+        total = int(data.get("events_total") or len(events))
+        routes = ", ".join(data.get("routes") or [])
+        fields.append(_f("🛣️ Événements", str(total), inline=True))
+        if routes:
+            fields.append(_f("🗺️ Axes", routes, inline=True))
+        if events:
+            lines = []
+            for e in events[:5]:
+                road = str(e.get("road") or "")
+                title = _trunc(e.get("title") or e.get("description") or "?", 80)
+                lines.append(f"• **{road} — {title}**")
+            fields.append(_f("📋 Événements", "\n".join(lines), inline=False))
+
+    # ── Bison Futé ────────────────────────────────────────────────────────────
+    elif service_key == "bison_fute":
+        isere = (data.get("today") or {}).get("isere") or {}
+        dep = str(isere.get("departure") or "?")
+        ret = str(isere.get("return") or "?")
+        fields.append(_f("🚗 Départ Isère J0", dep, inline=True))
+        fields.append(_f("🏠 Retour Isère J0", ret, inline=True))
+        isere_j1 = (data.get("tomorrow") or {}).get("isere") or {}
+        if isere_j1:
+            fields.append(_f("📅 J1 Départ/Retour", f"{isere_j1.get('departure','?')} / {isere_j1.get('return','?')}", inline=True))
+
+    # ── Vigieau ───────────────────────────────────────────────────────────────
+    elif service_key == "vigieau":
+        alerts = data.get("alerts") or []
+        fields.append(_f("💧 Restrictions eau", str(len(alerts)), inline=True))
+        if alerts:
+            lines = []
+            for a in alerts[:5]:
+                zone = str(a.get("zone") or a.get("department") or "Isère")
+                lv = str(a.get("level") or "?")
+                measure = _trunc(a.get("measure") or a.get("restriction") or "", 70)
+                lines.append(f"• **{zone}** — {lv}{(chr(10) + '  ' + measure) if measure else ''}")
+            fields.append(_f("📋 Restrictions", "\n".join(lines), inline=False))
+
+    # ── Qualité de l'air ──────────────────────────────────────────────────────
     elif service_key == "atmo_aura":
         today = data.get("today") or {}
-        lbl = today.get("label") or ""
-        idx = today.get("index") or ""
-        if lbl:
-            desc_lines.append(f"Indice qualité air : {idx} — {lbl}")
+        tomorrow = data.get("tomorrow") or {}
+        lbl = str(today.get("label") or today.get("level") or "?")
+        idx = today.get("index") or "?"
+        fields.append(_f("🌫️ Indice air J0", f"{idx} — {lbl}", inline=True))
+        if tomorrow:
+            lbl2 = str(tomorrow.get("label") or tomorrow.get("level") or "?")
+            idx2 = tomorrow.get("index") or "?"
+            fields.append(_f("📅 Indice air J1", f"{idx2} — {lbl2}", inline=True))
+        if data.get("has_pollution_episode"):
+            fields.append(_f("⚠️ Épisode pollution", "En cours", inline=True))
+        pollutants = today.get("pollutants") or []
+        if pollutants:
+            lines = [f"• {p.get('name','?')} : {p.get('value','?')} {p.get('unit','')}" for p in pollutants[:4]]
+            fields.append(_f("🔬 Polluants", "\n".join(lines), inline=False))
 
-    desc_lines.append(f"\n📍 Isère — {now}")
+    # ── Électricité / Ecowatt ─────────────────────────────────────────────────
+    elif service_key == "electricity_isere":
+        ecowatt = data.get("ecowatt") or {}
+        dval = int(ecowatt.get("dvalue") or 0)
+        sig_label = {1: "✅ Pas d'alerte", 2: "⚠️ Système tendu", 3: "🚨 Système très tendu"}.get(dval, "Signal inconnu")
+        fields.append(_f("⚡ Signal Ecowatt", sig_label, inline=False))
+        msg = str(ecowatt.get("message") or "")
+        if msg:
+            fields.append(_f("💬 Message RTE", _trunc(msg, 200), inline=False))
+        if data.get("consumption_mw") is not None:
+            fields.append(_f("🔌 Conso nationale", f"{data['consumption_mw']:,} MW".replace(",", " "), inline=True))
+
+    # ── Préfecture / Presse ───────────────────────────────────────────────────
+    elif service_key in ("prefecture_isere", "dauphine_isere", "france_bleu_isere"):
+        items = data.get("items") or data.get("articles") or []
+        icon = {"prefecture_isere": "🏛️", "dauphine_isere": "📰", "france_bleu_isere": "📻"}.get(service_key, "📰")
+        fields.append(_f(f"{icon} Articles/Actualités", str(len(items)), inline=True))
+        if items:
+            lines = [f"• {_trunc(i.get('title') or i.get('headline') or '?', 100)}" for i in items[:4]]
+            fields.append(_f("📋 Dernières actualités", "\n".join(lines), inline=False))
+
+    # ── Géorisques ────────────────────────────────────────────────────────────
+    elif service_key == "georisques":
+        details = data.get("details") or []
+        seismic = data.get("highest_seismic_zone_label") or "?"
+        flood_docs = data.get("flood_documents_total") or 0
+        fields.append(_f("🌋 Zone sismique max", seismic, inline=True))
+        fields.append(_f("🌊 Documents inondation", str(flood_docs), inline=True))
+        if details:
+            lines = [f"• {_trunc(str(d.get('type') or d.get('title') or d), 80)}" for d in details[:4]]
+            fields.append(_f("📋 Risques identifiés", "\n".join(lines), inline=False))
+
+    # ── ARCEP ─────────────────────────────────────────────────────────────────
+    elif service_key == "arcep_isere":
+        total = int(data.get("outages_total") or 0)
+        fields.append(_f("📶 Sites indisponibles", str(total), inline=True))
+        communes = data.get("communes") or []
+        if communes:
+            lines = [f"• {_trunc(str(c.get('name') or c), 60)}" for c in communes[:5]]
+            fields.append(_f("📍 Communes affectées", "\n".join(lines), inline=False))
+
+    # ── Champ générique si aucun cas spécifique ───────────────────────────────
+    if not fields:
+        if data.get("error"):
+            fields.append(_f("❌ Erreur", _trunc(str(data["error"]), 200), inline=False))
+
+    # ── Source / lien ─────────────────────────────────────────────────────────
+    source_url = str(data.get("source") or data.get("source_url") or data.get("link") or "")
+    if source_url.startswith("http"):
+        fields.append(_f("🔗 Source", f"[Voir la source]({source_url[:200]})", inline=True))
 
     return {
         "username": "CRISIS38",
         "embeds": [{
             "title": f"{emoji} ALERTE ISÈRE — {label}",
-            "description": "\n".join(desc_lines),
+            "description": description,
             "color": color,
+            "fields": fields[:25],  # Discord limite à 25 champs
             "footer": {"text": "CRISIS38 · Centre opérationnel Isère"},
+            "timestamp": now_iso,
         }]
     }
 
@@ -2365,10 +2551,21 @@ def _check_notif_quiet(quiet: dict, now_utc: "datetime") -> bool:
 
 def _check_and_send_notifications(service_key: str, data: dict) -> None:
     """Vérifie si une notification doit être envoyée pour chaque règle active.
-    Appelé dans un thread background — ne lève jamais d'exception."""
+
+    Logique de déduplication par niveau :
+    - Nouvelle alerte (vert → orange/rouge) → envoie immédiatement
+    - Escalade (orange → rouge) → envoie immédiatement
+    - Même niveau déjà notifié → envoie seulement si cooldown expiré
+    - Alerte revenue au vert puis réapparue → envoie immédiatement (reset détecté)
+    - De-escalade (rouge → orange, toujours ≥ seuil) → envoie après cooldown
+
+    Clés Redis utilisées :
+    - notif:state:{rule_id}:{service_key} → JSON {"notified_level":"orange","seen_below":false,"notified_at":"..."}
+    """
     try:
         rules = _load_notif_rules()
         current_level = _extract_service_level(service_key, data)
+        current_rank = _LEVEL_ORDER.get(current_level, 0)
         now_utc = datetime.utcnow()
 
         for rule in rules:
@@ -2385,25 +2582,70 @@ def _check_and_send_notifications(service_key: str, data: dict) -> None:
                     continue
 
                 threshold = str(svc_cfg.get("threshold") or "orange").lower()
-                if _LEVEL_ORDER.get(current_level, 0) < _LEVEL_ORDER.get(threshold, 1):
-                    continue
+                threshold_rank = _LEVEL_ORDER.get(threshold, 1)
 
                 if _check_notif_quiet(rule.get("quiet_hours") or {}, now_utc):
                     continue
 
-                cooldown_min = int(rule.get("cooldown_minutes") or 60)
+                # ── Charger l'état précédent ────────────────────────────────
+                state_key = f"notif:state:{rule_id}:{service_key}"
+                state: dict = {}
                 if _REDIS_OK and _redis is not None:
-                    last_key = f"{_NOTIF_LAST_KEY_PREFIX}{rule_id}:{service_key}"
-                    last_sent = _redis.get(last_key)
-                    if last_sent:
+                    raw = _redis.get(state_key)
+                    if raw:
                         try:
-                            last_dt = datetime.fromisoformat(last_sent.decode() if isinstance(last_sent, bytes) else last_sent)
-                            if (now_utc - last_dt).total_seconds() < cooldown_min * 60:
-                                continue
+                            state = json.loads(raw.decode() if isinstance(raw, bytes) else raw)
                         except Exception:
-                            pass
+                            state = {}
 
-                embed_payload = _build_discord_embed(service_key, current_level, data)
+                notified_level = str(state.get("notified_level") or "vert")
+                seen_below = bool(state.get("seen_below", True))  # True = était sous le seuil
+                notified_rank = _LEVEL_ORDER.get(notified_level, 0)
+
+                # ── Mettre à jour seen_below ────────────────────────────────
+                if current_rank < threshold_rank:
+                    # Niveau actuel sous le seuil → mémoriser le reset, pas de notification
+                    new_state = {**state, "seen_below": True, "last_seen_level": current_level}
+                    if _REDIS_OK and _redis is not None:
+                        _redis.setex(state_key, 7 * 86400, json.dumps(new_state))
+                    continue
+
+                # ── Décider si on envoie ────────────────────────────────────
+                cooldown_min = int(rule.get("cooldown_minutes") or 60)
+                last_notif_at: datetime | None = None
+                if state.get("notified_at"):
+                    try:
+                        last_notif_at = datetime.fromisoformat(str(state["notified_at"]).rstrip("Z"))
+                    except Exception:
+                        pass
+
+                cooldown_ok = (
+                    last_notif_at is None
+                    or (now_utc - last_notif_at).total_seconds() >= cooldown_min * 60
+                )
+
+                reason = ""
+                if seen_below or notified_rank < threshold_rank:
+                    # Alerte nouvelle ou revenue après un passage sous le seuil
+                    should_send = True
+                    reason = "nouvelle alerte" if notified_rank < threshold_rank else "retour alerte après retour au vert"
+                elif current_rank > notified_rank:
+                    # Escalade (orange → rouge)
+                    should_send = True
+                    reason = f"escalade {notified_level}→{current_level}"
+                elif cooldown_ok:
+                    # Même niveau ou de-escalade, cooldown expiré → rappel
+                    should_send = True
+                    reason = "rappel (cooldown expiré)"
+                else:
+                    # Même alerte déjà notifiée, cooldown pas expiré → silence
+                    should_send = False
+
+                if not should_send:
+                    continue
+
+                # ── Envoyer ────────────────────────────────────────────────
+                embed_payload = _build_discord_embed(service_key, current_level, data, reason=reason)
                 ok, detail = _send_discord_webhook(webhook_url, embed_payload)
 
                 log_entry = {
@@ -2412,15 +2654,23 @@ def _check_and_send_notifications(service_key: str, data: dict) -> None:
                     "service": service_key,
                     "label": _SERVICE_LABELS.get(service_key, service_key),
                     "level": current_level,
+                    "reason": reason,
                     "sent_at": now_utc.isoformat() + "Z",
                     "success": ok,
                     "detail": detail,
                 }
                 _save_notif_log(log_entry)
 
+                # ── Sauvegarder le nouvel état ──────────────────────────────
                 if _REDIS_OK and _redis is not None:
-                    last_key = f"{_NOTIF_LAST_KEY_PREFIX}{rule_id}:{service_key}"
-                    _redis.setex(last_key, cooldown_min * 60, now_utc.isoformat())
+                    new_state = {
+                        "notified_level": current_level,
+                        "seen_below": False,
+                        "notified_at": now_utc.isoformat(),
+                        "last_seen_level": current_level,
+                    }
+                    _redis.setex(state_key, 7 * 86400, json.dumps(new_state))
+
             except Exception:
                 continue
     except Exception:

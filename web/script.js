@@ -6952,8 +6952,6 @@ function buildSituationKpiModalContent(key, externalRisks = {}) {
   const vigicruesFlash = externalRisks?.vigicrues_flash_isere || {};
   const atmo = externalRisks?.atmo_aura || {};
   const arcep = externalRisks?.arcep_isere || {};
-  const elec = externalRisks?.electricity_isere || {};
-  const ecowatt = elec.ecowatt || {};
   switch (key) {
     case 'meteo':
       return buildMeteoSituationModalContent(meteo);
