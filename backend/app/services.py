@@ -714,6 +714,18 @@ _dauphine_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, 
 _FRANCE_BLEU_ISERE_CACHE_TTL_SECONDS = 300
 _france_bleu_cache_lock = Lock()
 _france_bleu_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "france_bleu_isere", "max_stale_hours": 4}
+_PLACEGRENET_CACHE_TTL_SECONDS = 300
+_placegrenet_cache_lock = Lock()
+_placegrenet_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "placegrenet"}
+_GRENOBLE_METRO_CACHE_TTL_SECONDS = 300
+_grenoble_metro_cache_lock = Lock()
+_grenoble_metro_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "grenoble_metro"}
+_ARS_AURA_CACHE_TTL_SECONDS = 300
+_ars_aura_cache_lock = Lock()
+_ars_aura_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "ars_aura"}
+_SEISMES_ISERE_CACHE_TTL_SECONDS = 600
+_seismes_isere_cache_lock = Lock()
+_seismes_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "seismes_isere"}
 _vigieau_cache_lock = Lock()
 _vigieau_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "vigieau"}
 _atmo_aura_cache_lock = Lock()
@@ -3866,6 +3878,162 @@ def fetch_france_bleu_isere_news(limit: int = 12, force_refresh: bool = False) -
         ttl_seconds=_FRANCE_BLEU_ISERE_CACHE_TTL_SECONDS,
         force_refresh=force_refresh,
         loader=lambda: _fetch_france_bleu_isere_news_live(limit=limit),
+    )
+
+
+def _fetch_placegrenet_news_live(limit: int = 10) -> dict[str, Any]:
+    source = "https://www.placegrenet.fr/feed/rss"
+    try:
+        xml_payload = _http_get_text(source)
+        root = ET.fromstring(xml_payload)
+        items: list[dict[str, Any]] = []
+        for item in root.findall(".//item"):
+            title = unescape((item.findtext("title") or "").strip()) or "Article Place Gre'net"
+            link = (item.findtext("link") or "https://www.placegrenet.fr").strip()
+            parsed_link = urlparse(link)
+            if parsed_link.scheme not in {"http", "https"}:
+                continue
+            description_html = (item.findtext("description") or "").strip()
+            description = unescape(re.sub(r"\s+", " ", _strip_html_tags(description_html))).strip()
+            published = (item.findtext("pubDate") or "").strip()
+            items.append({"title": title, "description": description[:400], "published_at": published, "link": link})
+        items.sort(key=lambda a: _parse_prefecture_published_date(a.get("published_at") or ""), reverse=True)
+        return {"service": "Place Gre'net", "status": "online", "source": source, "items": items[:limit], "updated_at": datetime.utcnow().isoformat() + "Z"}
+    except (ET.ParseError, HTTPError, URLError, TimeoutError, ValueError) as exc:
+        return {"service": "Place Gre'net", "status": "degraded", "source": source, "items": [], "error": str(exc)}
+
+
+def fetch_placegrenet_news(limit: int = 10, force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_placegrenet_cache,
+        lock=_placegrenet_cache_lock,
+        ttl_seconds=_PLACEGRENET_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=lambda: _fetch_placegrenet_news_live(limit=limit),
+    )
+
+
+def _fetch_grenoble_metro_news_live(limit: int = 8) -> dict[str, Any]:
+    source = "https://www.grenoblealpesmetropole.fr/rss_actualite.rss"
+    try:
+        xml_payload = _http_get_text(source)
+        root = ET.fromstring(xml_payload)
+        items: list[dict[str, Any]] = []
+        for item in root.findall(".//item"):
+            title = unescape((item.findtext("title") or "").strip()) or "Actualité Grenoble Alpes Métropole"
+            link = (item.findtext("link") or "https://www.grenoblealpesmetropole.fr").strip()
+            parsed_link = urlparse(link)
+            if parsed_link.scheme not in {"http", "https"}:
+                continue
+            description_html = (item.findtext("description") or "").strip()
+            description = unescape(re.sub(r"\s+", " ", _strip_html_tags(description_html))).strip()
+            published = (item.findtext("pubDate") or "").strip()
+            items.append({"title": title, "description": description[:400], "published_at": published, "link": link})
+        items.sort(key=lambda a: _parse_prefecture_published_date(a.get("published_at") or ""), reverse=True)
+        return {"service": "Grenoble Alpes Métropole", "status": "online", "source": source, "items": items[:limit], "updated_at": datetime.utcnow().isoformat() + "Z"}
+    except (ET.ParseError, HTTPError, URLError, TimeoutError, ValueError) as exc:
+        return {"service": "Grenoble Alpes Métropole", "status": "degraded", "source": source, "items": [], "error": str(exc)}
+
+
+def fetch_grenoble_metro_news(limit: int = 8, force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_grenoble_metro_cache,
+        lock=_grenoble_metro_cache_lock,
+        ttl_seconds=_GRENOBLE_METRO_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=lambda: _fetch_grenoble_metro_news_live(limit=limit),
+    )
+
+
+def _fetch_ars_aura_health_alerts_live(limit: int = 8) -> dict[str, Any]:
+    sources = [
+        "https://www.auvergne-rhone-alpes.ars.sante.fr/rss.xml?type=ars_alerte_sanitaire",
+        "https://www.auvergne-rhone-alpes.ars.sante.fr/rss.xml?type=ars_actualite",
+    ]
+    items: list[dict[str, Any]] = []
+    source_used = sources[0]
+    for source in sources:
+        try:
+            xml_payload = _http_get_text(source)
+            root = ET.fromstring(xml_payload)
+            for item in root.findall(".//item"):
+                title = unescape((item.findtext("title") or "").strip()) or "Alerte sanitaire ARS"
+                link = (item.findtext("link") or "https://www.auvergne-rhone-alpes.ars.sante.fr").strip()
+                parsed_link = urlparse(link)
+                if parsed_link.scheme not in {"http", "https"}:
+                    continue
+                description_html = (item.findtext("description") or "").strip()
+                description = unescape(re.sub(r"\s+", " ", _strip_html_tags(description_html))).strip()
+                published = (item.findtext("pubDate") or "").strip()
+                entry = {"title": title, "description": description[:400], "published_at": published, "link": link}
+                if entry not in items:
+                    items.append(entry)
+            source_used = source
+            if items:
+                break
+        except Exception:
+            continue
+    items.sort(key=lambda a: _parse_prefecture_published_date(a.get("published_at") or ""), reverse=True)
+    if items:
+        return {"service": "ARS AURA · Alertes sanitaires", "status": "online", "source": source_used, "items": items[:limit], "updated_at": datetime.utcnow().isoformat() + "Z"}
+    return {"service": "ARS AURA · Alertes sanitaires", "status": "degraded", "source": source_used, "items": [], "error": "Aucune alerte disponible"}
+
+
+def fetch_ars_aura_health_alerts(limit: int = 8, force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_ars_aura_cache,
+        lock=_ars_aura_cache_lock,
+        ttl_seconds=_ARS_AURA_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=lambda: _fetch_ars_aura_health_alerts_live(limit=limit),
+    )
+
+
+def _fetch_seismes_isere_live(limit: int = 10) -> dict[str, Any]:
+    # Bounding box Isère : lat 44.7-45.5, lon 4.8-6.5 — retourne QuakeML XML
+    url = (
+        "https://api.franceseisme.fr/fdsnws/event/1/query"
+        "?minlatitude=44.7&maxlatitude=45.5"
+        "&minlongitude=4.8&maxlongitude=6.5"
+        f"&limit={limit}&orderby=time"
+    )
+    ns = {"q": "http://quakeml.org/xmlns/quakeml/1.2"}
+    try:
+        raw = _http_get_text(url)
+        root = ET.fromstring(raw)
+        event_nodes = root.findall("q:eventParameters/q:event", ns)
+        events: list[dict[str, Any]] = []
+        for ev in event_nodes:
+            def _txt(path: str) -> str | None:
+                node = ev.find(path, ns)
+                return node.text.strip() if node is not None and node.text else None
+            mag_raw = _txt("q:magnitude/q:mag/q:value")
+            mag = round(float(mag_raw), 1) if mag_raw else None
+            place = _txt("q:description/q:text") or "Isère"
+            time_val = _txt("q:origin/q:time/q:value")
+            depth_raw = _txt("q:origin/q:depth/q:value")
+            depth_km = round(float(depth_raw) / 1000, 1) if depth_raw else None
+            events.append({
+                "title": f"Séisme M{mag} — {place}",
+                "magnitude": mag,
+                "place": place,
+                "depth_km": depth_km,
+                "published_at": time_val,
+                "description": f"Magnitude {mag} · Profondeur {depth_km} km" if depth_km else f"Magnitude {mag}",
+                "link": "https://www.franceseisme.fr/",
+            })
+        return {"service": "Séismes Isère (BCSF-RéNaSS)", "status": "online", "source": url, "items": events, "updated_at": datetime.utcnow().isoformat() + "Z"}
+    except (ET.ParseError, HTTPError, URLError, TimeoutError, ValueError, KeyError) as exc:
+        return {"service": "Séismes Isère (BCSF-RéNaSS)", "status": "degraded", "source": url, "items": [], "error": str(exc)}
+
+
+def fetch_seismes_isere(limit: int = 10, force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_seismes_isere_cache,
+        lock=_seismes_isere_cache_lock,
+        ttl_seconds=_SEISMES_ISERE_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=lambda: _fetch_seismes_isere_live(limit=limit),
     )
 
 
@@ -8116,6 +8284,10 @@ def flush_service_memory_cache(service_key: str) -> dict[str, str]:
         "apic_isere":          (_apic_isere_cache,            _apic_isere_cache_lock),
         "isere_opendata":      (_isere_opendata_cache,        _isere_opendata_cache_lock),
         "finess_isere":        (_finess_isere_cache,          _finess_isere_cache_lock),
+        "placegrenet":         (_placegrenet_cache,           _placegrenet_cache_lock),
+        "grenoble_metro":      (_grenoble_metro_cache,        _grenoble_metro_cache_lock),
+        "ars_aura":            (_ars_aura_cache,              _ars_aura_cache_lock),
+        "seismes_isere":       (_seismes_isere_cache,         _seismes_isere_cache_lock),
     }
     if service_key not in _known:
         return {"status": "not_found", "service": service_key}

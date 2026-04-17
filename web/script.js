@@ -57,6 +57,10 @@ const FLUX_SERVICES = [
   { key: 'prefecture_isere',       label: 'Préfecture Isère',          icon: '🏛️', category: 'Actualités',   interval: 90,    metric: (d) => `${(d.items || []).length} actualité(s)` },
   { key: 'dauphine_isere',         label: 'Dauphiné Libéré',           icon: '📰', category: 'Actualités',   interval: 180,   metric: (d) => `${(d.items || []).length} article(s)` },
   { key: 'france_bleu_isere',      label: 'France Bleu Isère',         icon: '📻', category: 'Actualités',   interval: 180,   metric: (d) => `${(d.items || []).length} article(s)` },
+  { key: 'placegrenet',            label: "Place Gre'net",             icon: '🗞️', category: 'Actualités',   interval: 180,   metric: (d) => `${(d.items || []).length} article(s)` },
+  { key: 'grenoble_metro',         label: 'Grenoble Alpes Métropole',  icon: '🏙️', category: 'Actualités',   interval: 300,   metric: (d) => `${(d.items || []).length} actualité(s)` },
+  { key: 'ars_aura',               label: 'ARS AURA · Santé',          icon: '🏥', category: 'Actualités',   interval: 300,   metric: (d) => `${(d.items || []).length} alerte(s) sanitaire(s)` },
+  { key: 'seismes_isere',          label: 'Séismes Isère',             icon: '🌍', category: 'Risques',       interval: 600,   metric: (d) => `${(d.items || []).length} séisme(s) détecté(s)` },
   { key: 'anfr_isere',             label: 'ANFR · Antennes mobiles',   icon: '📡', category: 'Télécom',       interval: 21600, metric: (d) => `${d.supports_total ?? 0} support(s) mobile recensés` },
   { key: 'arcep_isere',            label: 'ARCEP · Sites mobiles',     icon: '📶', category: 'Télécom',       interval: 600,   metric: (d) => `${d.outages_total ?? 0} indisponibilité(s)` },
   { key: 'isere_opendata',         label: 'Isère OpenData · Résilience', icon: '📊', category: 'Données',    interval: 1800,  metric: (d) => `${d.totals?.schools ?? 0} écoles · ${d.totals?.health_centers ?? 0} santé · ${d.totals?.food_aid_points ?? 0} aide alim.` },
@@ -580,6 +584,26 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
       ...(previous.france_bleu_isere || {}),
       ...(next.france_bleu_isere || {}),
       items: keepPreviousArray((previous.france_bleu_isere || {}).items, (next.france_bleu_isere || {}).items),
+    },
+    placegrenet: {
+      ...(previous.placegrenet || {}),
+      ...(next.placegrenet || {}),
+      items: keepPreviousArray((previous.placegrenet || {}).items, (next.placegrenet || {}).items),
+    },
+    grenoble_metro: {
+      ...(previous.grenoble_metro || {}),
+      ...(next.grenoble_metro || {}),
+      items: keepPreviousArray((previous.grenoble_metro || {}).items, (next.grenoble_metro || {}).items),
+    },
+    ars_aura: {
+      ...(previous.ars_aura || {}),
+      ...(next.ars_aura || {}),
+      items: keepPreviousArray((previous.ars_aura || {}).items, (next.ars_aura || {}).items),
+    },
+    seismes_isere: {
+      ...(previous.seismes_isere || {}),
+      ...(next.seismes_isere || {}),
+      items: keepPreviousArray((previous.seismes_isere || {}).items, (next.seismes_isere || {}).items),
     },
     georisques: {
       ...prevGeorisques,
@@ -5678,12 +5702,16 @@ function buildNewsArticleCard(item, fallbackLink) {
   </a>`;
 }
 
-function renderNewsPanel(prefecture = {}, dauphine = {}, franceBleu = {}) {
-  const prefItems   = sortPrefectureItemsByRecency(Array.isArray(prefecture.items)   ? prefecture.items   : []);
-  const dauphItems  = sortPrefectureItemsByRecency(Array.isArray(dauphine.items)     ? dauphine.items     : []);
-  const fbItems     = sortPrefectureItemsByRecency(Array.isArray(franceBleu.items)   ? franceBleu.items   : []);
+function renderNewsPanel(prefecture = {}, dauphine = {}, franceBleu = {}, placegrenet = {}, grenobleMétropole = {}, arsAura = {}, seismesIsere = {}) {
+  const prefItems      = sortPrefectureItemsByRecency(Array.isArray(prefecture.items)        ? prefecture.items        : []);
+  const dauphItems     = sortPrefectureItemsByRecency(Array.isArray(dauphine.items)          ? dauphine.items          : []);
+  const fbItems        = sortPrefectureItemsByRecency(Array.isArray(franceBleu.items)        ? franceBleu.items        : []);
+  const pgItems        = sortPrefectureItemsByRecency(Array.isArray(placegrenet.items)       ? placegrenet.items       : []);
+  const metroItems     = sortPrefectureItemsByRecency(Array.isArray(grenobleMétropole.items) ? grenobleMétropole.items : []);
+  const arsItems       = sortPrefectureItemsByRecency(Array.isArray(arsAura.items)           ? arsAura.items           : []);
+  const seismeItems    = Array.isArray(seismesIsere.items) ? seismesIsere.items : [];
 
-  const allItems = [...prefItems, ...dauphItems, ...fbItems];
+  const allItems = [...prefItems, ...dauphItems, ...fbItems, ...pgItems, ...metroItems, ...arsItems, ...seismeItems];
   const totalCount = allItems.length;
 
   /* Compteurs par source */
@@ -5691,6 +5719,10 @@ function renderNewsPanel(prefecture = {}, dauphine = {}, franceBleu = {}) {
   if (el('news-pref-count'))       el('news-pref-count').textContent       = String(prefItems.length);
   if (el('news-dauphine-count'))   el('news-dauphine-count').textContent   = String(dauphItems.length);
   if (el('news-francebleu-count')) el('news-francebleu-count').textContent = String(fbItems.length);
+  if (el('news-placegrenet-count')) el('news-placegrenet-count').textContent = String(pgItems.length);
+  if (el('news-metro-count'))      el('news-metro-count').textContent      = String(metroItems.length);
+  if (el('news-ars-count'))        el('news-ars-count').textContent        = String(arsItems.length);
+  if (el('news-seismes-count'))    el('news-seismes-count').textContent    = String(seismeItems.length);
   if (el('news-total-count-badge')) el('news-total-count-badge').textContent = `${totalCount} article${totalCount > 1 ? 's' : ''}`;
 
   /* Dernière MàJ globale */
@@ -5708,6 +5740,10 @@ function renderNewsPanel(prefecture = {}, dauphine = {}, franceBleu = {}) {
   if (el('news-pref-status'))       el('news-pref-status').textContent       = `${prefecture.status || '–'} · ${prefItems.length} actualité(s)`;
   if (el('news-dauphine-status'))   el('news-dauphine-status').textContent   = `${dauphine.status || '–'} · ${dauphItems.length} article(s)`;
   if (el('news-francebleu-status')) el('news-francebleu-status').textContent = `${franceBleu.status || '–'} · ${fbItems.length} article(s)`;
+  if (el('news-placegrenet-status')) el('news-placegrenet-status').textContent = `${placegrenet.status || '–'} · ${pgItems.length} article(s)`;
+  if (el('news-metro-status'))      el('news-metro-status').textContent      = `${grenobleMétropole.status || '–'} · ${metroItems.length} actualité(s)`;
+  if (el('news-ars-status'))        el('news-ars-status').textContent        = `${arsAura.status || '–'} · ${arsItems.length} alerte(s)`;
+  if (el('news-seismes-status'))    el('news-seismes-status').textContent    = `${seismesIsere.status || '–'} · ${seismeItems.length} séisme(s)`;
 
   /* Listes d'articles */
   const renderList = (containerId, items, fallbackLink, emptyMsg) => {
@@ -5719,9 +5755,13 @@ function renderNewsPanel(prefecture = {}, dauphine = {}, franceBleu = {}) {
     }
     container.innerHTML = items.slice(0, 12).map((item) => buildNewsArticleCard(item, fallbackLink)).join('');
   };
-  renderList('news-prefecture-list',  prefItems,  'https://www.isere.gouv.fr',     'Aucune actualité Préfecture.');
-  renderList('news-dauphine-list',    dauphItems, 'https://www.ledauphine.com/isere', 'Aucun article Dauphiné Libéré.');
-  renderList('news-francebleu-list',  fbItems,    'https://www.francebleu.fr/isere',  'Aucun article France Bleu Isère.');
+  renderList('news-prefecture-list',  prefItems,   'https://www.isere.gouv.fr',                    'Aucune actualité Préfecture.');
+  renderList('news-dauphine-list',    dauphItems,  'https://www.ledauphine.com/isere',              'Aucun article Dauphiné Libéré.');
+  renderList('news-francebleu-list',  fbItems,     'https://www.francebleu.fr/isere',               'Aucun article France Bleu Isère.');
+  renderList('news-placegrenet-list', pgItems,     'https://www.placegrenet.fr',                    "Aucun article Place Gre'net.");
+  renderList('news-metro-list',       metroItems,  'https://www.grenoblealpesmetropole.fr',         'Aucune actualité Métropole.');
+  renderList('news-ars-list',         arsItems,    'https://www.auvergne-rhone-alpes.ars.sante.fr', 'Aucune alerte sanitaire ARS.');
+  renderList('news-seismes-list',     seismeItems, 'https://www.franceseisme.fr',                   'Aucun séisme détecté.');
 
   /* Synthèse catégories (toutes sources) */
   const statsGrid = el('news-stats-grid');
@@ -8246,6 +8286,10 @@ function renderExternalRisks(data = {}) {
   const georisques = georisquesPayload?.data && typeof georisquesPayload.data === 'object'
     ? { ...georisquesPayload.data, ...georisquesPayload }
     : georisquesPayload;
+  const placegrenet = mergedData?.placegrenet || {};
+  const grenobleMétropole = mergedData?.grenoble_metro || {};
+  const arsAura = mergedData?.ars_aura || {};
+  const seismesIsere = mergedData?.seismes_isere || {};
 
   setRiskText('meteo-status', `${meteo.status || 'inconnu'} · niveau ${normalizeLevel(meteo.level || 'inconnu')}`, meteo.level || 'vert');
   setText('meteo-info', sanitizeMeteoInformation(meteo.info_state) || meteo.bulletin_title || '');
@@ -8267,7 +8311,7 @@ function renderExternalRisks(data = {}) {
   renderPrefectureNews(prefecture);
   renderDauphineNews(dauphine);
   renderFranceBleuNews(franceBleu);
-  renderNewsPanel(prefecture, dauphine, franceBleu);
+  renderNewsPanel(prefecture, dauphine, franceBleu, placegrenet, grenobleMétropole, arsAura, seismesIsere);
   renderSncfAlerts(sncf);
   renderApicAlerts(apic);
   renderVigicruesFlashAlerts(vigicruesFlash);

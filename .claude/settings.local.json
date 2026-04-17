@@ -226,7 +226,14 @@
       "Bash(python -c \"import ast; ast.parse\\(open\\('backend/app/main.py'\\).read\\(\\)\\); print\\('main.py OK'\\)\")",
       "Bash(pip show *)",
       "Bash(pip install *)",
-      "Bash(python -c \"import ast; ast.parse\\(open\\('c:/Users/pecout/OneDrive - Alma/Documents/ope/ope-protec/backend/app/services.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")"
+      "Bash(python -c \"import ast; ast.parse\\(open\\('c:/Users/pecout/OneDrive - Alma/Documents/ope/ope-protec/backend/app/services.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "WebFetch(domain:www.auvergne-rhone-alpes.ars.sante.fr)",
+      "WebFetch(domain:renass.unistra.fr)",
+      "WebFetch(domain:www.grenoblealpesmetropole.fr)",
+      "WebFetch(domain:api.franceseisme.fr)",
+      "WebFetch(domain:www.grenoble.fr)",
+      "WebFetch(domain:www.placegrenet.fr)",
+      "Bash(python -c \"from app.services import fetch_placegrenet_news, fetch_grenoble_metro_news, fetch_ars_aura_health_alerts, fetch_seismes_isere; print\\('OK'\\)\")"
     ]
   }
 }
