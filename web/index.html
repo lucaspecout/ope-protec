@@ -781,8 +781,6 @@
                 <div class="filter-group__body map-toggle-grid">
                   <label><input id="filter-cameras" type="checkbox" checked /> 📷 Caméras terrain</label>
                   <label><input id="filter-traffic-incidents" type="checkbox" checked /> 🚨 Itinisère + Bison Futé</label>
-                  <label><input id="filter-autoroutes" type="checkbox" checked /> 🛣️ APRR/AREA Incidents autoroutes</label>
-                  <label><input id="filter-pr-autoroutes" type="checkbox" /> 📍 Points de repère (PR km)</label>
                   <select id="filter-bison-type" aria-label="Filtrer les événements trafic">
                     <option value="all" selected>Tout (Itinisère + Bison Futé)</option>
                     <option value="itinisere">Itinisère (tout)</option>
@@ -790,6 +788,15 @@
                     <option value="accident">Accidents</option>
                     <option value="danger">Dangers</option>
                   </select>
+                  <label><input id="filter-autoroutes" type="checkbox" checked /> 🛣️ APRR/AREA Incidents autoroutes</label>
+                  <select id="filter-autoroutes-type" aria-label="Filtrer les incidents autoroutes">
+                    <option value="all" selected>Tout (APRR/AREA)</option>
+                    <option value="accident">Accidents</option>
+                    <option value="travaux">Travaux / Chantiers</option>
+                    <option value="perturbation">Perturbations</option>
+                    <option value="inconnu">Autres</option>
+                  </select>
+                  <label><input id="filter-pr-autoroutes" type="checkbox" /> 📍 Points de repère (PR km)</label>
                   <label><input id="filter-google-traffic-flow" type="checkbox" /> 🛣️ Trafic continu (style Google Maps)</label>
                 </div>
               </details>
