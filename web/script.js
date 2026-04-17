@@ -1159,6 +1159,14 @@ function fillLogFormFromEntry(log = {}) {
   syncLogScopeFields();
 }
 
+function prefillEventTime() {
+  const input = document.getElementById('log-event-time');
+  if (!input || input.value) return;
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  input.value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+}
+
 function resetLogFormState() {
   const form = document.getElementById('log-form');
   if (!form) return;
@@ -1167,6 +1175,9 @@ function resetLogFormState() {
   if (submitButton) submitButton.textContent = "Ajouter l'entrée";
   const cancelBtn = document.getElementById('mco-cancel-edit-btn');
   if (cancelBtn) { cancelBtn.hidden = true; cancelBtn.classList.add('hidden'); }
+  const eventTimeInput = document.getElementById('log-event-time');
+  if (eventTimeInput) eventTimeInput.value = '';
+  prefillEventTime();
 }
 
 function renderEventsList() {
@@ -9998,6 +10009,7 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
   renderStations(cachedVigicruesPayload);
   syncLogScopeFields();
   syncLogOtherFields();
+  prefillEventTime();
 
   const refreshPromise = refreshAll().catch((error) => {
     document.getElementById('dashboard-error').textContent = `Actualisation différée: ${sanitizeErrorMessage(error.message)}`;
@@ -10221,6 +10233,7 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
       assigned_to: form.get('assigned_to') || null,
       next_update_due: form.get('next_update_due') || null,
       actions_taken: form.get('actions_taken') || null,
+      event_time: form.get('event_time') || new Date().toISOString(),
     };
     const editingLogId = event.target.dataset.editLogId;
     if (editingLogId) {
