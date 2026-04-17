@@ -20,7 +20,7 @@ const STORAGE_KEYS = {
   serviceStatusHistory: 'serviceStatusHistory',
 };
 const AUTO_REFRESH_MS = 45000;
-const EVENTS_LIVE_REFRESH_MS = 45000;
+const EVENTS_LIVE_REFRESH_MS = 10000;
 const HOME_LIVE_REFRESH_MS = 60000;
 const API_CACHE_TTL_MS = 45000;
 const API_PANEL_REFRESH_MS = 60000;
@@ -6723,7 +6723,20 @@ function buildSituationLogMarkup(log = {}) {
   const at = safeDateToLocale(log.event_time || log.created_at || Date.now());
   const scope = formatLogScope(log);
   const icon = log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢';
-  return `<li><strong>${at}</strong> · <span class="badge neutral">${status}</span> · <span class="badge neutral">${scope}</span><br>${icon} <strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'Évènement')}</strong> · ${escapeHtml(log.description || '')}</li>`;
+  const lvlColor = levelColor(log.danger_level);
+
+  const details = [];
+  if (log.location)        details.push(`📍 ${escapeHtml(log.location)}`);
+  if (log.assigned_to)     details.push(`👤 ${escapeHtml(log.assigned_to)}`);
+  if (log.source)          details.push(`🔎 ${escapeHtml(log.source)}`);
+  if (log.actions_taken)   details.push(`✅ <em>${escapeHtml(log.actions_taken)}</em>`);
+  if (log.next_update_due) details.push(`⏰ Proch. point : ${escapeHtml(safeDateToLocale(log.next_update_due))}`);
+
+  return `<li style="border-left:3px solid ${lvlColor};padding-left:8px;margin-bottom:6px">
+    <div><strong>${at}</strong> · <span class="badge neutral">${status}</span> · <span class="badge neutral">${scope}</span></div>
+    <div>${icon} <strong style="color:${lvlColor}">${escapeHtml(log.event_type || 'MCO')}</strong>${log.description ? ` · ${escapeHtml(log.description)}` : ''}</div>
+    ${details.length ? `<div class="muted" style="font-size:0.82em;margin-top:2px">${details.join(' · ')}</div>` : ''}
+  </li>`;
 }
 
 function buildCriticalRisksMarkup(dashboard = {}, externalRisks = {}) {
@@ -6780,10 +6793,23 @@ function buildCriticalRisksMarkup(dashboard = {}, externalRisks = {}) {
 function buildOpenEventsSituationMarkup(events = []) {
   const openEvents = sortOperationalEvents(events).filter((event) => String(event.status || '').toLowerCase() === 'ouvert');
   if (!openEvents.length) return '<li>Aucun évènement ouvert.</li>';
+  const allLogs = Array.isArray(cachedLogs) ? cachedLogs : [];
   return openEvents.slice(0, 10).map((event) => {
-    const status = EVENT_STATUS_LABEL[event.status] || event.status || 'Ouvert';
     const locality = event.municipality_id ? getMunicipalityName(event.municipality_id) : 'Départemental';
-    return `<li><strong>${escapeHtml(event.title || 'Évènement')}</strong> · <span class="badge neutral">${escapeHtml(status)}</span><br/><span class="muted">${escapeHtml(locality)} · ${escapeHtml(event.address || 'Adresse non renseignée')}</span></li>`;
+    const eventLogs = allLogs.filter((l) => String(l.event_id || '') === String(event.id));
+    const activeLogs = eventLogs.filter((l) => ['nouveau','en_cours','suivi'].includes(String(l.status || '')));
+    const worstLevel = eventLogs.reduce((max, l) => riskRank(l.danger_level) > riskRank(max) ? (l.danger_level || 'vert') : max, 'vert');
+    const icon = LOG_LEVEL_EMOJI[normalizeLevel(worstLevel)] || '🟢';
+    const lvlColor = levelColor(worstLevel);
+    const lastLog = eventLogs.sort((a, b) => new Date(b.event_time || b.created_at) - new Date(a.event_time || a.created_at))[0];
+    const lastLogLine = lastLog
+      ? `<div class="muted" style="font-size:0.82em;margin-top:2px">Dernière MCO : ${escapeHtml(lastLog.description || lastLog.event_type || 'MCO')}${lastLog.assigned_to ? ` · 👤 ${escapeHtml(lastLog.assigned_to)}` : ''} · ${escapeHtml(safeDateToLocale(lastLog.event_time || lastLog.created_at))}</div>`
+      : '';
+    return `<li style="border-left:3px solid ${lvlColor};padding-left:8px;margin-bottom:6px">
+      <div>${icon} <strong>${escapeHtml(event.title || 'Évènement')}</strong> · <span class="muted">${escapeHtml(locality)} · ${escapeHtml(event.address || 'N/A')}</span></div>
+      <div class="muted" style="font-size:0.82em">${activeLogs.length} entrée(s) active(s) · ${eventLogs.length} au total · niveau <strong style="color:${lvlColor}">${escapeHtml(normalizeLevel(worstLevel))}</strong></div>
+      ${lastLogLine}
+    </li>`;
   }).join('');
 }
 
@@ -6924,7 +6950,7 @@ function renderSituationOverview() {
   const crisisCount = Number(dashboard.communes_crise ?? 0);
 
   const logs = Array.isArray(cachedLogs) && cachedLogs.length
-    ? cachedLogs.slice(0, 8)
+    ? cachedLogs
     : (Array.isArray(dashboard.latest_logs) ? dashboard.latest_logs : []);
   const eventsSource = Array.isArray(cachedEvents) && cachedEvents.length
     ? cachedEvents
@@ -7031,7 +7057,7 @@ function renderSituationOverview() {
     <div class="situation-log-columns">
       <div>
         <h4>Nouveaux / En cours / Suivi (prioritaires)</h4>
-        <ul class="list">${activeLogs.slice(0, 8).map((log) => buildSituationLogMarkup(log)).join('') || '<li>Aucune crise nouvelle / en cours / suivie liée à un évènement ouvert.</li>'}</ul>
+        <ul class="list">${activeLogs.map((log) => buildSituationLogMarkup(log)).join('') || '<li>Aucune crise nouvelle / en cours / suivie liée à un évènement ouvert.</li>'}</ul>
       </div>
     </div>
   `);
