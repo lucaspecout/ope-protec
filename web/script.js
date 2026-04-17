@@ -5182,7 +5182,8 @@ async function renderTrafficOnMap() {
   mapStats.traffic = 0;
 
   // ── Événements autoroutes APRR/AREA + Vinci (avec coordonnées) ──
-  if (autorouteLayer) {
+  const showAutoroutes = document.getElementById('filter-autoroutes')?.checked ?? true;
+  if (autorouteLayer && showAutoroutes) {
     const typeColor = { accident: '#c22f43', travaux: '#f07800', chantier: '#f07800', perturbation: '#e6a800', inconnu: '#5f7190' };
     const allRoadEvents = [
       ...(cachedExternalRisksSnapshot?.aprr_isere?.events || []).map((e) => ({ ...e, src: 'APRR/AREA' })),
@@ -9768,7 +9769,7 @@ function bindAppInteractions() {
     'filter-resources-telecom', 'filter-resources-telecom-type',
     'filter-resources-active',
   ]);
-  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras', 'filter-autoroutes'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       if (RESOURCE_ONLY_FILTERS.has(id)) {
         // Rendu immédiat depuis le cache

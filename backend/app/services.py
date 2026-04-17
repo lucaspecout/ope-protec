@@ -6962,6 +6962,67 @@ _aprr_isere_cache_lock = Lock()
 _aprr_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "aprr_isere"}
 _APRR_ISERE_ROUTES = ["A41", "A43", "A48", "A51"]
 
+# Points de repère (PR km) → (lat, lon) par autoroute pour interpolation linéaire
+# Format: pr_km, lat, lon  — points levés manuellement sur tracé réel
+_APRR_PR_ROAD_COORDS: dict[str, list[tuple[float, float, float]]] = {
+    "A41": [
+        (0, 45.203, 5.843), (5, 45.237, 5.870), (10, 45.268, 5.898),
+        (20, 45.338, 5.956), (30, 45.411, 6.001), (40, 45.476, 6.031),
+        (50, 45.541, 6.056), (60, 45.598, 6.070), (70, 45.649, 6.098),
+        (80, 45.698, 6.140),
+    ],
+    "A43": [
+        (55, 45.592, 5.283), (65, 45.556, 5.376), (75, 45.519, 5.478),
+        (85, 45.485, 5.572), (95, 45.454, 5.651), (105, 45.367, 5.756),
+        (115, 45.295, 5.806), (125, 45.225, 5.855), (135, 45.150, 5.896),
+    ],
+    "A48": [
+        (0, 45.183, 5.683), (10, 45.241, 5.630), (20, 45.308, 5.581),
+        (30, 45.378, 5.517), (40, 45.443, 5.442), (50, 45.511, 5.365),
+        (60, 45.562, 5.297),
+    ],
+    "A49": [
+        (0, 45.136, 5.700), (10, 45.088, 5.609), (20, 45.030, 5.557),
+        (30, 44.964, 5.521), (40, 44.900, 5.490),
+    ],
+    "A51": [
+        (0, 45.140, 5.695), (20, 44.980, 5.685), (40, 44.820, 5.692),
+        (60, 44.660, 5.700), (80, 44.498, 5.732), (100, 44.330, 5.790),
+        (120, 44.150, 5.850),
+    ],
+    "A480": [
+        (0, 45.155, 5.695), (2, 45.172, 5.703), (4, 45.189, 5.711),
+        (6, 45.205, 5.719), (8, 45.220, 5.727),
+    ],
+}
+
+
+def _aprr_pr_to_coords(road: str, pr_str: str) -> tuple[float, float] | None:
+    """Convertit un PR type '75+363' ou '75' en (lat, lon) par interpolation linéaire."""
+    coords = _APRR_PR_ROAD_COORDS.get(road)
+    if not coords:
+        return None
+    try:
+        parts = pr_str.split("+")
+        km = float(parts[0])
+        m = float(parts[1]) / 1000 if len(parts) > 1 else 0.0
+        pr_km = km + m
+    except (ValueError, IndexError):
+        return None
+
+    if pr_km <= coords[0][0]:
+        return coords[0][1], coords[0][2]
+    if pr_km >= coords[-1][0]:
+        return coords[-1][1], coords[-1][2]
+
+    for i in range(len(coords) - 1):
+        k0, lat0, lon0 = coords[i]
+        k1, lat1, lon1 = coords[i + 1]
+        if k0 <= pr_km <= k1:
+            t = (pr_km - k0) / (k1 - k0)
+            return lat0 + t * (lat1 - lat0), lon0 + t * (lon1 - lon0)
+    return None
+
 # Routes APRR/AREA passant par ou desservant l'Isère
 _APRR_ISERE_ROAD_SET: frozenset[str] = frozenset({
     "A41", "A43", "A48", "A51", "A480", "A49",
@@ -7056,7 +7117,7 @@ def _parse_bison_recap_aprr(html: str) -> list[dict[str, Any]]:
             desc_parts.append(f"[{origine}]")
         description = " — ".join(p for p in desc_parts if p)
 
-        events.append({
+        evt: dict[str, Any] = {
             "title": title[:160],
             "description": description[:500],
             "road": road.strip(),
@@ -7066,7 +7127,13 @@ def _parse_bison_recap_aprr(html: str) -> list[dict[str, Any]]:
             "end": end_time[:60] if end_time else "",
             "severity": level,
             "source": "Bison Futé / APRR AREA DATEXII",
-        })
+            "pr": pr,
+        }
+        if pr:
+            coords = _aprr_pr_to_coords(road.strip(), pr)
+            if coords:
+                evt["lat"], evt["lon"] = coords
+        events.append(evt)
 
     return events
 
@@ -7086,7 +7153,10 @@ def _fetch_aprr_isere_live() -> dict[str, Any]:
         if _REQUESTS_OK and _requests is not None:
             resp = _requests.get(_BISON_RECAP_URL, headers=hdrs, timeout=20, verify=False)
             resp.raise_for_status()
-            html = resp.content.decode("iso-8859-1", errors="replace")
+            try:
+                html = resp.content.decode("utf-8")
+            except UnicodeDecodeError:
+                html = resp.content.decode("iso-8859-1", errors="replace")
         else:
             html = _http_get_text(_BISON_RECAP_URL, timeout=20, headers=hdrs)
 
