@@ -247,6 +247,10 @@ SERVICE_REFRESH_INTERVALS: dict[str, int] = {
     "anfr_isere":           21600,   # Données quasi-statiques
     "finess_isere":         21600,
     "france_bleu_isere":    300,    # Actualités France Bleu Isère
+    "placegrenet":          300,    # Place Gre'net – actualités Grenoble/Isère
+    "grenoble_metro":       300,    # Grenoble Alpes Métropole
+    "ars_aura":             300,    # ARS AURA – alertes sanitaires
+    "seismes_isere":        600,    # Séismes Isère (BCSF-RéNaSS)
 }
 
 _external_risks_snapshot_lock = Lock()
