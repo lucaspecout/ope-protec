@@ -92,6 +92,7 @@ from .services import (
     fetch_helipads_isere,
     get_static_data_status,
     collect_all_static_data,
+    flush_service_memory_cache,
     _redis,
     _REDIS_OK,
 )
@@ -1393,6 +1394,19 @@ def api_static_data_collect(
     """Force la re-collecte de toutes les données statiques (Overpass + FINESS CSV).
     Bloquant, prévoir 2–5 min. Résultat : statut par source et comptages."""
     return collect_all_static_data()
+
+
+@app.post("/api/admin/flush-cache/{service_key}")
+def api_flush_service_cache(
+    service_key: str,
+    _: User = Depends(require_roles("admin")),
+):
+    """Purge le cache mémoire + Redis d'un service externe et déclenche un refresh immédiat."""
+    result = flush_service_memory_cache(service_key)
+    if result.get("status") == "not_found":
+        raise HTTPException(404, f"Service inconnu : {service_key}")
+    _refresh_one_service(service_key)
+    return result
 
 
 @app.get("/api/osm/isere/barrages")

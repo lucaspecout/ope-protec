@@ -684,7 +684,7 @@ _dauphine_cache_lock = Lock()
 _dauphine_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "dauphine"}
 _FRANCE_BLEU_ISERE_CACHE_TTL_SECONDS = 300
 _france_bleu_cache_lock = Lock()
-_france_bleu_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "france_bleu_isere"}
+_france_bleu_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "france_bleu_isere", "max_stale_hours": 4}
 _vigieau_cache_lock = Lock()
 _vigieau_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "vigieau"}
 _atmo_aura_cache_lock = Lock()
@@ -1457,7 +1457,19 @@ def _cached_external_payload(
     # Fetch échoué — retourner la dernière valeur connue en mémoire (stale)
     with lock:
         cached_payload = cache.get("payload")
+        max_stale_hours: float = cache.get("max_stale_hours", 0)  # 0 = illimité
         if cached_payload:
+            if max_stale_hours > 0:
+                try:
+                    raw_ts = str(cached_payload.get("updated_at") or "").rstrip("Z")
+                    age_hours = (datetime.utcnow() - datetime.fromisoformat(raw_ts)).total_seconds() / 3600
+                except Exception:
+                    age_hours = 0.0
+                if age_hours > max_stale_hours:
+                    # Données trop vieilles : purger le cache mémoire et retourner l'erreur
+                    cache["payload"] = None
+                    cache["expires_at"] = datetime.min
+                    return payload
             stale_payload = deepcopy(cached_payload)
             stale_payload["status"] = "stale"
             stale_payload["stale_reason"] = payload.get("error") or payload.get("info_state") or "service indisponible"
@@ -3766,9 +3778,12 @@ def _fetch_france_bleu_isere_news_live(limit: int = 12) -> dict[str, Any]:
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
     }
+    source_errors: list[str] = []
     for source in rss_sources:
         try:
-            xml_payload = _http_get_text(source, timeout=15, headers=_rss_headers)
+            resp = _requests.get(source, headers=_rss_headers, timeout=15, allow_redirects=True)
+            resp.raise_for_status()
+            xml_payload = resp.content.decode(resp.encoding or "utf-8", errors="ignore")
             root = ET.fromstring(xml_payload)
             items: list[dict[str, Any]] = []
             ns = {"media": "http://search.yahoo.com/mrss/", "dc": "http://purl.org/dc/elements/1.1/"}
@@ -3777,7 +3792,6 @@ def _fetch_france_bleu_isere_news_live(limit: int = 12) -> dict[str, Any]:
                 link = (item.findtext("link") or source).strip()
                 pub_date_raw = (item.findtext("pubDate") or item.findtext("dc:date", namespaces=ns) or "").strip()
                 description_raw = unescape(re.sub(r"<[^>]+>", " ", item.findtext("description") or "").strip())[:300]
-                # Normaliser la date
                 published_at = ""
                 if pub_date_raw:
                     try:
@@ -3794,6 +3808,7 @@ def _fetch_france_bleu_isere_news_live(limit: int = 12) -> dict[str, Any]:
                 if len(items) >= limit:
                     break
             if not items:
+                source_errors.append(f"{source} → 0 articles trouvés (XML valide)")
                 continue
             return {
                 "service": "France Bleu Isère",
@@ -3802,7 +3817,8 @@ def _fetch_france_bleu_isere_news_live(limit: int = 12) -> dict[str, Any]:
                 "items": items,
                 "updated_at": datetime.utcnow().isoformat() + "Z",
             }
-        except Exception:
+        except Exception as exc:
+            source_errors.append(f"{source} → {type(exc).__name__}: {exc}")
             continue
 
     return {
@@ -3810,7 +3826,7 @@ def _fetch_france_bleu_isere_news_live(limit: int = 12) -> dict[str, Any]:
         "status": "degraded",
         "source": rss_sources[0],
         "items": [],
-        "error": "Flux RSS France Bleu Isère indisponible",
+        "error": "Flux RSS France Bleu Isère indisponible — " + " | ".join(source_errors),
         "updated_at": datetime.utcnow().isoformat() + "Z",
     }
 
@@ -8052,4 +8068,37 @@ def load_risks_snapshot() -> dict[str, Any] | None:
     """Charge le dernier snapshot complet depuis Redis.
     Retourne None si Redis est indisponible ou si aucune donnée n'a encore été sauvegardée."""
     return _redis_get(_RISKS_SNAPSHOT_KEY)
+
+
+def flush_service_memory_cache(service_key: str) -> dict[str, str]:
+    """Vide le cache mémoire et Redis d'un service. Force le prochain fetch à aller en live."""
+    _known: dict[str, tuple[dict[str, Any], Any]] = {
+        "france_bleu_isere":   (_france_bleu_cache,          _france_bleu_cache_lock),
+        "prefecture_isere":    (_prefecture_cache,            _prefecture_cache_lock),
+        "dauphine_isere":      (_dauphine_cache,              _dauphine_cache_lock),
+        "meteo_france":        (_meteo_cache,                 _meteo_cache_lock),
+        "vigicrues":           (_vigicrues_cache,             _vigicrues_cache_lock),
+        "itinisere":           (_itinisere_cache,             _itinisere_cache_lock),
+        "bison_fute":          (_bison_cache,                 _bison_cache_lock),
+        "vigieau":             (_vigieau_cache,               _vigieau_cache_lock),
+        "atmo_aura":           (_atmo_aura_cache,             _atmo_aura_cache_lock),
+        "sncf_isere":          (_sncf_isere_cache,            _sncf_isere_cache_lock),
+        "anfr_isere":          (_anfr_isere_cache,            _anfr_isere_cache_lock),
+        "arcep_isere":         (_arcep_isere_cache,           _arcep_isere_cache_lock),
+        "groundwater_isere":   (_hubeau_groundwater_cache,    _hubeau_groundwater_cache_lock),
+        "apic_isere":          (_apic_isere_cache,            _apic_isere_cache_lock),
+        "isere_opendata":      (_isere_opendata_cache,        _isere_opendata_cache_lock),
+        "finess_isere":        (_finess_isere_cache,          _finess_isere_cache_lock),
+    }
+    if service_key not in _known:
+        return {"status": "not_found", "service": service_key}
+    cache, lock = _known[service_key]
+    with lock:
+        cache["payload"] = None
+        cache["expires_at"] = datetime.min
+    redis_key = cache.get("redis_key")
+    if redis_key and _redis_client:
+        _redis_client.delete(redis_key)
+        _redis_client.delete(f"persist:{redis_key}")
+    return {"status": "flushed", "service": service_key}
 

@@ -219,7 +219,11 @@
       "WebFetch(domain:www.electricitymaps.com)",
       "WebFetch(domain:odre.opendatasoft.com)",
       "WebFetch(domain:help.opendatasoft.com)",
-      "WebFetch(domain:docs.electricitymaps.com)"
+      "WebFetch(domain:docs.electricitymaps.com)",
+      "Bash(python -c ' *)",
+      "Bash(cat .env)",
+      "Bash(cat backend/.env)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('backend/app/main.py'\\).read\\(\\)\\); print\\('main.py OK'\\)\")"
     ]
   }
 }
