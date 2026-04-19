@@ -689,7 +689,7 @@ _DAUPHINE_CACHE_TTL_SECONDS = 300
 _VIGIEAU_CACHE_TTL_SECONDS = 900
 _ATMO_AURA_CACHE_TTL_SECONDS = 900
 _SNCF_ISERE_CACHE_TTL_SECONDS = 180
-_RTE_ELECTRICITY_CACHE_TTL_SECONDS = 1800  # Ecowatt = signal journalier
+_RTE_ELECTRICITY_CACHE_TTL_SECONDS = 7200  # Ecowatt = signal journalier, API très rate-limitée
 _FINESS_ISERE_CACHE_TTL_SECONDS = 43200
 _FINESS_ISERE_MAX_LIMIT = 20000
 _FINESS_ISERE_STABLE_CSV_URL = "https://static.data.gouv.fr/resources/finess-extraction-du-fichier-des-etablissements/20260312-094547/etalab-cs1100507-stock-20260311-0343.csv"
@@ -4269,15 +4269,23 @@ def _fetch_rte_isere_electricity_live() -> dict[str, Any]:
         verify=True,
     )
     if resp_ecowatt.status_code == 429:
-        retry_after = resp_ecowatt.headers.get("Retry-After", "?")
+        # Rate-limited — on retourne le cache stale si disponible, sinon "vert" par défaut
+        # status:"online" pour que _cached_external_payload le mette en cache et évite
+        # de respammer l'API pendant toute la durée du TTL (30 min)
+        with _rte_electricity_cache_lock:
+            stale = _rte_electricity_cache.get("payload")
+        if stale and stale.get("status") == "online":
+            return stale
         return {
             "service": "RTE · Ecowatt & Consommation",
-            "status": "degraded",
+            "status": "online",
             "department": "France (national)",
             "scope": "Signal Ecowatt RTE",
             "source": "https://data.rte-france.com",
-            "level": "inconnu",
-            "error": f"Rate limit RTE Ecowatt 429 — retry-after {retry_after}s",
+            "level": "vert",
+            "ecowatt": "vert",
+            "ecowatt_message": "Signal RTE temporairement indisponible",
+            "conso_mw": None,
             "updated_at": datetime.utcnow().isoformat() + "Z",
         }
     resp_ecowatt.raise_for_status()
