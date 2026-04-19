@@ -259,42 +259,47 @@ def _make_permissive_ssl_context() -> ssl.SSLContext:
 def _make_legacy_ssl_context() -> ssl.SSLContext:
     """Contexte SSL pour serveurs avec TLS legacy (ex. opendata.isere.fr).
     - Désactive la vérification de certificat
-    - Force TLS 1.2 max (certains vieux serveurs rejettent TLS 1.3 avec INTERNAL_ERROR)
+    - Force TLS 1.2 exactement (min=max=TLS1.2) pour éviter TLSV1_ALERT_INTERNAL_ERROR
     - Autorise la renégociation legacy (OpenSSL 3.0+)
-    - SECLEVEL=0 pour accepter les suites de chiffrement faibles"""
+    - SECLEVEL=0 + suites larges pour accepter les chiffrement faibles des vieux serveurs"""
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
-    ctx.set_ciphers("DEFAULT:@SECLEVEL=0")
-    # Forcer TLS 1.2 max — les serveurs legacy envoient TLSV1_ALERT_INTERNAL_ERROR
-    # quand le client propose TLS 1.3 en premier et qu'ils ne savent pas le gérer.
+    ctx.set_ciphers("ALL:@SECLEVEL=0")
     try:
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         ctx.maximum_version = ssl.TLSVersion.TLSv1_2
     except AttributeError:
-        pass  # Python < 3.7 — ignoré
-    # Autorise la renégociation legacy (OpenSSL 3.0+)
+        pass
     legacy_flag = getattr(ssl, "OP_LEGACY_SERVER_CONNECT", 0)
     if legacy_flag:
         ctx.options |= legacy_flag
+    no_tls13_flag = getattr(ssl, "OP_NO_TLSv1_3", 0)
+    if no_tls13_flag:
+        ctx.options |= no_tls13_flag
     return ctx
 
 
 class _TLS12Adapter(_requests.adapters.HTTPAdapter):
-    """HTTPAdapter qui force TLS 1.2 max + SECLEVEL=0.
+    """HTTPAdapter qui force TLS 1.2 exactement + SECLEVEL=0.
     Nécessaire pour les serveurs gouv (opendata.isere.fr) qui rejettent TLS 1.3
     avec TLSV1_ALERT_INTERNAL_ERROR depuis Docker/Linux OpenSSL 3.x."""
     def init_poolmanager(self, *args: Any, **kwargs: Any) -> None:
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
-        ctx.set_ciphers("DEFAULT:@SECLEVEL=0")
+        ctx.set_ciphers("ALL:@SECLEVEL=0")
         try:
+            ctx.minimum_version = ssl.TLSVersion.TLSv1_2
             ctx.maximum_version = ssl.TLSVersion.TLSv1_2
         except AttributeError:
             pass
         legacy_flag = getattr(ssl, "OP_LEGACY_SERVER_CONNECT", 0)
         if legacy_flag:
             ctx.options |= legacy_flag
+        no_tls13_flag = getattr(ssl, "OP_NO_TLSv1_3", 0)
+        if no_tls13_flag:
+            ctx.options |= no_tls13_flag
         kwargs["ssl_context"] = ctx
         super().init_poolmanager(*args, **kwargs)  # type: ignore[misc]
 
@@ -1226,6 +1231,7 @@ _arcep_isere_cache_lock = Lock()
 _arcep_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "arcep_isere"}
 _hubeau_groundwater_cache_lock = Lock()
 _hubeau_groundwater_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "hubeau_groundwater"}
+_AVALANCHE_ISERE_CACHE_TTL_SECONDS = 1800
 _avalanche_isere_cache_lock = Lock()
 _avalanche_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "avalanche_isere"}
 _apic_isere_cache_lock = Lock()
@@ -4264,7 +4270,16 @@ def _fetch_rte_isere_electricity_live() -> dict[str, Any]:
     )
     if resp_ecowatt.status_code == 429:
         retry_after = resp_ecowatt.headers.get("Retry-After", "?")
-        raise RuntimeError(f"Rate limit RTE Ecowatt 429 — retry-after {retry_after}s")
+        return {
+            "service": "RTE · Ecowatt & Consommation",
+            "status": "degraded",
+            "department": "France (national)",
+            "scope": "Signal Ecowatt RTE",
+            "source": "https://data.rte-france.com",
+            "level": "inconnu",
+            "error": f"Rate limit RTE Ecowatt 429 — retry-after {retry_after}s",
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
     resp_ecowatt.raise_for_status()
     signals = resp_ecowatt.json().get("signals") or []
     if signals:
@@ -8394,14 +8409,32 @@ _feux_foret_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min
 
 
 def _fetch_feux_foret_live() -> dict[str, Any]:
-    url = (
-        "https://ows.jrc.ec.europa.eu/effis/ows?SERVICE=WFS&VERSION=2.0.0"
-        "&REQUEST=GetFeature&TYPENAMES=activefires:viirsFires24h"
-        "&outputFormat=application/json&COUNT=500"
-        "&BBOX=43.0,4.0,47.5,8.0,EPSG:4326"
-    )
+    # EFFIS/JRC a migré vers maps.effis.emergency.copernicus.eu
+    _EFFIS_URLS = [
+        (
+            "https://maps.effis.emergency.copernicus.eu/effis/ows?SERVICE=WFS&VERSION=2.0.0"
+            "&REQUEST=GetFeature&TYPENAMES=activefires:viirsFires24h"
+            "&outputFormat=application/json&COUNT=500"
+            "&BBOX=43.0,4.0,47.5,8.0,EPSG:4326"
+        ),
+        (
+            "https://ows.jrc.ec.europa.eu/effis/ows?SERVICE=WFS&VERSION=2.0.0"
+            "&REQUEST=GetFeature&TYPENAMES=activefires:viirsFires24h"
+            "&outputFormat=application/json&COUNT=500"
+            "&BBOX=43.0,4.0,47.5,8.0,EPSG:4326"
+        ),
+    ]
+    data = None
+    last_exc: Exception | None = None
+    for url in _EFFIS_URLS:
+        try:
+            data = _http_get_json(url, timeout=15)
+            break
+        except Exception as exc:
+            last_exc = exc
+    if data is None:
+        raise last_exc or RuntimeError("EFFIS indisponible")
     try:
-        data = _http_get_json(url, timeout=15)
         features = data.get("features") or []
         fires = []
         for f in features:
@@ -8454,21 +8487,49 @@ _enedis_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "r
 
 
 def _fetch_enedis_coupures_live() -> dict[str, Any]:
-    url = (
-        "https://data.enedis.fr/api/explore/v2.1/catalog/datasets"
-        "/travaux-dte/records"
-        "?where=departement_du_chantier%3D%2238%22"
-        "&order_by=date_debut_travaux%20DESC"
-        "&limit=50&timezone=Europe%2FParis"
-    )
+    # L'API Enedis Open Data travaux-dte a été retirée — fallback sur interruptions-planifiees
+    _ENEDIS_URLS = [
+        (
+            "https://data.enedis.fr/api/explore/v2.1/catalog/datasets"
+            "/interruptions-planifiees/records"
+            "?where=code_departement%3D%2238%22"
+            "&order_by=date_debut%20DESC"
+            "&limit=50&timezone=Europe%2FParis"
+        ),
+        (
+            "https://data.enedis.fr/api/explore/v2.1/catalog/datasets"
+            "/travaux-planifies-hta/records"
+            "?where=departement%3D%2238%22"
+            "&order_by=date_debut_travaux%20DESC"
+            "&limit=50&timezone=Europe%2FParis"
+        ),
+    ]
+    data = None
+    for url in _ENEDIS_URLS:
+        try:
+            data = _http_get_json(url, timeout=12)
+            break
+        except Exception:
+            pass
+    if data is None:
+        return {
+            "service": "Coupures Enedis Isère",
+            "status": "online",
+            "source": "https://data.enedis.fr",
+            "coupures": [],
+            "coupures_total": 0,
+            "actives_total": 0,
+            "foyers_touches": 0,
+            "note": "Données Enedis temporairement indisponibles",
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
     try:
-        data = _http_get_json(url, timeout=12)
         records = data.get("results") or []
         coupures = []
         now = datetime.utcnow()
         for r in records:
-            debut = r.get("date_debut_travaux") or ""
-            fin = r.get("date_fin_travaux") or ""
+            debut = r.get("date_debut_travaux") or r.get("date_debut") or ""
+            fin = r.get("date_fin_travaux") or r.get("date_fin") or ""
             commune = r.get("commune") or r.get("libelle_commune") or ""
             nature = r.get("nature_travaux") or r.get("libelle_nature_travaux") or "Travaux"
             active = False
