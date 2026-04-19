@@ -115,6 +115,8 @@ const RESOURCE_TYPE_META = {
   transport_gare_routiere: { label: 'Gare routière', icon: '🚌' },
   transport_aeroport: { label: 'Aéroport', icon: '✈️' },
   energie: { label: 'Énergie / barrage', icon: '⚡' },
+  protection_civile: { label: 'Antenne Protection Civile', icon: '🔺' },
+  site_sensible_custom: { label: 'Site sensible (ajouté)', icon: '⚠️' },
   anfr_antenna: { label: 'Antenne ANFR', icon: '📡' },
   arcep_mobile_outage: { label: 'Site mobile indisponible (ARCEP)', icon: '🔴' },
 };
@@ -164,6 +166,20 @@ const RESOURCE_POINTS = [
   { id: 'seveso-esso-villette', name: 'Esso S.A.F.', type: 'lieu_risque', active: true, lat: 45.5867649, lon: 4.9140734, address: '38200 Villette-de-Vienne', priority: 'risk', info: 'Établissement SEVESO seuil haut (code S3IC 0061.03258).', source: 'https://www.georisques.gouv.fr/risques/installations/donnees' },
   { id: 'seveso-spmr-villette', name: 'Spmr', type: 'lieu_risque', active: true, lat: 45.5745417, lon: 4.915693, address: '38200 Villette-de-Vienne', priority: 'risk', info: 'Établissement SEVESO seuil haut (code S3IC 0061.03261).', source: 'https://www.georisques.gouv.fr/risques/installations/donnees' },
   { id: 'seveso-stepan-voreppe', name: 'Stepan Europe Sa', type: 'lieu_risque', active: true, lat: 45.292283, lon: 5.6235683, address: '38340 Voreppe', priority: 'risk', info: 'Établissement SEVESO seuil haut (code S3IC 0061.03282).', source: 'https://www.georisques.gouv.fr/risques/installations/donnees' },
+  // ─── Antennes Protection Civile ──────────────────────────────────────────────
+  { id: 'pc-grenoble-antenne', name: 'Antenne de Grenoble — Protection Civile', type: 'protection_civile', active: true, lat: 45.191296, lon: 5.689586, address: '1 Rue des Marronniers, 38600 Fontaine', priority: 'vital', info: 'Antenne Protection Civile de Grenoble.', source: '' },
+  { id: 'pc-vri', name: 'Antenne de VRI — Protection Civile', type: 'protection_civile', active: true, lat: 45.339315, lon: 4.915945, address: 'Route de Bel Air, 38150 Bougé-Chambalud', priority: 'vital', info: 'Antenne Protection Civile de VRI.', source: '' },
+  { id: 'pc-rhone', name: 'Antenne du Rhône — Protection Civile', type: 'protection_civile', active: true, lat: 45.720708, lon: 4.866714, address: '158 avenue Francis de Pressensé, 69200 Vénissieux', priority: 'vital', info: 'Antenne Protection Civile du Rhône.', source: '' },
+  { id: 'pc-tassin', name: 'Antenne de Tassin — Protection Civile', type: 'protection_civile', active: true, lat: 45.759879, lon: 4.779425, address: '13 Avenue de Lauterbourg, 69160 Tassin-la-Demi-Lune', priority: 'vital', info: 'Antenne Protection Civile de Tassin.', source: '' },
+  { id: 'pc-drome', name: 'Antenne de la Drôme — Protection Civile', type: 'protection_civile', active: true, lat: 44.936273, lon: 4.919106, address: '74 Route de Montélier, 26000 Valence', priority: 'vital', info: 'Antenne Protection Civile de la Drôme.', source: '' },
+  { id: 'pc-nord-drome', name: 'Antenne Nord Drôme — Protection Civile', type: 'protection_civile', active: true, lat: 45.022872, lon: 5.045960, address: '435 chemin des Passas, 26300 Bourg-de-Péage', priority: 'vital', info: 'Antenne Protection Civile Nord Drôme.', source: '' },
+  { id: 'pc-sud-drome', name: 'Antenne Sud Drôme — Protection Civile', type: 'protection_civile', active: true, lat: 44.661916, lon: 4.791205, address: '1 Avenue du Blomard, 26740 Les Tourrettes', priority: 'vital', info: 'Antenne Protection Civile Sud Drôme.', source: '' },
+  { id: 'pc-balan', name: 'Antenne de Balan — Protection Civile', type: 'protection_civile', active: true, lat: 45.836997, lon: 5.094751, address: 'Rue des Écoles, 01360 Balan', priority: 'vital', info: 'Antenne Protection Civile de Balan (Ain).', source: '' },
+  { id: 'pc-bourg', name: 'Antenne de Bourg-en-Bresse — Protection Civile', type: 'protection_civile', active: true, lat: 46.203862, lon: 5.208437, address: '14 Rue Abbé Gorini, 01000 Bourg-en-Bresse', priority: 'vital', info: 'Antenne Protection Civile de Bourg-en-Bresse.', source: '' },
+  { id: 'pc-gex', name: 'Antenne Pays de Gex — Protection Civile', type: 'protection_civile', active: true, lat: 46.336459, lon: 6.069914, address: '36 Rue de Pitegny, 01170 Gex', priority: 'vital', info: 'Antenne Protection Civile du Pays de Gex.', source: '' },
+  { id: 'pc-rumilly', name: 'Antenne de Rumilly — Protection Civile', type: 'protection_civile', active: true, lat: 45.859974, lon: 5.957009, address: '1 Rue des Bauges, 74150 Rumilly', priority: 'vital', info: 'Antenne Protection Civile de Rumilly (Haute-Savoie).', source: '' },
+  { id: 'pc-annemasse', name: 'Antenne d\'Annemasse — Protection Civile', type: 'protection_civile', active: true, lat: 46.196477, lon: 6.232161, address: '13 Avenue Emile Zola, 74100 Annemasse', priority: 'vital', info: 'Antenne Protection Civile d\'Annemasse.', source: '' },
+  { id: 'pc-chambery', name: 'Antenne de Chambéry — Protection Civile', type: 'protection_civile', active: true, lat: 45.591000, lon: 5.951000, address: '2610 avenue des Landiers, 73000 Chambéry', priority: 'vital', info: 'Antenne Protection Civile de Chambéry.', source: '' },
 ];
 
 let token = localStorage.getItem(STORAGE_KEYS.token);
@@ -717,9 +733,10 @@ const FIRE_RESOURCE_TYPES = new Set(['caserne_pompier', 'caserne']);
 const HEALTH_RESOURCE_TYPES = new Set(['hopital', 'hopital_public', 'hopital_prive', 'chu', 'clinique', 'medecin', 'ehpad']);
 const HEALTH_URGENT_CARE_TYPES = new Set(['chu', 'hopital', 'hopital_public', 'hopital_prive', 'clinique']);
 const FINESS_DYNAMIC_RESOURCE_TYPES = new Set();
-const RISK_RESOURCE_TYPES = new Set(['lieu_risque', 'centrale_nucleaire', 'energie']);
+const RISK_RESOURCE_TYPES = new Set(['lieu_risque', 'centrale_nucleaire', 'energie', 'site_sensible_custom']);
 const TRANSPORT_RESOURCE_TYPES = new Set(['transport', 'transport_gare_sncf', 'transport_gare_routiere', 'transport_aeroport']);
 const COMMAND_RESOURCE_TYPES = new Set(['poste_commandement']);
+const PC_RESOURCE_TYPES = new Set(['protection_civile']);
 const HOSTING_RESOURCE_TYPES = new Set(['gymnase', 'complexe_sportif', 'stade', 'salle_omnisports', 'centre_culturel', 'salle_spectacle_public', 'palais_congres', 'salle_fetes']);
 const TELECOM_RESOURCE_TYPES = new Set(['anfr_antenna', 'arcep_mobile_outage']);
 
@@ -3511,6 +3528,7 @@ function shouldDisplayBaseResourceType(type = '') {
     if (!hostingEnabled) return false;
     return hostingTypeFilter === 'all' || hostingTypeFilter === type;
   }
+  if (PC_RESOURCE_TYPES.has(type)) return document.getElementById('filter-resources-protcivile')?.checked ?? true;
   return true;
 }
 
@@ -3980,7 +3998,12 @@ function getDisplayedResources() {
     .filter((r) => shouldDisplayBaseResourceType(r.type))
     .filter((r) => resourceVisibilityOverrides.get(r.id) !== false)
     .filter((r) => !query || `${r.name} ${r.address}`.toLowerCase().includes(query));
-  return [...staticResources, ...dynamicResources];
+  const customSensible = (Array.isArray(mapPoints) ? mapPoints : [])
+    .filter((p) => p.category === 'site_sensible' && mapPointVisibilityOverrides.get(p.id) !== false)
+    .filter((p) => !query || p.name.toLowerCase().includes(query))
+    .map((p) => ({ id: p.id, name: p.name, type: 'site_sensible_custom', active: true, lat: p.lat, lon: p.lon, address: `${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}`, priority: 'risk', info: p.notes || '', source: '', dynamic: false }))
+    .filter((p) => shouldDisplayBaseResourceType('site_sensible_custom'));
+  return [...staticResources, ...dynamicResources, ...customSensible];
 }
 
 function getResourcesForZoneImpact() {
@@ -4050,7 +4073,12 @@ function _drawResourceMarkers() {
     if (!coords) return;
     const typeKey = String(r.type || '');
     const meta = RESOURCE_TYPE_META[typeKey] || { label: typeKey.replace(/_/g, ' ') || 'Inconnu', icon: '📍' };
-    const markerHtml = `<span class="map-resource-icon" style="background:${markerColor[r.priority] || '#2f9e44'}">${meta.icon}</span>`;
+    let markerHtml;
+    if (typeKey === 'protection_civile') {
+      markerHtml = `<div style="background:linear-gradient(145deg,#1a3568,#0f2240);width:28px;height:28px;border-radius:50%;display:grid;place-items:center;box-shadow:0 1px 4px rgba(0,0,0,.45);"><div style="width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;border-bottom:12px solid #f07800;margin-top:2px;"></div></div>`;
+    } else {
+      markerHtml = `<span class="map-resource-icon" style="background:${markerColor[r.priority] || '#2f9e44'}">${meta.icon}</span>`;
+    }
     window.L.marker([coords.lat, coords.lon], {
       icon: window.L.divIcon({ className: 'map-resource-icon-wrap', html: markerHtml, iconSize: [24, 24], iconAnchor: [12, 12] }),
     })
@@ -5200,12 +5228,12 @@ const APRR_PR_COORDS = {
     {k:45,lat:45.472,lon:5.400},{k:50,lat:45.507,lon:5.401},{k:55,lat:45.534,lon:5.405},
     {k:60,lat:45.550,lon:5.362},{k:65,lat:45.572,lon:5.318},
   ],
-  // A49 : Grenoble→Moirans→Saint-Marcellin→Romans (O, vallée de l'Isère)
+  // A49 : Voreppe(A48 jct)→Saint-Marcellin→Romans-sur-Isère (SO) — IGN confirmé PR20/PR40
   A49: [
-    {k:0,lat:45.152,lon:5.700},{k:5,lat:45.127,lon:5.637},{k:10,lat:45.099,lon:5.572},
-    {k:15,lat:45.099,lon:5.504},{k:20,lat:45.114,lon:5.432},{k:25,lat:45.134,lon:5.363},
-    {k:30,lat:45.143,lon:5.295},{k:35,lat:45.143,lon:5.224},{k:40,lat:45.125,lon:5.155},
-    {k:45,lat:45.096,lon:5.092},{k:50,lat:45.048,lon:5.063},
+    {k:0,lat:45.300,lon:5.610},{k:5,lat:45.275,lon:5.578},{k:10,lat:45.252,lon:5.538},
+    {k:15,lat:45.228,lon:5.490},{k:20,lat:45.200,lon:5.430},{k:25,lat:45.172,lon:5.374},
+    {k:30,lat:45.148,lon:5.318},{k:35,lat:45.115,lon:5.260},{k:40,lat:45.078,lon:5.214},
+    {k:45,lat:45.060,lon:5.148},{k:50,lat:45.048,lon:5.063},
   ],
   // A51 : Grenoble→Échirolles→Vizille→La Mure→Corps (S puis SE, Alpes)
   A51: [
@@ -5621,6 +5649,7 @@ function renderCustomPoints(showFeedback = true) {
     marker.addTo(mapPointsLayer);
   });
   if (showFeedback) setMapFeedback(`${filteredPoints.length} marqueur(s) opérationnel(s)/POI affiché(s).`);
+  if (mapPoints.some((p) => p.category === 'site_sensible')) _drawResourceMarkers();
 }
 
 function onMapClickAddPoint(event) {
