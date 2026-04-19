@@ -8368,6 +8368,9 @@ def flush_service_memory_cache(service_key: str) -> dict[str, str]:
         "grenoble_metro":      (_grenoble_metro_cache,        _grenoble_metro_cache_lock),
         "ars_aura":            (_ars_aura_cache,              _ars_aura_cache_lock),
         "seismes_isere":       (_seismes_isere_cache,         _seismes_isere_cache_lock),
+        "feux_foret_isere":    (_feux_foret_cache,            _feux_foret_cache_lock),
+        "enedis_coupures_isere": (_enedis_cache,              _enedis_cache_lock),
+        "cols_alpins_isere":   (_cols_cache,                  _cols_cache_lock),
     }
     if service_key not in _known:
         return {"status": "not_found", "service": service_key}
@@ -8380,4 +8383,219 @@ def flush_service_memory_cache(service_key: str) -> dict[str, str]:
         _redis_client.delete(redis_key)
         _redis_client.delete(f"persist:{redis_key}")
     return {"status": "flushed", "service": service_key}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# FEUX DE FORÊT — EFFIS/JRC Copernicus (Feature 17)
+# ══════════════════════════════════════════════════════════════════════════════
+_FEUX_FORET_CACHE_TTL_SECONDS = 600
+_feux_foret_cache_lock = Lock()
+_feux_foret_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "feux_foret_isere"}
+
+
+def _fetch_feux_foret_live() -> dict[str, Any]:
+    url = (
+        "https://ows.jrc.ec.europa.eu/effis/ows?SERVICE=WFS&VERSION=2.0.0"
+        "&REQUEST=GetFeature&TYPENAMES=activefires:viirsFires24h"
+        "&outputFormat=application/json&COUNT=500"
+        "&BBOX=43.0,4.0,47.5,8.0,EPSG:4326"
+    )
+    try:
+        data = _http_get_json(url, timeout=15)
+        features = data.get("features") or []
+        fires = []
+        for f in features:
+            coords = (f.get("geometry") or {}).get("coordinates") or []
+            props = f.get("properties") or {}
+            if len(coords) >= 2:
+                fires.append({
+                    "lat": round(float(coords[1]), 5),
+                    "lon": round(float(coords[0]), 5),
+                    "confidence": str(props.get("confidence") or "nominal"),
+                    "date": str(props.get("acq_date") or ""),
+                    "frp": props.get("frp"),
+                })
+        return {
+            "service": "Feux de forêt EFFIS",
+            "status": "online",
+            "source": "https://effis.jrc.ec.europa.eu",
+            "fires": fires,
+            "fires_total": len(fires),
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+    except Exception as exc:
+        return {
+            "service": "Feux de forêt EFFIS",
+            "status": "degraded",
+            "source": "https://effis.jrc.ec.europa.eu",
+            "fires": [],
+            "fires_total": 0,
+            "error": str(exc),
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+
+
+def fetch_feux_foret_isere(force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_feux_foret_cache,
+        lock=_feux_foret_cache_lock,
+        ttl_seconds=_FEUX_FORET_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=_fetch_feux_foret_live,
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# COUPURES ENEDIS — Travaux & pannes réseau Isère (Feature 18)
+# ══════════════════════════════════════════════════════════════════════════════
+_ENEDIS_CACHE_TTL_SECONDS = 600
+_enedis_cache_lock = Lock()
+_enedis_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "enedis_coupures_isere"}
+
+
+def _fetch_enedis_coupures_live() -> dict[str, Any]:
+    url = (
+        "https://data.enedis.fr/api/explore/v2.1/catalog/datasets"
+        "/travaux-dte/records"
+        "?where=departement_du_chantier%3D%2238%22"
+        "&order_by=date_debut_travaux%20DESC"
+        "&limit=50&timezone=Europe%2FParis"
+    )
+    try:
+        data = _http_get_json(url, timeout=12)
+        records = data.get("results") or []
+        coupures = []
+        now = datetime.utcnow()
+        for r in records:
+            debut = r.get("date_debut_travaux") or ""
+            fin = r.get("date_fin_travaux") or ""
+            commune = r.get("commune") or r.get("libelle_commune") or ""
+            nature = r.get("nature_travaux") or r.get("libelle_nature_travaux") or "Travaux"
+            active = False
+            try:
+                d = datetime.fromisoformat(debut.replace("Z", "").replace("+00:00", ""))
+                f2 = datetime.fromisoformat(fin.replace("Z", "").replace("+00:00", ""))
+                active = d <= now <= f2
+            except Exception:
+                pass
+            coupures.append({
+                "commune": str(commune),
+                "nature": str(nature),
+                "debut": str(debut),
+                "fin": str(fin),
+                "active": active,
+                "foyers": int(r.get("nb_clients_coupes") or r.get("nombre_clients") or 0),
+            })
+        actives = [c for c in coupures if c["active"]]
+        return {
+            "service": "Coupures Enedis Isère",
+            "status": "online",
+            "source": "https://data.enedis.fr",
+            "coupures": coupures[:30],
+            "coupures_total": len(coupures),
+            "actives_total": len(actives),
+            "foyers_touches": sum(c["foyers"] for c in actives),
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+    except Exception as exc:
+        return {
+            "service": "Coupures Enedis Isère",
+            "status": "degraded",
+            "source": "https://data.enedis.fr",
+            "coupures": [],
+            "coupures_total": 0,
+            "actives_total": 0,
+            "foyers_touches": 0,
+            "error": str(exc),
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+
+
+def fetch_enedis_coupures_isere(force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_enedis_cache,
+        lock=_enedis_cache_lock,
+        ttl_seconds=_ENEDIS_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=_fetch_enedis_coupures_live,
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# COLS ALPINS — État en temps réel via open-meteo (Feature 19)
+# ══════════════════════════════════════════════════════════════════════════════
+_COLS_CACHE_TTL_SECONDS = 1800
+_cols_cache_lock = Lock()
+_cols_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "cols_alpins_isere"}
+
+_COLS_ALPINS: list[dict[str, Any]] = [
+    {"nom": "Col du Lautaret",        "route": "N91",   "alt": 2058, "lat": 45.036, "lon": 6.408},
+    {"nom": "Col du Galibier",         "route": "D902",  "alt": 2642, "lat": 45.064, "lon": 6.409},
+    {"nom": "Col de la Croix de Fer",  "route": "D926",  "alt": 2067, "lat": 45.229, "lon": 6.197},
+    {"nom": "Col du Glandon",          "route": "D926",  "alt": 1924, "lat": 45.223, "lon": 6.178},
+    {"nom": "Col de l'Ornon",          "route": "D526",  "alt": 1367, "lat": 45.039, "lon": 5.960},
+    {"nom": "Col de Mens",             "route": "D526",  "alt": 1356, "lat": 44.845, "lon": 5.771},
+    {"nom": "Col de Porte",            "route": "D512",  "alt": 1326, "lat": 45.295, "lon": 5.773},
+    {"nom": "Col du Coq",              "route": "D30",   "alt": 1434, "lat": 45.289, "lon": 5.835},
+    {"nom": "Col du Granier",          "route": "D912",  "alt": 1134, "lat": 45.451, "lon": 5.924},
+    {"nom": "Col de la Chartreuse",    "route": "D512",  "alt": 1139, "lat": 45.333, "lon": 5.824},
+]
+
+
+def _col_status_from_weather(temp_c, snow_cm, precip, wind_kmh):
+    if temp_c is None:
+        return {"statut": "inconnu", "couleur": "gris", "detail": "Météo indisponible"}
+    if snow_cm is not None and snow_cm > 10:
+        return {"statut": "chaines obligatoires", "couleur": "orange", "detail": f"{snow_cm:.0f} cm neige · {temp_c:.0f}°C"}
+    if snow_cm is not None and snow_cm > 2:
+        return {"statut": "prudence", "couleur": "jaune", "detail": f"Enneigement {snow_cm:.0f} cm · {temp_c:.0f}°C"}
+    if temp_c < -5 and (precip or 0) > 1:
+        return {"statut": "verglas probable", "couleur": "orange", "detail": f"{temp_c:.0f}°C · précipitations"}
+    if wind_kmh is not None and wind_kmh > 80:
+        return {"statut": "vent fort", "couleur": "jaune", "detail": f"Rafales {wind_kmh:.0f} km/h"}
+    return {"statut": "ouvert", "couleur": "vert", "detail": f"{temp_c:.0f}°C · conditions normales"}
+
+
+def _fetch_cols_alpins_live() -> dict[str, Any]:
+    cols_out = []
+    for col in _COLS_ALPINS:
+        url = (
+            f"https://api.open-meteo.com/v1/forecast"
+            f"?latitude={col['lat']}&longitude={col['lon']}"
+            "&current=temperature_2m,precipitation,snowfall,wind_speed_10m"
+            "&wind_speed_unit=kmh&timezone=Europe%2FParis"
+        )
+        try:
+            data = _http_get_json(url, timeout=10)
+            cur = data.get("current") or {}
+            temp = cur.get("temperature_2m")
+            snow = cur.get("snowfall")
+            precip = cur.get("precipitation")
+            wind = cur.get("wind_speed_10m")
+            status = _col_status_from_weather(temp, snow, precip, wind)
+        except Exception:
+            status = {"statut": "inconnu", "couleur": "gris", "detail": "Météo indisponible"}
+            temp = snow = precip = wind = None
+        cols_out.append({**col, **status, "temperature": temp, "enneigement_cm": snow, "precipitations": precip, "vent_kmh": wind})
+
+    nb_dangereux = sum(1 for c in cols_out if c["couleur"] in ("orange", "rouge"))
+    return {
+        "service": "Cols alpins Isère",
+        "status": "online",
+        "source": "https://api.open-meteo.com",
+        "cols": cols_out,
+        "cols_total": len(cols_out),
+        "dangereux_total": nb_dangereux,
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+def fetch_cols_alpins_isere(force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_cols_cache,
+        lock=_cols_cache_lock,
+        ttl_seconds=_COLS_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=_fetch_cols_alpins_live,
+    )
 

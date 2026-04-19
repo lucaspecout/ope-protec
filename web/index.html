@@ -681,6 +681,21 @@
                     🏗️ Barrages hydrauliques
                     <small class="filter-legend">Ouvrages &amp; zones submersibles · Géorisques</small>
                   </label>
+                  <label>
+                    <input id="filter-seismes" type="checkbox" />
+                    🌍 Séismes récents
+                    <small class="filter-legend">Épicentres M≥1 · BCSF-RéNaSS 30 jours</small>
+                  </label>
+                  <label>
+                    <input id="filter-groundwater" type="checkbox" />
+                    💧 Nappes phréatiques
+                    <small class="filter-legend">Niveaux &amp; tendances · Hub'Eau ADES</small>
+                  </label>
+                  <label>
+                    <input id="filter-feux-foret" type="checkbox" />
+                    🔥 Feux de forêt détectés
+                    <small class="filter-legend">Foyers actifs 24h · EFFIS/JRC Copernicus</small>
+                  </label>
                 </div>
               </details>
 
@@ -690,6 +705,11 @@
                 <div class="filter-group__body map-toggle-grid">
                   <label><input id="filter-montagne" type="checkbox" /> 🛖 Refuges de montagne</label>
                   <label><input id="filter-helipads" type="checkbox" /> 🚁 Héliports &amp; zones SMUR</label>
+                  <label>
+                    <input id="filter-cols-alpins" type="checkbox" />
+                    ⛰️ Cols alpins
+                    <small class="filter-legend">État &amp; conditions météo · open-meteo.com</small>
+                  </label>
                 </div>
               </details>
 
@@ -1034,6 +1054,7 @@
   </main>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js" crossorigin=""></script>
+  <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js" crossorigin=""></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
   <!-- Compatibilité avec d'anciens scripts qui pilotent #isere-shape. -->
   <svg aria-hidden="true" width="0" height="0" focusable="false" style="position:absolute">

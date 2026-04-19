@@ -61,6 +61,10 @@ const FLUX_SERVICES = [
   { key: 'grenoble_metro',         label: 'Grenoble Alpes Métropole',  icon: '🏙️', category: 'Actualités',   interval: 300,   metric: (d) => `${(d.items || []).length} actualité(s)` },
   { key: 'ars_aura',               label: 'ARS AURA · Santé',          icon: '🏥', category: 'Actualités',   interval: 300,   metric: (d) => `${(d.items || []).length} alerte(s) sanitaire(s)` },
   { key: 'seismes_isere',          label: 'Séismes Isère',             icon: '🌍', category: 'Risques',       interval: 600,   metric: (d) => `${(d.items || []).length} séisme(s) détecté(s)` },
+  { key: 'avalanche_isere',        label: 'Avalanches BRA · Isère',    icon: '🏔️', category: 'Risques',       interval: 1800,  metric: (d) => `Niveau max ${d.niveau_max_bra ?? '?'}/5 · ${(d.massifs || []).length} massif(s)` },
+  { key: 'feux_foret_isere',       label: 'Feux de forêt EFFIS',       icon: '🔥', category: 'Risques',       interval: 600,   metric: (d) => `${d.fires_total ?? 0} foyer(s) détecté(s) 24h` },
+  { key: 'enedis_coupures_isere',  label: 'Coupures Enedis Isère',     icon: '⚡', category: 'Infrastructure', interval: 600,   metric: (d) => `${d.actives_total ?? 0} coupure(s) active(s) · ${d.foyers_touches ?? 0} foyer(s)` },
+  { key: 'cols_alpins_isere',      label: 'Cols alpins Isère',         icon: '⛰️', category: 'Transport',     interval: 1800,  metric: (d) => `${d.cols_total ?? 0} cols · ${d.dangereux_total ?? 0} à surveiller` },
   { key: 'anfr_isere',             label: 'ANFR · Antennes mobiles',   icon: '📡', category: 'Télécom',       interval: 21600, metric: (d) => `${d.supports_total ?? 0} support(s) mobile recensés` },
   { key: 'arcep_isere',            label: 'ARCEP · Sites mobiles',     icon: '📶', category: 'Télécom',       interval: 600,   metric: (d) => `${d.outages_total ?? 0} indisponibilité(s)` },
   { key: 'isere_opendata',         label: 'Isère OpenData · Résilience', icon: '📊', category: 'Données',    interval: 1800,  metric: (d) => `${d.totals?.schools ?? 0} écoles · ${d.totals?.health_centers ?? 0} santé · ${d.totals?.food_aid_points ?? 0} aide alim.` },
@@ -244,6 +248,11 @@ let avalancheZoneWmsLayer = null;
 let barrageMarkerLayer = null;
 let montagneLayer = null;
 let helipadLayer = null;
+let seismesLayer = null;
+let groundwaterLayer = null;
+let feuxForetLayer = null;
+let colsAlpinsLayer = null;
+let populationHeatLayer = null;
 let userLocationMarker = null;
 let mapAddPointMode = false;
 let mapPoints = [];
@@ -678,6 +687,26 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
     isere_opendata: mergeServiceSlot(previous.isere_opendata || {}, next.isere_opendata || {}, (p, n) => ({
       ...p, ...n,
       totals: (n.totals && Object.keys(n.totals).length > 0) ? n.totals : (p.totals || {}),
+    })),
+    avalanche_isere: mergeServiceSlot(previous.avalanche_isere || {}, next.avalanche_isere || {}, (p, n) => ({
+      ...p, ...n,
+      massifs: keepPreviousArray(p.massifs, n.massifs),
+      niveau_max_bra: keepPreviousValue(p.niveau_max_bra, n.niveau_max_bra),
+    })),
+    feux_foret_isere: mergeServiceSlot(previous.feux_foret_isere || {}, next.feux_foret_isere || {}, (p, n) => ({
+      ...p, ...n,
+      fires: keepPreviousArray(p.fires, n.fires),
+      fires_total: keepPreviousValue(p.fires_total, n.fires_total),
+    })),
+    enedis_coupures_isere: mergeServiceSlot(previous.enedis_coupures_isere || {}, next.enedis_coupures_isere || {}, (p, n) => ({
+      ...p, ...n,
+      coupures: keepPreviousArray(p.coupures, n.coupures),
+      actives_total: keepPreviousValue(p.actives_total, n.actives_total),
+    })),
+    cols_alpins_isere: mergeServiceSlot(previous.cols_alpins_isere || {}, next.cols_alpins_isere || {}, (p, n) => ({
+      ...p, ...n,
+      cols: keepPreviousArray(p.cols, n.cols),
+      dangereux_total: keepPreviousValue(p.dangereux_total, n.dangereux_total),
     })),
   };
 }
@@ -2379,6 +2408,9 @@ async function computeZoneImpact() {
 
   document.getElementById('zone-impact-export-btn')?.addEventListener('click', exportZoneImpactReport);
   document.getElementById('zone-impact-clear-btn')?.addEventListener('click', clearZoneImpactSelection);
+
+  // Feature 6 — Heatmap population dans la zone
+  renderPopulationHeatmap(municipalitiesInZone);
 }
 
 function exportZoneImpactReport() {
@@ -2612,7 +2644,35 @@ async function loadIserePopulationByInsee() {
   return iserePopulationByInseeCache;
 }
 
+function renderPopulationHeatmap(communes = []) {
+  if (!leafletMap || typeof window.L === 'undefined') return;
+  if (populationHeatLayer) { leafletMap.removeLayer(populationHeatLayer); populationHeatLayer = null; }
+  if (!communes.length) return;
+  // Leaflet.heat doit être chargé; si absent on tombe en mode fallback cercles
+  const heatPoints = communes
+    .map((c) => {
+      const pt = zoneImpactMunicipalityPoint(c);
+      const pop = Number(c.population || c.pop || c.total_population || 0);
+      if (!pt || !pop) return null;
+      return [pt.lat, pt.lon, Math.min(1, pop / 15000)];
+    })
+    .filter(Boolean);
+  if (!heatPoints.length) return;
+  if (typeof window.L.heatLayer === 'function') {
+    populationHeatLayer = window.L.heatLayer(heatPoints, { radius: 35, blur: 20, maxZoom: 13, minOpacity: 0.3, gradient: { 0.2: '#4dabf7', 0.5: '#ffd43b', 0.8: '#ff6b6b', 1.0: '#c92a2a' } });
+    populationHeatLayer.addTo(leafletMap);
+  } else {
+    // Fallback : cercles proportionnels si plugin absent
+    populationHeatLayer = window.L.layerGroup();
+    heatPoints.forEach(([lat, lon, intensity]) => {
+      window.L.circleMarker([lat, lon], { radius: 5 + intensity * 20, color: '#e03131', fillColor: '#ff6b6b', fillOpacity: 0.35 + intensity * 0.3, weight: 1 }).addTo(populationHeatLayer);
+    });
+    populationHeatLayer.addTo(leafletMap);
+  }
+}
+
 function clearZoneImpactSelection() {
+  if (populationHeatLayer) { leafletMap?.removeLayer(populationHeatLayer); populationHeatLayer = null; }
   if (mapZoneImpactLayer) mapZoneImpactLayer.clearLayers();
   mapZoneImpactSelection = null;
   if (mapZoneImpactDrawHandler?.disable) mapZoneImpactDrawHandler.disable();
@@ -2751,6 +2811,117 @@ function applyAvalancheZoneLayer() {
   }).addTo(leafletMap);
 }
 
+// ── Feature 15 : Séismes récents sur la carte ────────────────────────────────
+function renderSeismesLayer() {
+  if (!leafletMap || typeof window.L === 'undefined') return;
+  const show = document.getElementById('filter-seismes')?.checked ?? false;
+  if (!show) {
+    if (seismesLayer && leafletMap.hasLayer(seismesLayer)) leafletMap.removeLayer(seismesLayer);
+    return;
+  }
+  if (!seismesLayer) seismesLayer = window.L.layerGroup();
+  if (!leafletMap.hasLayer(seismesLayer)) seismesLayer.addTo(leafletMap);
+  seismesLayer.clearLayers();
+  const items = Array.isArray(cachedExternalRisksSnapshot?.seismes_isere?.items) ? cachedExternalRisksSnapshot.seismes_isere.items : [];
+  items.forEach((q) => {
+    if (!q.lat || !q.lon) return;
+    const mag = q.magnitude != null ? Number(q.magnitude) : 0;
+    const r = Math.max(8, Math.min(28, mag * 7));
+    const color = mag >= 4 ? '#c92a2a' : mag >= 3 ? '#e67700' : mag >= 2 ? '#e9a800' : '#2b8a3e';
+    const icon = window.L.divIcon({
+      className: '',
+      html: `<div style="width:${r * 2}px;height:${r * 2}px;border-radius:50%;background:${color};opacity:.7;border:2px solid #fff;box-shadow:0 0 0 2px ${color}44;"></div>`,
+      iconSize: [r * 2, r * 2], iconAnchor: [r, r],
+    });
+    window.L.marker([q.lat, q.lon], { icon })
+      .bindPopup(`<strong>🌍 M${mag} — ${escapeHtml(q.place || q.title || '?')}</strong><br><span class="muted">${escapeHtml(q.date || '')}</span><br>Profondeur : ${escapeHtml(String(q.depth || '?'))} km`)
+      .addTo(seismesLayer);
+  });
+}
+
+// ── Feature 16 : Nappes phréatiques sur la carte ─────────────────────────────
+function renderGroundwaterLayer() {
+  if (!leafletMap || typeof window.L === 'undefined') return;
+  const show = document.getElementById('filter-groundwater')?.checked ?? false;
+  if (!show) {
+    if (groundwaterLayer && leafletMap.hasLayer(groundwaterLayer)) leafletMap.removeLayer(groundwaterLayer);
+    return;
+  }
+  if (!groundwaterLayer) groundwaterLayer = window.L.layerGroup();
+  if (!leafletMap.hasLayer(groundwaterLayer)) groundwaterLayer.addTo(leafletMap);
+  groundwaterLayer.clearLayers();
+  const stations = Array.isArray(cachedExternalRisksSnapshot?.groundwater_isere?.stations) ? cachedExternalRisksSnapshot.groundwater_isere.stations : [];
+  stations.forEach((s) => {
+    if (!s.latitude || !s.longitude) return;
+    const trend = s.trend || 'stable';
+    const arrow = trend === 'hausse' ? '↑' : trend === 'baisse' ? '↓' : '→';
+    const color = trend === 'hausse' ? '#1971c2' : trend === 'baisse' ? '#e03131' : '#2b8a3e';
+    const icon = window.L.divIcon({
+      className: '',
+      html: `<div style="background:${color};color:#fff;font-size:11px;font-weight:700;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;box-shadow:0 1px 4px rgba(0,0,0,.4)">${arrow}</div>`,
+      iconSize: [26, 26], iconAnchor: [13, 13],
+    });
+    const level = s.groundwater_level_m_ngf != null ? `${Number(s.groundwater_level_m_ngf).toFixed(2)} m NGF` : '—';
+    window.L.marker([s.latitude, s.longitude], { icon })
+      .bindPopup(`<strong>🏔️ ${escapeHtml(s.name || s.bss_id || '?')}</strong><br>Niveau : ${level}<br>Tendance : ${arrow} ${trend}<br><span class="muted">${escapeHtml(s.commune || '')}</span>`)
+      .addTo(groundwaterLayer);
+  });
+}
+
+// ── Feature 17 : Feux de forêt EFFIS ─────────────────────────────────────────
+function renderFeuxForetLayer() {
+  if (!leafletMap || typeof window.L === 'undefined') return;
+  const show = document.getElementById('filter-feux-foret')?.checked ?? false;
+  if (!show) {
+    if (feuxForetLayer && leafletMap.hasLayer(feuxForetLayer)) leafletMap.removeLayer(feuxForetLayer);
+    return;
+  }
+  if (!feuxForetLayer) feuxForetLayer = window.L.layerGroup();
+  if (!leafletMap.hasLayer(feuxForetLayer)) feuxForetLayer.addTo(leafletMap);
+  feuxForetLayer.clearLayers();
+  const fires = Array.isArray(cachedExternalRisksSnapshot?.feux_foret_isere?.fires) ? cachedExternalRisksSnapshot.feux_foret_isere.fires : [];
+  fires.forEach((f) => {
+    const frp = f.frp != null ? `${Number(f.frp).toFixed(0)} MW` : '?';
+    const conf = f.confidence || 'nominal';
+    const color = conf === 'high' ? '#c92a2a' : conf === 'low' ? '#f08c00' : '#e03131';
+    const icon = window.L.divIcon({
+      className: '',
+      html: `<span style="font-size:18px;filter:drop-shadow(0 1px 3px rgba(0,0,0,.5))">🔥</span>`,
+      iconSize: [22, 22], iconAnchor: [11, 11],
+    });
+    window.L.marker([f.lat, f.lon], { icon })
+      .bindPopup(`<strong>🔥 Foyer actif EFFIS</strong><br>Puissance : ${frp}<br>Confiance : ${conf}<br><span class="muted">${escapeHtml(f.date || '')}</span>`)
+      .addTo(feuxForetLayer);
+  });
+}
+
+// ── Feature 19 : Cols alpins ──────────────────────────────────────────────────
+function renderColsAlpinsLayer() {
+  if (!leafletMap || typeof window.L === 'undefined') return;
+  const show = document.getElementById('filter-cols-alpins')?.checked ?? false;
+  if (!show) {
+    if (colsAlpinsLayer && leafletMap.hasLayer(colsAlpinsLayer)) leafletMap.removeLayer(colsAlpinsLayer);
+    return;
+  }
+  if (!colsAlpinsLayer) colsAlpinsLayer = window.L.layerGroup();
+  if (!leafletMap.hasLayer(colsAlpinsLayer)) colsAlpinsLayer.addTo(leafletMap);
+  colsAlpinsLayer.clearLayers();
+  const cols = Array.isArray(cachedExternalRisksSnapshot?.cols_alpins_isere?.cols) ? cachedExternalRisksSnapshot.cols_alpins_isere.cols : [];
+  cols.forEach((col) => {
+    const couleur = { vert: '#2b8a3e', jaune: '#e9a800', orange: '#e67700', rouge: '#c92a2a', gris: '#868e96' }[col.couleur] || '#868e96';
+    const icon = window.L.divIcon({
+      className: '',
+      html: `<div style="background:${couleur};color:#fff;font-size:9px;font-weight:700;padding:2px 4px;border-radius:4px;border:1px solid rgba(0,0,0,.25);white-space:nowrap;max-width:90px;overflow:hidden;text-overflow:ellipsis;box-shadow:0 1px 3px rgba(0,0,0,.4)">⛰️ ${escapeHtml(col.nom.replace('Col ', '').replace('Col de la ', '').replace('Col du ', '').replace('Col de ', ''))}</div>`,
+      iconAnchor: [0, 10], popupAnchor: [0, -12],
+    });
+    const temp = col.temperature != null ? `${Number(col.temperature).toFixed(1)}°C` : '—';
+    const snow = col.enneigement_cm != null ? `${Number(col.enneigement_cm).toFixed(0)} cm` : '—';
+    window.L.marker([col.lat, col.lon], { icon })
+      .bindPopup(`<strong>⛰️ ${escapeHtml(col.nom)}</strong> · ${col.route || ''}<br>Altitude : ${col.alt || '?'} m · État : <strong style="color:${couleur}">${escapeHtml(col.statut || '?')}</strong><br>${escapeHtml(col.detail || '')}<br>Temp : ${temp} · Neige : ${snow}`)
+      .addTo(colsAlpinsLayer);
+  });
+}
+
 function renderBarrageLayer() {
   if (!barrageMarkerLayer || !leafletMap) return;
   const enabled = document.getElementById('filter-barrages')?.checked ?? false;
@@ -2817,6 +2988,10 @@ function initMap() {
   montagneLayer = window.L.layerGroup(); // ajouté à la carte uniquement si filtre activé
   helipadLayer = window.L.layerGroup();
   barrageMarkerLayer = window.L.layerGroup();
+  seismesLayer = window.L.layerGroup();
+  groundwaterLayer = window.L.layerGroup();
+  feuxForetLayer = window.L.layerGroup();
+  colsAlpinsLayer = window.L.layerGroup();
   leafletMap.on('click', onMapClickAddPoint);
   leafletMap.on('click', handleOsmDetailsClick);
   leafletMap.on('popupopen', refreshPhotoCameraImages);
@@ -4225,6 +4400,10 @@ function _ensureStaticDataLoaded() {
       .then(() => { _barrageLoadInFlight = false; renderBarrageLayer(); })
       .catch(() => { _barrageLoadInFlight = false; });
   }
+  renderSeismesLayer();
+  renderGroundwaterLayer();
+  renderFeuxForetLayer();
+  renderColsAlpinsLayer();
 }
 
 /**
@@ -7266,6 +7445,18 @@ function renderSituationOverview() {
     { key: 'communes-crise', label: 'Communes en crise', value: String(crisisCount), info: 'PCS actif', css: crisisCount > 0 ? 'rouge' : 'vert' },
     { key: 'electricity', label: '⚡ Ecowatt RTE', value: ecowattShortMsg, info: ecowattConsoMw ? `Conso nationale ${ecowattConsoMw}` : 'Signal Ecowatt RTE temps réel', css: ecowattLevel },
   ];
+  // ── Nouvelles tuiles risques (Features 13/15/17/18/20) ───────────────────
+  const braData = externalRisks?.avalanche_isere || {};
+  const braNiveauMax = braData.niveau_max_bra;
+  const braLevel = braNiveauMax >= 4 ? 'rouge' : braNiveauMax >= 3 ? 'orange' : braNiveauMax >= 2 ? 'jaune' : braNiveauMax ? 'vert' : 'inconnu';
+  const braLabel = { 1: 'Faible', 2: 'Limité', 3: 'Marqué', 4: 'Fort', 5: 'Très fort' }[braNiveauMax] || 'Indisponible';
+  const feuxData = externalRisks?.feux_foret_isere || {};
+  const enedisData = externalRisks?.enedis_coupures_isere || {};
+  const seismesData = externalRisks?.seismes_isere || {};
+  const dernierSeisme = (seismesData.items || [])[0];
+  const seismeLevel = dernierSeisme?.magnitude >= 4 ? 'rouge' : dernierSeisme?.magnitude >= 3 ? 'orange' : dernierSeisme?.magnitude >= 2 ? 'jaune' : 'vert';
+  const colsData = externalRisks?.cols_alpins_isere || {};
+
   const bisonDeparture = normalizeLevel(externalRisks?.bison_fute?.today?.isere?.departure || 'inconnu');
   const bisonReturn = normalizeLevel(externalRisks?.bison_fute?.today?.isere?.return || 'inconnu');
   const bisonCombinedLevel = riskRank(bisonReturn) > riskRank(bisonDeparture) ? bisonReturn : bisonDeparture;
@@ -7285,6 +7476,14 @@ function renderSituationOverview() {
     { key: 'apic', label: 'APIC · alertes Isère', value: `${apicAlerts}`, info: 'Pluie intense à l’échelle communale', css: apicAlerts > 0 ? 'orange' : 'vert' },
     { key: 'vigicrues-flash', label: 'Vigicrues Flash · alertes Isère', value: `${vigicruesFlashAlerts}`, info: 'Avertissements crues rapides', css: vigicruesFlashAlerts > 0 ? 'orange' : 'vert' },
   ];
+  const risquesNaturelsCards = [
+    { key: 'avalanche', label: '🏔️ Avalanches BRA', value: braNiveauMax ? `${braNiveauMax}/5 — ${braLabel}` : 'Indisponible', info: `${(braData.massifs || []).length} massif(s) Isère`, css: braLevel },
+    { key: 'feux', label: '🔥 Feux de forêt EFFIS', value: `${feuxData.fires_total ?? 0} foyer(s) 24h`, info: feuxData.fires_total > 0 ? 'Foyers détectés par satellite VIIRS' : 'Aucun foyer détecté dans la région', css: (feuxData.fires_total ?? 0) > 5 ? 'rouge' : (feuxData.fires_total ?? 0) > 0 ? 'orange' : 'vert' },
+    { key: 'seismes', label: '🌍 Séismes récents', value: dernierSeisme ? `M${dernierSeisme.magnitude} ${escapeHtml(dernierSeisme.place?.split(',')[0] || '')}` : 'Aucun', info: `${(seismesData.items || []).length} séisme(s) détecté(s)`, css: seismeLevel },
+    { key: 'enedis', label: '⚡ Coupures Enedis', value: `${enedisData.actives_total ?? 0} active(s)`, info: `${enedisData.foyers_touches ?? 0} foyer(s) touchés`, css: (enedisData.actives_total ?? 0) > 0 ? 'jaune' : 'vert' },
+    { key: 'cols', label: '⛰️ Cols alpins', value: `${colsData.dangereux_total ?? 0} à surveiller`, info: `${colsData.cols_total ?? 0} cols suivis`, css: (colsData.dangereux_total ?? 0) > 3 ? 'orange' : (colsData.dangereux_total ?? 0) > 0 ? 'jaune' : 'vert' },
+  ];
+
   const generatedAt = safeDateToLocale(Date.now());
 
   setHtml('situation-content', `
@@ -7305,6 +7504,10 @@ function renderSituationOverview() {
 
     <div class="situation-top-grid">
       ${mobilityCards.map((card) => `<article class="tile situation-tile situation-tile--interactive" role="button" tabindex="0" data-kpi-key="${escapeHtml(card.key)}" data-kpi-label="${escapeHtml(card.label)}"><h3>${card.label}</h3><p class="kpi-value ${card.css}">${escapeHtml(card.value)}</p><p class="muted">${card.info}</p></article>`).join('')}
+    </div>
+
+    <div class="situation-top-grid">
+      ${risquesNaturelsCards.map((card) => `<article class="tile situation-tile situation-tile--interactive" role="button" tabindex="0" data-kpi-key="${escapeHtml(card.key)}" data-kpi-label="${escapeHtml(card.label)}"><h3>${card.label}</h3><p class="kpi-value ${card.css}">${card.value}</p><p class="muted">${card.info}</p></article>`).join('')}
     </div>
 
     <div class="situation-middle-grid">
@@ -7856,7 +8059,50 @@ function renderVigicruesFlashAlerts(vigicruesFlash = {}) {
   }).join('') || '<li>Aucune alerte Vigicrues Flash en cours sur l’Isère.</li>');
 }
 
-function renderAvalancheIsere() { /* BRA avalanche supprimé */ }
+function renderAvalancheIsere(data = {}) {
+  const massifs = Array.isArray(data.massifs) ? data.massifs : [];
+  const niveauGlobal = data.niveau_global || 'gris';
+  const niveauMax = data.niveau_max_bra;
+  const braColors = { 1: '#2b8a3e', 2: '#e9a800', 3: '#e67700', 4: '#c92a2a', 5: '#6741d9' };
+  const braLabels = { 1: 'Faible', 2: 'Limité', 3: 'Marqué', 4: 'Fort', 5: 'Très fort' };
+  setRiskText('avalanche-svc-status', `${data.status || 'inconnu'} · Niveau max ${niveauMax ?? '?'}/5 · ${massifs.length} massif(s)`, data.status === 'online' ? 'vert' : 'jaune');
+  setHtml('avalanche-svc-list', massifs.map((m) => {
+    const lvl = m.niveau_bra;
+    const color = braColors[lvl] || '#868e96';
+    const label = braLabels[lvl] || 'Indisponible';
+    return `<li><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:5px"></span><strong>${escapeHtml(m.nom || '?')}</strong> <span style="color:${color};font-weight:600">${lvl ? lvl + '/5 · ' + label : '—'}</span> <span class="muted">${escapeHtml(m.date_echeance ? '· ' + m.date_echeance : '')}</span></li>`;
+  }).join('') || '<li>Aucune donnée BRA disponible.</li>');
+}
+
+function renderFeuxForetWidget(data = {}) {
+  const fires = Array.isArray(data.fires) ? data.fires : [];
+  setRiskText('feux-svc-status', `${data.status || 'inconnu'} · ${data.fires_total ?? 0} foyer(s)`, (data.fires_total ?? 0) > 0 ? 'orange' : 'vert');
+  setHtml('feux-svc-list', fires.slice(0, 6).map((f) => {
+    const frp = f.frp != null ? ` · ${Number(f.frp).toFixed(0)} MW` : '';
+    return `<li>🔥 Lat ${f.lat?.toFixed(3)}, Lon ${f.lon?.toFixed(3)} · confiance <strong>${escapeHtml(f.confidence || '?')}</strong>${frp} · ${escapeHtml(f.date || '')}</li>`;
+  }).join('') || '<li class="muted">Aucun foyer détecté dans la région.</li>');
+}
+
+function renderEnedisCoupuresWidget(data = {}) {
+  const coupures = Array.isArray(data.coupures) ? data.coupures : [];
+  const actives = coupures.filter((c) => c.active);
+  setRiskText('enedis-svc-status', `${data.status || 'inconnu'} · ${data.actives_total ?? 0} active(s) · ${data.foyers_touches ?? 0} foyers`, (data.actives_total ?? 0) > 0 ? 'jaune' : 'vert');
+  setHtml('enedis-svc-list', (actives.length ? actives : coupures).slice(0, 6).map((c) => {
+    const badge = c.active ? '<span style="color:#e67700;font-weight:700">EN COURS</span>' : '<span class="muted">Programmé</span>';
+    return `<li>${badge} · <strong>${escapeHtml(c.commune || '?')}</strong> · ${escapeHtml(c.nature || '?')}${c.foyers ? ` · ${c.foyers} foyer(s)` : ''}<br><span class="muted">Du ${escapeHtml(c.debut || '?')} au ${escapeHtml(c.fin || '?')}</span></li>`;
+  }).join('') || '<li class="muted">Aucune coupure active en Isère.</li>');
+}
+
+function renderColsAlpinsWidget(data = {}) {
+  const cols = Array.isArray(data.cols) ? data.cols : [];
+  const dangereux = cols.filter((c) => c.couleur !== 'vert' && c.couleur !== 'gris');
+  const braColors = { vert: '#2b8a3e', jaune: '#e9a800', orange: '#e67700', rouge: '#c92a2a', gris: '#868e96' };
+  setRiskText('cols-svc-status', `${data.status || 'inconnu'} · ${data.dangereux_total ?? 0} à surveiller / ${data.cols_total ?? 0} cols`, (data.dangereux_total ?? 0) > 0 ? 'jaune' : 'vert');
+  setHtml('cols-svc-list', cols.map((c) => {
+    const color = braColors[c.couleur] || '#868e96';
+    return `<li><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:4px"></span><strong>${escapeHtml(c.nom)}</strong> <span style="color:${color};font-weight:600">${escapeHtml(c.statut || '?')}</span> <span class="muted">· ${c.alt} m · ${escapeHtml(c.detail || '')}</span></li>`;
+  }).join('') || '<li class="muted">Aucune donnée cols disponible.</li>');
+}
 
 function setServiceInfoWithSource(targetId, label, sourceCandidate) {
   const safeLabel = escapeHtml(String(label || '').trim() || '-');
@@ -8137,6 +8383,10 @@ const SVC_CARD_META = {
   grenoble_metro:        { statusId: 'grenoble-metro-svc-status', infoId: null,                url: 'https://www.grenoblealpesmetropole.fr' },
   ars_aura:              { statusId: 'ars-aura-svc-status',    infoId: null,                   url: 'https://www.auvergne-rhone-alpes.ars.sante.fr/alertes-sanitaires-en-cours' },
   seismes_isere:         { statusId: 'seismes-svc-status',     infoId: 'seismes-svc-info',     url: 'https://www.franceseisme.fr' },
+  avalanche_isere:       { statusId: 'avalanche-svc-status',   infoId: null,                   url: 'https://meteofrance.com/meteo-montagne' },
+  feux_foret_isere:      { statusId: 'feux-svc-status',        infoId: null,                   url: 'https://effis.jrc.ec.europa.eu' },
+  enedis_coupures_isere: { statusId: 'enedis-svc-status',      infoId: null,                   url: 'https://data.enedis.fr' },
+  cols_alpins_isere:     { statusId: 'cols-svc-status',        infoId: null,                   url: 'https://api.open-meteo.com' },
   anfr_isere:            { statusId: 'anfr-status',            infoId: 'anfr-info',            url: 'https://www.data.gouv.fr/fr/datasets/donnees-sur-les-installations-radioelectriques-de-plus-de-5-watts-1/' },
   arcep_isere:           { statusId: 'arcep-status',           infoId: 'arcep-info',           url: 'https://www.data.gouv.fr/fr/datasets/sites-indisponibles/' },
   isere_opendata:        { statusId: 'opendata-status',        infoId: 'opendata-info',        url: 'https://opendata.isere.fr' },
@@ -8185,6 +8435,10 @@ const SVC_DETAIL_LISTS = {
   grenoble_metro:        [{ id: 'grenoble-metro-svc-list', label: 'Actualités Grenoble Alpes Métropole' }],
   ars_aura:              [{ id: 'ars-aura-svc-list',     label: 'Alertes sanitaires ARS AURA' }],
   seismes_isere:         [{ id: 'seismes-svc-list',      label: 'Séismes récents Isère' }],
+  avalanche_isere:       [{ id: 'avalanche-svc-list',    label: 'BRA — Risque avalanche massifs Isère' }],
+  feux_foret_isere:      [{ id: 'feux-svc-list',         label: 'Foyers actifs EFFIS (24h)' }],
+  enedis_coupures_isere: [{ id: 'enedis-svc-list',       label: 'Coupures & travaux Enedis Isère' }],
+  cols_alpins_isere:     [{ id: 'cols-svc-list',         label: 'État des cols alpins Isère' }],
 };
 
 function buildServiceCards() {
@@ -8512,6 +8766,10 @@ function renderExternalRisks(data = {}) {
   const grenobleMétropole = mergedData?.grenoble_metro || {};
   const arsAura = mergedData?.ars_aura || {};
   const seismesIsere = mergedData?.seismes_isere || {};
+  const avalancheIsere = mergedData?.avalanche_isere || {};
+  const feuxForet = mergedData?.feux_foret_isere || {};
+  const enedisCoupures = mergedData?.enedis_coupures_isere || {};
+  const colsAlpins = mergedData?.cols_alpins_isere || {};
 
   setRiskText('meteo-status', `${meteo.status || 'inconnu'} · niveau ${normalizeLevel(meteo.level || 'inconnu')}`, meteo.level || 'vert');
   setText('meteo-info', sanitizeMeteoInformation(meteo.info_state) || meteo.bulletin_title || '');
@@ -8537,6 +8795,15 @@ function renderExternalRisks(data = {}) {
   renderGrenobleMetroNews(grenobleMétropole);
   renderArsAuraAlerts(arsAura);
   renderSeismesIsere(seismesIsere);
+  renderAvalancheIsere(avalancheIsere);
+  renderFeuxForetWidget(feuxForet);
+  renderEnedisCoupuresWidget(enedisCoupures);
+  renderColsAlpinsWidget(colsAlpins);
+  // Redessiner couches carte avec nouvelles données
+  renderSeismesLayer();
+  renderGroundwaterLayer();
+  renderFeuxForetLayer();
+  renderColsAlpinsLayer();
   renderNewsPanel(prefecture, dauphine, franceBleu, placegrenet, grenobleMétropole, arsAura, seismesIsere);
   renderSncfAlerts(sncf);
   renderApicAlerts(apic);
@@ -9595,6 +9862,10 @@ function bindAppInteractions() {
       renderHelipadLayer();
     }
   });
+  document.getElementById('filter-seismes')?.addEventListener('change', () => renderSeismesLayer());
+  document.getElementById('filter-groundwater')?.addEventListener('change', () => renderGroundwaterLayer());
+  document.getElementById('filter-feux-foret')?.addEventListener('change', () => renderFeuxForetLayer());
+  document.getElementById('filter-cols-alpins')?.addEventListener('change', () => renderColsAlpinsLayer());
   document.getElementById('filter-resources-telecom')?.addEventListener('change', () => {
     syncTelecomFilterState();
     renderResources();

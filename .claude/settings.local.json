@@ -239,7 +239,9 @@
       "WebFetch(domain:nominatim.openstreetmap.org)",
       "WebFetch(domain:overpass.kumi.systems)",
       "WebFetch(domain:api.openrouteservice.org)",
-      "WebFetch(domain:router.project-osrm.org)"
+      "WebFetch(domain:router.project-osrm.org)",
+      "Bash(grep -i \"leaflet\\\\|heatmap\\\\|heat\\\\\\\\.js\\\\|leaflet-heat\\\\|HeatmapLayer\" /c/Users/lucme/Music/opeprotec/ope-protec/web/index.html)",
+      "Bash(grep -i \"heatmap\\\\|heat\\\\\\\\.js\\\\|leaflet-heat\" /c/Users/lucme/Music/opeprotec/ope-protec/web/script.js)"
     ]
   }
 }
