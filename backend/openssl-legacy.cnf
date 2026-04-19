@@ -12,7 +12,9 @@ system_default = system_default_sect
 [system_default_sect]
 # Autorise la renégociation legacy (requis pour opendata.isere.fr et autres serveurs gouv)
 Options = UnsafeLegacyRenegotiation
-# Accepte TLS 1.0+ (certains serveurs gouvernementaux n'ont pas migré vers TLS 1.2)
-MinProtocol = TLSv1
+# Force TLS 1.2 exactement — évite TLSV1_ALERT_INTERNAL_ERROR sur opendata.isere.fr
+# (serveur rejette TLS 1.3 avec internal error au lieu d'un alert version correcte)
+MinProtocol = TLSv1.2
+MaxProtocol = TLSv1.2
 # Niveau de sécurité bas pour accepter les suites de chiffrement RSA sans PFS
 CipherString = DEFAULT:@SECLEVEL=0

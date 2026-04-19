@@ -37,6 +37,8 @@ services:
     mem_limit: 1g
     volumes:
       - app_data:/data
+      - ./backend/app:/app/app:ro
+      - ./backend/openssl-legacy.cnf:/etc/ssl/legacy-openssl.cnf:ro
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/veille
       REDIS_URL: redis://redis:6379/0

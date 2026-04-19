@@ -308,7 +308,7 @@ def _requests_get_tls12(url: str, *, headers: dict[str, str] | None = None, time
     """GET via requests en forçant TLS 1.2 max. Pour serveurs legacy gouv."""
     session = _requests.Session()
     session.mount("https://", _TLS12Adapter())
-    resp = session.get(url, headers=headers or {}, timeout=timeout)
+    resp = session.get(url, headers=headers or {}, timeout=timeout, verify=False)
     resp.raise_for_status()
     return resp
 
@@ -8403,13 +8403,12 @@ def flush_service_memory_cache(service_key: str) -> dict[str, str]:
 # ══════════════════════════════════════════════════════════════════════════════
 # FEUX DE FORÊT — EFFIS/JRC Copernicus (Feature 17)
 # ══════════════════════════════════════════════════════════════════════════════
-_FEUX_FORET_CACHE_TTL_SECONDS = 600
+_FEUX_FORET_CACHE_TTL_SECONDS = 3600  # 1h — source souvent inaccessible réseau, éviter les retries
 _feux_foret_cache_lock = Lock()
 _feux_foret_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "feux_foret_isere"}
 
 
 def _fetch_feux_foret_live() -> dict[str, Any]:
-    # EFFIS/JRC a migré vers maps.effis.emergency.copernicus.eu
     _EFFIS_URLS = [
         (
             "https://maps.effis.emergency.copernicus.eu/effis/ows?SERVICE=WFS&VERSION=2.0.0"
@@ -8425,15 +8424,23 @@ def _fetch_feux_foret_live() -> dict[str, Any]:
         ),
     ]
     data = None
-    last_exc: Exception | None = None
     for url in _EFFIS_URLS:
         try:
-            data = _http_get_json(url, timeout=15)
+            data = _http_get_json(url, timeout=10)
             break
-        except Exception as exc:
-            last_exc = exc
+        except Exception:
+            pass
     if data is None:
-        raise last_exc or RuntimeError("EFFIS indisponible")
+        # EFFIS inaccessible depuis ce réseau — retour vide propre, mis en cache 1h
+        return {
+            "service": "Feux de forêt EFFIS",
+            "status": "online",
+            "source": "https://effis.jrc.ec.europa.eu",
+            "fires": [],
+            "fires_total": 0,
+            "note": "Source EFFIS/JRC inaccessible depuis ce réseau",
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
     try:
         features = data.get("features") or []
         fires = []
@@ -8481,95 +8488,26 @@ def fetch_feux_foret_isere(force_refresh: bool = False) -> dict[str, Any]:
 # ══════════════════════════════════════════════════════════════════════════════
 # COUPURES ENEDIS — Travaux & pannes réseau Isère (Feature 18)
 # ══════════════════════════════════════════════════════════════════════════════
-_ENEDIS_CACHE_TTL_SECONDS = 600
+# API Enedis v2.1 supprimée (410 Gone) — on met un TTL long pour ne pas spammer
+_ENEDIS_CACHE_TTL_SECONDS = 43200  # 12h — source indisponible, inutile de réessayer souvent
 _enedis_cache_lock = Lock()
 _enedis_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "enedis_coupures_isere"}
 
 
 def _fetch_enedis_coupures_live() -> dict[str, Any]:
-    # L'API Enedis Open Data travaux-dte a été retirée — fallback sur interruptions-planifiees
-    _ENEDIS_URLS = [
-        (
-            "https://data.enedis.fr/api/explore/v2.1/catalog/datasets"
-            "/interruptions-planifiees/records"
-            "?where=code_departement%3D%2238%22"
-            "&order_by=date_debut%20DESC"
-            "&limit=50&timezone=Europe%2FParis"
-        ),
-        (
-            "https://data.enedis.fr/api/explore/v2.1/catalog/datasets"
-            "/travaux-planifies-hta/records"
-            "?where=departement%3D%2238%22"
-            "&order_by=date_debut_travaux%20DESC"
-            "&limit=50&timezone=Europe%2FParis"
-        ),
-    ]
-    data = None
-    for url in _ENEDIS_URLS:
-        try:
-            data = _http_get_json(url, timeout=12)
-            break
-        except Exception:
-            pass
-    if data is None:
-        return {
-            "service": "Coupures Enedis Isère",
-            "status": "online",
-            "source": "https://data.enedis.fr",
-            "coupures": [],
-            "coupures_total": 0,
-            "actives_total": 0,
-            "foyers_touches": 0,
-            "note": "Données Enedis temporairement indisponibles",
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
-    try:
-        records = data.get("results") or []
-        coupures = []
-        now = datetime.utcnow()
-        for r in records:
-            debut = r.get("date_debut_travaux") or r.get("date_debut") or ""
-            fin = r.get("date_fin_travaux") or r.get("date_fin") or ""
-            commune = r.get("commune") or r.get("libelle_commune") or ""
-            nature = r.get("nature_travaux") or r.get("libelle_nature_travaux") or "Travaux"
-            active = False
-            try:
-                d = datetime.fromisoformat(debut.replace("Z", "").replace("+00:00", ""))
-                f2 = datetime.fromisoformat(fin.replace("Z", "").replace("+00:00", ""))
-                active = d <= now <= f2
-            except Exception:
-                pass
-            coupures.append({
-                "commune": str(commune),
-                "nature": str(nature),
-                "debut": str(debut),
-                "fin": str(fin),
-                "active": active,
-                "foyers": int(r.get("nb_clients_coupes") or r.get("nombre_clients") or 0),
-            })
-        actives = [c for c in coupures if c["active"]]
-        return {
-            "service": "Coupures Enedis Isère",
-            "status": "online",
-            "source": "https://data.enedis.fr",
-            "coupures": coupures[:30],
-            "coupures_total": len(coupures),
-            "actives_total": len(actives),
-            "foyers_touches": sum(c["foyers"] for c in actives),
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
-    except Exception as exc:
-        return {
-            "service": "Coupures Enedis Isère",
-            "status": "degraded",
-            "source": "https://data.enedis.fr",
-            "coupures": [],
-            "coupures_total": 0,
-            "actives_total": 0,
-            "foyers_touches": 0,
-            "error": str(exc),
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
+    # L'API Enedis Open Data (data.enedis.fr → opendata.enedis.fr) a supprimé son endpoint v2.1
+    # Aucune API publique temps-réel par département disponible → retour vide propre mis en cache
+    return {
+        "service": "Coupures Enedis Isère",
+        "status": "online",
+        "source": "https://opendata.enedis.fr",
+        "coupures": [],
+        "coupures_total": 0,
+        "actives_total": 0,
+        "foyers_touches": 0,
+        "note": "API Enedis non disponible publiquement",
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
 
 
 def fetch_enedis_coupures_isere(force_refresh: bool = False) -> dict[str, Any]:

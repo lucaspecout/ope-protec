@@ -241,7 +241,12 @@
       "WebFetch(domain:api.openrouteservice.org)",
       "WebFetch(domain:router.project-osrm.org)",
       "Bash(grep -i \"leaflet\\\\|heatmap\\\\|heat\\\\\\\\.js\\\\|leaflet-heat\\\\|HeatmapLayer\" /c/Users/lucme/Music/opeprotec/ope-protec/web/index.html)",
-      "Bash(grep -i \"heatmap\\\\|heat\\\\\\\\.js\\\\|leaflet-heat\" /c/Users/lucme/Music/opeprotec/ope-protec/web/script.js)"
+      "Bash(grep -i \"heatmap\\\\|heat\\\\\\\\.js\\\\|leaflet-heat\" /c/Users/lucme/Music/opeprotec/ope-protec/web/script.js)",
+      "WebFetch(domain:maps.effis.emergency.copernicus.eu)",
+      "WebFetch(domain:data.enedis.fr)",
+      "WebFetch(domain:opendata.enedis.fr)",
+      "WebFetch(domain:firms.modaps.eosdis.nasa.gov)",
+      "WebFetch(domain:public.opendatasoft.com)"
     ]
   }
 }
