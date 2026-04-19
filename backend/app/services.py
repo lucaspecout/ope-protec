@@ -3995,7 +3995,7 @@ def fetch_ars_aura_health_alerts(limit: int = 8, force_refresh: bool = False) ->
     )
 
 
-def _fetch_seismes_isere_live(limit: int = 10) -> dict[str, Any]:
+def _fetch_seismes_isere_live(limit: int = 6) -> dict[str, Any]:
     # Bounding box Isère : lat 44.7-45.5, lon 4.8-6.5 — retourne QuakeML XML
     url = (
         "https://api.franceseisme.fr/fdsnws/event/1/query"
@@ -4019,12 +4019,21 @@ def _fetch_seismes_isere_live(limit: int = 10) -> dict[str, Any]:
             time_val = _txt("q:origin/q:time/q:value")
             depth_raw = _txt("q:origin/q:depth/q:value")
             depth_km = round(float(depth_raw) / 1000, 1) if depth_raw else None
+            # Formater la date ISO "2024-02-12T08:23:45.000000Z" → "12/02/2024 08:23"
+            date_label = ""
+            if time_val:
+                try:
+                    dt = datetime.fromisoformat(time_val.replace("Z", "").split(".")[0])
+                    date_label = dt.strftime("%d/%m/%Y %H:%M")
+                except Exception:
+                    date_label = time_val[:16]
             events.append({
                 "title": f"Séisme M{mag} — {place}",
                 "magnitude": mag,
                 "place": place,
                 "depth_km": depth_km,
                 "published_at": time_val,
+                "date_label": date_label,
                 "description": f"Magnitude {mag} · Profondeur {depth_km} km" if depth_km else f"Magnitude {mag}",
                 "link": "https://www.franceseisme.fr/",
             })

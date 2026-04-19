@@ -6051,15 +6051,25 @@ function renderArsAuraAlerts(data = {}) {
 
 function renderSeismesIsere(data = {}) {
   const items = Array.isArray(data.items) ? data.items : [];
-  setRiskText('seismes-svc-status', `${data.status || 'inconnu'} · ${items.length} séisme(s)`, data.status === 'online' ? 'vert' : 'jaune');
-  setText('seismes-svc-info', items.length ? `Dernier : ${escapeHtml(items[0]?.title || '')}` : 'Aucun séisme détecté récemment');
-  setHtml('seismes-svc-list', items.slice(0, 8).map((item) => {
-    const mag = item.magnitude != null ? `M${item.magnitude}` : '';
-    const place = escapeHtml(item.place || '');
-    const depth = item.depth_km != null ? ` · ${item.depth_km} km` : '';
-    const published = item.published_at ? `<br><span class="muted">${escapeHtml(item.published_at)}</span>` : '';
-    return `<li><strong>${mag} — ${place}</strong>${depth}${published}</li>`;
-  }).join('') || '<li>Aucun séisme détecté récemment.</li>');
+  const last = items[0];
+  const lastMag = last?.magnitude != null ? `M${last.magnitude}` : '';
+  const statusLabel = items.length
+    ? `${items.length} séisme(s) · Dernier ${lastMag} le ${escapeHtml(last?.date_label || last?.published_at?.slice(0, 10) || '?')}`
+    : 'Aucun séisme détecté récemment';
+  setRiskText('seismes-svc-status', statusLabel, data.status === 'online' ? 'vert' : 'jaune');
+  setText('seismes-svc-info', items.length ? `Source : BCSF-RéNaSS · Isère (30 jours)` : '');
+  setHtml('seismes-svc-list', items.slice(0, 6).map((item) => {
+    const mag = item.magnitude != null ? item.magnitude : '?';
+    const magColor = mag >= 3 ? '#c92a2a' : mag >= 2 ? '#e67700' : '#2b8a3e';
+    const place = escapeHtml(item.place || 'Isère');
+    const depth = item.depth_km != null ? `prof. ${item.depth_km} km` : '';
+    const date = escapeHtml(item.date_label || item.published_at?.slice(0, 16)?.replace('T', ' ') || '—');
+    return `<li style="display:flex;align-items:baseline;gap:6px">
+      <span style="font-weight:700;color:${magColor};min-width:32px">M${mag}</span>
+      <span style="flex:1"><strong>${place}</strong>${depth ? ` <span class="muted">· ${depth}</span>` : ''}</span>
+      <span class="muted" style="white-space:nowrap;font-size:11px">${date}</span>
+    </li>`;
+  }).join('') || '<li class="muted">Aucun séisme détecté récemment.</li>');
 }
 
 /* Helpers pour les badges de catégorie dans le nouveau news panel */
