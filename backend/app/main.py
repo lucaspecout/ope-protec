@@ -88,7 +88,6 @@ from .services import (
     fetch_cars_region_aura_disruptions,
     fetch_avalanche_isere,
     fetch_feux_foret_isere,
-    fetch_enedis_coupures_isere,
     fetch_cols_alpins_isere,
     generate_pdf_report,
     resolve_commune_insee_code,
@@ -257,7 +256,6 @@ SERVICE_REFRESH_INTERVALS: dict[str, int] = {
     "seismes_isere":        600,    # Séismes Isère (BCSF-RéNaSS)
     "avalanche_isere":     1800,    # BRA Météo-France massifs Isère
     "feux_foret_isere":     600,    # Feux de forêt EFFIS/JRC
-    "enedis_coupures_isere": 600,   # Coupures / travaux Enedis Isère
     "cols_alpins_isere":   1800,    # État cols alpins Isère (open-meteo)
 }
 
@@ -1078,7 +1076,6 @@ def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str])
         "cars_region_aura": (lambda: fetch_cars_region_aura_disruptions(force_refresh=refresh), {"status": "pending", "disruptions": [], "disruptions_total": 0}),
         "avalanche_isere": (lambda: fetch_avalanche_isere(force_refresh=refresh), {"status": "pending", "massifs": [], "massifs_total": 0, "niveau_global": "gris"}),
         "feux_foret_isere": (lambda: fetch_feux_foret_isere(force_refresh=refresh), {"status": "pending", "fires": [], "fires_total": 0}),
-        "enedis_coupures_isere": (lambda: fetch_enedis_coupures_isere(force_refresh=refresh), {"status": "pending", "coupures": [], "actives_total": 0, "foyers_touches": 0}),
         "cols_alpins_isere": (lambda: fetch_cols_alpins_isere(force_refresh=refresh), {"status": "pending", "cols": [], "cols_total": 0, "dangereux_total": 0}),
     }
 
@@ -2798,11 +2795,6 @@ def api_avalanche_isere(refresh: bool = False, _: User = Depends(require_roles(*
 @app.get("/api/feux-foret-isere")
 def api_feux_foret_isere(refresh: bool = False, _: User = Depends(require_roles(*READ_ROLES))):
     return fetch_feux_foret_isere(force_refresh=refresh)
-
-
-@app.get("/api/enedis-coupures-isere")
-def api_enedis_coupures_isere(refresh: bool = False, _: User = Depends(require_roles(*READ_ROLES))):
-    return fetch_enedis_coupures_isere(force_refresh=refresh)
 
 
 @app.get("/api/cols-alpins-isere")

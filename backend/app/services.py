@@ -8414,7 +8414,6 @@ def flush_service_memory_cache(service_key: str) -> dict[str, str]:
         "ars_aura":            (_ars_aura_cache,              _ars_aura_cache_lock),
         "seismes_isere":       (_seismes_isere_cache,         _seismes_isere_cache_lock),
         "feux_foret_isere":    (_feux_foret_cache,            _feux_foret_cache_lock),
-        "enedis_coupures_isere": (_enedis_cache,              _enedis_cache_lock),
         "cols_alpins_isere":   (_cols_cache,                  _cols_cache_lock),
     }
     if service_key not in _known:
@@ -8512,117 +8511,6 @@ def fetch_feux_foret_isere(force_refresh: bool = False) -> dict[str, Any]:
         ttl_seconds=_FEUX_FORET_CACHE_TTL_SECONDS,
         force_refresh=force_refresh,
         loader=_fetch_feux_foret_live,
-    )
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# RÉSEAU ENEDIS — Indicateurs qualité & continuité Isère (Feature 18)
-# Nouvelle API : opendata.enedis.fr/data-fair/api/v1 (Koumoul platform)
-# Dataset : indicateur réglementaire continuité d'alimentation par département
-# ══════════════════════════════════════════════════════════════════════════════
-_ENEDIS_CACHE_TTL_SECONDS = 86400  # 24h — données annuelles
-_enedis_cache_lock = Lock()
-_enedis_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "enedis_coupures_isere"}
-
-_ENEDIS_BASE = "https://opendata.enedis.fr/data-fair/api/v1/datasets"
-_ENEDIS_CONTINUITE_ID = "w06kbpkd-qkqnu6zq5lpxer3"
-_ENEDIS_FREQ_BT_ID = "hfdd6h8eoz6ov2pkxt4kc595"
-_ENEDIS_DUREE_BT_ID = "d7d9k4lc9ncr93iyx65nub-m"
-
-
-def _enedis_latest_year(rec: dict[str, Any]) -> tuple[int, float | None]:
-    """Retourne (année_max, valeur) parmi les champs aaa{year} du record."""
-    annee_max = 0
-    valeur: float | None = None
-    for key, val in rec.items():
-        if key.startswith("aaa") and len(key) == 7:
-            try:
-                y = int(key[3:])
-                if y > annee_max and val is not None:
-                    annee_max = y
-                    valeur = float(val)
-            except (ValueError, TypeError):
-                pass
-    return annee_max, valeur
-
-
-def _fetch_enedis_coupures_live() -> dict[str, Any]:
-    try:
-        # 1. Indicateur continuité par département (filtre Isère 38)
-        url_cont = (
-            f"{_ENEDIS_BASE}/{_ENEDIS_CONTINUITE_ID}/lines"
-            "?size=1&qs=ndeg_departement%3A38"
-        )
-        cont_data = _http_get_json(url_cont, timeout=12)
-        cont_results = (cont_data.get("results") or [])
-        indicateur: float | None = None
-        indicateur_annee: int | None = None
-        if cont_results:
-            annee, val = _enedis_latest_year(cont_results[0])
-            if annee:
-                indicateur = round(val, 2) if val is not None else None
-                indicateur_annee = annee
-
-        # 2. Fréquence coupures BT (national)
-        url_freq = f"{_ENEDIS_BASE}/{_ENEDIS_FREQ_BT_ID}/lines?size=1&sort=-annee"
-        freq_data = _http_get_json(url_freq, timeout=10)
-        freq_results = (freq_data.get("results") or [])
-        freq_longue: float | None = None
-        freq_annee: str | None = None
-        if freq_results:
-            r = freq_results[0]
-            freq_annee = str(r.get("annee") or "")
-            freq_longue = r.get("frequence_moyenne_de_coupure_longue_non_planifiee_par_client_bt")
-            if freq_longue is not None:
-                freq_longue = round(float(freq_longue), 3)
-
-        # 3. Durée coupures BT (national)
-        url_dur = f"{_ENEDIS_BASE}/{_ENEDIS_DUREE_BT_ID}/lines?size=1&sort=-annee"
-        dur_data = _http_get_json(url_dur, timeout=10)
-        dur_results = (dur_data.get("results") or [])
-        duree_non_plan: float | None = None
-        if dur_results:
-            r = dur_results[0]
-            v = r.get("duree_annuelle_moyenne_de_coupure_non_planifiees_par_client_minutes")
-            if v is not None:
-                duree_non_plan = round(float(v), 1)
-
-        return {
-            "service": "Réseau Enedis · Isère",
-            "status": "online",
-            "source": "https://opendata.enedis.fr",
-            "coupures": [],
-            "coupures_total": 0,
-            "actives_total": 0,
-            "foyers_touches": 0,
-            "indicateur_continuite_isere": indicateur,
-            "indicateur_annee": indicateur_annee,
-            "freq_coupure_bt_national": freq_longue,
-            "duree_coupure_bt_min_national": duree_non_plan,
-            "freq_annee": freq_annee,
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
-    except Exception as exc:
-        return {
-            "service": "Réseau Enedis · Isère",
-            "status": "degraded",
-            "source": "https://opendata.enedis.fr",
-            "coupures": [],
-            "coupures_total": 0,
-            "actives_total": 0,
-            "foyers_touches": 0,
-            "error": str(exc),
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
-
-
-def fetch_enedis_coupures_isere(force_refresh: bool = False) -> dict[str, Any]:
-    return _cached_external_payload(
-        cache=_enedis_cache,
-        lock=_enedis_cache_lock,
-        ttl_seconds=_ENEDIS_CACHE_TTL_SECONDS,
-        force_refresh=force_refresh,
-        loader=_fetch_enedis_coupures_live,
     )
 
 

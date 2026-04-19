@@ -63,7 +63,6 @@ const FLUX_SERVICES = [
   { key: 'seismes_isere',          label: 'Séismes Isère',             icon: '🌍', category: 'Risques',       interval: 600,   metric: (d) => `${(d.items || []).length} séisme(s) détecté(s)` },
   { key: 'avalanche_isere',        label: 'Avalanches BRA · Isère',    icon: '🏔️', category: 'Risques',       interval: 1800,  metric: (d) => `Niveau max ${d.niveau_max_bra ?? '?'}/5 · ${(d.massifs || []).length} massif(s)` },
   { key: 'feux_foret_isere',       label: 'Feux de forêt EFFIS',       icon: '🔥', category: 'Risques',       interval: 600,   metric: (d) => `${d.fires_total ?? 0} foyer(s) détecté(s) 24h` },
-  { key: 'enedis_coupures_isere',  label: 'Réseau Enedis · Isère',     icon: '⚡', category: 'Infrastructure', interval: 86400, metric: (d) => d.indicateur_continuite_isere != null ? `Indic. continuité Isère ${d.indicateur_annee} : ${d.indicateur_continuite_isere}` : `${d.actives_total ?? 0} coupure(s)` },
   { key: 'cols_alpins_isere',      label: 'Cols alpins Isère',         icon: '⛰️', category: 'Transport',     interval: 1800,  metric: (d) => `${d.cols_total ?? 0} cols · ${d.dangereux_total ?? 0} à surveiller` },
   { key: 'anfr_isere',             label: 'ANFR · Antennes mobiles',   icon: '📡', category: 'Télécom',       interval: 21600, metric: (d) => `${d.supports_total ?? 0} support(s) mobile recensés` },
   { key: 'arcep_isere',            label: 'ARCEP · Sites mobiles',     icon: '📶', category: 'Télécom',       interval: 600,   metric: (d) => `${d.outages_total ?? 0} indisponibilité(s)` },
@@ -697,11 +696,6 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
       ...p, ...n,
       fires: keepPreviousArray(p.fires, n.fires),
       fires_total: keepPreviousValue(p.fires_total, n.fires_total),
-    })),
-    enedis_coupures_isere: mergeServiceSlot(previous.enedis_coupures_isere || {}, next.enedis_coupures_isere || {}, (p, n) => ({
-      ...p, ...n,
-      coupures: keepPreviousArray(p.coupures, n.coupures),
-      actives_total: keepPreviousValue(p.actives_total, n.actives_total),
     })),
     cols_alpins_isere: mergeServiceSlot(previous.cols_alpins_isere || {}, next.cols_alpins_isere || {}, (p, n) => ({
       ...p, ...n,
@@ -7461,7 +7455,6 @@ function renderSituationOverview() {
   const braLevel = braNiveauMax >= 4 ? 'rouge' : braNiveauMax >= 3 ? 'orange' : braNiveauMax >= 2 ? 'jaune' : braNiveauMax ? 'vert' : 'inconnu';
   const braLabel = { 1: 'Faible', 2: 'Limité', 3: 'Marqué', 4: 'Fort', 5: 'Très fort' }[braNiveauMax] || 'Indisponible';
   const feuxData = externalRisks?.feux_foret_isere || {};
-  const enedisData = externalRisks?.enedis_coupures_isere || {};
   const seismesData = externalRisks?.seismes_isere || {};
   const dernierSeisme = (seismesData.items || [])[0];
   const seismeLevel = dernierSeisme?.magnitude >= 4 ? 'rouge' : dernierSeisme?.magnitude >= 3 ? 'orange' : dernierSeisme?.magnitude >= 2 ? 'jaune' : 'vert';
@@ -7490,7 +7483,6 @@ function renderSituationOverview() {
     { key: 'avalanche', label: '🏔️ Avalanches BRA', value: braNiveauMax ? `${braNiveauMax}/5 — ${braLabel}` : 'Indisponible', info: `${(braData.massifs || []).length} massif(s) Isère`, css: braLevel },
     { key: 'feux', label: '🔥 Feux de forêt EFFIS', value: `${feuxData.fires_total ?? 0} foyer(s) 24h`, info: feuxData.fires_total > 0 ? 'Foyers détectés par satellite VIIRS' : 'Aucun foyer détecté dans la région', css: (feuxData.fires_total ?? 0) > 5 ? 'rouge' : (feuxData.fires_total ?? 0) > 0 ? 'orange' : 'vert' },
     { key: 'seismes', label: '🌍 Séismes récents', value: dernierSeisme ? `M${dernierSeisme.magnitude} ${escapeHtml(dernierSeisme.place?.split(',')[0] || '')}` : 'Aucun', info: `${(seismesData.items || []).length} séisme(s) détecté(s)`, css: seismeLevel },
-    { key: 'enedis', label: '⚡ Coupures Enedis', value: `${enedisData.actives_total ?? 0} active(s)`, info: `${enedisData.foyers_touches ?? 0} foyer(s) touchés`, css: (enedisData.actives_total ?? 0) > 0 ? 'jaune' : 'vert' },
     { key: 'cols', label: '⛰️ Cols alpins', value: `${colsData.dangereux_total ?? 0} à surveiller`, info: `${colsData.cols_total ?? 0} cols suivis`, css: (colsData.dangereux_total ?? 0) > 3 ? 'orange' : (colsData.dangereux_total ?? 0) > 0 ? 'jaune' : 'vert' },
   ];
 
@@ -8093,28 +8085,6 @@ function renderFeuxForetWidget(data = {}) {
   }).join('') || '<li class="muted">Aucun foyer détecté dans la région.</li>');
 }
 
-function renderEnedisCoupuresWidget(data = {}) {
-  const indic = data.indicateur_continuite_isere;
-  const annee = data.indicateur_annee;
-  const duree = data.duree_coupure_bt_min_national;
-  const freq  = data.freq_coupure_bt_national;
-  const freqAnnee = data.freq_annee || '';
-  const statusLabel = indic != null
-    ? `Isère ${annee} · Indic. continuité ${indic}`
-    : `${data.actives_total ?? 0} coupure(s) active(s) · ${data.foyers_touches ?? 0} foyer(s)`;
-  setRiskText('enedis-svc-status', statusLabel, 'vert');
-  const rows = [];
-  if (indic != null)
-    rows.push(`<li>📊 <strong>Indicateur continuité Isère ${annee}</strong> : <strong>${indic}</strong> <span class="muted">(indice réglementaire annuel Enedis)</span></li>`);
-  if (duree != null)
-    rows.push(`<li>⏱ Durée moy. coupure BT non planifiée (France) : <strong>${duree} min/an/client</strong> <span class="muted">${freqAnnee}</span></li>`);
-  if (freq != null)
-    rows.push(`<li>🔁 Fréquence coupure longue BT (France) : <strong>${freq} coupure/an/client</strong></li>`);
-  if (!rows.length)
-    rows.push('<li class="muted">Aucune donnée disponible.</li>');
-  setHtml('enedis-svc-list', rows.join(''));
-}
-
 function renderColsAlpinsWidget(data = {}) {
   const cols = Array.isArray(data.cols) ? data.cols : [];
   const dangereux = cols.filter((c) => c.couleur !== 'vert' && c.couleur !== 'gris');
@@ -8407,7 +8377,6 @@ const SVC_CARD_META = {
   seismes_isere:         { statusId: 'seismes-svc-status',     infoId: 'seismes-svc-info',     url: 'https://www.franceseisme.fr' },
   avalanche_isere:       { statusId: 'avalanche-svc-status',   infoId: null,                   url: 'https://meteofrance.com/meteo-montagne' },
   feux_foret_isere:      { statusId: 'feux-svc-status',        infoId: null,                   url: 'https://effis.jrc.ec.europa.eu' },
-  enedis_coupures_isere: { statusId: 'enedis-svc-status',      infoId: null,                   url: 'https://data.enedis.fr' },
   cols_alpins_isere:     { statusId: 'cols-svc-status',        infoId: null,                   url: 'https://api.open-meteo.com' },
   anfr_isere:            { statusId: 'anfr-status',            infoId: 'anfr-info',            url: 'https://www.data.gouv.fr/fr/datasets/donnees-sur-les-installations-radioelectriques-de-plus-de-5-watts-1/' },
   arcep_isere:           { statusId: 'arcep-status',           infoId: 'arcep-info',           url: 'https://www.data.gouv.fr/fr/datasets/sites-indisponibles/' },
@@ -8459,7 +8428,6 @@ const SVC_DETAIL_LISTS = {
   seismes_isere:         [{ id: 'seismes-svc-list',      label: 'Séismes récents Isère' }],
   avalanche_isere:       [{ id: 'avalanche-svc-list',    label: 'BRA — Risque avalanche massifs Isère' }],
   feux_foret_isere:      [{ id: 'feux-svc-list',         label: 'Foyers actifs EFFIS (24h)' }],
-  enedis_coupures_isere: [{ id: 'enedis-svc-list',       label: 'Coupures & travaux Enedis Isère' }],
   cols_alpins_isere:     [{ id: 'cols-svc-list',         label: 'État des cols alpins Isère' }],
 };
 
@@ -8790,7 +8758,6 @@ function renderExternalRisks(data = {}) {
   const seismesIsere = mergedData?.seismes_isere || {};
   const avalancheIsere = mergedData?.avalanche_isere || {};
   const feuxForet = mergedData?.feux_foret_isere || {};
-  const enedisCoupures = mergedData?.enedis_coupures_isere || {};
   const colsAlpins = mergedData?.cols_alpins_isere || {};
 
   setRiskText('meteo-status', `${meteo.status || 'inconnu'} · niveau ${normalizeLevel(meteo.level || 'inconnu')}`, meteo.level || 'vert');
@@ -8819,7 +8786,6 @@ function renderExternalRisks(data = {}) {
   renderSeismesIsere(seismesIsere);
   renderAvalancheIsere(avalancheIsere);
   renderFeuxForetWidget(feuxForet);
-  renderEnedisCoupuresWidget(enedisCoupures);
   renderColsAlpinsWidget(colsAlpins);
   // Redessiner couches carte avec nouvelles données
   renderSeismesLayer();
