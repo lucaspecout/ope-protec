@@ -4003,21 +4003,25 @@ def _fetch_seismes_isere_live(limit: int = 6) -> dict[str, Any]:
         "&minlongitude=4.8&maxlongitude=6.5"
         f"&limit={limit}&orderby=time"
     )
-    ns = {"q": "http://quakeml.org/xmlns/quakeml/1.2"}
+    # QuakeML : root = q:quakeml (xmlns:q=quakeml/1.2), fils = bed/1.2 (default ns)
+    NS = {
+        "q": "http://quakeml.org/xmlns/quakeml/1.2",
+        "b": "http://quakeml.org/xmlns/bed/1.2",
+    }
     try:
         raw = _http_get_text(url)
         root = ET.fromstring(raw)
-        event_nodes = root.findall("q:eventParameters/q:event", ns)
+        event_nodes = root.findall("b:eventParameters/b:event", NS)
         events: list[dict[str, Any]] = []
         for ev in event_nodes:
             def _txt(path: str) -> str | None:
-                node = ev.find(path, ns)
+                node = ev.find(path, NS)
                 return node.text.strip() if node is not None and node.text else None
-            mag_raw = _txt("q:magnitude/q:mag/q:value")
+            mag_raw = _txt("b:magnitude/b:mag/b:value")
             mag = round(float(mag_raw), 1) if mag_raw else None
-            place = _txt("q:description/q:text") or "Isère"
-            time_val = _txt("q:origin/q:time/q:value")
-            depth_raw = _txt("q:origin/q:depth/q:value")
+            place = _txt("b:description/b:text") or "Isère"
+            time_val = _txt("b:origin/b:time/b:value")
+            depth_raw = _txt("b:origin/b:depth/b:value")
             depth_km = round(float(depth_raw) / 1000, 1) if depth_raw else None
             # Formater la date ISO "2024-02-12T08:23:45.000000Z" → "12/02/2024 08:23"
             date_label = ""
