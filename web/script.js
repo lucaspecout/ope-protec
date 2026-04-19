@@ -63,7 +63,7 @@ const FLUX_SERVICES = [
   { key: 'seismes_isere',          label: 'Séismes Isère',             icon: '🌍', category: 'Risques',       interval: 600,   metric: (d) => `${(d.items || []).length} séisme(s) détecté(s)` },
   { key: 'avalanche_isere',        label: 'Avalanches BRA · Isère',    icon: '🏔️', category: 'Risques',       interval: 1800,  metric: (d) => `Niveau max ${d.niveau_max_bra ?? '?'}/5 · ${(d.massifs || []).length} massif(s)` },
   { key: 'feux_foret_isere',       label: 'Feux de forêt EFFIS',       icon: '🔥', category: 'Risques',       interval: 600,   metric: (d) => `${d.fires_total ?? 0} foyer(s) détecté(s) 24h` },
-  { key: 'enedis_coupures_isere',  label: 'Coupures Enedis Isère',     icon: '⚡', category: 'Infrastructure', interval: 600,   metric: (d) => `${d.actives_total ?? 0} coupure(s) active(s) · ${d.foyers_touches ?? 0} foyer(s)` },
+  { key: 'enedis_coupures_isere',  label: 'Réseau Enedis · Isère',     icon: '⚡', category: 'Infrastructure', interval: 86400, metric: (d) => d.indicateur_continuite_isere != null ? `Indic. continuité Isère ${d.indicateur_annee} : ${d.indicateur_continuite_isere}` : `${d.actives_total ?? 0} coupure(s)` },
   { key: 'cols_alpins_isere',      label: 'Cols alpins Isère',         icon: '⛰️', category: 'Transport',     interval: 1800,  metric: (d) => `${d.cols_total ?? 0} cols · ${d.dangereux_total ?? 0} à surveiller` },
   { key: 'anfr_isere',             label: 'ANFR · Antennes mobiles',   icon: '📡', category: 'Télécom',       interval: 21600, metric: (d) => `${d.supports_total ?? 0} support(s) mobile recensés` },
   { key: 'arcep_isere',            label: 'ARCEP · Sites mobiles',     icon: '📶', category: 'Télécom',       interval: 600,   metric: (d) => `${d.outages_total ?? 0} indisponibilité(s)` },
@@ -8084,13 +8084,25 @@ function renderFeuxForetWidget(data = {}) {
 }
 
 function renderEnedisCoupuresWidget(data = {}) {
-  const coupures = Array.isArray(data.coupures) ? data.coupures : [];
-  const actives = coupures.filter((c) => c.active);
-  setRiskText('enedis-svc-status', `${data.status || 'inconnu'} · ${data.actives_total ?? 0} active(s) · ${data.foyers_touches ?? 0} foyers`, (data.actives_total ?? 0) > 0 ? 'jaune' : 'vert');
-  setHtml('enedis-svc-list', (actives.length ? actives : coupures).slice(0, 6).map((c) => {
-    const badge = c.active ? '<span style="color:#e67700;font-weight:700">EN COURS</span>' : '<span class="muted">Programmé</span>';
-    return `<li>${badge} · <strong>${escapeHtml(c.commune || '?')}</strong> · ${escapeHtml(c.nature || '?')}${c.foyers ? ` · ${c.foyers} foyer(s)` : ''}<br><span class="muted">Du ${escapeHtml(c.debut || '?')} au ${escapeHtml(c.fin || '?')}</span></li>`;
-  }).join('') || '<li class="muted">Aucune coupure active en Isère.</li>');
+  const indic = data.indicateur_continuite_isere;
+  const annee = data.indicateur_annee;
+  const duree = data.duree_coupure_bt_min_national;
+  const freq  = data.freq_coupure_bt_national;
+  const freqAnnee = data.freq_annee || '';
+  const statusLabel = indic != null
+    ? `Isère ${annee} · Indic. continuité ${indic}`
+    : `${data.actives_total ?? 0} coupure(s) active(s) · ${data.foyers_touches ?? 0} foyer(s)`;
+  setRiskText('enedis-svc-status', statusLabel, 'vert');
+  const rows = [];
+  if (indic != null)
+    rows.push(`<li>📊 <strong>Indicateur continuité Isère ${annee}</strong> : <strong>${indic}</strong> <span class="muted">(indice réglementaire annuel Enedis)</span></li>`);
+  if (duree != null)
+    rows.push(`<li>⏱ Durée moy. coupure BT non planifiée (France) : <strong>${duree} min/an/client</strong> <span class="muted">${freqAnnee}</span></li>`);
+  if (freq != null)
+    rows.push(`<li>🔁 Fréquence coupure longue BT (France) : <strong>${freq} coupure/an/client</strong></li>`);
+  if (!rows.length)
+    rows.push('<li class="muted">Aucune donnée disponible.</li>');
+  setHtml('enedis-svc-list', rows.join(''));
 }
 
 function renderColsAlpinsWidget(data = {}) {
