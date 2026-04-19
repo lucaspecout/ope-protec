@@ -689,7 +689,7 @@ _DAUPHINE_CACHE_TTL_SECONDS = 300
 _VIGIEAU_CACHE_TTL_SECONDS = 900
 _ATMO_AURA_CACHE_TTL_SECONDS = 900
 _SNCF_ISERE_CACHE_TTL_SECONDS = 180
-_RTE_ELECTRICITY_CACHE_TTL_SECONDS = 7200  # Ecowatt = signal journalier, API très rate-limitée
+_RTE_ELECTRICITY_CACHE_TTL_SECONDS = 1800  # Ecowatt = signal journalier ; 30 min pour récupérer les vraies données sans surcharger l'API
 _FINESS_ISERE_CACHE_TTL_SECONDS = 43200
 _FINESS_ISERE_MAX_LIMIT = 20000
 _FINESS_ISERE_STABLE_CSV_URL = "https://static.data.gouv.fr/resources/finess-extraction-du-fichier-des-etablissements/20260312-094547/etalab-cs1100507-stock-20260311-0343.csv"
@@ -4282,14 +4282,15 @@ def _fetch_rte_isere_electricity_live() -> dict[str, Any]:
         verify=True,
     )
     if resp_ecowatt.status_code == 429:
-        # Rate-limited — on retourne le cache stale si disponible, sinon "vert" par défaut
-        # status:"online" pour que _cached_external_payload le mette en cache et évite
-        # de respammer l'API pendant toute la durée du TTL (30 min)
+        retry_after = max(int(resp_ecowatt.headers.get("Retry-After", 900)), 60)
+        # Priorité 1 : retourner le cache stale s'il contient de vraies données
         with _rte_electricity_cache_lock:
             stale = _rte_electricity_cache.get("payload")
-        if stale and stale.get("status") == "online":
+        if stale and stale.get("status") == "online" and stale.get("ecowatt") in ("vert", "orange", "rouge"):
             return stale
-        return {
+        # Priorité 2 : fallback "vert" mis en cache uniquement pour retry_after+60s
+        # (pas le TTL complet) afin de réessayer l'API dès que le rate-limit se lève
+        fallback = {
             "service": "RTE · Ecowatt & Consommation",
             "status": "online",
             "department": "France (national)",
@@ -4297,10 +4298,18 @@ def _fetch_rte_isere_electricity_live() -> dict[str, Any]:
             "source": "https://data.rte-france.com",
             "level": "vert",
             "ecowatt": "vert",
-            "ecowatt_message": "Signal RTE temporairement indisponible",
+            "ecowatt_message": "Signal Ecowatt — données en attente",
             "conso_mw": None,
             "updated_at": datetime.utcnow().isoformat() + "Z",
         }
+        short_ttl = retry_after + 60
+        redis_key = _rte_electricity_cache.get("redis_key")
+        if redis_key:
+            _redis_set(redis_key, fallback, short_ttl)
+        with _rte_electricity_cache_lock:
+            _rte_electricity_cache["payload"] = deepcopy(fallback)
+            _rte_electricity_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=short_ttl)
+        return fallback
     resp_ecowatt.raise_for_status()
     signals = resp_ecowatt.json().get("signals") or []
     if signals:
