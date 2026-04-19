@@ -2644,8 +2644,8 @@ function applyBasemap(style = 'osm') {
       options: { maxZoom: 19, attribution: '&copy; OpenTopoMap contributors' },
     },
     satellite: {
-      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-      options: { maxZoom: 19, attribution: 'Tiles &copy; Esri' },
+      url: 'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/jpeg',
+      options: { maxZoom: 20, attribution: '© IGN Géoportail — Orthophotographies', tileSize: 256 },
     },
     light: {
       url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
@@ -5250,7 +5250,40 @@ const APRR_PR_COORDS = {
   ],
 };
 
-function renderPrAutorouteLayer() {
+let _ignPrCache = null; // { A41: [{k, lat, lon},...], ... } from IGN WFS
+let _ignPrLoading = false;
+
+async function loadPrFromIgnWfs() {
+  if (_ignPrCache) return _ignPrCache;
+  if (_ignPrLoading) return null;
+  _ignPrLoading = true;
+  const roads = Object.keys(APRR_PR_COORDS);
+  const result = {};
+  await Promise.all(roads.map(async (road) => {
+    try {
+      const filter = encodeURIComponent(`cpx_numero='${road}'`);
+      const url = `https://data.geopf.fr/wfs/ows?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=BDTOPO_V3:borne_kilometrique&OUTPUTFORMAT=application/json&CQL_FILTER=${filter}&COUNT=300`;
+      const resp = await fetchWithTimeout(url, { timeoutMs: 12000 });
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const pts = (data.features || [])
+        .map((f) => {
+          const coords = f.geometry?.coordinates;
+          const val = f.properties?.valeur ?? f.properties?.numero ?? f.properties?.pk;
+          if (!coords || val == null) return null;
+          return { k: Number(val), lat: coords[1], lon: coords[0] };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.k - b.k);
+      if (pts.length > 0) result[road] = pts;
+    } catch { /* keep static fallback */ }
+  }));
+  _ignPrLoading = false;
+  if (Object.keys(result).length > 0) _ignPrCache = result;
+  return _ignPrCache;
+}
+
+async function renderPrAutorouteLayer() {
   if (!prAutorouteLayer || typeof window.L === 'undefined') return;
   prAutorouteLayer.clearLayers();
   const show = document.getElementById('filter-pr-autoroutes')?.checked ?? false;
@@ -5259,8 +5292,15 @@ function renderPrAutorouteLayer() {
     return;
   }
   if (leafletMap && !leafletMap.hasLayer(prAutorouteLayer)) leafletMap.addLayer(prAutorouteLayer);
+
+  // Try IGN WFS first; fall back to static coords if unavailable
+  const ignData = await loadPrFromIgnWfs();
+  const coords = ignData || APRR_PR_COORDS;
+  prAutorouteLayer.clearLayers(); // clear again after async wait
+
   const roadColors = { A41: '#2563eb', A43: '#7c3aed', A48: '#059669', A49: '#d97706', A51: '#dc2626', A480: '#0891b2' };
-  Object.entries(APRR_PR_COORDS).forEach(([road, pts]) => {
+  const sourceLabel = ignData ? 'IGN BDTOPO' : 'estimé';
+  Object.entries(coords).forEach(([road, pts]) => {
     const color = roadColors[road] || '#555';
     pts.forEach(({ k, lat, lon }) => {
       const icon = window.L.divIcon({
@@ -5270,7 +5310,7 @@ function renderPrAutorouteLayer() {
         popupAnchor: [0, -10],
       });
       const marker = window.L.marker([lat, lon], { icon });
-      marker.bindPopup(`<strong>${road} — PR ${k}</strong><br><small>${lat.toFixed(4)}, ${lon.toFixed(4)}</small>`);
+      marker.bindPopup(`<strong>${road} — PR ${k}</strong><br><small>${lat.toFixed(5)}, ${lon.toFixed(5)}</small><br><span class="muted" style="font-size:.75rem">Source: ${sourceLabel}</span>`);
       marker.addTo(prAutorouteLayer);
     });
   });
@@ -10086,9 +10126,9 @@ function bindAppInteractions() {
     'filter-resources-transport', 'filter-resources-transport-type',
     'filter-resources-health', 'filter-resources-health-type',
     'filter-resources-telecom', 'filter-resources-telecom-type',
-    'filter-resources-active',
+    'filter-resources-active', 'filter-resources-protcivile',
   ]);
-  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras', 'filter-autoroutes', 'filter-autoroutes-type', 'filter-pr-autoroutes'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-resources-protcivile', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras', 'filter-autoroutes', 'filter-autoroutes-type', 'filter-pr-autoroutes'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       if (RESOURCE_ONLY_FILTERS.has(id)) {
         // Rendu immédiat depuis le cache
