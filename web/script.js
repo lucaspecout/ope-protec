@@ -5175,13 +5175,13 @@ async function buildItinisereMapPoints(events = []) {
 
 // Points de repère (PR kilométriques) par autoroute — géométrie OSRM confirmée
 const APRR_PR_COORDS = {
-  // A41 : Grenoble/Meylan→Goncelin→Pontcharra(PR40)→La Rochette (NNE, vallée Grésivaudan)
+  // A41 : Grenoble→Grésivaudan→Pontcharra(PR40)→Montmélian→Chambéry (IGN confirmé)
   A41: [
     {k:0,lat:45.204,lon:5.843},{k:5,lat:45.225,lon:5.853},{k:10,lat:45.245,lon:5.863},
-    {k:15,lat:45.267,lon:5.896},{k:20,lat:45.280,lon:5.921},{k:25,lat:45.280,lon:5.931},
-    {k:30,lat:45.308,lon:5.958},{k:35,lat:45.367,lon:5.988},{k:40,lat:45.418,lon:6.024},
-    {k:45,lat:45.445,lon:6.065},{k:50,lat:45.450,lon:6.131},{k:55,lat:45.460,lon:6.158},
-    {k:60,lat:45.480,lon:6.198},
+    {k:15,lat:45.267,lon:5.896},{k:20,lat:45.280,lon:5.921},{k:25,lat:45.300,lon:5.935},
+    {k:30,lat:45.310,lon:5.942},{k:35,lat:45.367,lon:5.975},{k:40,lat:45.413,lon:5.999},
+    {k:45,lat:45.445,lon:6.004},{k:50,lat:45.490,lon:6.008},{k:55,lat:45.540,lon:5.960},
+    {k:60,lat:45.575,lon:5.915},{k:65,lat:45.604,lon:5.884},
   ],
   // A43 : Chambéry→Montmélian→Saint-Jean-de-Maurienne→Modane (ESE, vallée Maurienne)
   A43: [
