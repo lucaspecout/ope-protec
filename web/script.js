@@ -8880,6 +8880,188 @@ function buildLogTableRow(log = {}) {
   </div>`;
 }
 
+function generateMcoEventPdf() {
+  const event = getSelectedOperationalEvent();
+  if (!event) return;
+
+  const logs = [...cachedLogs]
+    .filter((log) => String(log.event_id || '') === String(event.id))
+    .sort((a, b) => parseUtcTimestamp(a.event_time || a.created_at).getTime() - parseUtcTimestamp(b.event_time || b.created_at).getTime());
+
+  const isClosed = String(event.status || '').toLowerCase() === 'clos';
+  const locality = event.municipality_id ? getMunicipalityName(event.municipality_id) : 'Départemental';
+  const worstLevel = logs.reduce((max, log) => riskRank(log.danger_level) > riskRank(max) ? (log.danger_level || 'vert') : max, 'vert');
+  const levelNorm = normalizeLevel(worstLevel);
+  const levelEmoji = LOG_LEVEL_EMOJI[levelNorm] || '🟢';
+  const levelColors = { rouge: '#c92a2a', orange: '#e67700', jaune: '#e9a800', vert: '#2b8a3e' };
+  const levelBg = { rouge: '#fff5f5', orange: '#fff8f0', jaune: '#fffde7', vert: '#f0fff4' };
+  const levelColor = levelColors[levelNorm] || '#2b8a3e';
+  const levelBgColor = levelBg[levelNorm] || '#f0fff4';
+
+  const created = event.created_at ? new Date(event.created_at).toLocaleString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+  const exportedAt = new Date().toLocaleString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+  const durationMs = logs.length >= 2
+    ? parseUtcTimestamp(logs[logs.length - 1].event_time || logs[logs.length - 1].created_at).getTime() - parseUtcTimestamp(logs[0].event_time || logs[0].created_at).getTime()
+    : null;
+  const durationText = durationMs !== null ? (() => {
+    const h = Math.floor(durationMs / 3600000);
+    const m = Math.floor((durationMs % 3600000) / 60000);
+    return h > 0 ? `${h}h${m.toString().padStart(2, '0')}` : `${m} min`;
+  })() : '—';
+
+  const entryDotColor = { rouge: '#c92a2a', orange: '#e67700', jaune: '#e9a800', vert: '#2b8a3e' };
+
+  const timelineRows = logs.map((log, idx) => {
+    const level = normalizeLevel(log.danger_level || 'vert');
+    const emoji = log.danger_emoji || LOG_LEVEL_EMOJI[level] || '🟢';
+    const dotColor = entryDotColor[level] || '#2b8a3e';
+    const ts = parseUtcTimestamp(log.event_time || log.created_at);
+    const timeStr = ts.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const scope = formatLogScope(log);
+    const municipality = log.municipality_id ? getMunicipalityName(log.municipality_id) : '';
+    const scopeLabel = municipality ? `${scope} · ${escapeHtml(municipality)}` : scope;
+    const isLast = idx === logs.length - 1;
+    return `
+      <div class="tl-row">
+        <div class="tl-time">${escapeHtml(timeStr)}</div>
+        <div class="tl-spine">
+          <div class="tl-dot" style="background:${dotColor};box-shadow:0 0 0 3px ${dotColor}22;"></div>
+          ${isLast ? '' : '<div class="tl-line"></div>'}
+        </div>
+        <div class="tl-card" style="border-left:3px solid ${dotColor};">
+          <div class="tl-card-head">
+            <span class="tl-emoji">${emoji}</span>
+            <span class="tl-level" style="color:${dotColor}">${escapeHtml(levelNorm.toUpperCase())}</span>
+            <span class="tl-scope">${escapeHtml(scopeLabel)}</span>
+          </div>
+          ${log.description ? `<div class="tl-desc">${escapeHtml(log.description)}</div>` : ''}
+          ${log.actions_taken ? `<div class="tl-actions"><strong>↳ Actions :</strong> ${escapeHtml(log.actions_taken)}</div>` : ''}
+          <div class="tl-meta">
+            ${log.location ? `<span>📍 ${escapeHtml(log.location)}</span>` : ''}
+            ${log.source ? `<span>🗣️ ${escapeHtml(log.source)}</span>` : ''}
+            ${log.assigned_to ? `<span>👤 ${escapeHtml(log.assigned_to)}</span>` : ''}
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Rapport MCO — ${escapeHtml(event.title || 'Évènement')}</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11pt; color: #1a1a2e; background: #fff; }
+  @page { size: A4; margin: 18mm 15mm 18mm 15mm; }
+  @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } .no-print { display: none !important; } }
+
+  /* ── Cover ── */
+  .cover { border-radius: 10px; background: linear-gradient(135deg, #0f2240 0%, #1a3568 60%, #1565c0 100%); color: #fff; padding: 28px 32px 22px; margin-bottom: 24px; position: relative; overflow: hidden; }
+  .cover::after { content: ''; position: absolute; top: -30px; right: -30px; width: 160px; height: 160px; border-radius: 50%; background: rgba(255,255,255,.06); }
+  .cover-logo { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; font-size: 10pt; opacity: .8; letter-spacing: .05em; text-transform: uppercase; }
+  .cover-logo-pc { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(145deg,#1a3568,#0f2240); border: 2px solid rgba(255,255,255,.4); display: flex; align-items: center; justify-content: center; }
+  .cover-logo-pc::after { content: '▲'; color: #f07800; font-size: 12px; line-height: 1; }
+  .cover-title { font-size: 19pt; font-weight: 700; line-height: 1.25; margin-bottom: 6px; }
+  .cover-addr { font-size: 10.5pt; opacity: .85; margin-bottom: 14px; }
+  .cover-badges { display: flex; gap: 8px; flex-wrap: wrap; }
+  .cover-badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 9pt; font-weight: 600; }
+  .cover-badge--level { background: ${levelColor}; color: #fff; }
+  .cover-badge--status { background: ${isClosed ? '#495057' : '#2b8a3e'}; color: #fff; }
+  .cover-badge--loc { background: rgba(255,255,255,.18); color: #fff; border: 1px solid rgba(255,255,255,.3); }
+
+  /* ── Info grid ── */
+  .info-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 22px; }
+  .info-box { border: 1px solid #e9ecef; border-radius: 7px; padding: 10px 14px; }
+  .info-box-label { font-size: 8.5pt; text-transform: uppercase; letter-spacing: .06em; color: #868e96; margin-bottom: 3px; }
+  .info-box-value { font-size: 11pt; font-weight: 600; color: #1a1a2e; }
+
+  /* ── Section header ── */
+  .section-head { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+  .section-head-line { flex: 1; height: 1px; background: #dee2e6; }
+  .section-head-title { font-size: 10pt; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: #495057; white-space: nowrap; }
+
+  /* ── Timeline ── */
+  .timeline { }
+  .tl-row { display: grid; grid-template-columns: 72px 28px 1fr; gap: 0 10px; margin-bottom: 0; }
+  .tl-time { font-size: 8.5pt; color: #868e96; padding-top: 2px; text-align: right; line-height: 1.3; }
+  .tl-spine { display: flex; flex-direction: column; align-items: center; }
+  .tl-dot { width: 13px; height: 13px; border-radius: 50%; flex-shrink: 0; margin-top: 2px; }
+  .tl-line { width: 2px; background: #dee2e6; flex: 1; min-height: 12px; margin-top: 2px; }
+  .tl-card { background: #f8f9fa; border-radius: 6px; padding: 8px 11px 9px; margin-bottom: 10px; }
+  .tl-card-head { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+  .tl-emoji { font-size: 12pt; }
+  .tl-level { font-size: 8pt; font-weight: 700; letter-spacing: .05em; }
+  .tl-scope { font-size: 8.5pt; color: #868e96; margin-left: auto; }
+  .tl-desc { font-size: 10pt; color: #1a1a2e; line-height: 1.5; margin-bottom: 5px; }
+  .tl-actions { font-size: 9.5pt; color: #495057; background: #e9ecef; border-radius: 4px; padding: 4px 8px; margin-bottom: 5px; line-height: 1.4; }
+  .tl-meta { display: flex; gap: 10px; flex-wrap: wrap; font-size: 8.5pt; color: #868e96; }
+
+  /* ── Footer ── */
+  .pdf-footer { margin-top: 28px; padding-top: 12px; border-top: 1px solid #dee2e6; display: flex; justify-content: space-between; font-size: 8.5pt; color: #adb5bd; }
+
+  /* ── Print button ── */
+  .print-btn { position: fixed; bottom: 24px; right: 24px; background: #1a3568; color: #fff; border: none; border-radius: 8px; padding: 12px 22px; font-size: 12pt; font-weight: 600; cursor: pointer; box-shadow: 0 4px 16px rgba(0,0,0,.25); }
+  .print-btn:hover { background: #0f2240; }
+</style>
+</head>
+<body>
+
+<button class="print-btn no-print" onclick="window.print()">🖨️ Imprimer / Sauvegarder PDF</button>
+
+<div class="cover">
+  <div class="cover-logo">
+    <div class="cover-logo-pc"></div>
+    Protection Civile — Rapport opérationnel
+  </div>
+  <div class="cover-title">${escapeHtml(event.title || 'Évènement')}</div>
+  <div class="cover-addr">${escapeHtml(event.address || 'Adresse non renseignée')}</div>
+  <div class="cover-badges">
+    <span class="cover-badge cover-badge--level">${levelEmoji} Niveau ${escapeHtml(levelNorm)}</span>
+    <span class="cover-badge cover-badge--status">${isClosed ? '🔒 Clôturé' : '🟢 En cours'}</span>
+    <span class="cover-badge cover-badge--loc">📍 ${escapeHtml(locality)}</span>
+  </div>
+</div>
+
+<div class="info-grid">
+  <div class="info-box">
+    <div class="info-box-label">Ouverture</div>
+    <div class="info-box-value">${escapeHtml(created)}</div>
+  </div>
+  <div class="info-box">
+    <div class="info-box-label">Entrées MCO</div>
+    <div class="info-box-value">${logs.length} entrée${logs.length !== 1 ? 's' : ''}</div>
+  </div>
+  <div class="info-box">
+    <div class="info-box-label">Durée enregistrée</div>
+    <div class="info-box-value">${escapeHtml(durationText)}</div>
+  </div>
+</div>
+
+<div class="section-head">
+  <span class="section-head-title">Chronologie des entrées</span>
+  <div class="section-head-line"></div>
+</div>
+
+<div class="timeline">
+  ${timelineRows || '<p style="color:#868e96;font-size:10pt;padding:8px 0">Aucune entrée enregistrée pour cet évènement.</p>'}
+</div>
+
+<div class="pdf-footer">
+  <span>Rapport généré le ${escapeHtml(exportedAt)}</span>
+  <span>OPE-PROTEC · Main Courante Opérationnelle</span>
+</div>
+
+</body>
+</html>`;
+
+  const win = window.open('', '_blank', 'width=900,height=750');
+  if (!win) { alert('Veuillez autoriser les popups pour générer le rapport PDF.'); return; }
+  win.document.write(html);
+  win.document.close();
+}
+
 function renderLogsList() {
   let filtered = [...cachedLogs];
   if (selectedOperationalEventId) {
@@ -9737,8 +9919,13 @@ function bindAppInteractions() {
     const deleteButton = event.target.closest('[data-log-delete]');
     const editButton = event.target.closest('[data-log-edit]');
     const deleteEventButton = event.target.closest('[data-event-delete]');
+    const exportPdfButton = event.target.closest('#event-export-pdf-btn');
     if (openEventButton) {
       openOperationalEventMcoForm(openEventButton.getAttribute('data-event-open'));
+      return;
+    }
+    if (exportPdfButton) {
+      generateMcoEventPdf();
       return;
     }
 
