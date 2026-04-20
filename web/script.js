@@ -2239,6 +2239,7 @@ function setActivePanel(panelId) {
       leafletMap.invalidateSize();
       centerMapOnIsere();
     }, 100);
+    if (token) _refreshAgentMarkers();
   }
   if (panelId === 'logs-panel') ensureLogMunicipalitiesLoaded();
   if (panelId === 'news-panel') ensureSocialFeedsRendered();
@@ -10607,6 +10608,11 @@ function startAutoRefresh() {
   refreshTimer = setInterval(() => token && refreshAll(true), AUTO_REFRESH_MS);
 }
 
+function startAgentMarkersPolling() {
+  // Polling global des positions terrain — actif sur tous les appareils (desktop + mobile)
+  setInterval(() => { if (token) _refreshAgentMarkers(); }, _GEO_INTERVAL_MS);
+}
+
 /* ─────────────────────────────────────────────────────────────
    AMÉLIORATIONS OPÉRATIONNELLES
    ───────────────────────────────────────────────────────────── */
@@ -10902,6 +10908,7 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
   buildServiceCards();
   initMobileNav();
   initMobileGeoLocate();
+  startAgentMarkersPolling();
   setActivePanel(localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel');
   syncMobileNavWithPanel();
   hydrateUiFromLocalCache();
