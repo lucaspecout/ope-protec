@@ -250,7 +250,11 @@
       "WebFetch(domain:koumoul.com)",
       "Bash(grep -v \"//.*enedis\\\\|//.*Enedis\")",
       "WebFetch(domain:forest-fire.emergency.copernicus.eu)",
-      "Bash(grep -v \"^.*//.*ecowatt\")"
+      "Bash(grep -v \"^.*//.*ecowatt\")",
+      "Bash(curl -s \"https://lz4.overpass-api.de/api/interpreter?data=[out:json][timeout:25];way[\\\\\"highway\\\\\"=\\\\\"motorway\\\\\"][\\\\\"ref\\\\\"~\\\\\"A41\\\\\"]\\(44.8,5.5,45.8,6.5\\);out geom;\")",
+      "Bash(powershell -Command \"Test-Connection -ComputerName lz4.overpass-api.de -Count 1\")",
+      "Bash(powershell -Command \"\\(Invoke-WebRequest -Uri 'https://lz4.overpass-api.de/api/interpreter?data=[out:json][timeout:25];way[\\\\\"highway\\\\\"=\\\\\"motorway\\\\\"][\\\\\"ref\\\\\"~\\\\\"A41\\\\\"]\\(44.8,5.5,45.8,6.5\\);out geom;' -UseBasicParsing\\).Content\")",
+      "Bash(pkill -f \"tail -f\")"
     ]
   }
 }
