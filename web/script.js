@@ -1900,15 +1900,126 @@ async function apiFile(path) {
 }
 
 function closeMobileSidebar() {
-  document.getElementById('app-sidebar')?.classList.remove('open');
-  document.getElementById('sidebar-backdrop')?.classList.remove('open');
+  document.getElementById('app-sidebar')?.classList.remove('open', 'mobile-open');
+  document.getElementById('sidebar-backdrop')?.classList.remove('open', 'mobile-open');
   document.getElementById('app-menu-btn')?.setAttribute('aria-expanded', 'false');
 }
 
 function openMobileSidebar() {
-  document.getElementById('app-sidebar')?.classList.add('open');
-  document.getElementById('sidebar-backdrop')?.classList.add('open');
+  document.getElementById('app-sidebar')?.classList.add('open', 'mobile-open');
+  document.getElementById('sidebar-backdrop')?.classList.add('open', 'mobile-open');
   document.getElementById('app-menu-btn')?.setAttribute('aria-expanded', 'true');
+}
+
+/* ── Mobile terrain helpers ── */
+function isMobileView() { return window.innerWidth <= 768; }
+
+function updateMobileNavActive(panelId) {
+  document.querySelectorAll('.mobile-nav-btn[data-mobile-target]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.mobileTarget === panelId);
+  });
+}
+
+function openMobileMcoSheet() {
+  const overlay = document.getElementById('mobile-mco-overlay');
+  if (!overlay) return;
+  // Pré-remplir l'heure
+  const timeInput = overlay.querySelector('input[name="event_time"]');
+  if (timeInput && !timeInput.value) {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    timeInput.value = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  }
+  overlay.hidden = false;
+  overlay.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeMobileMcoSheet() {
+  const overlay = document.getElementById('mobile-mco-overlay');
+  if (!overlay) return;
+  overlay.hidden = true;
+  overlay.classList.add('hidden');
+  document.body.style.overflow = '';
+}
+
+function initMobileNav() {
+  // Bottom nav — navigation entre panels
+  document.querySelectorAll('.mobile-nav-btn[data-mobile-target]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      setActivePanel(btn.dataset.mobileTarget);
+      updateMobileNavActive(btn.dataset.mobileTarget);
+    });
+  });
+
+  // Bouton saisie MCO
+  document.getElementById('mobile-mco-open-btn')?.addEventListener('click', openMobileMcoSheet);
+  document.getElementById('mobile-mco-close')?.addEventListener('click', closeMobileMcoSheet);
+
+  // Fermer en cliquant le fond
+  document.getElementById('mobile-mco-overlay')?.addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) closeMobileMcoSheet();
+  });
+
+  // Bouton Menu → ouvre la sidebar
+  document.getElementById('mobile-menu-btn')?.addEventListener('click', openMobileSidebar);
+
+  // Sélecteur de niveau
+  document.querySelectorAll('.mobile-level-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.mobile-level-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+  });
+
+  // Soumission du formulaire MCO rapide
+  document.getElementById('mobile-mco-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!canEdit()) { document.getElementById('mobile-mco-error').textContent = 'Accès en lecture seule.'; return; }
+    const form = new FormData(e.target);
+    const activeLevel = document.querySelector('.mobile-level-btn.active');
+    const danger_level = activeLevel?.dataset.level || 'vert';
+    await ensureLogMunicipalitiesLoaded();
+    const errorEl = document.getElementById('mobile-mco-error');
+    try {
+      errorEl.textContent = '';
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
+      await api('/logs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event_id: selectedOperationalEventId ? Number(selectedOperationalEventId) : null,
+          event_type: null,
+          description: form.get('description') || null,
+          danger_level,
+          danger_emoji: LOG_LEVEL_EMOJI[danger_level] || '🟢',
+          status: 'nouveau',
+          location: form.get('location') || null,
+          event_time: form.get('event_time') || new Date().toISOString(),
+        }),
+      });
+      e.target.reset();
+      document.querySelectorAll('.mobile-level-btn').forEach((b) => b.classList.remove('active'));
+      document.querySelector('.mobile-level-btn[data-level="vert"]')?.classList.add('active');
+      closeMobileMcoSheet();
+      await loadLogs();
+    } catch (err) {
+      errorEl.textContent = sanitizeErrorMessage(err.message);
+    } finally {
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = false;
+    }
+  });
+
+  // Mettre à jour le badge actif quand setActivePanel est appelé
+  const _origSetActivePanel = setActivePanel;
+  window._mobileNavHooked = true;
+}
+
+function syncMobileNavWithPanel() {
+  const stored = localStorage.getItem('activePanel') || 'situation-panel';
+  updateMobileNavActive(stored);
 }
 
 function setActivePanel(panelId) {
@@ -1916,6 +2027,7 @@ function setActivePanel(panelId) {
   localStorage.setItem(STORAGE_KEYS.activePanel, panelId);
   document.querySelectorAll('.menu-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.target === panelId));
   document.querySelectorAll('.view').forEach((panel) => setVisibility(panel, panel.id === panelId));
+  updateMobileNavActive(panelId);
   document.getElementById('panel-title').textContent = PANEL_TITLES[panelId] || 'Centre opérationnel';
   if (panelId === 'map-panel' && leafletMap) {
     setTimeout(() => {
@@ -10649,7 +10761,9 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
   applyRoleVisibility();
   showApp();
   buildServiceCards();
+  initMobileNav();
   setActivePanel(localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel');
+  syncMobileNavWithPanel();
   hydrateUiFromLocalCache();
   loadIsereBoundary();
   renderStations(cachedVigicruesPayload);
