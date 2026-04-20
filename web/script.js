@@ -2026,39 +2026,74 @@ function _geoToast(msg, type = 'info') {
 }
 
 function _initAgentMarkersLayer() {
-  if (!leafletMap || _agentMarkersLayer) return;
-  _agentMarkersLayer = window.L.layerGroup().addTo(leafletMap);
+  if (!leafletMap) return;
+  if (_agentMarkersLayer) return;
+  _agentMarkersLayer = window.L.layerGroup();
+  if (document.getElementById('filter-agents')?.checked !== false) {
+    _agentMarkersLayer.addTo(leafletMap);
+  }
 }
 
 async function _refreshAgentMarkers() {
   if (!leafletMap) return;
   _initAgentMarkersLayer();
+  if (!_agentMarkersLayer) return;
+
+  // Vérifier si le filtre est actif
+  const filterEl = document.getElementById('filter-agents');
+  if (filterEl && !filterEl.checked) {
+    _agentMarkersLayer.clearLayers();
+    return;
+  }
+
   try {
     const origin = apiOrigins()[0];
     const headers = {};
     if (token) headers.Authorization = `Bearer ${token}`;
-    const res = await fetch(`${origin}/agents/locations`, { headers });
+    const res = await fetch(`${origin}/agents/locations`, { headers, signal: AbortSignal.timeout(8000) });
     if (!res.ok) return;
     const data = await res.json();
-    if (!Array.isArray(data?.agents)) return;
+    const agents = Array.isArray(data?.agents) ? data.agents : [];
+
     _agentMarkersLayer.clearLayers();
-    for (const agent of data.agents) {
-      const isMe = _geoState.name && agent.name === _geoState.name;
-      const dotColor = isMe ? '#0b4daa' : '#e53935';
-      const icon = window.L.divIcon({
-        className: '',
-        html: `<div class="agent-marker${isMe ? ' agent-marker--me' : ''}">
-          <div class="agent-marker-dot" style="background:${dotColor}"></div>
-          <div class="agent-marker-label">${escapeHtml(agent.name)}</div>
-        </div>`,
-        iconAnchor: [9, 9],
-        iconSize: [90, 34],
-      });
-      const ts = agent.updated_at ? new Date(agent.updated_at).toLocaleTimeString('fr-FR') : '';
-      window.L.marker([agent.lat, agent.lon], { icon })
-        .bindPopup(`<strong>${escapeHtml(agent.name)}</strong><br>±${Math.round(agent.accuracy || 0)} m${ts ? `<br><small>${ts}</small>` : ''}`)
-        .addTo(_agentMarkersLayer);
+
+    // S'assurer que la couche est bien sur la carte
+    if (!leafletMap.hasLayer(_agentMarkersLayer)) {
+      _agentMarkersLayer.addTo(leafletMap);
     }
+
+    for (const agent of agents) {
+      const isMe = _geoState.name && agent.name === _geoState.name;
+      const color = isMe ? '#0b4daa' : '#e53935';
+      const ts = agent.updated_at ? new Date(agent.updated_at).toLocaleTimeString('fr-FR') : '';
+
+      const marker = window.L.circleMarker([agent.lat, agent.lon], {
+        radius: isMe ? 11 : 9,
+        color: '#fff',
+        weight: 2.5,
+        fillColor: color,
+        fillOpacity: 0.92,
+        zIndexOffset: 1000,
+      });
+
+      marker.bindTooltip(escapeHtml(agent.name), {
+        permanent: true,
+        direction: 'top',
+        offset: [0, -12],
+        className: 'agent-tooltip',
+      });
+
+      marker.bindPopup(
+        `<strong>${escapeHtml(agent.name)}</strong><br>±${Math.round(agent.accuracy || 0)} m${ts ? `<br><small>${ts}</small>` : ''}`
+      );
+
+      marker.addTo(_agentMarkersLayer);
+    }
+
+    // Mettre à jour le compteur dans le filtre
+    const countEl = document.getElementById('filter-agents-count');
+    if (countEl) countEl.textContent = agents.length > 0 ? ` (${agents.length})` : '';
+
   } catch (_) { /* silent */ }
 }
 
@@ -10033,6 +10068,16 @@ function bindAppInteractions() {
       renderHelipadLayer();
     }
   });
+  document.getElementById('filter-agents')?.addEventListener('change', () => {
+    if (!_agentMarkersLayer) return;
+    if (document.getElementById('filter-agents').checked) {
+      if (!leafletMap.hasLayer(_agentMarkersLayer)) _agentMarkersLayer.addTo(leafletMap);
+      _refreshAgentMarkers();
+    } else {
+      _agentMarkersLayer.clearLayers();
+      if (leafletMap.hasLayer(_agentMarkersLayer)) leafletMap.removeLayer(_agentMarkersLayer);
+    }
+  });
   document.getElementById('filter-seismes')?.addEventListener('change', () => renderSeismesLayer());
   document.getElementById('filter-groundwater')?.addEventListener('change', () => renderGroundwaterLayer());
   document.getElementById('filter-feux-foret')?.addEventListener('change', () => renderFeuxForetLayer());
@@ -10609,8 +10654,18 @@ function startAutoRefresh() {
 }
 
 function startAgentMarkersPolling() {
-  // Polling global des positions terrain — actif sur tous les appareils (desktop + mobile)
-  setInterval(() => { if (token) _refreshAgentMarkers(); }, _GEO_INTERVAL_MS);
+  // Polling global — actif sur tous les appareils (desktop + mobile)
+  // Premier appel immédiat dès que la carte est prête, puis toutes les 10s
+  const _doRefresh = () => { if (token && leafletMap) _refreshAgentMarkers(); };
+  const _tryStart = () => {
+    if (leafletMap) {
+      _doRefresh();
+      setInterval(_doRefresh, 10000);
+    } else {
+      setTimeout(_tryStart, 500);
+    }
+  };
+  setTimeout(_tryStart, 1500);
 }
 
 /* ─────────────────────────────────────────────────────────────

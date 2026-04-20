@@ -3339,32 +3339,16 @@ details[open] .news-stats-toggle::before { content: '▾ '; }
   .geo-toast { display: block; }
 }
 
-/* ── Marqueurs agents terrain (hors media query — visibles sur desktop aussi) ── */
-.agent-marker { display: flex; flex-direction: column; align-items: center; pointer-events: auto; }
-.agent-marker-dot {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  border: 2.5px solid #fff;
-  box-shadow: 0 2px 6px rgba(0,0,0,.35);
-}
-.agent-marker--me .agent-marker-dot {
-  animation: agentPing 1.6s ease-in-out infinite;
-}
-@keyframes agentPing {
-  0%,100% { box-shadow: 0 0 0 0 rgba(11,77,170,.6), 0 2px 6px rgba(0,0,0,.35); }
-  50%      { box-shadow: 0 0 0 7px rgba(11,77,170,.0), 0 2px 6px rgba(0,0,0,.35); }
-}
-.agent-marker-label {
-  margin-top: 2px;
-  font-size: .62rem;
-  font-weight: 700;
-  color: #fff;
-  background: rgba(0,0,0,.55);
-  border-radius: 4px;
-  padding: 1px 4px;
+/* ── Tooltip agents terrain (Leaflet) ── */
+.agent-tooltip {
+  background: rgba(0,0,0,.72) !important;
+  border: none !important;
+  border-radius: 5px !important;
+  color: #fff !important;
+  font-size: .72rem !important;
+  font-weight: 700 !important;
+  padding: 2px 6px !important;
   white-space: nowrap;
-  max-width: 90px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  box-shadow: 0 2px 6px rgba(0,0,0,.3) !important;
 }
+.agent-tooltip::before { display: none !important; }
