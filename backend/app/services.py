@@ -8437,20 +8437,47 @@ _feux_foret_cache_lock = Lock()
 _feux_foret_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "feux_foret_isere"}
 
 
+_ISERE_BBOX = (44.4, 4.9, 45.7, 6.4)  # lat_min, lon_min, lat_max, lon_max
+
+_ISERE_ZONES = [
+    ((45.2, 5.5, 45.5, 5.9), "Chartreuse"),
+    ((44.7, 5.0, 45.2, 5.6), "Vercors"),
+    ((45.0, 5.8, 45.7, 6.3), "Belledonne"),
+    ((44.8, 5.9, 45.2, 6.4), "Oisans"),
+    ((44.7, 5.5, 45.0, 5.9), "Trièves / Matheysine"),
+    ((45.1, 5.8, 45.5, 6.1), "Grésivaudan"),
+    ((45.0, 5.0, 45.5, 5.5), "Bièvre-Valloire"),
+    ((45.1, 5.4, 45.3, 5.8), "Agglomération grenobloise"),
+]
+
+
+def _fire_zone(lat: float, lon: float) -> str:
+    for (lat_min, lon_min, lat_max, lon_max), name in _ISERE_ZONES:
+        if lat_min <= lat <= lat_max and lon_min <= lon <= lon_max:
+            return name
+    return f"Isère ({lat:.2f}°N {lon:.2f}°E)"
+
+
 def _parse_effis_geojson(data: dict) -> list[dict]:
+    lat_min, lon_min, lat_max, lon_max = _ISERE_BBOX
     fires = []
     for f in data.get("features") or []:
         coords = (f.get("geometry") or {}).get("coordinates") or []
         props = f.get("properties") or {}
-        if len(coords) >= 2:
-            fires.append({
-                "lat": round(float(coords[1]), 5),
-                "lon": round(float(coords[0]), 5),
-                "confidence": str(props.get("confidence") or "nominal"),
-                "date": str(props.get("acq_date") or ""),
-                "frp": props.get("frp"),
-                "source": "EFFIS/Copernicus",
-            })
+        if len(coords) < 2:
+            continue
+        lat, lon = round(float(coords[1]), 5), round(float(coords[0]), 5)
+        if not (lat_min <= lat <= lat_max and lon_min <= lon <= lon_max):
+            continue
+        fires.append({
+            "lat": lat,
+            "lon": lon,
+            "zone": _fire_zone(lat, lon),
+            "confidence": str(props.get("confidence") or "nominal"),
+            "date": str(props.get("acq_date") or ""),
+            "frp": _safe_float(props.get("frp")),
+            "source": "EFFIS/Copernicus",
+        })
     return fires
 
 
@@ -8471,8 +8498,10 @@ def _parse_firms_csv(text: str) -> list[dict]:
             fires.append({
                 "lat": round(lat, 5),
                 "lon": round(lon, 5),
+                "zone": _fire_zone(lat, lon),
                 "confidence": str(row.get("confidence") or "nominal"),
                 "date": str(row.get("acq_date") or ""),
+                "time": str(row.get("acq_time") or ""),
                 "frp": _safe_float(row.get("frp")),
                 "source": "NASA FIRMS/VIIRS",
             })
@@ -8546,13 +8575,23 @@ def _fetch_feux_foret_live() -> dict[str, Any]:
             "updated_at": datetime.utcnow().isoformat() + "Z",
         }
 
+    # Trier par date desc puis FRP desc pour mettre les plus récents/intenses en premier
+    def _fire_sort_key(f: dict):
+        d = str(f.get("date") or "")
+        t = str(f.get("time") or "")
+        frp = float(f.get("frp") or 0)
+        return (d + t, frp)
+
+    fires_sorted = sorted(fires, key=_fire_sort_key, reverse=True)
+
     return {
         "service": "Feux de forêt EFFIS",
         "status": "online",
         "source": "https://effis.jrc.ec.europa.eu",
         "data_source": data_source,
-        "fires": fires,
-        "fires_total": len(fires),
+        "fires": fires_sorted,
+        "fires_total": len(fires_sorted),
+        "top_fires": fires_sorted[:3],
         "updated_at": datetime.utcnow().isoformat() + "Z",
     }
 

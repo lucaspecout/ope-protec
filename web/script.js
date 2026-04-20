@@ -8077,12 +8077,33 @@ function renderAvalancheIsere(data = {}) {
 }
 
 function renderFeuxForetWidget(data = {}) {
-  const fires = Array.isArray(data.fires) ? data.fires : [];
-  setRiskText('feux-svc-status', `${data.status || 'inconnu'} · ${data.fires_total ?? 0} foyer(s)`, (data.fires_total ?? 0) > 0 ? 'orange' : 'vert');
-  setHtml('feux-svc-list', fires.slice(0, 6).map((f) => {
-    const frp = f.frp != null ? ` · ${Number(f.frp).toFixed(0)} MW` : '';
-    return `<li>🔥 Lat ${f.lat?.toFixed(3)}, Lon ${f.lon?.toFixed(3)} · confiance <strong>${escapeHtml(f.confidence || '?')}</strong>${frp} · ${escapeHtml(f.date || '')}</li>`;
-  }).join('') || '<li class="muted">Aucun foyer détecté dans la région.</li>');
+  const total = data.fires_total ?? 0;
+  const color = total > 5 ? 'rouge' : total > 0 ? 'orange' : 'vert';
+  const src = data.data_source ? ` · ${escapeHtml(data.data_source)}` : '';
+  setRiskText('feux-svc-status', `${data.status || 'inconnu'} · ${total} foyer(s) détecté(s)${src}`, color);
+
+  const top = Array.isArray(data.top_fires) && data.top_fires.length ? data.top_fires
+              : Array.isArray(data.fires) ? data.fires.slice(0, 3) : [];
+
+  if (!top.length) {
+    setHtml('feux-svc-list', '<li class="muted">Aucun foyer détecté dans le département.</li>');
+    return;
+  }
+
+  setHtml('feux-svc-list', top.map((f, i) => {
+    const zone    = escapeHtml(f.zone || `${f.lat?.toFixed(2)}°N ${f.lon?.toFixed(2)}°E`);
+    const frp     = f.frp != null ? `<strong>${Number(f.frp).toFixed(0)} MW</strong>` : '– MW';
+    const conf    = escapeHtml(f.confidence || '?');
+    const confColor = conf === 'high' ? '#c92a2a' : conf === 'nominal' ? '#e67700' : '#868e96';
+    const dateStr = f.date ? escapeHtml(f.date) + (f.time ? ` ${String(f.time).padStart(4,'0').replace(/(\d{2})(\d{2})/, '$1h$2')}` : '') : '–';
+    const label   = i === 0 ? '🔴 Dernière alerte' : i === 1 ? '🟠 Alerte précédente' : '🟡 Alerte antérieure';
+    return `<li style="padding:4px 0;border-bottom:1px solid #eee">
+      <span style="font-size:0.7em;font-weight:600;color:#888;text-transform:uppercase">${label}</span><br>
+      <strong>📍 ${zone}</strong><br>
+      <span class="muted">Puissance : ${frp} · Confiance : <span style="color:${confColor};font-weight:600">${conf}</span></span><br>
+      <span class="muted">Détecté le ${dateStr}</span>
+    </li>`;
+  }).join(''));
 }
 
 function renderColsAlpinsWidget(data = {}) {
