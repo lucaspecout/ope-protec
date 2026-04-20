@@ -5730,8 +5730,71 @@ const APRR_PR_COORDS = {
   ],
 };
 
-// IGN WFS borne_kilometrique retourne 400 — on utilise APRR_PR_COORDS directement
-async function loadPrFromIgnWfs() { return null; }
+// Points d'entrée/sortie Isère de chaque autoroute (lon, lat) pour OSRM
+// + startPr = premier PR dans la section Isère, step = espacement km
+const _OSRM_ROUTES = {
+  // Coordonnées sur l'autoroute (échangeurs/péages) + points intermédiaires pour forcer OSRM sur le bon tracé
+  A41:  { from:[5.840,45.215], via:[[5.930,45.310]], to:[6.008,45.392], startPr:0,  step:5  }, // Meylan→Crolles→Goncelin
+  A43:  { from:[5.052,45.713], via:[[5.265,45.578]], to:[5.478,45.490], startPr:28, step:4  }, // Pont-de-Chéruy→Bourgoin→Les Abrets
+  A48:  { from:[5.730,45.182], via:[[5.530,45.375]], to:[5.252,45.600], startPr:0,  step:5  }, // Grenoble→La Côte-Saint-André→Bourgoin
+  A49:  { from:[5.683,45.138], via:[[5.330,45.115]], to:[5.045,45.062], startPr:0,  step:5  }, // Échirolles→Rovon→Romans
+  A51:  { from:[5.765,45.140], via:[[5.820,44.960]], to:[5.972,44.832], startPr:0,  step:5  }, // Échirolles→Vizille→Corps
+  A480: { from:[5.690,45.156], to:[5.712,45.213], startPr:0,  step:1  },                       // Échirolles→rocade Nord Grenoble
+};
+
+function _haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.asin(Math.sqrt(a));
+}
+
+// Échantillonne une polyligne OSRM (coords = [[lon,lat],...]) tous les `step` km à partir de `startPr`
+function _sampleRouteKm(coords, startPr, step) {
+  const pts = [];
+  let traveled = 0;
+  let nextMark = startPr;
+  for (let i = 0; i < coords.length - 1; i++) {
+    const [lon0, lat0] = coords[i];
+    const [lon1, lat1] = coords[i + 1];
+    const seg = _haversineKm(lat0, lon0, lat1, lon1);
+    while (nextMark <= traveled + seg + 1e-6) {
+      const t = seg > 1e-9 ? (nextMark - traveled) / seg : 0;
+      pts.push({ k: nextMark, lat: +(lat0 + t * (lat1 - lat0)).toFixed(6), lon: +(lon0 + t * (lon1 - lon0)).toFixed(6) });
+      nextMark += step;
+    }
+    traveled += seg;
+  }
+  return pts;
+}
+
+let _osrmPrCache = null;
+
+async function loadPrFromOsrm() {
+  if (_osrmPrCache) return _osrmPrCache;
+  const result = {};
+  await Promise.all(Object.entries(_OSRM_ROUTES).map(async ([road, { from, via, to, startPr, step }]) => {
+    try {
+      const waypoints = [from, ...(via || []), to];
+      const coords_str = waypoints.map(([lon, lat]) => `${lon},${lat}`).join(';');
+      const url = `https://router.project-osrm.org/route/v1/driving/${coords_str}?overview=full&geometries=geojson`;
+      const resp = await fetchWithTimeout(url, {}, 10000);
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const coords = data?.routes?.[0]?.geometry?.coordinates;
+      if (!Array.isArray(coords) || coords.length < 2) return;
+      const pts = _sampleRouteKm(coords, startPr, step);
+      if (pts.length > 0) result[road] = pts;
+    } catch { /* fallback statique */ }
+  }));
+  if (Object.keys(result).length > 0) { _osrmPrCache = result; return result; }
+  return null;
+}
+
+// Conservé pour compatibilité — redirige vers OSRM
+async function loadPrFromIgnWfs() { return loadPrFromOsrm(); }
 
 async function renderPrAutorouteLayer() {
   if (!prAutorouteLayer || typeof window.L === 'undefined') return;
