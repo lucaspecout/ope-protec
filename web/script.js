@@ -2064,26 +2064,31 @@ async function _refreshAgentMarkers() {
   _agentMarkersLayer.clearLayers();
   if (!leafletMap.hasLayer(_agentMarkersLayer)) _agentMarkersLayer.addTo(leafletMap);
 
-  const now = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  _setAgentFilterStatus(agents.length === 0 ? `0 agent · ${now}` : `${agents.length} agent(s) · ${now}`, agents.length > 0 ? '#2e7d32' : 'var(--muted)');
+  const nowTs = Date.now();
+  const nowStr = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  _setAgentFilterStatus(agents.length === 0 ? `0 agent · ${nowStr}` : `${agents.length} agent(s) · ${nowStr}`, agents.length > 0 ? '#2e7d32' : 'var(--muted)');
 
   for (const agent of agents) {
-    const isMe = _geoState.name && agent.name === _geoState.name;
-    const color = isMe ? '#0b4daa' : '#e53935';
-    const ts = agent.updated_at ? new Date(agent.updated_at).toLocaleTimeString('fr-FR') : '';
+    const updatedMs = agent.updated_at ? new Date(agent.updated_at).getTime() : 0;
+    const ageSec = updatedMs > 0 ? (nowTs - updatedMs) / 1000 : 999;
+    const isStale = ageSec >= 30;
+    const ts = updatedMs > 0 ? new Date(updatedMs).toLocaleTimeString('fr-FR') : '';
+
+    // Vert = signal frais (<30s), Rouge = connexion perdue (≥30s, expire dans Redis à 60s)
+    const fillColor = isStale ? '#e53935' : '#2e7d32';
+    const statusLabel = isStale ? '🔴 Signal perdu' : '🟢 En ligne';
 
     const circle = window.L.circleMarker([agent.lat, agent.lon], {
-      radius: isMe ? 12 : 9,
+      radius: 10,
       color: '#fff',
       weight: 3,
-      fillColor: color,
+      fillColor,
       fillOpacity: 1,
     })
       .bindTooltip(escapeHtml(agent.name), { permanent: true, direction: 'top', offset: [0, -14], className: 'agent-tooltip' })
-      .bindPopup(`<strong>${escapeHtml(agent.name)}</strong><br>±${Math.round(agent.accuracy || 0)} m${ts ? `<br><small>${ts}</small>` : ''}`)
+      .bindPopup(`<strong>${escapeHtml(agent.name)}</strong><br>${statusLabel}<br>±${Math.round(agent.accuracy || 0)} m${ts ? `<br><small>Dernière position : ${ts}</small>` : ''}`)
       .addTo(_agentMarkersLayer);
 
-    // Amener au premier plan
     if (circle.bringToFront) circle.bringToFront();
   }
 }
