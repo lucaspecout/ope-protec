@@ -53,7 +53,6 @@ const FLUX_SERVICES = [
   { key: 'aprr_isere',             label: 'APRR/AREA · Autoroutes',    icon: '🛣️', category: 'Transport',     interval: 180,   metric: (d) => `${d.events_total ?? 0} événement(s) · ${(d.routes || []).join(' ')}` },
   { key: 'vinci_autoroutes',       label: 'Vinci Autoroutes · Isère',  icon: '🚧', category: 'Transport',     interval: 180,   metric: (d) => `${d.events_total ?? 0} événement(s) · ${(d.routes || []).join(' ')}` },
   { key: 'cars_region_aura',       label: 'Cars Région · AURA',        icon: '🚐', category: 'Transport',     interval: 300,   metric: (d) => `${d.disruptions_total ?? 0} perturbation(s) cars région` },
-  { key: 'electricity_isere',      label: 'RTE · Ecowatt & Conso',     icon: '⚡', category: 'Énergie',       interval: 180,   metric: (d) => { const sig = {1:'vert',2:'orange',3:'rouge'}[d.ecowatt?.dvalue] || d.level || '?'; const conso = d.consumption_mw != null ? ` · ${d.consumption_mw} MW` : ''; return `Ecowatt ${sig}${conso}`; } },
   { key: 'prefecture_isere',       label: 'Préfecture Isère',          icon: '🏛️', category: 'Actualités',   interval: 90,    metric: (d) => `${(d.items || []).length} actualité(s)` },
   { key: 'dauphine_isere',         label: 'Dauphiné Libéré',           icon: '📰', category: 'Actualités',   interval: 180,   metric: (d) => `${(d.items || []).length} article(s)` },
   { key: 'france_bleu_isere',      label: 'France Bleu Isère',         icon: '📻', category: 'Actualités',   interval: 180,   metric: (d) => `${(d.items || []).length} article(s)` },
@@ -674,12 +673,6 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
       ...p, ...n,
       disruptions: keepPreviousArray(p.disruptions, n.disruptions),
       disruptions_total: keepPreviousValue(p.disruptions_total, n.disruptions_total),
-    })),
-    electricity_isere: mergeServiceSlot(previous.electricity_isere || {}, next.electricity_isere || {}, (p, n) => ({
-      ...p, ...n,
-      level: keepPreviousValue(p.level, n.level),
-      ecowatt: (n.ecowatt && Object.keys(n.ecowatt).length) ? n.ecowatt : (p.ecowatt || {}),
-      consumption_mw: keepPreviousValue(p.consumption_mw, n.consumption_mw),
     })),
     isere_opendata: mergeServiceSlot(previous.isere_opendata || {}, next.isere_opendata || {}, (p, n) => ({
       ...p, ...n,
@@ -6261,35 +6254,6 @@ function renderVigieauAlerts(vigieau = {}) {
   }).join('') || "<li>Aucune restriction d'eau active signalée pour l'Isère.</li>");
 }
 
-function renderElectricityStatus(electricity = {}) {
-  const status = electricity.status || 'inconnu';
-  const ecowatt = electricity.ecowatt || {};
-  const dval = Number(ecowatt.dvalue ?? 0);
-  const ecowattLevel = {1:'vert', 2:'orange', 3:'rouge'}[dval] || normalizeLevel(electricity.level || 'inconnu');
-  const ecowattMsg = escapeHtml(ecowatt.message || '');
-  const ecowattJour = ecowatt.jour ? escapeHtml(String(ecowatt.jour).slice(0, 10)) : '';
-  const genForecast = Number.isFinite(Number(ecowatt.generation_forecast_mw)) ? `${Number(ecowatt.generation_forecast_mw).toLocaleString('fr-FR')} MW` : null;
-  const consumption = Number.isFinite(Number(electricity.consumption_mw)) ? `${Number(electricity.consumption_mw).toLocaleString('fr-FR')} MW` : '-';
-  const scope = escapeHtml(electricity.scope || 'France nationale · Signal Ecowatt RTE');
-
-  const signalLabel = {1:'Pas d\'alerte', 2:'Système tendu', 3:'Système très tendu — effacement requis'}[dval] || 'Signal inconnu';
-
-  setRiskText('electricity-status', `${status} · Ecowatt ${ecowattLevel}`, ecowattLevel);
-  setText('electricity-info', ecowattMsg || signalLabel);
-
-  const rows = [
-    `<li><strong>Signal Ecowatt:</strong> <span style="font-weight:700;color:${levelColor(ecowattLevel)}">${escapeHtml(ecowattLevel.toUpperCase())}</span> · ${escapeHtml(signalLabel)}</li>`,
-    ecowattJour ? `<li><strong>Date signal:</strong> ${ecowattJour}</li>` : '',
-    ecowattMsg ? `<li><strong>Message RTE:</strong> ${ecowattMsg}</li>` : '',
-    genForecast ? `<li><strong>Prévision production nationale:</strong> ${genForecast}</li>` : '',
-    `<li><strong>Consommation nationale:</strong> ${consumption}</li>`,
-    `<li><strong>Périmètre:</strong> ${scope}</li>`,
-    electricity.warnings?.length ? `<li><strong>Avertissements:</strong> ${escapeHtml((electricity.warnings || []).join(' | '))}</li>` : '',
-    electricity.error ? `<li><strong>Erreur:</strong> ${escapeHtml(electricity.error)}</li>` : '',
-  ].filter(Boolean);
-
-  setHtml('electricity-list', rows.join('') || '<li>Aucune donnée Ecowatt disponible.</li>');
-}
 
 function renderBisonFuteSummary(bison = {}) {
   cachedBisonFute = bison || {};
@@ -7354,28 +7318,6 @@ function buildSituationKpiModalContent(key, externalRisks = {}) {
       return `<p><strong>Alertes APIC Isère:</strong> ${Number(apic.alerts_total ?? (apic.alerts || []).length)}</p><ul class="situation-kpi-modal__list">${(apic.alerts || []).slice(0, 8).map((alert) => `<li><strong>${escapeHtml(alert.zone || 'Isère')}</strong> · ${escapeHtml(normalizeLevel(alert.level || 'jaune'))}</li>`).join('') || '<li>Aucune alerte APIC en cours.</li>'}</ul>`;
     case 'vigicrues-flash':
       return `<p><strong>Alertes Vigicrues Flash Isère:</strong> ${Number(vigicruesFlash.alerts_total ?? (vigicruesFlash.alerts || []).length)}</p><ul class="situation-kpi-modal__list">${(vigicruesFlash.alerts || []).slice(0, 8).map((alert) => `<li><strong>${escapeHtml(alert.zone || 'Isère')}</strong> · ${escapeHtml(normalizeLevel(alert.level || 'jaune'))}</li>`).join('') || '<li>Aucune alerte Vigicrues Flash.</li>'}</ul>`;
-    case 'electricity': {
-      const dval = Number(ecowatt.dvalue ?? 0);
-      const lvl = {1:'vert',2:'orange',3:'rouge'}[dval] || 'inconnu';
-      const lvlLabel = {1:'✅ Pas d\'alerte — situation normale',2:'⚠️ Système tendu — réduire la consommation',3:'🚨 Système très tendu — effacement requis'}[dval] || 'Signal inconnu';
-      const conso = elec.consumption_mw != null ? `${Number(elec.consumption_mw).toLocaleString('fr-FR')} MW` : '–';
-      const genForecast = ecowatt.generation_forecast_mw != null ? `${Number(ecowatt.generation_forecast_mw).toLocaleString('fr-FR')} MW` : '–';
-      const jour = ecowatt.jour ? String(ecowatt.jour).slice(0, 10) : '–';
-      const msg = ecowatt.message || '';
-      return `
-        <div class="ecowatt-modal-badge ecowatt-modal-badge--${escapeHtml(lvl)}">${escapeHtml(lvl.toUpperCase())}</div>
-        <p style="margin:.5rem 0 1rem"><strong>${escapeHtml(lvlLabel)}</strong></p>
-        ${msg ? `<p class="muted">${escapeHtml(msg)}</p>` : ''}
-        <ul class="situation-kpi-modal__list">
-          <li><strong>Signal du jour:</strong> ${jour}</li>
-          <li><strong>Valeur dvalue:</strong> ${dval} / 3</li>
-          <li><strong>Consommation nationale:</strong> ${conso}</li>
-          ${genForecast !== '–' ? `<li><strong>Prévision production:</strong> ${genForecast}</li>` : ''}
-          <li><strong>Source:</strong> RTE data.rte-france.com · API Ecowatt v5</li>
-          ${elec.warnings?.length ? `<li><strong>Avertissements:</strong> ${escapeHtml((elec.warnings||[]).join(' | '))}</li>` : ''}
-        </ul>
-        <p class="muted" style="margin-top:.8rem;font-size:.8rem">Ecowatt est un signal national RTE indiquant si le réseau électrique est sous tension. Dvalue 1 = vert, 2 = orange, 3 = rouge.</p>`;
-    }
     default:
       return '<p>Aucun détail supplémentaire disponible pour ce KPI.</p>';
   }
@@ -7458,19 +7400,11 @@ function renderSituationOverview() {
       }${alertCount > 6 ? `<li class="muted">… et ${alertCount - 6} autre(s)</li>` : ''}</ul>`
     : `<p class="muted" style="font-size:0.82em;margin-top:4px">Aucune station en alerte</p>`;
 
-  const electricityData = externalRisks?.electricity_isere || {};
-  const ecowattData = electricityData.ecowatt || {};
-  const ecowattDval = Number(ecowattData.dvalue ?? 0);
-  const ecowattLevel = {1:'vert', 2:'orange', 3:'rouge'}[ecowattDval] || normalizeLevel(electricityData.level || 'inconnu');
-  const ecowattShortMsg = {1:'Pas d\'alerte', 2:'Système tendu', 3:'Très tendu'}[ecowattDval] || 'Inconnu';
-  const ecowattConsoMw = electricityData.consumption_mw != null ? `${Number(electricityData.consumption_mw).toLocaleString('fr-FR')} MW` : null;
-
   const kpiCards = [
     { key: 'meteo', label: 'Vigilance météo', value: vigilance, info: 'Source Météo-France', css: normalizeLevel(vigilance) },
     { key: 'crues', label: 'Niveau crues', value: crues, info: `Tronçons AN11/12/20 · ${alertCount} station(s) en alerte`, css: normalizeLevel(crues), detail: cruesAlertHtml },
     { key: 'global-risk', label: 'Risque global', value: globalRisk, info: 'Calcul consolidé', css: normalizeLevel(globalRisk) },
     { key: 'communes-crise', label: 'Communes en crise', value: String(crisisCount), info: 'PCS actif', css: crisisCount > 0 ? 'rouge' : 'vert' },
-    { key: 'electricity', label: '⚡ Ecowatt RTE', value: ecowattShortMsg, info: ecowattConsoMw ? `Conso nationale ${ecowattConsoMw}` : 'Signal Ecowatt RTE temps réel', css: ecowattLevel },
   ];
   // ── Nouvelles tuiles risques (Features 13/15/17/18/20) ───────────────────
   const braData = externalRisks?.avalanche_isere || {};
@@ -7739,7 +7673,6 @@ function buildSitrepHtml() {
   const vigieau      = externalRisks?.vigieau || {};
   const apic         = externalRisks?.apic_isere || {};
   const vigiFlash    = externalRisks?.vigicrues_flash_isere || {};
-  const electricity  = externalRisks?.electricity_isere || {};
   const arcep        = externalRisks?.arcep_isere || {};
   const prefData     = externalRisks?.prefecture_isere || {};
   const dauphineData = externalRisks?.dauphine_isere || {};
@@ -7857,11 +7790,9 @@ function buildSitrepHtml() {
     ? sitrepTable(['Niveau', 'Zone', 'Usages concernés'], vigieauRows)
     : '<p style="color:#2e7d32;font-size:12px">✔ Aucune restriction eau en vigueur.</p>', '💧');
 
-  // Électricité + ARCEP
-  const elecBadge = sitrepLevelBadge(normalizeLevel(electricity.level || 'vert'));
-  const elecHtml = `<p style="font-size:12px">${elecBadge} Réseau RTE · Marge: <strong>${electricity.supply_margin_mw != null ? electricity.supply_margin_mw + ' MW' : '—'}</strong>${electricity.error ? ` · <span style="color:#c62828">${escapeHtml(electricity.error)}</span>` : ''}</p>`;
+  // Réseaux ARCEP
   const arcepHtml = `<p style="font-size:12px">Sites mobiles indisponibles : <strong>${Number(arcep.outages_total ?? 0)}</strong> · Communes impactées : <strong>${Number(arcep.communes_total ?? 0)}</strong> · Voix : ${Number(arcep.voice_impacted_total ?? 0)} · Data : ${Number(arcep.data_impacted_total ?? 0)}</p>`;
-  const reseauxSection = sitrepSection('Réseaux critiques', elecHtml + arcepHtml, '⚡');
+  const reseauxSection = sitrepSection('Réseaux critiques', arcepHtml, '📡');
 
   // Préfecture + Dauphiné
   const prefRows = prefItems.map((item) => sitrepRow([escapeHtml(item.published_at || '—'), `<strong>${escapeHtml(item.title || '—')}</strong>`]));
@@ -8411,7 +8342,6 @@ const SVC_CARD_META = {
   itinisere:             { statusId: 'itinisere-status',       infoId: null,                   url: 'https://www.itinisere.fr' },
   bison_fute:            { statusId: 'bison-status',           infoId: 'bison-info',           url: 'https://www.bison-fute.gouv.fr', extraHtml: '<div id="bison-isere-square" class="bison-isere-square" aria-live="polite"></div>' },
   sncf_isere:            { statusId: 'sncf-status',            infoId: 'sncf-info',            url: 'https://www.sncf.com/fr/itineraire-reservation/info-trafic' },
-  electricity_isere:     { statusId: 'electricity-status',     infoId: 'electricity-info',     url: 'https://data.rte-france.com' },
   prefecture_isere:      { statusId: 'prefecture-status',      infoId: 'prefecture-info',      url: 'https://www.isere.gouv.fr' },
   dauphine_isere:        { statusId: 'dauphine-status',        infoId: 'dauphine-info',        url: 'https://www.ledauphine.com' },
   france_bleu_isere:     { statusId: 'francebleu-status',      infoId: 'francebleu-info',      url: 'https://www.francebleu.fr/isere' },
@@ -8455,7 +8385,6 @@ const SVC_DETAIL_LISTS = {
   vigieau:               [{ id: 'vigieau-list',          label: 'Restrictions eau' }],
   bison_fute:            [{ id: 'bison-communique-list', label: 'Communiqués' }],
   sncf_isere:            [{ id: 'sncf-alerts-list',      label: 'Alertes voie ferrée' }],
-  electricity_isere:     [{ id: 'electricity-list',      label: 'Données réseau' }],
   prefecture_isere:      [{ id: 'prefecture-news-list',  label: 'Actualités', titleId: 'prefecture-news-title' }],
   dauphine_isere:        [{ id: 'dauphine-news-list',    label: 'Articles' }],
   france_bleu_isere:     [{ id: 'francebleu-news-list',  label: 'Articles France Bleu' }],
@@ -8787,7 +8716,6 @@ function renderExternalRisks(data = {}) {
   const sncf = mergedData?.sncf_isere || {};
   const vigieau = mergedData?.vigieau || {};
   const atmo = mergedData?.atmo_aura || {};
-  const electricity = mergedData?.electricity_isere || {};
   const anfr = mergedData?.anfr_isere || {};
   const arcep = mergedData?.arcep_isere || {};
   const apic = mergedData?.apic_isere || {};
@@ -8841,7 +8769,6 @@ function renderExternalRisks(data = {}) {
   renderApicAlerts(apic);
   renderVigicruesFlashAlerts(vigicruesFlash);
   renderVigieauAlerts(vigieau);
-  renderElectricityStatus(electricity);
   const atmoToday = atmo?.today || {};
   const atmoLevel = normalizeLevel(atmoToday.level || 'inconnu');
   const atmoLabelRaw = String(atmoToday.label || atmoLevel || 'inconnu').toLowerCase();
@@ -11140,7 +11067,6 @@ const _NOTIF_SERVICES = [
   { key: 'aprr_isere',            label: 'APRR/AREA · Autoroutes',     icon: '🛣️', cat: 'Transport' },
   { key: 'vinci_autoroutes',      label: 'Vinci Autoroutes · Isère',   icon: '🚧', cat: 'Transport' },
   { key: 'cars_region_aura',      label: 'Cars Région · AURA',         icon: '🚐', cat: 'Transport' },
-  { key: 'electricity_isere',     label: 'RTE · Électricité',          icon: '⚡', cat: 'Énergie' },
   { key: 'prefecture_isere',      label: 'Préfecture Isère',           icon: '🏛️', cat: 'Actualités' },
   { key: 'france_bleu_isere',     label: 'France Bleu Isère',          icon: '📻', cat: 'Actualités' },
 ];

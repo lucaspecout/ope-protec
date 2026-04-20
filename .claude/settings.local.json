@@ -249,7 +249,8 @@
       "WebFetch(domain:public.opendatasoft.com)",
       "WebFetch(domain:koumoul.com)",
       "Bash(grep -v \"//.*enedis\\\\|//.*Enedis\")",
-      "WebFetch(domain:forest-fire.emergency.copernicus.eu)"
+      "WebFetch(domain:forest-fire.emergency.copernicus.eu)",
+      "Bash(grep -v \"^.*//.*ecowatt\")"
     ]
   }
 }

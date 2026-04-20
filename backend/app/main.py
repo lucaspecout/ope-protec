@@ -74,7 +74,6 @@ from .services import (
     fetch_isere_opendata_resilience,
     fetch_hubeau_isere_groundwater,
     fetch_sncf_isere_alerts,
-    fetch_rte_isere_electricity_status,
     fetch_atmo_aura_isere_air_quality,
     fetch_anfr_isere_antennas,
     fetch_arcep_isere_mobile_outages,
@@ -235,7 +234,6 @@ SERVICE_REFRESH_INTERVALS: dict[str, int] = {
     "mreseau":                120,   # M Réseau trams + bus + cars Grenoble
     "vigicrues_flash_isere":  180,
     "apic_isere":             180,
-    "electricity_isere":     1800,   # Ecowatt = signal journalier, 30 min suffit
     "dauphine_isere":         180,
     "aprr_isere":             180,
     "vinci_autoroutes":       180,
@@ -1065,7 +1063,6 @@ def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str])
         "arcep_isere": (lambda: fetch_arcep_isere_mobile_outages(force_refresh=refresh), {"status": "pending", "outages_total": 0, "communes": []}),
         "apic_isere": (lambda: fetch_apic_isere_alerts(force_refresh=refresh), {"status": "pending", "level": "vert", "alerts_total": 0, "alerts": []}),
         "vigicrues_flash_isere": (lambda: fetch_vigicrues_flash_isere_alerts(force_refresh=refresh), {"status": "pending", "level": "vert", "alerts_total": 0, "alerts": []}),
-        "electricity_isere": (lambda: fetch_rte_isere_electricity_status(force_refresh=refresh), {"status": "pending", "level": "inconnu"}),
         "finess_isere": (lambda: fetch_finess_isere_resources(force_refresh=refresh), {"status": "pending", "resources": [], "resources_total": 0}),
         "groundwater_isere": (lambda: fetch_hubeau_isere_groundwater(force_refresh=refresh), {"status": "pending", "stations": [], "stations_total": 0, "trend_summary": {"hausse": 0, "baisse": 0, "stable": 0}}),
         "isere_opendata": (lambda: fetch_isere_opendata_resilience(force_refresh=refresh), {"status": "pending", "datasets": [], "totals": {"food_aid_points": 0, "health_centers": 0, "schools": 0}, "insights": []}),
@@ -1502,7 +1499,6 @@ def supervision_overview(
             "dauphine_isere": dauphine,
             "anfr_isere": risks_payload.get("anfr_isere") or {},
             "arcep_isere": risks_payload.get("arcep_isere") or {},
-            "electricity_isere": risks_payload.get("electricity_isere") or {},
             "groundwater_isere": risks_payload.get("groundwater_isere") or {},
             "isere_opendata": risks_payload.get("isere_opendata") or {},
         },
@@ -2161,7 +2157,6 @@ _SERVICE_LABELS: dict[str, str] = {
     "aprr_isere": "APRR/AREA · Autoroutes",
     "vinci_autoroutes": "Vinci Autoroutes",
     "cars_region_aura": "Cars Région · AURA",
-    "electricity_isere": "RTE · Électricité",
     "prefecture_isere": "Préfecture Isère",
     "france_bleu_isere": "France Bleu Isère",
     "bison_fute": "Bison Futé",
@@ -2210,11 +2205,6 @@ def _extract_service_level(key: str, data: dict) -> str:
         return worst
     if key == "sncf_isere":
         return "jaune" if len(data.get("alerts") or []) > 0 else "vert"
-
-    # Énergie
-    if key == "electricity_isere":
-        raw = str(data.get("level") or "vert").lower()
-        return raw if raw in _LEVEL_ORDER else "vert"
 
     # Fallback générique
     raw = str(data.get("level") or data.get("alert_level") or "vert").lower()
@@ -2398,18 +2388,6 @@ def _build_discord_embed(service_key: str, level: str, data: dict, reason: str =
         if pollutants:
             lines = [f"• {p.get('name','?')} : {p.get('value','?')} {p.get('unit','')}" for p in pollutants[:4]]
             fields.append(_f("🔬 Polluants", "\n".join(lines), inline=False))
-
-    # ── Électricité / Ecowatt ─────────────────────────────────────────────────
-    elif service_key == "electricity_isere":
-        ecowatt = data.get("ecowatt") or {}
-        dval = int(ecowatt.get("dvalue") or 0)
-        sig_label = {1: "✅ Pas d'alerte", 2: "⚠️ Système tendu", 3: "🚨 Système très tendu"}.get(dval, "Signal inconnu")
-        fields.append(_f("⚡ Signal Ecowatt", sig_label, inline=False))
-        msg = str(ecowatt.get("message") or "")
-        if msg:
-            fields.append(_f("💬 Message RTE", _trunc(msg, 200), inline=False))
-        if data.get("consumption_mw") is not None:
-            fields.append(_f("🔌 Conso nationale", f"{data['consumption_mw']:,} MW".replace(",", " "), inline=True))
 
     # ── Préfecture / Presse ───────────────────────────────────────────────────
     elif service_key in ("prefecture_isere", "dauphine_isere", "france_bleu_isere"):
