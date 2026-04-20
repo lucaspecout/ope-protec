@@ -254,7 +254,16 @@
       "Bash(curl -s \"https://lz4.overpass-api.de/api/interpreter?data=[out:json][timeout:25];way[\\\\\"highway\\\\\"=\\\\\"motorway\\\\\"][\\\\\"ref\\\\\"~\\\\\"A41\\\\\"]\\(44.8,5.5,45.8,6.5\\);out geom;\")",
       "Bash(powershell -Command \"Test-Connection -ComputerName lz4.overpass-api.de -Count 1\")",
       "Bash(powershell -Command \"\\(Invoke-WebRequest -Uri 'https://lz4.overpass-api.de/api/interpreter?data=[out:json][timeout:25];way[\\\\\"highway\\\\\"=\\\\\"motorway\\\\\"][\\\\\"ref\\\\\"~\\\\\"A41\\\\\"]\\(44.8,5.5,45.8,6.5\\);out geom;' -UseBasicParsing\\).Content\")",
-      "Bash(pkill -f \"tail -f\")"
+      "Bash(pkill -f \"tail -f\")",
+      "Bash(curl -s \"https://api.open-meteo.com/v1/forecast?latitude=45.036&longitude=6.408&current=temperature_2m,precipitation,snow_depth,wind_speed_10m&wind_speed_unit=kmh&timezone=Europe/Paris\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" \"https://www.gdacs.org/xml/rss_fl.xml\")",
+      "Bash(curl -s \"https://www.gdacs.org/xml/rss_fl.xml\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" \"https://www.gdacs.org/xml/rss.xml\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" \"https://gdacs.org/gdacsapi/api/events/geteventlist/GDACS?eventtypes=FL\")",
+      "Bash(curl -s \"https://www.gdacs.org/gdacsapi/api/events/geteventlist/GDACS?eventtypes=FL\")",
+      "Bash(curl -s \"https://www.gdacs.org/xml/rss.xml\")",
+      "Bash(python -m pip show requests)",
+      "Bash(python3 -c ' *)"
     ]
   }
 }

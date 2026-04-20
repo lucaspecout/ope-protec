@@ -8395,47 +8395,94 @@ _COPERNICUS_EMS_CACHE_TTL_SECONDS = 1800  # 30 min
 _copernicus_ems_cache_lock = Lock()
 _copernicus_ems_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "copernicus_ems"}
 
+_GDACS_NS = "http://www.gdacs.org"
+_GEO_NS   = "http://www.w3.org/2003/01/geo/wgs84_pos#"
+
+
+def _gdacs_text(item: Any, tag: str, ns: str | None = None) -> str:
+    """Extrait le texte d'un élément XML RSS GDACS."""
+    prefix = f"{{{ns}}}" if ns else ""
+    el = item.find(f"{prefix}{tag}")
+    return (el.text or "").strip() if el is not None else ""
+
+
 def _fetch_copernicus_ems_live() -> dict[str, Any]:
     """
-    Activations d'urgence inondations Europe via GDACS (API publique, fiable).
-    GDACS = Global Disaster Alert and Coordination System (UN-backed).
-    Filtrage sur les inondations (FL) en cours.
+    Inondations actives en Europe via le flux RSS GDACS.
+    URL : https://www.gdacs.org/xml/rss.xml (toutes catastrophes, filtrées sur FL)
     """
     try:
-        # GDACS API : événements de type inondation en cours
         resp = _requests.get(
-            "https://www.gdacs.org/gdacsapi/api/events/geteventlist/GDACS",
-            params={"eventtypes": "FL", "alertlevel": "Green,Orange,Red", "limit": "50"},
+            "https://www.gdacs.org/xml/rss.xml",
             timeout=20,
-            headers={"Accept": "application/json", "User-Agent": _BROWSER_UA},
+            headers={"Accept": "application/xml,text/xml,*/*", "User-Agent": _BROWSER_UA},
         )
         resp.raise_for_status()
-        raw = resp.json()
-        raw_items = raw if isinstance(raw, list) else (raw.get("results") or raw.get("features") or [])
+        # Supprime le BOM UTF-8 éventuel avant parsing XML
+        content = resp.content.lstrip(b"\xef\xbb\xbf")
+        root = ET.fromstring(content)
+        channel = root.find("channel")
+        all_items = (channel or root).findall("item")
 
         activations: list[dict[str, Any]] = []
         france_activations: list[dict[str, Any]] = []
 
-        for item in raw_items[:50]:
-            # Support GeoJSON feature format
-            props = item.get("properties") or item if isinstance(item, dict) else {}
-            country = str(props.get("country") or props.get("iso3") or props.get("countryname") or "")
-            is_france = "FR" in country.upper() or "FRANCE" in country.upper() or "FRA" in country.upper()
+        for item in all_items:
+            # Filtrer sur les inondations uniquement
+            event_type = _gdacs_text(item, "eventtype", _GDACS_NS)
+            link = _gdacs_text(item, "link")
+            if event_type != "FL" and "eventtype=FL" not in link:
+                continue
+            # Garder seulement les événements en cours
+            is_current = _gdacs_text(item, "iscurrent", _GDACS_NS)
+            if is_current == "false":
+                continue
+
+            title   = _gdacs_text(item, "title")
+            country = _gdacs_text(item, "country", _GDACS_NS)
+            iso3    = _gdacs_text(item, "iso3", _GDACS_NS)
+            alert   = _gdacs_text(item, "alertlevel", _GDACS_NS)
+            event_id = _gdacs_text(item, "eventid", _GDACS_NS)
+            pub     = _gdacs_text(item, "pubDate")[:16] if _gdacs_text(item, "pubDate") else ""
+
+            # Coordonnées : <georss:point> = "lat lon" (plus simple)
+            _GEORSS_NS = "http://www.georss.org/georss"
+            georss_pt = _gdacs_text(item, "point", _GEORSS_NS)
+            lat_s = lon_s = ""
+            if georss_pt and " " in georss_pt:
+                parts = georss_pt.split()
+                lat_s, lon_s = parts[0], parts[1]
+            else:
+                # fallback : <geo:Point><geo:lat>
+                geo_point = item.find(f"{{{_GEO_NS}}}Point")
+                if geo_point is not None:
+                    lat_s = _gdacs_text(geo_point, "lat", _GEO_NS)
+                    lon_s = _gdacs_text(geo_point, "long", _GEO_NS)
+
+            is_france = (
+                "FRANCE" in country.upper()
+                or iso3.upper() == "FRA"
+                or country.upper() == "FR"
+            )
             activation = {
-                "id": str(props.get("eventid") or props.get("id") or ""),
-                "title": str(props.get("eventname") or props.get("title") or props.get("name") or "Inondation"),
-                "type": str(props.get("eventtype") or "FL"),
-                "date": str(props.get("fromdate") or props.get("date") or ""),
-                "level": str(props.get("alertlevel") or ""),
+                "id": event_id or link,
+                "title": title or "Inondation",
+                "type": "FL",
+                "date": pub,
+                "level": alert,
                 "country": country,
-                "lat": props.get("latitude") or props.get("lat"),
-                "lon": props.get("longitude") or props.get("lon"),
+                "iso3": iso3,
+                "lat": float(lat_s) if lat_s else None,
+                "lon": float(lon_s) if lon_s else None,
                 "france": is_france,
-                "url": props.get("url") or f"https://www.gdacs.org/",
+                "url": link or "https://www.gdacs.org",
             }
             activations.append(activation)
             if is_france:
                 france_activations.append(activation)
+
+            if len(activations) >= 50:
+                break
 
         return {
             "service": "GDACS · Inondations Europe",
@@ -8850,9 +8897,16 @@ def _fetch_cols_alpins_live() -> dict[str, Any]:
         except Exception:
             results_map[col["nom"]] = {"temp": None, "snow": None, "precip": None, "wind": None, "ok": False}
 
+    first_error: str | None = None
     for col in _COLS_ALPINS:
         r = results_map.get(col["nom"], {})
-        temp, snow, precip, wind = r.get("temp"), r.get("snow"), r.get("precip"), r.get("wind")
+        temp   = r.get("temp")
+        snow_m = r.get("snow")   # open-meteo renvoie snow_depth en mètres → convertir en cm
+        snow   = round(snow_m * 100, 1) if snow_m is not None else None
+        precip = r.get("precip")
+        wind   = r.get("wind")
+        if not r.get("ok") and r.get("err") and first_error is None:
+            first_error = r.get("err")
         if r.get("ok") and temp is not None:
             status = _col_status_from_weather(temp, snow, precip, wind)
         else:
@@ -8861,7 +8915,7 @@ def _fetch_cols_alpins_live() -> dict[str, Any]:
         cols_out.append({**col, **status, "temperature": temp, "enneigement_cm": snow, "precipitations": precip, "vent_kmh": wind})
 
     nb_dangereux = sum(1 for c in cols_out if c["couleur"] in ("orange", "rouge"))
-    return {
+    result: dict[str, Any] = {
         "service": "Cols alpins Isère",
         "status": "online",
         "source": "https://api.open-meteo.com",
@@ -8870,6 +8924,9 @@ def _fetch_cols_alpins_live() -> dict[str, Any]:
         "dangereux_total": nb_dangereux,
         "updated_at": datetime.utcnow().isoformat() + "Z",
     }
+    if first_error:
+        result["_debug_first_error"] = first_error
+    return result
 
 
 def fetch_cols_alpins_isere(force_refresh: bool = False) -> dict[str, Any]:
