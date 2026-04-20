@@ -8437,7 +8437,59 @@ _feux_foret_cache_lock = Lock()
 _feux_foret_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "feux_foret_isere"}
 
 
+def _parse_effis_geojson(data: dict) -> list[dict]:
+    fires = []
+    for f in data.get("features") or []:
+        coords = (f.get("geometry") or {}).get("coordinates") or []
+        props = f.get("properties") or {}
+        if len(coords) >= 2:
+            fires.append({
+                "lat": round(float(coords[1]), 5),
+                "lon": round(float(coords[0]), 5),
+                "confidence": str(props.get("confidence") or "nominal"),
+                "date": str(props.get("acq_date") or ""),
+                "frp": props.get("frp"),
+                "source": "EFFIS/Copernicus",
+            })
+    return fires
+
+
+def _parse_firms_csv(text: str) -> list[dict]:
+    """Parse NASA FIRMS area CSV response — filtré sur la bbox Isère élargie."""
+    fires = []
+    try:
+        reader = csv.DictReader(io.StringIO(text))
+        for row in reader:
+            try:
+                lat = float(row.get("latitude") or row.get("lat") or 0)
+                lon = float(row.get("longitude") or row.get("lon") or 0)
+            except ValueError:
+                continue
+            # Isère élargie : 44.4–45.7 N, 4.9–6.4 E
+            if not (44.4 <= lat <= 45.7 and 4.9 <= lon <= 6.4):
+                continue
+            fires.append({
+                "lat": round(lat, 5),
+                "lon": round(lon, 5),
+                "confidence": str(row.get("confidence") or "nominal"),
+                "date": str(row.get("acq_date") or ""),
+                "frp": _safe_float(row.get("frp")),
+                "source": "NASA FIRMS/VIIRS",
+            })
+    except Exception:
+        pass
+    return fires
+
+
+def _safe_float(v: Any) -> float | None:
+    try:
+        return float(v) if v not in (None, "", "nan") else None
+    except (ValueError, TypeError):
+        return None
+
+
 def _fetch_feux_foret_live() -> dict[str, Any]:
+    # 1. EFFIS/Copernicus — deux endpoints WFS GeoJSON
     _EFFIS_URLS = [
         (
             "https://maps.effis.emergency.copernicus.eu/effis/ows?SERVICE=WFS&VERSION=2.0.0"
@@ -8452,56 +8504,57 @@ def _fetch_feux_foret_live() -> dict[str, Any]:
             "&BBOX=43.0,4.0,47.5,8.0,EPSG:4326"
         ),
     ]
-    data = None
+    fires: list[dict] = []
+    data_source = "EFFIS/Copernicus"
+
     for url in _EFFIS_URLS:
         try:
-            data = _http_get_json(url, timeout=10)
+            data = _http_get_json(url, timeout=12)
+            fires = _parse_effis_geojson(data)
             break
         except Exception:
             pass
-    if data is None:
-        # EFFIS inaccessible depuis ce réseau — retour vide propre, mis en cache 1h
-        return {
-            "service": "Feux de forêt EFFIS",
-            "status": "online",
-            "source": "https://effis.jrc.ec.europa.eu",
-            "fires": [],
-            "fires_total": 0,
-            "note": "Source EFFIS/JRC inaccessible depuis ce réseau",
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
-    try:
-        features = data.get("features") or []
-        fires = []
-        for f in features:
-            coords = (f.get("geometry") or {}).get("coordinates") or []
-            props = f.get("properties") or {}
-            if len(coords) >= 2:
-                fires.append({
-                    "lat": round(float(coords[1]), 5),
-                    "lon": round(float(coords[0]), 5),
-                    "confidence": str(props.get("confidence") or "nominal"),
-                    "date": str(props.get("acq_date") or ""),
-                    "frp": props.get("frp"),
-                })
-        return {
-            "service": "Feux de forêt EFFIS",
-            "status": "online",
-            "source": "https://effis.jrc.ec.europa.eu",
-            "fires": fires,
-            "fires_total": len(fires),
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
-    except Exception as exc:
+
+    # 2. Fallback NASA FIRMS si EFFIS inaccessible
+    if not fires:
+        map_key = (settings.firms_map_key or "").strip()
+        if map_key:
+            # BBOX : west,south,east,north — SE France élargi
+            firms_url = (
+                f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/"
+                f"{map_key}/VIIRS_SNPP_NRT/4.0,43.0,8.0,47.5/2"
+            )
+            try:
+                text = _http_get_text(firms_url, timeout=20)
+                fires = _parse_firms_csv(text)
+                data_source = "NASA FIRMS/VIIRS"
+            except Exception:
+                pass
+
+    if not fires and not (settings.firms_map_key or "").strip():
+        # Aucune source disponible — indiquer clairement le statut
         return {
             "service": "Feux de forêt EFFIS",
             "status": "degraded",
             "source": "https://effis.jrc.ec.europa.eu",
             "fires": [],
             "fires_total": 0,
-            "error": str(exc),
+            "note": (
+                "Sources EFFIS/JRC inaccessibles depuis ce réseau. "
+                "Configurez FIRMS_MAP_KEY (gratuit sur firms.modaps.eosdis.nasa.gov) pour activer le fallback NASA."
+            ),
             "updated_at": datetime.utcnow().isoformat() + "Z",
         }
+
+    return {
+        "service": "Feux de forêt EFFIS",
+        "status": "online",
+        "source": "https://effis.jrc.ec.europa.eu",
+        "data_source": data_source,
+        "fires": fires,
+        "fires_total": len(fires),
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
 
 
 def fetch_feux_foret_isere(force_refresh: bool = False) -> dict[str, Any]:

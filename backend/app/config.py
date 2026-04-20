@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     # RTE data.rte-france.com — base64(client_id:client_secret)
     rte_ecowatt_b64: str = ""
     rte_consumption_b64: str = ""
+    # NASA FIRMS — clé gratuite sur https://firms.modaps.eosdis.nasa.gov/api/map_key/
+    firms_map_key: str = ""
 
     class Config:
         env_file = ".env"

@@ -248,7 +248,8 @@
       "WebFetch(domain:firms.modaps.eosdis.nasa.gov)",
       "WebFetch(domain:public.opendatasoft.com)",
       "WebFetch(domain:koumoul.com)",
-      "Bash(grep -v \"//.*enedis\\\\|//.*Enedis\")"
+      "Bash(grep -v \"//.*enedis\\\\|//.*Enedis\")",
+      "WebFetch(domain:forest-fire.emergency.copernicus.eu)"
     ]
   }
 }
