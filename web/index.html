@@ -784,7 +784,11 @@
                     </select>
                   </div>
 
-                  <label><input id="filter-agents" type="checkbox" checked /> 🧑‍🚒 Agents terrain<span id="filter-agents-count" style="font-weight:700;color:var(--primary)"></span></label>
+                  <div class="filter-subgroup">
+                    <label><input id="filter-agents" type="checkbox" checked /> 🧑‍🚒 Agents terrain</label>
+                    <span id="filter-agents-status" style="font-size:.75rem;display:block;margin-top:2px"></span>
+                    <button id="filter-agents-refresh" type="button" class="ghost map-btn-lite" style="margin-top:4px;font-size:.75rem">↺ Rafraîchir maintenant</button>
+                  </div>
 
                   <label><input id="filter-resources-protcivile" type="checkbox" checked /> 🔺 Antennes Protection Civile</label>
 
