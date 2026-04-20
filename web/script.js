@@ -194,7 +194,6 @@ let homeLiveTimer = null;
 let apiPanelTimer = null;
 let apiResyncTimer = null;
 let refreshAllInFlight = null;
-let photoCameraRefreshTimer = null;
 let _lastRefreshAllTs = 0;
 let _liveEventsFailCount = 0;
 let lastApiResyncAt = null;
@@ -234,7 +233,6 @@ let mapPointsLayer = null;
 let itinisereLayer = null;
 let bisonLayer = null;
 let bisonCameraLayer = null;
-let photoCameraLayer = null;
 let autorouteLayer = null;
 let prAutorouteLayer = null;
 let institutionLayer = null;
@@ -1004,50 +1002,6 @@ function nearestPointOnCorridor(corridor = [], anchor = null) {
   return nearest;
 }
 
-const ITINISERE_PHOTO_CAMERAS = [
-  {
-    name: 'La Diat',
-    road: 'D520B',
-    lat: 45.33981893625896,
-    lon: 5.807674386173609,
-    streamUrl: 'https://traffic.itiniserev2.cityway.fr/api/v1/Camera/D520BLaDiat',
-  },
-  {
-    name: 'Les Fontaines',
-    road: 'D525',
-    lat: 45.35574122911768,
-    lon: 5.992340889751027,
-    streamUrl: 'https://traffic.itiniserev2.cityway.fr/api/v1/Camera/D525LesFontaines',
-  },
-  {
-    name: 'Fond de France',
-    road: 'D525A',
-    lat: 45.28221936272868,
-    lon: 6.074009634997554,
-    streamUrl: 'https://traffic.itiniserev2.cityway.fr/api/v1/Camera/D525AFonddeFrance',
-  },
-  {
-    name: 'Rochetaillée',
-    road: 'D1091 / D526',
-    lat: 45.1144099370023,
-    lon: 6.005238134016191,
-    streamUrl: 'https://traffic.itiniserev2.cityway.fr/api/v1/Camera/D1091D526Rochetaillee',
-  },
-  {
-    name: 'Seiglières',
-    road: 'D111',
-    lat: 45.15474818390343,
-    lon: 5.869930116196619,
-    streamUrl: 'https://traffic.itiniserev2.cityway.fr/api/v1/Camera/D111Seiglieres',
-  },
-  {
-    name: 'Clavaux Grenoble',
-    road: 'D1091',
-    lat: 45.07592699481376,
-    lon: 5.883116163700038,
-    streamUrl: 'https://traffic.itiniserev2.cityway.fr/api/v1/Camera/D1091ClavauxGrenoble',
-  },
-];
 
 function cameraPopupMarkup(camera = {}) {
   const name = escapeHtml(camera.name || 'Caméra routière');
@@ -1072,38 +1026,6 @@ function cameraPopupMarkup(camera = {}) {
   `;
 }
 
-function photoCameraPopupMarkup(camera = {}) {
-  return cameraPopupMarkup({
-    manager: 'Photo route',
-    mediaType: 'image',
-    ...camera,
-  });
-}
-
-function refreshPhotoCameraImages(event) {
-  const popupElement = event?.popup?.getElement?.();
-  if (!popupElement) return;
-  popupElement.querySelectorAll('img').forEach((image) => {
-    const originalUrl = image.getAttribute('data-original-src') || image.getAttribute('src');
-    if (!originalUrl) return;
-    if (!image.getAttribute('data-original-src')) image.setAttribute('data-original-src', originalUrl);
-    const separator = originalUrl.includes('?') ? '&' : '?';
-    image.setAttribute('src', `${originalUrl}${separator}t=${Date.now()}`);
-  });
-}
-
-function startPhotoCameraAutoRefresh() {
-  if (photoCameraRefreshTimer) clearInterval(photoCameraRefreshTimer);
-  photoCameraRefreshTimer = setInterval(() => {
-    if (document.hidden || !leafletMap) return;
-    leafletMap.eachLayer((layer) => {
-      if (!(layer instanceof window.L.Marker)) return;
-      const popup = layer.getPopup?.();
-      if (!popup?.isOpen?.()) return;
-      refreshPhotoCameraImages({ popup });
-    });
-  }, 30000);
-}
 
 const homeView = document.getElementById('home-view');
 const loginView = document.getElementById('login-view');
@@ -2974,7 +2896,6 @@ function initMap() {
   itinisereLayer = window.L.layerGroup().addTo(leafletMap);
   bisonLayer = window.L.layerGroup().addTo(leafletMap);
   bisonCameraLayer = window.L.layerGroup().addTo(leafletMap);
-  photoCameraLayer = window.L.layerGroup().addTo(leafletMap);
   autorouteLayer = window.L.layerGroup().addTo(leafletMap);
   prAutorouteLayer = window.L.layerGroup();
   institutionLayer = window.L.layerGroup().addTo(leafletMap);
@@ -2988,10 +2909,8 @@ function initMap() {
   colsAlpinsLayer = window.L.layerGroup();
   leafletMap.on('click', onMapClickAddPoint);
   leafletMap.on('click', handleOsmDetailsClick);
-  leafletMap.on('popupopen', refreshPhotoCameraImages);
   leafletMap.on('zoomend', updateTrafficZoomClass);
   updateTrafficZoomClass();
-  startPhotoCameraAutoRefresh();
 }
 
 function formatOsmDetailsPopup(payload = {}) {
@@ -3191,7 +3110,7 @@ function toggleMapContrast() {
 
 function fitMapToData(showFeedback = false) {
   if (!leafletMap) return;
-  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsBoundaryLayer, pcsLayer, resourceLayer, institutionLayer, populationLayer, searchLayer, customPointsLayer, mapPointsLayer, itinisereLayer, bisonLayer, bisonCameraLayer, photoCameraLayer].filter(Boolean);
+  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsBoundaryLayer, pcsLayer, resourceLayer, institutionLayer, populationLayer, searchLayer, customPointsLayer, mapPointsLayer, itinisereLayer, bisonLayer, bisonCameraLayer].filter(Boolean);
   const bounds = window.L.latLngBounds([]);
   layers.forEach((layer) => {
     if (layer?.getBounds) {
@@ -5490,12 +5409,11 @@ async function renderPrAutorouteLayer() {
 }
 
 async function renderTrafficOnMap() {
-  if (!itinisereLayer || !bisonLayer || !bisonCameraLayer || !photoCameraLayer || typeof window.L === 'undefined') return;
+  if (!itinisereLayer || !bisonLayer || !bisonCameraLayer || typeof window.L === 'undefined') return;
   const renderSequence = ++trafficRenderSequence;
   itinisereLayer.clearLayers();
   bisonLayer.clearLayers();
   bisonCameraLayer.clearLayers();
-  photoCameraLayer.clearLayers();
   if (autorouteLayer) autorouteLayer.clearLayers();
   mapStats.traffic = 0;
 
@@ -5590,14 +5508,6 @@ async function renderTrafficOnMap() {
     });
     mapStats.traffic += BISON_FUTE_CAMERAS.length;
 
-    ITINISERE_PHOTO_CAMERAS.forEach((camera) => {
-      const coords = normalizeMapCoordinates(camera.lat, camera.lon);
-      if (!coords) return;
-      const popupHtml = photoCameraPopupMarkup(camera);
-      const pointIcon = emojiDivIcon('📷', { iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -11] });
-      window.L.marker([coords.lat, coords.lon], { icon: pointIcon }).bindPopup(popupHtml).addTo(photoCameraLayer);
-    });
-    mapStats.traffic += ITINISERE_PHOTO_CAMERAS.length;
   }
 
 
@@ -10435,7 +10345,6 @@ function logout() {
   if (liveEventsTimer) clearInterval(liveEventsTimer);
   if (apiPanelTimer) clearInterval(apiPanelTimer);
   if (apiResyncTimer) clearInterval(apiResyncTimer);
-  if (photoCameraRefreshTimer) clearInterval(photoCameraRefreshTimer);
   stopMapAnnotationsSync();
   stopExternalRisksSSE();
   finishStartupQueue();
