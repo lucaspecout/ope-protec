@@ -4282,27 +4282,27 @@ def _fetch_rte_isere_electricity_live() -> dict[str, Any]:
         verify=True,
     )
     if resp_ecowatt.status_code == 429:
-        retry_after = max(int(resp_ecowatt.headers.get("Retry-After", 900)), 60)
-        # Priorité 1 : retourner le cache stale s'il contient de vraies données
+        retry_after = max(int(resp_ecowatt.headers.get("Retry-After", 120)), 60)
+        # Priorité 1 : retourner le cache stale s'il contient de vraies données Ecowatt
         with _rte_electricity_cache_lock:
             stale = _rte_electricity_cache.get("payload")
-        if stale and stale.get("status") == "online" and stale.get("ecowatt") in ("vert", "orange", "rouge"):
+        _ecowatt_is_real = lambda p: isinstance(p, dict) and isinstance(p.get("ecowatt"), dict)
+        if stale and stale.get("status") == "online" and _ecowatt_is_real(stale):
             return stale
-        # Priorité 2 : fallback "vert" mis en cache uniquement pour retry_after+60s
-        # (pas le TTL complet) afin de réessayer l'API dès que le rate-limit se lève
+        # Priorité 2 : fallback dégradé avec TTL court pour réessayer rapidement
         fallback = {
             "service": "RTE · Ecowatt & Consommation",
-            "status": "online",
+            "status": "degraded",
             "department": "France (national)",
             "scope": "Signal Ecowatt RTE",
             "source": "https://data.rte-france.com",
-            "level": "vert",
-            "ecowatt": "vert",
-            "ecowatt_message": "Signal Ecowatt — données en attente",
-            "conso_mw": None,
+            "level": "inconnu",
+            "ecowatt": {},
+            "ecowatt_message": "Données temporairement indisponibles (limite API RTE)",
+            "consumption_mw": None,
             "updated_at": datetime.utcnow().isoformat() + "Z",
         }
-        short_ttl = retry_after + 60
+        short_ttl = min(retry_after + 30, 300)  # max 5 min d'attente
         redis_key = _rte_electricity_cache.get("redis_key")
         if redis_key:
             _redis_set(redis_key, fallback, short_ttl)
@@ -4330,6 +4330,7 @@ def _fetch_rte_isere_electricity_live() -> dict[str, Any]:
     consumption_observed_at: str | None = None
     if consumption_b64:
         try:
+            from datetime import timezone as _tz
             token2 = _rte_get_oauth_token(consumption_b64, "consumption")
             resp2 = _requests.get(
                 f"{_RTE_BASE}/open_api/consumption/v1/short_term",
@@ -4339,18 +4340,30 @@ def _fetch_rte_isere_electricity_live() -> dict[str, Any]:
             )
             resp2.raise_for_status()
             short_terms = resp2.json().get("short_term") or []
-            # On cherche la valeur la plus récente (type REALISED ou la dernière valeur)
+            # Prendre la valeur non-nulle la plus récente (max start_date) qui ne soit
+            # pas dans le futur et pas vieille de plus de 4h.
             now_utc = datetime.utcnow()
             best_value: int | None = None
             best_dt: str | None = None
+            best_ts: datetime | None = None
             for bloc in short_terms:
                 for val in (bloc.get("values") or []):
                     try:
                         start = val.get("start_date") or ""
                         v = val.get("value")
-                        if v is not None and start:
+                        if v is None or not start:
+                            continue
+                        ts = datetime.fromisoformat(start.replace("Z", "+00:00"))
+                        ts_utc = ts.astimezone(_tz.utc).replace(tzinfo=None)
+                        # Ignorer les valeurs futures et les valeurs trop anciennes (>4h)
+                        if ts_utc > now_utc:
+                            continue
+                        if (now_utc - ts_utc).total_seconds() > 4 * 3600:
+                            continue
+                        if best_ts is None or ts_utc > best_ts:
                             best_value = int(v)
                             best_dt = start
+                            best_ts = ts_utc
                     except Exception:
                         pass
             consumption_mw = best_value
