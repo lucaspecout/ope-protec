@@ -8387,6 +8387,91 @@ def collect_all_static_data() -> dict[str, Any]:
     return results
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# COPERNICUS EMS — Cartographie d'urgence Sentinel-1 / inondations (Feature 11)
+# API : emergency.copernicus.eu/mapping/rest/api/v1/activations
+# ══════════════════════════════════════════════════════════════════════════════
+_COPERNICUS_EMS_CACHE_TTL_SECONDS = 1800  # 30 min
+_copernicus_ems_cache_lock = Lock()
+_copernicus_ems_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "copernicus_ems"}
+
+_COPERNICUS_EMS_API = "https://emergency.copernicus.eu/mapping/rest/api/v1/activations"
+
+
+def _fetch_copernicus_ems_live() -> dict[str, Any]:
+    try:
+        params = "?format=json&status=ongoing"
+        resp = requests.get(
+            f"{_COPERNICUS_EMS_API}{params}",
+            timeout=15,
+            headers={"Accept": "application/json"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        raw_items = data if isinstance(data, list) else (data.get("items") or data.get("activations") or [])
+        activations: list[dict[str, Any]] = []
+        france_activations: list[dict[str, Any]] = []
+
+        for item in raw_items[:50]:
+            countries = item.get("countries") or item.get("country") or []
+            if isinstance(countries, str):
+                countries = [countries]
+            # Normalize: list of country names or codes
+            country_strs = [str(c).lower() for c in countries]
+            is_france = any(
+                "france" in c or c == "fr" or "french" in c
+                for c in country_strs
+            )
+            activation = {
+                "id": item.get("activationid") or item.get("id") or item.get("code"),
+                "title": item.get("title") or item.get("name") or item.get("event_name"),
+                "type": item.get("type") or item.get("event_type") or "FLOOD",
+                "countries": countries,
+                "date": (item.get("reportdate") or item.get("date") or "")[:10],
+                "lat": item.get("latitude") or item.get("lat"),
+                "lon": item.get("longitude") or item.get("lon"),
+                "france": is_france,
+                "url": item.get("url") or item.get("link"),
+            }
+            activations.append(activation)
+            if is_france:
+                france_activations.append(activation)
+
+        return {
+            "service": "Copernicus EMS",
+            "status": "online",
+            "source": "https://emergency.copernicus.eu",
+            "activations_total": len(activations),
+            "france_total": len(france_activations),
+            "activations": activations[:20],
+            "france_activations": france_activations[:10],
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+    except Exception as exc:
+        return {
+            "service": "Copernicus EMS",
+            "status": "degraded",
+            "source": "https://emergency.copernicus.eu",
+            "activations_total": 0,
+            "france_total": 0,
+            "activations": [],
+            "france_activations": [],
+            "error": str(exc),
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+
+
+def fetch_copernicus_ems_france(force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_copernicus_ems_cache,
+        lock=_copernicus_ems_cache_lock,
+        ttl_seconds=_COPERNICUS_EMS_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=_fetch_copernicus_ems_live,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Persistance du snapshot consolidé (main.py ↔ Redis)
 # ---------------------------------------------------------------------------
@@ -8431,6 +8516,7 @@ def flush_service_memory_cache(service_key: str) -> dict[str, str]:
         "seismes_isere":       (_seismes_isere_cache,         _seismes_isere_cache_lock),
         "feux_foret_isere":    (_feux_foret_cache,            _feux_foret_cache_lock),
         "cols_alpins_isere":   (_cols_cache,                  _cols_cache_lock),
+        "copernicus_ems":      (_copernicus_ems_cache,        _copernicus_ems_cache_lock),
     }
     if service_key not in _known:
         return {"status": "not_found", "service": service_key}

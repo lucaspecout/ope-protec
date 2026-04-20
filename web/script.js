@@ -62,6 +62,7 @@ const FLUX_SERVICES = [
   { key: 'seismes_isere',          label: 'Séismes Isère',             icon: '🌍', category: 'Risques',       interval: 600,   metric: (d) => `${(d.items || []).length} séisme(s) détecté(s)` },
   { key: 'avalanche_isere',        label: 'Avalanches BRA · Isère',    icon: '🏔️', category: 'Risques',       interval: 1800,  metric: (d) => `Niveau max ${d.niveau_max_bra ?? '?'}/5 · ${(d.massifs || []).length} massif(s)` },
   { key: 'feux_foret_isere',       label: 'Feux de forêt EFFIS',       icon: '🔥', category: 'Risques',       interval: 600,   metric: (d) => `${d.fires_total ?? 0} foyer(s) détecté(s) 24h` },
+  { key: 'copernicus_ems',         label: 'Copernicus EMS · Inondations', icon: '🛰️', category: 'Risques',    interval: 1800,  metric: (d) => `${d.france_total ?? 0} activation(s) France · ${d.activations_total ?? 0} Europe` },
   { key: 'cols_alpins_isere',      label: 'Cols alpins Isère',         icon: '⛰️', category: 'Transport',     interval: 1800,  metric: (d) => `${d.cols_total ?? 0} cols · ${d.dangereux_total ?? 0} à surveiller` },
   { key: 'anfr_isere',             label: 'ANFR · Antennes mobiles',   icon: '📡', category: 'Télécom',       interval: 21600, metric: (d) => `${d.supports_total ?? 0} support(s) mobile recensés` },
   { key: 'arcep_isere',            label: 'ARCEP · Sites mobiles',     icon: '📶', category: 'Télécom',       interval: 600,   metric: (d) => `${d.outages_total ?? 0} indisponibilité(s)` },
@@ -80,6 +81,9 @@ const PANEL_TITLES = {
   'map-panel': 'Carte stratégique Isère',
   'users-panel': 'Gestion des utilisateurs',
   'notifications-panel': 'Notifications Discord',
+  'alerts-panel': 'Historique des alertes',
+  'resources-panel': 'Ressources opérationnelles',
+  'audit-panel': "Journal d'audit",
 };
 
 const RESOURCE_TYPE_META = {
@@ -692,6 +696,12 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
       ...p, ...n,
       cols: keepPreviousArray(p.cols, n.cols),
       dangereux_total: keepPreviousValue(p.dangereux_total, n.dangereux_total),
+    })),
+    copernicus_ems: mergeServiceSlot(previous.copernicus_ems || {}, next.copernicus_ems || {}, (p, n) => ({
+      ...p, ...n,
+      activations: keepPreviousArray(p.activations, n.activations),
+      france_activations: keepPreviousArray(p.france_activations, n.france_activations),
+      france_total: keepPreviousValue(p.france_total, n.france_total),
     })),
   };
 }
@@ -6111,6 +6121,7 @@ function startExternalRisksSSE() {
       renderApiInterconnections(cachedExternalRisksSnapshot);
       saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
       renderTrafficOnMap().catch(() => {});
+      checkServiceAlertsFromSnapshot(data);
     } catch (_) {}
   };
   externalRisksSSE.onerror = () => {
@@ -8666,6 +8677,7 @@ const SVC_CARD_META = {
   seismes_isere:         { statusId: 'seismes-svc-status',     infoId: 'seismes-svc-info',     url: 'https://www.franceseisme.fr' },
   avalanche_isere:       { statusId: 'avalanche-svc-status',   infoId: null,                   url: 'https://meteofrance.com/meteo-montagne' },
   feux_foret_isere:      { statusId: 'feux-svc-status',        infoId: null,                   url: 'https://effis.jrc.ec.europa.eu' },
+  copernicus_ems:        { statusId: 'copernicus-svc-status',  infoId: null,                   url: 'https://emergency.copernicus.eu/mapping/list-of-activations-rapid' },
   cols_alpins_isere:     { statusId: 'cols-svc-status',        infoId: null,                   url: 'https://api.open-meteo.com' },
   anfr_isere:            { statusId: 'anfr-status',            infoId: 'anfr-info',            url: 'https://www.data.gouv.fr/fr/datasets/donnees-sur-les-installations-radioelectriques-de-plus-de-5-watts-1/' },
   arcep_isere:           { statusId: 'arcep-status',           infoId: 'arcep-info',           url: 'https://www.data.gouv.fr/fr/datasets/sites-indisponibles/' },
@@ -8716,6 +8728,7 @@ const SVC_DETAIL_LISTS = {
   seismes_isere:         [{ id: 'seismes-svc-list',      label: 'Séismes récents Isère' }],
   avalanche_isere:       [{ id: 'avalanche-svc-list',    label: 'BRA — Risque avalanche massifs Isère' }],
   feux_foret_isere:      [{ id: 'feux-svc-list',         label: 'Foyers actifs EFFIS (24h)' }],
+  copernicus_ems:        [{ id: 'copernicus-svc-list',   label: 'Activations Copernicus EMS' }],
   cols_alpins_isere:     [{ id: 'cols-svc-list',         label: 'État des cols alpins Isère' }],
 };
 
@@ -9073,6 +9086,7 @@ function renderExternalRisks(data = {}) {
   renderSeismesIsere(seismesIsere);
   renderAvalancheIsere(avalancheIsere);
   renderFeuxForetWidget(feuxForet);
+  renderCopernicusEmsWidget(mergedData?.copernicus_ems || {});
   renderColsAlpinsWidget(colsAlpins);
   // Redessiner couches carte avec nouvelles données
   renderSeismesLayer();
@@ -11024,6 +11038,13 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
   document.getElementById('current-role').textContent = roleLabel(currentUser.role);
   document.getElementById('current-commune').textContent = currentUser.municipality_name || 'Toutes';
   applyRoleVisibility();
+  // Show audit button for admins only
+  const _auditMenuBtn = document.getElementById('menu-audit-btn');
+  if (_auditMenuBtn) {
+    if (currentUser.role === 'admin') { _auditMenuBtn.classList.remove('hidden'); _auditMenuBtn.hidden = false; }
+    else { _auditMenuBtn.classList.add('hidden'); _auditMenuBtn.hidden = true; }
+  }
+  _updateNotifBtn();
   showApp();
   buildServiceCards();
   initMobileNav();
@@ -11776,3 +11797,634 @@ async function _forceRefreshService(serviceKey, btn) {
     if (row) row.classList.remove('flux-row--refreshing');
   }
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// FEATURE 1 — Notifications push navigateur
+// ════════════════════════════════════════════════════════════════════════════
+
+let notificationsEnabled = false;
+const _svcAlertLevels = {};
+
+const _NOTIF_LEVEL_SEV = { inconnu: -1, pending: -1, vert: 0, online: 0, partial: 0, jaune: 1, stale: 1, orange: 2, degraded: 2, rouge: 3, unavailable: 3 };
+
+function _getServiceDisplayLevel(key, data) {
+  const status = String(data?.status || 'inconnu');
+  if (status === 'unavailable') return 'rouge';
+  if (key === 'meteo_france') return normalizeLevel(data?.level || status);
+  if (key === 'vigicrues') return normalizeLevel(data?.water_alert_level || status);
+  if (key === 'apic_isere') return (data?.alerts_total || 0) > 0 ? 'orange' : 'vert';
+  if (key === 'avalanche_isere') {
+    const n = data?.niveau_max_bra || 0;
+    return n >= 4 ? 'rouge' : n >= 3 ? 'orange' : n >= 2 ? 'jaune' : 'vert';
+  }
+  if (key === 'feux_foret_isere') {
+    const t = data?.fires_total || 0;
+    return t > 5 ? 'orange' : t > 0 ? 'jaune' : 'vert';
+  }
+  return normalizeLevel(status);
+}
+
+function checkServiceAlertsFromSnapshot(snapshot) {
+  if (!notificationsEnabled || !snapshot || typeof snapshot !== 'object') return;
+  for (const [key, data] of Object.entries(snapshot)) {
+    if (!data || typeof data !== 'object' || key === 'updated_at') continue;
+    const newLevel = _getServiceDisplayLevel(key, data);
+    const prevLevel = _svcAlertLevels[key];
+    _svcAlertLevels[key] = newLevel;
+    if (prevLevel === undefined) continue;
+    if (prevLevel === newLevel) continue;
+    const prevSev = _NOTIF_LEVEL_SEV[prevLevel] ?? 0;
+    const newSev = _NOTIF_LEVEL_SEV[newLevel] ?? 0;
+    if (newSev > prevSev && newSev >= 2) {
+      const svc = FLUX_SERVICES.find((s) => s.key === key);
+      const label = svc?.label || key;
+      try {
+        new Notification(`CRISIS38 — ${label}`, {
+          body: `Niveau ${newLevel.toUpperCase()} (précédent : ${prevLevel})`,
+          icon: '/favicon.ico',
+          tag: `svc-alert-${key}`,
+        });
+      } catch (_) {}
+    }
+  }
+}
+
+async function requestNotificationPermission() {
+  if (!('Notification' in window)) return;
+  const perm = await Notification.requestPermission();
+  notificationsEnabled = perm === 'granted';
+  _updateNotifBtn();
+}
+
+function _updateNotifBtn() {
+  const btn = document.getElementById('notif-permission-btn');
+  if (!btn) return;
+  if (!('Notification' in window)) { btn.style.display = 'none'; return; }
+  const p = Notification.permission;
+  btn.textContent = p === 'granted' ? '🔔 Actif' : p === 'denied' ? '🔕 Bloqué' : '🔔 Alertes';
+  btn.title = p === 'granted' ? 'Notifications push activées' : p === 'denied' ? 'Notifications bloquées — autoriser dans le navigateur' : 'Activer les notifications push';
+  notificationsEnabled = p === 'granted';
+  btn.style.color = p === 'granted' ? 'var(--level-vert, #2b8a3e)' : p === 'denied' ? 'var(--level-rouge, #c92a2a)' : '';
+}
+
+(function initNotifBtn() {
+  const btn = document.getElementById('notif-permission-btn');
+  if (!btn) return;
+  _updateNotifBtn();
+  btn.addEventListener('click', requestNotificationPermission);
+})();
+
+// Hook into SSE handler — call after mergeExternalRisksSnapshot
+const _origSSEMerge = typeof mergeExternalRisksSnapshot === 'function' ? mergeExternalRisksSnapshot : null;
+
+// ════════════════════════════════════════════════════════════════════════════
+// FEATURE 11 — Copernicus EMS widget
+// ════════════════════════════════════════════════════════════════════════════
+
+function renderCopernicusEmsWidget(data = {}) {
+  const france = data.france_total ?? 0;
+  const total = data.activations_total ?? 0;
+  const level = france > 0 ? 'orange' : 'vert';
+  setRiskText('copernicus-svc-status', `${france} activation(s) France · ${total} Europe`, level);
+  const items = Array.isArray(data.france_activations) ? data.france_activations : [];
+  const all = items.length ? items : (Array.isArray(data.activations) ? data.activations.slice(0, 5) : []);
+  setHtml('copernicus-svc-list', all.map((a) =>
+    `<li>🛰️ <strong>${escapeHtml(a.title || a.id || '?')}</strong> <span class="muted">— ${escapeHtml(a.type || 'FLOOD')} — ${escapeHtml(a.date || '?')}</span></li>`
+  ).join('') || '<li class="muted">Aucune activation Copernicus EMS active pour la France.</li>');
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// FEATURE 3 — Historique des alertes
+// ════════════════════════════════════════════════════════════════════════════
+
+let _alertsChartInstance = null;
+
+async function loadAlertsHistory() {
+  const el = document.getElementById('alerts-list');
+  if (el) el.innerHTML = '<p class="muted">Chargement…</p>';
+  try {
+    const data = await api('/api/alerts/history?days=30&limit=300');
+    renderAlertsHistory(Array.isArray(data) ? data : []);
+  } catch (err) {
+    if (el) el.innerHTML = `<p class="error">Erreur : ${escapeHtml(sanitizeErrorMessage(err.message))}</p>`;
+  }
+}
+
+function renderAlertsHistory(alerts) {
+  // ── Chart : alertes par jour ─────────────────────────────────────────────
+  const canvas = document.getElementById('alerts-chart');
+  if (canvas) {
+    const countsByDay = {};
+    alerts.forEach((a) => {
+      const day = (a.triggered_at || '').slice(0, 10);
+      if (day) countsByDay[day] = (countsByDay[day] || 0) + 1;
+    });
+    const days = [];
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 86400000);
+      days.push(d.toISOString().slice(0, 10));
+    }
+    const counts = days.map((d) => countsByDay[d] || 0);
+    if (_alertsChartInstance) _alertsChartInstance.destroy();
+    _alertsChartInstance = new Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels: days.map((d) => d.slice(5)),
+        datasets: [{
+          label: 'Alertes / jour',
+          data: counts,
+          backgroundColor: 'rgba(230, 119, 0, 0.7)',
+          borderColor: 'rgba(230, 119, 0, 1)',
+          borderWidth: 1,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } },
+      },
+    });
+  }
+
+  // ── Liste des alertes ────────────────────────────────────────────────────
+  const el = document.getElementById('alerts-list');
+  if (!el) return;
+  if (!alerts.length) {
+    el.innerHTML = '<p class="muted" style="padding:1rem">Aucune alerte enregistrée ces 30 derniers jours.</p>';
+    return;
+  }
+  const levelColor = { vert: '#2b8a3e', jaune: '#e9a800', orange: '#e67700', rouge: '#c92a2a', degraded: '#e67700', unavailable: '#c92a2a', stale: '#868e96' };
+  el.innerHTML = alerts.map((a) => {
+    const newCol = levelColor[a.new_level] || '#868e96';
+    const prevCol = levelColor[a.previous_level] || '#868e96';
+    const dt = new Date(a.triggered_at);
+    const dtStr = isNaN(dt) ? '' : dt.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const svc = FLUX_SERVICES.find((s) => s.key === a.service_key);
+    const icon = svc?.icon || '📡';
+    return `<div class="flux-row" style="align-items:center;gap:.5rem;padding:.5rem .75rem">
+      <span style="font-size:1.1rem">${icon}</span>
+      <div style="flex:1;min-width:0">
+        <strong>${escapeHtml(a.service_label || a.service_key)}</strong>
+        <span class="muted" style="font-size:.8rem;margin-left:.4rem">${escapeHtml(dtStr)}</span>
+      </div>
+      <span style="color:${prevCol};font-weight:600;font-size:.85rem">${escapeHtml(a.previous_level || '?')}</span>
+      <span class="muted" style="font-size:.8rem">→</span>
+      <span style="color:${newCol};font-weight:700;font-size:.9rem">${escapeHtml(a.new_level)}</span>
+    </div>`;
+  }).join('');
+}
+
+// Bind alerts panel
+(function initAlertsPanel() {
+  const btn = document.getElementById('alerts-refresh-btn');
+  if (btn) btn.addEventListener('click', loadAlertsHistory);
+  document.querySelectorAll('.menu-btn[data-target="alerts-panel"]').forEach((b) => {
+    b.addEventListener('click', () => loadAlertsHistory());
+  });
+})();
+
+// ════════════════════════════════════════════════════════════════════════════
+// FEATURE 8 — Ressources opérationnelles
+// ════════════════════════════════════════════════════════════════════════════
+
+let cachedResources = [];
+let _editingResourceId = null;
+let resourcesMapLayer = null;
+
+const _RESOURCE_TYPE_LABELS = {
+  vehicule_lsc: 'Véhicule LSC', vehicule_vttu: 'Véhicule VTTU', vehicule_vtu: 'Véhicule VTU / pick-up',
+  vehicule_pl: 'Camion / Poids lourd', vehicule_tp: 'Transport personnel',
+  groupe_electrogene: 'Groupe électrogène', lot_eau_potable: 'Lot eau potable',
+  lot_soutien_vie: 'Lot soutien vie (VSB)', materiel_eclairage: "Mât d'éclairage",
+  equipe_secours: 'Équipe secours', equipe_logistique: 'Équipe logistique',
+  poste_secours: 'Poste de secours médical', autre: 'Autre matériel',
+};
+
+const _RESOURCE_STATUS_META = {
+  disponible:  { label: 'Disponible',   color: '#2b8a3e', bg: '#d3f9d8' },
+  en_alerte:   { label: 'En alerte',    color: '#e9a800', bg: '#fff3bf' },
+  engage:      { label: 'Engagé',       color: '#e67700', bg: '#ffe8cc' },
+  hors_service:{ label: 'Hors service', color: '#c92a2a', bg: '#ffe3e3' },
+};
+
+async function loadResources() {
+  try {
+    const data = await api('/resources');
+    cachedResources = Array.isArray(data) ? data : [];
+    renderResourcesList();
+    renderResourcesMapLayer();
+  } catch (err) {
+    const el = document.getElementById('resources-list');
+    if (el) el.innerHTML = `<p class="error">Erreur : ${escapeHtml(sanitizeErrorMessage(err.message))}</p>`;
+  }
+}
+
+function renderResourcesList() {
+  const filterSel = document.getElementById('resource-status-filter');
+  const filterVal = filterSel?.value || 'all';
+  const filtered = filterVal === 'all' ? cachedResources : cachedResources.filter((r) => r.status === filterVal);
+
+  // Summary badges
+  const summaryEl = document.getElementById('resources-summary');
+  if (summaryEl) {
+    const counts = {};
+    cachedResources.forEach((r) => { counts[r.status] = (counts[r.status] || 0) + 1; });
+    summaryEl.innerHTML = Object.entries(_RESOURCE_STATUS_META).map(([key, meta]) => {
+      const n = counts[key] || 0;
+      return `<span style="background:${meta.bg};color:${meta.color};padding:.2rem .6rem;border-radius:.4rem;font-size:.82rem;font-weight:600">${meta.label}: ${n}</span>`;
+    }).join('');
+  }
+
+  const el = document.getElementById('resources-list');
+  if (!el) return;
+  if (!filtered.length) {
+    el.innerHTML = '<p class="muted" style="padding:1rem">Aucune ressource enregistrée.</p>';
+    return;
+  }
+
+  const isEditor = currentUser?.role === 'admin' || currentUser?.role === 'ope';
+  el.innerHTML = filtered.map((r) => {
+    const meta = _RESOURCE_STATUS_META[r.status] || { label: r.status, color: '#868e96', bg: '#f1f3f5' };
+    const typeLabel = _RESOURCE_TYPE_LABELS[r.resource_type] || r.resource_type;
+    const pos = (r.lat != null && r.lon != null) ? `<span class="muted" style="font-size:.78rem">📍 ${Number(r.lat).toFixed(4)}, ${Number(r.lon).toFixed(4)}</span>` : '';
+    const editBtns = isEditor ? `
+      <button class="ghost" style="font-size:.78rem;padding:.15rem .4rem" onclick="_editResource(${r.id})" title="Modifier">✏️</button>
+      <button class="ghost" style="font-size:.78rem;padding:.15rem .4rem;color:#c92a2a" onclick="_deleteResource(${r.id})" title="Supprimer">🗑️</button>` : '';
+    return `<div class="flux-row" style="gap:.6rem;padding:.5rem .75rem;align-items:flex-start">
+      <span style="background:${meta.bg};color:${meta.color};font-size:.78rem;font-weight:700;padding:.15rem .45rem;border-radius:.35rem;white-space:nowrap;margin-top:.1rem">${meta.label}</span>
+      <div style="flex:1;min-width:0">
+        <strong>${escapeHtml(r.name)}</strong>
+        <span class="muted" style="font-size:.82rem;margin-left:.4rem">${escapeHtml(typeLabel)}</span>
+        ${r.unit ? `<span class="muted" style="font-size:.78rem;margin-left:.4rem">· ${escapeHtml(r.unit)}</span>` : ''}
+        ${r.notes ? `<p class="muted" style="font-size:.78rem;margin:.1rem 0 0">${escapeHtml(r.notes)}</p>` : ''}
+        ${pos}
+      </div>
+      <div style="display:flex;gap:.25rem;flex-shrink:0">${editBtns}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderResourcesMapLayer() {
+  if (!leafletMap) return;
+  if (resourcesMapLayer) resourcesMapLayer.clearLayers();
+  if (!resourcesMapLayer) {
+    resourcesMapLayer = L.layerGroup().addTo(leafletMap);
+  }
+  const colors = { disponible: '#2b8a3e', en_alerte: '#e9a800', engage: '#e67700', hors_service: '#c92a2a' };
+  cachedResources.filter((r) => r.lat != null && r.lon != null).forEach((r) => {
+    const col = colors[r.status] || '#868e96';
+    const icon = L.divIcon({
+      className: '',
+      html: `<div style="background:${col};color:#fff;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.4)">R</div>`,
+      iconSize: [24, 24],
+      iconAnchor: [12, 12],
+    });
+    L.marker([r.lat, r.lon], { icon })
+      .addTo(resourcesMapLayer)
+      .bindPopup(`<strong>${escapeHtml(r.name)}</strong><br>${escapeHtml(_RESOURCE_STATUS_META[r.status]?.label || r.status)}<br>${escapeHtml(_RESOURCE_TYPE_LABELS[r.resource_type] || r.resource_type)}`);
+  });
+}
+
+function _openResourceModal(resource = null) {
+  _editingResourceId = resource ? resource.id : null;
+  document.getElementById('resource-modal-title').textContent = resource ? 'Modifier la ressource' : 'Nouvelle ressource';
+  document.getElementById('resource-name').value = resource?.name || '';
+  document.getElementById('resource-type').value = resource?.resource_type || 'vehicule_lsc';
+  document.getElementById('resource-status-input').value = resource?.status || 'disponible';
+  document.getElementById('resource-unit').value = resource?.unit || '';
+  document.getElementById('resource-notes').value = resource?.notes || '';
+  document.getElementById('resource-lat').value = resource?.lat ?? '';
+  document.getElementById('resource-lon').value = resource?.lon ?? '';
+  const modal = document.getElementById('resource-modal');
+  modal.classList.remove('hidden');
+  modal.hidden = false;
+}
+
+function _closeResourceModal() {
+  const modal = document.getElementById('resource-modal');
+  modal.classList.add('hidden');
+  modal.hidden = true;
+  _editingResourceId = null;
+}
+
+function _editResource(id) {
+  const r = cachedResources.find((x) => x.id === id);
+  if (r) _openResourceModal(r);
+}
+
+async function _deleteResource(id) {
+  if (!confirm('Supprimer cette ressource ?')) return;
+  try {
+    await api(`/resources/${id}`, { method: 'DELETE' });
+    await loadResources();
+  } catch (err) {
+    alert(`Erreur : ${sanitizeErrorMessage(err.message)}`);
+  }
+}
+
+(function initResourcesPanel() {
+  const addBtn = document.getElementById('resource-add-btn');
+  if (addBtn) addBtn.addEventListener('click', () => _openResourceModal(null));
+
+  const closeBtn = document.getElementById('resource-modal-close');
+  const cancelBtn = document.getElementById('resource-modal-cancel');
+  if (closeBtn) closeBtn.addEventListener('click', _closeResourceModal);
+  if (cancelBtn) cancelBtn.addEventListener('click', _closeResourceModal);
+
+  const form = document.getElementById('resource-form');
+  if (form) {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const latVal = document.getElementById('resource-lat').value;
+      const lonVal = document.getElementById('resource-lon').value;
+      const payload = {
+        name: document.getElementById('resource-name').value.trim(),
+        resource_type: document.getElementById('resource-type').value,
+        status: document.getElementById('resource-status-input').value,
+        unit: document.getElementById('resource-unit').value.trim() || null,
+        notes: document.getElementById('resource-notes').value.trim() || null,
+        lat: latVal !== '' ? parseFloat(latVal) : null,
+        lon: lonVal !== '' ? parseFloat(lonVal) : null,
+      };
+      try {
+        if (_editingResourceId) {
+          await api(`/resources/${_editingResourceId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        } else {
+          await api('/resources', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        }
+        _closeResourceModal();
+        await loadResources();
+      } catch (err) {
+        alert(`Erreur : ${sanitizeErrorMessage(err.message)}`);
+      }
+    });
+  }
+
+  const filterSel = document.getElementById('resource-status-filter');
+  if (filterSel) filterSel.addEventListener('change', renderResourcesList);
+
+  document.querySelectorAll('.menu-btn[data-target="resources-panel"]').forEach((b) => {
+    b.addEventListener('click', () => loadResources());
+  });
+})();
+
+// ════════════════════════════════════════════════════════════════════════════
+// FEATURE 10 — Météo hyper-locale (Open-Meteo)
+// ════════════════════════════════════════════════════════════════════════════
+
+let _mapWeatherMode = false;
+let _meteoLocalTempChart = null;
+let _meteoLocalRainChart = null;
+
+const _WMO_LABELS = {
+  0: 'Ciel dégagé', 1: 'Principalement dégagé', 2: 'Partiellement nuageux', 3: 'Couvert',
+  45: 'Brouillard', 48: 'Brouillard givrant', 51: 'Bruine légère', 53: 'Bruine modérée', 55: 'Bruine forte',
+  61: 'Pluie légère', 63: 'Pluie modérée', 65: 'Pluie forte', 71: 'Neige légère', 73: 'Neige modérée', 75: 'Neige forte',
+  80: 'Averses légères', 81: 'Averses modérées', 82: 'Averses violentes',
+  95: 'Orage', 96: 'Orage avec grêle légère', 99: 'Orage avec grêle forte',
+};
+
+function _toggleMapWeatherMode() {
+  _mapWeatherMode = !_mapWeatherMode;
+  const btn = document.getElementById('map-weather-btn');
+  if (btn) {
+    btn.style.background = _mapWeatherMode ? 'rgba(59,130,246,.15)' : '';
+    btn.style.borderColor = _mapWeatherMode ? '#3b82f6' : '';
+    btn.title = _mapWeatherMode ? 'Cliquez sur la carte pour la météo · Cliquer ici pour désactiver' : 'Cliquer sur la carte pour obtenir la météo locale';
+  }
+  if (leafletMap) {
+    leafletMap.getContainer().style.cursor = _mapWeatherMode ? 'crosshair' : '';
+  }
+}
+
+async function _fetchAndShowLocalWeather(lat, lon) {
+  _toggleMapWeatherMode(); // désactiver après clic
+  const modal = document.getElementById('meteo-local-modal');
+  const content = document.getElementById('meteo-local-content');
+  const titleEl = document.getElementById('meteo-local-title');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  modal.hidden = false;
+  if (content) content.innerHTML = '<p class="muted">Chargement des prévisions…</p>';
+  if (titleEl) titleEl.textContent = `⛅ Météo · ${lat.toFixed(4)}°N, ${lon.toFixed(4)}°E`;
+  try {
+    const data = await api(`/api/meteo/local?lat=${lat}&lon=${lon}`);
+    _renderLocalWeatherModal(data, lat, lon);
+  } catch (err) {
+    if (content) content.innerHTML = `<p class="error">Impossible de charger la météo : ${escapeHtml(sanitizeErrorMessage(err.message))}</p>`;
+  }
+}
+
+function _renderLocalWeatherModal(data, lat, lon) {
+  const content = document.getElementById('meteo-local-content');
+  const hourly = data?.hourly || {};
+  const times = (hourly.time || []).slice(0, 24);
+  const temps = (hourly.temperature_2m || []).slice(0, 24);
+  const rains = (hourly.precipitation || []).slice(0, 24);
+  const winds = (hourly.windspeed_10m || []).slice(0, 24);
+  const codes = (hourly.weathercode || []).slice(0, 24);
+
+  // Summary info
+  const nowHour = new Date().getHours();
+  const currTemp = temps[nowHour] ?? temps[0];
+  const currWind = winds[nowHour] ?? winds[0];
+  const currCode = codes[nowHour] ?? codes[0];
+  const currDesc = _WMO_LABELS[currCode] || 'Inconnu';
+  const maxTemp = Math.max(...temps.filter(Number.isFinite));
+  const minTemp = Math.min(...temps.filter(Number.isFinite));
+  const totalRain = rains.filter(Number.isFinite).reduce((a, b) => a + b, 0);
+
+  if (content) {
+    content.innerHTML = `
+      <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:.75rem">
+        <div style="flex:1;min-width:120px;background:var(--panel-bg,#f8f9fa);border-radius:.4rem;padding:.6rem .8rem">
+          <div style="font-size:1.4rem;font-weight:700">${currTemp != null ? currTemp + '°C' : '—'}</div>
+          <div class="muted" style="font-size:.82rem">${escapeHtml(currDesc)}</div>
+        </div>
+        <div style="flex:1;min-width:120px;background:var(--panel-bg,#f8f9fa);border-radius:.4rem;padding:.6rem .8rem">
+          <div style="font-size:.82rem" class="muted">Min / Max 24h</div>
+          <div style="font-weight:600">${minTemp}° / ${maxTemp}°C</div>
+        </div>
+        <div style="flex:1;min-width:120px;background:var(--panel-bg,#f8f9fa);border-radius:.4rem;padding:.6rem .8rem">
+          <div style="font-size:.82rem" class="muted">Précipitations 24h</div>
+          <div style="font-weight:600">${totalRain.toFixed(1)} mm</div>
+        </div>
+        <div style="flex:1;min-width:120px;background:var(--panel-bg,#f8f9fa);border-radius:.4rem;padding:.6rem .8rem">
+          <div style="font-size:.82rem" class="muted">Vent actuellement</div>
+          <div style="font-weight:600">${currWind != null ? currWind + ' km/h' : '—'}</div>
+        </div>
+      </div>
+      <p class="muted" style="font-size:.78rem">Source : Open-Meteo · ${lat.toFixed(4)}°N, ${lon.toFixed(4)}°E</p>`;
+  }
+
+  // Temperature chart
+  const labels = times.map((t) => t.slice(11, 16));
+  const tempCanvas = document.getElementById('meteo-local-temp-chart');
+  if (tempCanvas) {
+    if (_meteoLocalTempChart) _meteoLocalTempChart.destroy();
+    _meteoLocalTempChart = new Chart(tempCanvas, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Température (°C)',
+          data: temps,
+          borderColor: '#e67700',
+          backgroundColor: 'rgba(230,119,0,.1)',
+          tension: 0.4,
+          pointRadius: 0,
+          fill: true,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: { y: { title: { display: true, text: '°C' } } },
+      },
+    });
+  }
+
+  // Rain chart
+  const rainCanvas = document.getElementById('meteo-local-rain-chart');
+  if (rainCanvas) {
+    if (_meteoLocalRainChart) _meteoLocalRainChart.destroy();
+    _meteoLocalRainChart = new Chart(rainCanvas, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Précipitations (mm)',
+          data: rains,
+          backgroundColor: 'rgba(59,130,246,.65)',
+          borderColor: 'rgba(59,130,246,1)',
+          borderWidth: 1,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true, title: { display: true, text: 'mm' } } },
+      },
+    });
+  }
+}
+
+(function initMeteoLocalFeature() {
+  const weatherBtn = document.getElementById('map-weather-btn');
+  if (weatherBtn) weatherBtn.addEventListener('click', _toggleMapWeatherMode);
+
+  const closeBtn = document.getElementById('meteo-local-close');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => {
+      const modal = document.getElementById('meteo-local-modal');
+      if (modal) { modal.classList.add('hidden'); modal.hidden = true; }
+    });
+  }
+})();
+
+// Hook on Leaflet map click for weather mode
+(function _hookMapClickForWeather() {
+  const _waitAndHook = () => {
+    if (leafletMap) {
+      leafletMap.on('click', (e) => {
+        if (!_mapWeatherMode) return;
+        _fetchAndShowLocalWeather(e.latlng.lat, e.latlng.lng);
+      });
+    } else {
+      setTimeout(_waitAndHook, 500);
+    }
+  };
+  setTimeout(_waitAndHook, 1000);
+})();
+
+// ════════════════════════════════════════════════════════════════════════════
+// FEATURE 15 — Journal d'audit
+// ════════════════════════════════════════════════════════════════════════════
+
+async function loadAuditLog() {
+  const userFilter = (document.getElementById('audit-user-filter')?.value || '').trim();
+  const typeFilter = document.getElementById('audit-type-filter')?.value || '';
+  const el = document.getElementById('audit-list');
+  if (el) el.innerHTML = '<p class="muted">Chargement…</p>';
+  let url = '/api/audit?limit=100';
+  if (userFilter) url += `&username=${encodeURIComponent(userFilter)}`;
+  if (typeFilter) url += `&resource_type=${encodeURIComponent(typeFilter)}`;
+  try {
+    const data = await api(url);
+    renderAuditLog(Array.isArray(data) ? data : []);
+  } catch (err) {
+    if (el) el.innerHTML = `<p class="error">Erreur : ${escapeHtml(sanitizeErrorMessage(err.message))}</p>`;
+  }
+}
+
+function renderAuditLog(logs) {
+  const el = document.getElementById('audit-list');
+  if (!el) return;
+  if (!logs.length) {
+    el.innerHTML = '<p class="muted" style="padding:1rem">Aucune action enregistrée.</p>';
+    return;
+  }
+  const methodColor = { POST: '#2b8a3e', PATCH: '#e9a800', PUT: '#e9a800', DELETE: '#c92a2a', GET: '#1971c2' };
+  el.innerHTML = logs.map((a) => {
+    const dt = new Date(a.created_at);
+    const dtStr = isNaN(dt) ? '' : dt.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const [method] = (a.action || '').split(' ');
+    const col = methodColor[method] || '#868e96';
+    const sc = a.status_code;
+    const scCol = sc >= 400 ? '#c92a2a' : sc >= 300 ? '#e9a800' : '#2b8a3e';
+    return `<div class="flux-row" style="gap:.5rem;padding:.4rem .75rem;align-items:center;font-size:.83rem">
+      <span style="color:${col};font-weight:700;font-size:.78rem;min-width:50px">${escapeHtml(method || '?')}</span>
+      <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(a.action)}">${escapeHtml(a.action)}</span>
+      <span class="muted" style="min-width:80px;text-align:right">${escapeHtml(a.username)}</span>
+      <span style="color:${scCol};min-width:30px;text-align:right;font-weight:600">${sc || ''}</span>
+      <span class="muted" style="min-width:110px;text-align:right">${escapeHtml(dtStr)}</span>
+    </div>`;
+  }).join('');
+}
+
+(function initAuditPanel() {
+  const btn = document.getElementById('audit-refresh-btn');
+  if (btn) btn.addEventListener('click', loadAuditLog);
+
+  const userFilter = document.getElementById('audit-user-filter');
+  if (userFilter) userFilter.addEventListener('keydown', (e) => { if (e.key === 'Enter') loadAuditLog(); });
+
+  const typeFilter = document.getElementById('audit-type-filter');
+  if (typeFilter) typeFilter.addEventListener('change', loadAuditLog);
+
+  document.querySelectorAll('.menu-btn[data-target="audit-panel"]').forEach((b) => {
+    b.addEventListener('click', () => loadAuditLog());
+  });
+
+  // Show audit button only for admin
+  const auditMenuBtn = document.getElementById('menu-audit-btn');
+  if (auditMenuBtn && typeof currentUser !== 'undefined') {
+    const _showIfAdmin = () => {
+      if (currentUser?.role === 'admin') {
+        auditMenuBtn.classList.remove('hidden');
+        auditMenuBtn.hidden = false;
+      }
+    };
+    setTimeout(_showIfAdmin, 2000);
+  }
+
+  // Update export link with auth token
+  const exportLink = document.getElementById('audit-export-link');
+  if (exportLink && typeof token !== 'undefined') {
+    exportLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      const days = 30;
+      const url = `/api/audit/export/csv?days=${days}`;
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `audit_${new Date().toISOString().slice(0,10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    });
+  }
+})();
+

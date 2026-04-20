@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import Base, SessionLocal, engine, get_db
-from .models import IncidentEvent, InstitutionPoint, MapAnnotation, MapPoint, Municipality, MunicipalityDocument, OperationalLog, PublicShare, RiverStation, User, WeatherAlert
+from .models import AlertHistory, AuditLog, IncidentEvent, InstitutionPoint, MapAnnotation, MapPoint, Municipality, MunicipalityDocument, OperationalLog, OperationalResource, PublicShare, RiverStation, User, WeatherAlert
 from .schemas import (
     MapAnnotationCreate,
     MapAnnotationOut,
@@ -88,6 +88,7 @@ from .services import (
     fetch_avalanche_isere,
     fetch_feux_foret_isere,
     fetch_cols_alpins_isere,
+    fetch_copernicus_ems_france,
     generate_pdf_report,
     resolve_commune_insee_code,
     vigicrues_geojson_from_stations,
@@ -209,12 +210,96 @@ with engine.begin() as conn:
         )
     """))
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_institution_points_type ON institution_points(type)"))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS alert_history (
+            id SERIAL PRIMARY KEY,
+            service_key VARCHAR(80) NOT NULL,
+            service_label VARCHAR(120) NOT NULL,
+            new_level VARCHAR(20) NOT NULL,
+            previous_level VARCHAR(20),
+            detail TEXT,
+            triggered_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+    """))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_alert_history_triggered_at ON alert_history(triggered_at DESC)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_alert_history_service_key ON alert_history(service_key)"))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS operational_resources (
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(120) NOT NULL,
+            resource_type VARCHAR(60) NOT NULL DEFAULT 'autre',
+            status VARCHAR(30) NOT NULL DEFAULT 'disponible',
+            unit VARCHAR(80),
+            notes TEXT,
+            lat DOUBLE PRECISION,
+            lon DOUBLE PRECISION,
+            municipality_id INTEGER REFERENCES municipalities(id) ON DELETE SET NULL,
+            created_by_id INTEGER NOT NULL REFERENCES users(id),
+            created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+    """))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_operational_resources_status ON operational_resources(status)"))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id SERIAL PRIMARY KEY,
+            username VARCHAR(80) NOT NULL,
+            action VARCHAR(160) NOT NULL,
+            resource_type VARCHAR(80),
+            details TEXT,
+            ip_address VARCHAR(60),
+            status_code INTEGER,
+            created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+    """))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at DESC)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_audit_log_username ON audit_log(username)"))
 
 
 app = FastAPI(title=settings.app_name)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.add_middleware(GZipMiddleware, minimum_size=800)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+
+
+@app.middleware("http")
+async def audit_log_middleware(request: Request, call_next):
+    response = await call_next(request)
+    method = request.method
+    path = request.url.path
+    should_log = (
+        method in ("POST", "PATCH", "PUT", "DELETE")
+        or (method == "GET" and "/export/" in path)
+    )
+    if should_log and not path.startswith(("/static", "/health")):
+        username = _get_request_username(request)
+        ip = _get_client_ip(request)
+        action = f"{method} {path}"
+        resource_type = _path_resource_type(path)
+        status_code = response.status_code
+
+        def _write():
+            db = None
+            try:
+                db = SessionLocal()
+                db.add(AuditLog(
+                    username=username,
+                    action=action,
+                    resource_type=resource_type,
+                    ip_address=ip,
+                    status_code=status_code,
+                ))
+                db.commit()
+            except Exception:
+                pass
+            finally:
+                if db:
+                    db.close()
+
+        import asyncio as _asyncio
+        loop = _asyncio.get_event_loop()
+        loop.run_in_executor(None, _write)
+    return response
 
 ALLOWED_WEATHER_TRANSITIONS = {("jaune", "orange"), ("orange", "rouge")}
 READ_ROLES = {"admin", "ope", "securite", "visiteur", "mairie"}
@@ -255,6 +340,7 @@ SERVICE_REFRESH_INTERVALS: dict[str, int] = {
     "avalanche_isere":     1800,    # BRA Météo-France massifs Isère
     "feux_foret_isere":     600,    # Feux de forêt EFFIS/JRC
     "cols_alpins_isere":   1800,    # État cols alpins Isère (open-meteo)
+    "copernicus_ems":      1800,    # Copernicus EMS cartographie d'urgence
 }
 
 _external_risks_snapshot_lock = Lock()
@@ -274,6 +360,111 @@ _map_annotations_revision = 0
 _weather_cleanup_lock = Lock()
 _last_weather_cleanup_at: datetime | None = None
 _WEATHER_CLEANUP_MIN_INTERVAL = timedelta(minutes=10)
+
+# ── Alert history tracking ──────────────────────────────────────────────────
+_LEVEL_SEVERITY: dict[str, int] = {
+    "inconnu": -1, "pending": -1,
+    "vert": 0, "online": 0, "partial": 0,
+    "jaune": 1, "stale": 1,
+    "orange": 2, "degraded": 2,
+    "rouge": 3, "unavailable": 3,
+}
+_alert_prev_levels: dict[str, str] = {}
+_alert_prev_levels_lock = Lock()
+
+
+def _extract_level_from_slot(key: str, data: dict) -> str:
+    status = str(data.get("status") or "inconnu")
+    if status in ("error", "unavailable"):
+        return "rouge"
+    if key == "meteo_france":
+        return str(data.get("level") or status)
+    if key == "vigicrues":
+        return str(data.get("water_alert_level") or status)
+    if key == "apic_isere":
+        return "orange" if (data.get("alerts_total") or 0) > 0 else "vert"
+    if key == "avalanche_isere":
+        n = data.get("niveau_max_bra") or 0
+        if n >= 4: return "rouge"
+        if n >= 3: return "orange"
+        if n >= 2: return "jaune"
+        return "vert"
+    if key == "feux_foret_isere":
+        t = data.get("fires_total") or 0
+        return "orange" if t > 5 else "jaune" if t > 0 else "vert"
+    return status
+
+
+_SVC_LABELS: dict[str, str] = {
+    "meteo_france": "Météo-France", "vigicrues": "Vigicrues", "apic_isere": "APIC",
+    "avalanche_isere": "Avalanches BRA", "feux_foret_isere": "Feux de forêt EFFIS",
+    "seismes_isere": "Séismes Isère", "vigicrues_flash_isere": "Vigicrues Flash",
+    "vigieau": "Vigieau", "atmo_aura": "Atmo AURA", "copernicus_ems": "Copernicus EMS",
+    "cols_alpins_isere": "Cols alpins", "prefecture_isere": "Préfecture Isère",
+}
+
+
+def _check_and_record_alert(key: str, new_data: dict) -> None:
+    new_level = _extract_level_from_slot(key, new_data)
+    with _alert_prev_levels_lock:
+        prev_level = _alert_prev_levels.get(key)
+        _alert_prev_levels[key] = new_level
+    if prev_level is None or prev_level == new_level:
+        return
+    prev_sev = _LEVEL_SEVERITY.get(prev_level, 0)
+    new_sev = _LEVEL_SEVERITY.get(new_level, 0)
+    if prev_sev == new_sev or (prev_sev <= 0 and new_sev <= 0):
+        return
+    label = _SVC_LABELS.get(key, key)
+    db = None
+    try:
+        db = SessionLocal()
+        db.add(AlertHistory(
+            service_key=key,
+            service_label=label,
+            new_level=new_level,
+            previous_level=prev_level,
+            detail=f"{label}: {prev_level} → {new_level}",
+        ))
+        db.commit()
+    except Exception:
+        pass
+    finally:
+        if db:
+            db.close()
+
+
+# ── Audit helpers ────────────────────────────────────────────────────────────
+def _get_request_username(request: Request) -> str:
+    try:
+        auth = request.headers.get("Authorization", "")
+        tok = auth[7:].strip() if auth.startswith("Bearer ") else ""
+        if not tok:
+            return "anonymous"
+        payload = jwt.decode(tok, settings.secret_key, algorithms=["HS256"])
+        return str(payload.get("sub") or "anonymous")
+    except Exception:
+        return "anonymous"
+
+
+def _get_client_ip(request: Request) -> str:
+    fwd = request.headers.get("X-Forwarded-For")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _path_resource_type(path: str) -> str:
+    if "/auth/" in path:        return "auth"
+    if "/municipalities" in path: return "municipalities"
+    if "/logs" in path:         return "logs"
+    if "/events" in path:       return "events"
+    if "/resources" in path:    return "resources"
+    if "/map" in path:          return "map"
+    if "/notifications" in path: return "notifications"
+    if "/reports" in path:      return "reports"
+    if "/users" in path:        return "users"
+    return "api"
 
 
 def bump_map_annotations_revision() -> int:
@@ -1074,6 +1265,7 @@ def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str])
         "avalanche_isere": (lambda: fetch_avalanche_isere(force_refresh=refresh), {"status": "pending", "massifs": [], "massifs_total": 0, "niveau_global": "gris"}),
         "feux_foret_isere": (lambda: fetch_feux_foret_isere(force_refresh=refresh), {"status": "pending", "fires": [], "fires_total": 0}),
         "cols_alpins_isere": (lambda: fetch_cols_alpins_isere(force_refresh=refresh), {"status": "pending", "cols": [], "cols_total": 0, "dangereux_total": 0}),
+        "copernicus_ems": (lambda: fetch_copernicus_ems_france(force_refresh=refresh), {"status": "pending", "activations": [], "activations_total": 0, "france_total": 0, "france_activations": []}),
     }
 
 
@@ -2670,8 +2862,8 @@ _orig_update_service_slot = _update_service_slot
 
 def _update_service_slot_with_notif(key: str, result: dict) -> None:
     _orig_update_service_slot(key, result)
-    # Lancer la vérification en thread séparé pour ne pas bloquer la boucle de refresh
     Thread(target=_check_and_send_notifications, args=(key, result), daemon=True).start()
+    Thread(target=_check_and_record_alert, args=(key, result), daemon=True).start()
 
 
 _update_service_slot = _update_service_slot_with_notif  # type: ignore[assignment]
@@ -2846,3 +3038,233 @@ def get_agent_locations(_: User = Depends(get_active_user)):
         return {"agents": agents}
     except Exception:
         return {"agents": []}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# FEATURE 3 — Historique des alertes
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/alerts/history")
+def get_alerts_history(
+    days: int = Query(30, ge=1, le=90),
+    limit: int = Query(300, ge=1, le=1000),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(*READ_ROLES)),
+):
+    since = datetime.utcnow() - timedelta(days=days)
+    alerts = (
+        db.query(AlertHistory)
+        .filter(AlertHistory.triggered_at >= since)
+        .order_by(AlertHistory.triggered_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "id": a.id,
+            "service_key": a.service_key,
+            "service_label": a.service_label,
+            "new_level": a.new_level,
+            "previous_level": a.previous_level,
+            "detail": a.detail,
+            "triggered_at": a.triggered_at.isoformat() + "Z",
+        }
+        for a in alerts
+    ]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# FEATURE 8 — Tableau de bord ressources opérationnelles
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _resource_to_dict(r: OperationalResource) -> dict:
+    return {
+        "id": r.id,
+        "name": r.name,
+        "resource_type": r.resource_type,
+        "status": r.status,
+        "unit": r.unit,
+        "notes": r.notes,
+        "lat": r.lat,
+        "lon": r.lon,
+        "municipality_id": r.municipality_id,
+        "created_by": r.created_by.username if r.created_by else None,
+        "created_at": r.created_at.isoformat() + "Z",
+        "updated_at": r.updated_at.isoformat() + "Z",
+    }
+
+
+@app.get("/resources")
+def list_resources(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*READ_ROLES)),
+):
+    q = db.query(OperationalResource)
+    if user.role == "mairie":
+        mid = get_user_municipality_id(user, db)
+        if mid:
+            q = q.filter(OperationalResource.municipality_id == mid)
+    return [_resource_to_dict(r) for r in q.order_by(OperationalResource.updated_at.desc()).all()]
+
+
+@app.post("/resources")
+async def create_resource(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles("admin", "ope")),
+):
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "Corps JSON invalide")
+    if not str(body.get("name") or "").strip():
+        raise HTTPException(400, "Nom requis")
+    r = OperationalResource(
+        name=str(body["name"])[:120],
+        resource_type=str(body.get("resource_type") or "autre")[:60],
+        status=str(body.get("status") or "disponible")[:30],
+        unit=str(body.get("unit") or "")[:80] or None,
+        notes=str(body.get("notes") or "")[:1000] or None,
+        lat=float(body["lat"]) if body.get("lat") is not None else None,
+        lon=float(body["lon"]) if body.get("lon") is not None else None,
+        municipality_id=int(body["municipality_id"]) if body.get("municipality_id") else None,
+        created_by_id=user.id,
+    )
+    db.add(r)
+    db.commit()
+    db.refresh(r)
+    return _resource_to_dict(r)
+
+
+@app.patch("/resources/{resource_id}")
+async def update_resource(
+    resource_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles("admin", "ope")),
+):
+    r = db.get(OperationalResource, resource_id)
+    if not r:
+        raise HTTPException(404, "Ressource introuvable")
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "Corps JSON invalide")
+    for field in ("name", "resource_type", "status", "unit", "notes"):
+        if field in body:
+            setattr(r, field, body[field])
+    if "lat" in body:
+        r.lat = float(body["lat"]) if body["lat"] is not None else None
+    if "lon" in body:
+        r.lon = float(body["lon"]) if body["lon"] is not None else None
+    if "municipality_id" in body:
+        r.municipality_id = int(body["municipality_id"]) if body["municipality_id"] else None
+    r.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(r)
+    return _resource_to_dict(r)
+
+
+@app.delete("/resources/{resource_id}")
+def delete_resource(
+    resource_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles("admin", "ope")),
+):
+    r = db.get(OperationalResource, resource_id)
+    if not r:
+        raise HTTPException(404, "Ressource introuvable")
+    db.delete(r)
+    db.commit()
+    return {"deleted": resource_id}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# FEATURE 10 — Météo hyper-locale (Open-Meteo proxy)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/meteo/local")
+def get_meteo_local(
+    lat: float = Query(..., ge=43.5, le=46.5),
+    lon: float = Query(..., ge=4.0, le=7.5),
+    _: User = Depends(require_roles(*READ_ROLES)),
+):
+    try:
+        url = (
+            "https://api.open-meteo.com/v1/forecast"
+            f"?latitude={lat}&longitude={lon}"
+            "&hourly=temperature_2m,precipitation,windspeed_10m,weathercode"
+            "&timezone=Europe%2FParis&forecast_days=2"
+        )
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as exc:
+        raise HTTPException(503, f"Open-Meteo indisponible: {exc}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# FEATURE 15 — Journal d'audit
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/audit")
+def get_audit_log(
+    limit: int = Query(100, ge=1, le=500),
+    username: str | None = Query(None),
+    resource_type: str | None = Query(None),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles("admin")),
+):
+    q = db.query(AuditLog).order_by(AuditLog.created_at.desc())
+    if username:
+        q = q.filter(AuditLog.username == username)
+    if resource_type:
+        q = q.filter(AuditLog.resource_type == resource_type)
+    return [
+        {
+            "id": a.id,
+            "username": a.username,
+            "action": a.action,
+            "resource_type": a.resource_type,
+            "ip_address": a.ip_address,
+            "status_code": a.status_code,
+            "created_at": a.created_at.isoformat() + "Z",
+        }
+        for a in q.limit(limit).all()
+    ]
+
+
+@app.get("/api/audit/export/csv")
+def export_audit_csv(
+    days: int = Query(30, ge=1, le=90),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles("admin")),
+):
+    since = datetime.utcnow() - timedelta(days=days)
+    logs = (
+        db.query(AuditLog)
+        .filter(AuditLog.created_at >= since)
+        .order_by(AuditLog.created_at.desc())
+        .all()
+    )
+
+    def _csv():
+        yield "id,username,action,resource_type,ip_address,status_code,created_at\n"
+        for a in logs:
+            fields = [
+                str(a.id),
+                a.username.replace(",", " "),
+                a.action.replace(",", " "),
+                (a.resource_type or "").replace(",", " "),
+                (a.ip_address or ""),
+                str(a.status_code or ""),
+                a.created_at.isoformat() + "Z",
+            ]
+            yield ",".join(fields) + "\n"
+
+    filename = f"audit_{datetime.utcnow().strftime('%Y%m%d')}.csv"
+    return StreamingResponse(
+        _csv(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
