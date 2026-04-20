@@ -1998,6 +1998,175 @@ function initMobileNav() {
   window._mobileNavHooked = true;
 }
 
+// ── Géolocalisation terrain (mobile uniquement) ──────────────────────────────
+const _GEO_STORAGE_KEY = 'agentDisplayName';
+const _GEO_INTERVAL_MS = 20000;
+
+const _geoState = {
+  active: false,
+  intervalId: null,
+  markersRefreshId: null,
+  wakeLock: null,
+  name: null,
+};
+
+let _agentMarkersLayer = null;
+
+function _initAgentMarkersLayer() {
+  if (!leafletMap || _agentMarkersLayer) return;
+  _agentMarkersLayer = window.L.layerGroup().addTo(leafletMap);
+}
+
+async function _refreshAgentMarkers() {
+  if (!leafletMap) return;
+  _initAgentMarkersLayer();
+  try {
+    const data = await api('/agents/locations', { bypassCache: true });
+    if (!data?.agents) return;
+    _agentMarkersLayer.clearLayers();
+    for (const agent of data.agents) {
+      const isMe = agent.user_id && _geoState.name && agent.name === _geoState.name;
+      const dotColor = isMe ? '#0b4daa' : '#e53935';
+      const icon = window.L.divIcon({
+        className: '',
+        html: `<div class="agent-marker${isMe ? ' agent-marker--me' : ''}">
+          <div class="agent-marker-dot" style="background:${dotColor}"></div>
+          <div class="agent-marker-label">${escapeHtml(agent.name)}</div>
+        </div>`,
+        iconAnchor: [9, 9],
+        iconSize: [90, 34],
+      });
+      const ts = agent.updated_at ? new Date(agent.updated_at).toLocaleTimeString('fr-FR') : '';
+      window.L.marker([agent.lat, agent.lon], { icon })
+        .bindPopup(`<strong>${escapeHtml(agent.name)}</strong><br>±${Math.round(agent.accuracy || 0)} m${ts ? `<br><small>${ts}</small>` : ''}`)
+        .addTo(_agentMarkersLayer);
+    }
+  } catch (_) { /* silent */ }
+}
+
+async function _geoTick() {
+  if (!navigator.geolocation || !_geoState.active) return;
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      try {
+        await api('/agents/location', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: _geoState.name,
+            lat: pos.coords.latitude,
+            lon: pos.coords.longitude,
+            accuracy: pos.coords.accuracy,
+          }),
+          bypassCache: true,
+          logoutOn401: false,
+        });
+      } catch (_) { /* silent */ }
+      _refreshAgentMarkers();
+    },
+    () => { /* ignore geoloc errors */ },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
+  );
+}
+
+async function _acquireWakeLock() {
+  if (!('wakeLock' in navigator)) return;
+  try {
+    _geoState.wakeLock = await navigator.wakeLock.request('screen');
+    _geoState.wakeLock.addEventListener('release', () => { _geoState.wakeLock = null; });
+  } catch (_) {}
+}
+
+function _releaseWakeLock() {
+  if (_geoState.wakeLock) {
+    try { _geoState.wakeLock.release(); } catch (_) {}
+    _geoState.wakeLock = null;
+  }
+}
+
+async function _onGeoVisibilityChange() {
+  if (!document.hidden && _geoState.active && !_geoState.wakeLock) {
+    await _acquireWakeLock();
+    _geoTick();
+  }
+}
+
+async function _startGeoTracking(name) {
+  _geoState.name = name;
+  _geoState.active = true;
+  localStorage.setItem(_GEO_STORAGE_KEY, name);
+  await _acquireWakeLock();
+  await _geoTick();
+  _geoState.intervalId = setInterval(_geoTick, _GEO_INTERVAL_MS);
+  _geoState.markersRefreshId = setInterval(_refreshAgentMarkers, _GEO_INTERVAL_MS);
+  document.addEventListener('visibilitychange', _onGeoVisibilityChange);
+  const btn = document.getElementById('mobile-locate-btn');
+  if (btn) {
+    btn.classList.add('mobile-nav-btn--locate-active');
+    const lbl = btn.querySelector('.mobile-nav-label');
+    if (lbl) lbl.textContent = 'En cours…';
+  }
+}
+
+function _stopGeoTracking() {
+  _geoState.active = false;
+  clearInterval(_geoState.intervalId);
+  clearInterval(_geoState.markersRefreshId);
+  _geoState.intervalId = null;
+  _geoState.markersRefreshId = null;
+  _releaseWakeLock();
+  document.removeEventListener('visibilitychange', _onGeoVisibilityChange);
+  if (_agentMarkersLayer) _agentMarkersLayer.clearLayers();
+  const btn = document.getElementById('mobile-locate-btn');
+  if (btn) {
+    btn.classList.remove('mobile-nav-btn--locate-active');
+    const lbl = btn.querySelector('.mobile-nav-label');
+    if (lbl) lbl.textContent = 'Localiser';
+  }
+}
+
+function openAgentNameModal() {
+  const modal = document.getElementById('agent-name-modal');
+  if (!modal) return;
+  const saved = localStorage.getItem(_GEO_STORAGE_KEY) || '';
+  const input = document.getElementById('agent-name-input');
+  if (input && saved) input.value = saved;
+  modal.hidden = false;
+  modal.classList.remove('hidden');
+  setTimeout(() => input?.focus(), 50);
+}
+
+function closeAgentNameModal() {
+  const modal = document.getElementById('agent-name-modal');
+  if (!modal) return;
+  modal.hidden = true;
+  modal.classList.add('hidden');
+}
+
+function toggleGeoTracking() {
+  if (_geoState.active) {
+    _stopGeoTracking();
+  } else {
+    openAgentNameModal();
+  }
+}
+
+function initMobileGeoLocate() {
+  if (!isMobileView()) return;
+  document.getElementById('mobile-locate-btn')?.addEventListener('click', toggleGeoTracking);
+  document.getElementById('agent-name-close')?.addEventListener('click', closeAgentNameModal);
+  document.getElementById('agent-name-modal')?.addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) closeAgentNameModal();
+  });
+  document.getElementById('agent-name-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = (document.getElementById('agent-name-input')?.value || '').trim();
+    if (!name) return;
+    closeAgentNameModal();
+    await _startGeoTracking(name);
+  });
+}
+
 function _populateMobileEventMunicipalities() {
   const select = document.getElementById('mobile-event-municipality-id');
   if (!select || select.dataset.populated) return;
@@ -10690,6 +10859,7 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
   showApp();
   buildServiceCards();
   initMobileNav();
+  initMobileGeoLocate();
   setActivePanel(localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel');
   syncMobileNavWithPanel();
   hydrateUiFromLocalCache();

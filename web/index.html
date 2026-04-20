@@ -1088,11 +1088,32 @@
       <span class="mobile-nav-icon">📝</span>
       <span class="mobile-nav-label">MCO</span>
     </button>
+    <button class="mobile-nav-btn mobile-nav-btn--locate" id="mobile-locate-btn" aria-label="Me localiser">
+      <span class="mobile-nav-icon">📍</span>
+      <span class="mobile-nav-label">Localiser</span>
+    </button>
     <button class="mobile-nav-btn" id="mobile-menu-btn" aria-label="Menu">
       <span class="mobile-nav-icon">☰</span>
       <span class="mobile-nav-label">Menu</span>
     </button>
   </nav>
+
+  <!-- ── Modal nom d'agent (géoloc terrain) ── -->
+  <div id="agent-name-modal" class="agent-name-modal hidden" hidden aria-modal="true" role="dialog" aria-label="Partager ma position">
+    <div class="agent-name-sheet">
+      <div class="agent-name-sheet-hd">
+        <span class="agent-name-sheet-title">📍 Partager ma position</span>
+        <button id="agent-name-close" class="ghost" type="button" aria-label="Fermer">✕</button>
+      </div>
+      <p class="agent-name-desc">Votre position GPS sera partagée avec les autres opérateurs connectés et actualisée toutes les 20 s.</p>
+      <form id="agent-name-form" class="agent-name-form">
+        <label>Nom d'affichage
+          <input id="agent-name-input" type="text" placeholder="Ex: Lucas PECOUT" maxlength="40" required autocomplete="name" />
+        </label>
+        <button type="submit" class="agent-name-submit">Commencer le partage</button>
+      </form>
+    </div>
+  </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js" crossorigin=""></script>

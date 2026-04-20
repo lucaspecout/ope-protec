@@ -2795,3 +2795,54 @@ def get_notif_log(_: User = Depends(require_roles("admin", "ope"))):
         return {"entries": entries}
     except Exception:
         return {"entries": []}
+
+
+# ── Géolocalisation terrain ─────────────────────────────────────────────────
+_AGENT_LOC_PREFIX = "agent_loc:"
+_AGENT_LOC_TTL = 60  # secondes — expire si plus de signal GPS
+
+
+@app.put("/agents/location")
+async def update_agent_location(request: Request, user: User = Depends(get_active_user)):
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, "Corps JSON invalide")
+    name = str(payload.get("name") or user.username or "Agent")[:40]
+    try:
+        lat = float(payload["lat"])
+        lon = float(payload["lon"])
+    except (KeyError, ValueError, TypeError):
+        raise HTTPException(400, "lat/lon manquants ou invalides")
+    accuracy = float(payload.get("accuracy") or 0)
+    data = {
+        "user_id": user.id,
+        "name": name,
+        "lat": lat,
+        "lon": lon,
+        "accuracy": accuracy,
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
+    if not _REDIS_OK or _redis is None:
+        raise HTTPException(503, "Redis non disponible")
+    _redis.setex(f"{_AGENT_LOC_PREFIX}{user.id}", _AGENT_LOC_TTL, json.dumps(data))
+    return {"status": "ok"}
+
+
+@app.get("/agents/locations")
+def get_agent_locations(_: User = Depends(get_active_user)):
+    if not _REDIS_OK or _redis is None:
+        return {"agents": []}
+    try:
+        keys = _redis.keys(f"{_AGENT_LOC_PREFIX}*")
+        agents = []
+        for key in keys:
+            raw = _redis.get(key)
+            if raw:
+                try:
+                    agents.append(json.loads(raw))
+                except Exception:
+                    pass
+        return {"agents": agents}
+    except Exception:
+        return {"agents": []}
