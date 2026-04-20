@@ -1053,23 +1053,19 @@
     </section>
   </main>
   <!-- ── Vue terrain mobile ── -->
-  <div id="mobile-mco-overlay" class="mobile-mco-overlay hidden" hidden aria-modal="true" role="dialog" aria-label="Saisie MCO rapide">
+  <div id="mobile-mco-overlay" class="mobile-mco-overlay hidden" hidden aria-modal="true" role="dialog" aria-label="Créer un événement">
     <div class="mobile-mco-sheet">
       <div class="mobile-mco-sheet-hd">
-        <span class="mobile-mco-sheet-title">Saisie MCO rapide</span>
+        <span class="mobile-mco-sheet-title">Nouvel événement</span>
         <button id="mobile-mco-close" class="ghost mobile-mco-close" type="button" aria-label="Fermer">✕</button>
       </div>
       <form id="mobile-mco-form" class="mobile-mco-form">
-        <div class="mobile-mco-level-row">
-          <button type="button" class="mobile-level-btn active" data-level="vert">🟢 Vert</button>
-          <button type="button" class="mobile-level-btn" data-level="jaune">🟡 Jaune</button>
-          <button type="button" class="mobile-level-btn" data-level="orange">🟠 Orange</button>
-          <button type="button" class="mobile-level-btn" data-level="rouge">🔴 Rouge</button>
-        </div>
-        <input name="location" placeholder="📍 Lieu / secteur" autocomplete="off" />
-        <textarea name="description" placeholder="Situation en cours..." rows="3"></textarea>
-        <input name="event_time" type="datetime-local" title="Heure (vide = maintenant)" />
-        <button type="submit" class="mobile-mco-submit">Enregistrer l'entrée</button>
+        <input name="title" placeholder="Titre (ex: Crue secteur Grenoble)" required autocomplete="off" />
+        <input name="address" placeholder="📍 Adresse / secteur concerné" required autocomplete="off" />
+        <select name="municipality_id" id="mobile-event-municipality-id">
+          <option value="">Aucune commune (départemental)</option>
+        </select>
+        <button type="submit" class="mobile-mco-submit">Créer l'événement</button>
         <p id="mobile-mco-error" class="error"></p>
       </form>
     </div>
@@ -1084,9 +1080,9 @@
       <span class="mobile-nav-icon">🗺️</span>
       <span class="mobile-nav-label">Carte</span>
     </button>
-    <button class="mobile-nav-btn mobile-nav-btn--add" id="mobile-mco-open-btn" aria-label="Saisie MCO">
-      <span class="mobile-nav-icon">✏️</span>
-      <span class="mobile-nav-label">Saisie</span>
+    <button class="mobile-nav-btn mobile-nav-btn--add" id="mobile-mco-open-btn" aria-label="Nouvel événement">
+      <span class="mobile-nav-icon">➕</span>
+      <span class="mobile-nav-label">Événement</span>
     </button>
     <button class="mobile-nav-btn" data-mobile-target="logs-panel" aria-label="Main courante">
       <span class="mobile-nav-icon">📝</span>

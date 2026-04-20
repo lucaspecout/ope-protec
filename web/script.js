@@ -1952,8 +1952,11 @@ function initMobileNav() {
     });
   });
 
-  // Bouton saisie MCO
-  document.getElementById('mobile-mco-open-btn')?.addEventListener('click', openMobileMcoSheet);
+  // Bouton nouvel événement
+  document.getElementById('mobile-mco-open-btn')?.addEventListener('click', () => {
+    _populateMobileEventMunicipalities();
+    openMobileMcoSheet();
+  });
   document.getElementById('mobile-mco-close')?.addEventListener('click', closeMobileMcoSheet);
 
   // Fermer en cliquant le fond
@@ -1964,50 +1967,35 @@ function initMobileNav() {
   // Bouton Menu → ouvre la sidebar
   document.getElementById('mobile-menu-btn')?.addEventListener('click', openMobileSidebar);
 
-  // Sélecteur de niveau
-  document.querySelectorAll('.mobile-level-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.mobile-level-btn').forEach((b) => b.classList.remove('active'));
-      btn.classList.add('active');
-    });
-  });
-
-  // Soumission du formulaire MCO rapide
+  // Soumission — création d'un événement
   document.getElementById('mobile-mco-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!canEdit()) { document.getElementById('mobile-mco-error').textContent = 'Accès en lecture seule.'; return; }
     const form = new FormData(e.target);
-    const activeLevel = document.querySelector('.mobile-level-btn.active');
-    const danger_level = activeLevel?.dataset.level || 'vert';
-    await ensureLogMunicipalitiesLoaded();
     const errorEl = document.getElementById('mobile-mco-error');
+    const submitBtn = e.target.querySelector('button[type="submit"]');
     try {
       errorEl.textContent = '';
-      const submitBtn = e.target.querySelector('button[type="submit"]');
       if (submitBtn) submitBtn.disabled = true;
-      await api('/logs', {
+      const created = await api('/events', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          event_id: selectedOperationalEventId ? Number(selectedOperationalEventId) : null,
-          event_type: null,
-          description: form.get('description') || null,
-          danger_level,
-          danger_emoji: LOG_LEVEL_EMOJI[danger_level] || '🟢',
-          status: 'nouveau',
-          location: form.get('location') || null,
-          event_time: form.get('event_time') || new Date().toISOString(),
+          title: String(form.get('title') || '').trim(),
+          address: String(form.get('address') || '').trim(),
+          status: 'ouvert',
+          municipality_id: form.get('municipality_id') ? Number(form.get('municipality_id')) : null,
         }),
       });
       e.target.reset();
-      document.querySelectorAll('.mobile-level-btn').forEach((b) => b.classList.remove('active'));
-      document.querySelector('.mobile-level-btn[data-level="vert"]')?.classList.add('active');
       closeMobileMcoSheet();
-      await loadLogs();
+      // Sélectionner le nouvel événement et aller sur la main courante
+      if (created?.id) selectedOperationalEventId = String(created.id);
+      await loadEvents();
+      setActivePanel('logs-panel');
     } catch (err) {
       errorEl.textContent = sanitizeErrorMessage(err.message);
     } finally {
-      const submitBtn = e.target.querySelector('button[type="submit"]');
       if (submitBtn) submitBtn.disabled = false;
     }
   });
@@ -2015,6 +2003,19 @@ function initMobileNav() {
   // Mettre à jour le badge actif quand setActivePanel est appelé
   const _origSetActivePanel = setActivePanel;
   window._mobileNavHooked = true;
+}
+
+function _populateMobileEventMunicipalities() {
+  const select = document.getElementById('mobile-event-municipality-id');
+  if (!select || select.dataset.populated) return;
+  const municipalities = Array.isArray(cachedMunicipalities) ? cachedMunicipalities : [];
+  municipalities.slice().sort((a, b) => (a.name || '').localeCompare(b.name || '', 'fr')).forEach((m) => {
+    const opt = document.createElement('option');
+    opt.value = m.id;
+    opt.textContent = m.name || `Commune #${m.id}`;
+    select.appendChild(opt);
+  });
+  select.dataset.populated = '1';
 }
 
 function syncMobileNavWithPanel() {
