@@ -62,7 +62,7 @@ const FLUX_SERVICES = [
   { key: 'seismes_isere',          label: 'Séismes Isère',             icon: '🌍', category: 'Risques',       interval: 600,   metric: (d) => `${(d.items || []).length} séisme(s) détecté(s)` },
   { key: 'avalanche_isere',        label: 'Avalanches BRA · Isère',    icon: '🏔️', category: 'Risques',       interval: 1800,  metric: (d) => `Niveau max ${d.niveau_max_bra ?? '?'}/5 · ${(d.massifs || []).length} massif(s)` },
   { key: 'feux_foret_isere',       label: 'Feux de forêt EFFIS',       icon: '🔥', category: 'Risques',       interval: 600,   metric: (d) => `${d.fires_total ?? 0} foyer(s) détecté(s) 24h` },
-  { key: 'copernicus_ems',         label: 'Copernicus EMS · Inondations', icon: '🛰️', category: 'Risques',    interval: 1800,  metric: (d) => `${d.france_total ?? 0} activation(s) France · ${d.activations_total ?? 0} Europe` },
+  { key: 'copernicus_ems',         label: 'GDACS · Inondations Europe',   icon: '🛰️', category: 'Risques',    interval: 1800,  metric: (d) => `${d.france_total ?? 0} activation(s) France · ${d.activations_total ?? 0} Europe` },
   { key: 'cols_alpins_isere',      label: 'Cols alpins Isère',         icon: '⛰️', category: 'Transport',     interval: 1800,  metric: (d) => `${d.cols_total ?? 0} cols · ${d.dangereux_total ?? 0} à surveiller` },
   { key: 'anfr_isere',             label: 'ANFR · Antennes mobiles',   icon: '📡', category: 'Télécom',       interval: 21600, metric: (d) => `${d.supports_total ?? 0} support(s) mobile recensés` },
   { key: 'arcep_isere',            label: 'ARCEP · Sites mobiles',     icon: '📶', category: 'Télécom',       interval: 600,   metric: (d) => `${d.outages_total ?? 0} indisponibilité(s)` },
@@ -8725,7 +8725,7 @@ const SVC_CARD_META = {
   seismes_isere:         { statusId: 'seismes-svc-status',     infoId: 'seismes-svc-info',     url: 'https://www.franceseisme.fr' },
   avalanche_isere:       { statusId: 'avalanche-svc-status',   infoId: null,                   url: 'https://meteofrance.com/meteo-montagne' },
   feux_foret_isere:      { statusId: 'feux-svc-status',        infoId: null,                   url: 'https://effis.jrc.ec.europa.eu' },
-  copernicus_ems:        { statusId: 'copernicus-svc-status',  infoId: null,                   url: 'https://emergency.copernicus.eu/mapping/list-of-activations-rapid' },
+  copernicus_ems:        { statusId: 'copernicus-svc-status',  infoId: null,                   url: 'https://www.gdacs.org' },
   cols_alpins_isere:     { statusId: 'cols-svc-status',        infoId: null,                   url: 'https://api.open-meteo.com' },
   anfr_isere:            { statusId: 'anfr-status',            infoId: 'anfr-info',            url: 'https://www.data.gouv.fr/fr/datasets/donnees-sur-les-installations-radioelectriques-de-plus-de-5-watts-1/' },
   arcep_isere:           { statusId: 'arcep-status',           infoId: 'arcep-info',           url: 'https://www.data.gouv.fr/fr/datasets/sites-indisponibles/' },
@@ -8776,7 +8776,7 @@ const SVC_DETAIL_LISTS = {
   seismes_isere:         [{ id: 'seismes-svc-list',      label: 'Séismes récents Isère' }],
   avalanche_isere:       [{ id: 'avalanche-svc-list',    label: 'BRA — Risque avalanche massifs Isère' }],
   feux_foret_isere:      [{ id: 'feux-svc-list',         label: 'Foyers actifs EFFIS (24h)' }],
-  copernicus_ems:        [{ id: 'copernicus-svc-list',   label: 'Activations Copernicus EMS' }],
+  copernicus_ems:        [{ id: 'copernicus-svc-list',   label: 'Inondations actives — GDACS' }],
   cols_alpins_isere:     [{ id: 'cols-svc-list',         label: 'État des cols alpins Isère' }],
 };
 
@@ -11932,13 +11932,18 @@ const _origSSEMerge = typeof mergeExternalRisksSnapshot === 'function' ? mergeEx
 function renderCopernicusEmsWidget(data = {}) {
   const france = data.france_total ?? 0;
   const total = data.activations_total ?? 0;
-  const level = france > 0 ? 'orange' : 'vert';
-  setRiskText('copernicus-svc-status', `${france} activation(s) France · ${total} Europe`, level);
-  const items = Array.isArray(data.france_activations) ? data.france_activations : [];
-  const all = items.length ? items : (Array.isArray(data.activations) ? data.activations.slice(0, 5) : []);
-  setHtml('copernicus-svc-list', all.map((a) =>
-    `<li>🛰️ <strong>${escapeHtml(a.title || a.id || '?')}</strong> <span class="muted">— ${escapeHtml(a.type || 'FLOOD')} — ${escapeHtml(a.date || '?')}</span></li>`
-  ).join('') || '<li class="muted">Aucune activation Copernicus EMS active pour la France.</li>');
+  const level = france > 0 ? 'orange' : total > 0 ? 'jaune' : 'vert';
+  const src = data.source ? ` · ${escapeHtml(data.service || 'GDACS')}` : '';
+  setRiskText('copernicus-svc-status', `${france} activation(s) France · ${total} Europe${src}`, level);
+  const items = Array.isArray(data.france_activations) && data.france_activations.length
+    ? data.france_activations
+    : (Array.isArray(data.activations) ? data.activations.slice(0, 8) : []);
+  const alertColors = { Red: '#c92a2a', Orange: '#e67700', Green: '#2b8a3e' };
+  setHtml('copernicus-svc-list', items.map((a) => {
+    const color = alertColors[a.level] || '#868e96';
+    const country = a.country ? ` · ${escapeHtml(a.country)}` : '';
+    return `<li>🌊 <strong>${escapeHtml(a.title || a.id || '?')}</strong><span class="muted">${country} — ${escapeHtml(a.date || '?')}</span>${a.level ? ` <span style="color:${color};font-weight:600">(${escapeHtml(a.level)})</span>` : ''}</li>`;
+  }).join('') || '<li class="muted">Aucune inondation active détectée en Europe.</li>');
 }
 
 // ════════════════════════════════════════════════════════════════════════════

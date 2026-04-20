@@ -8395,39 +8395,84 @@ _COPERNICUS_EMS_CACHE_TTL_SECONDS = 1800  # 30 min
 _copernicus_ems_cache_lock = Lock()
 _copernicus_ems_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "copernicus_ems"}
 
-_COPERNICUS_EMS_CANDIDATE_URLS = [
-    # v2 sans filtre de statut (plus stable)
-    "https://emergency.copernicus.eu/mapping/rest/api/v2/activations?format=json&per_page=100",
-    # v1 sans trailing slash
-    "https://emergency.copernicus.eu/mapping/rest/api/v1/activations?format=json",
-    # v1 avec filtre (ancienne URL)
-    "https://emergency.copernicus.eu/mapping/rest/api/v1/activations?format=json&status=ongoing",
-]
-
-
 def _fetch_copernicus_ems_live() -> dict[str, Any]:
+    """
+    Activations d'urgence inondations Europe via GDACS (API publique, fiable).
+    GDACS = Global Disaster Alert and Coordination System (UN-backed).
+    Filtrage sur les inondations (FL) en cours.
+    """
     try:
-        data = None
-        last_err = None
-        for url in _COPERNICUS_EMS_CANDIDATE_URLS:
-            try:
-                resp = _requests.get(
-                    url,
-                    timeout=15,
-                    headers={"Accept": "application/json", "User-Agent": _BROWSER_UA},
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    break
-                last_err = f"HTTP {resp.status_code} sur {url}"
-            except Exception as exc:
-                last_err = str(exc)
-        if data is None:
-            raise RuntimeError(last_err or "Toutes les URLs Copernicus EMS ont échoué")
-
-        raw_items = data if isinstance(data, list) else (
-            data.get("data") or data.get("items") or data.get("activations") or []
+        # GDACS API : événements de type inondation en cours
+        resp = _requests.get(
+            "https://www.gdacs.org/gdacsapi/api/events/geteventlist/GDACS",
+            params={"eventtypes": "FL", "alertlevel": "Green,Orange,Red", "limit": "50"},
+            timeout=20,
+            headers={"Accept": "application/json", "User-Agent": _BROWSER_UA},
         )
+        resp.raise_for_status()
+        raw = resp.json()
+        raw_items = raw if isinstance(raw, list) else (raw.get("results") or raw.get("features") or [])
+
+        activations: list[dict[str, Any]] = []
+        france_activations: list[dict[str, Any]] = []
+
+        for item in raw_items[:50]:
+            # Support GeoJSON feature format
+            props = item.get("properties") or item if isinstance(item, dict) else {}
+            country = str(props.get("country") or props.get("iso3") or props.get("countryname") or "")
+            is_france = "FR" in country.upper() or "FRANCE" in country.upper() or "FRA" in country.upper()
+            activation = {
+                "id": str(props.get("eventid") or props.get("id") or ""),
+                "title": str(props.get("eventname") or props.get("title") or props.get("name") or "Inondation"),
+                "type": str(props.get("eventtype") or "FL"),
+                "date": str(props.get("fromdate") or props.get("date") or ""),
+                "level": str(props.get("alertlevel") or ""),
+                "country": country,
+                "lat": props.get("latitude") or props.get("lat"),
+                "lon": props.get("longitude") or props.get("lon"),
+                "france": is_france,
+                "url": props.get("url") or f"https://www.gdacs.org/",
+            }
+            activations.append(activation)
+            if is_france:
+                france_activations.append(activation)
+
+        return {
+            "service": "GDACS · Inondations Europe",
+            "status": "online",
+            "source": "https://www.gdacs.org",
+            "activations_total": len(activations),
+            "france_total": len(france_activations),
+            "activations": activations[:20],
+            "france_activations": france_activations[:10],
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+    except Exception as exc:
+        return {
+            "service": "GDACS · Inondations Europe",
+            "status": "degraded",
+            "source": "https://www.gdacs.org",
+            "activations_total": 0,
+            "france_total": 0,
+            "activations": [],
+            "france_activations": [],
+            "error": str(exc),
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+
+
+# ── kept for unused reference ──────────────────────────────────────────────
+def _fetch_copernicus_ems_live_UNUSED() -> dict[str, Any]:
+    """Ancienne implémentation REST Copernicus EMS (API désactivée fin 2025)."""
+    try:
+        resp = _requests.get(
+            "https://emergency.copernicus.eu/mapping/rest/api/v1/activations",
+            timeout=15,
+            headers={"Accept": "application/json", "User-Agent": _BROWSER_UA},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        raw_items = data if isinstance(data, list) else (data.get("items") or data.get("activations") or [])
         activations: list[dict[str, Any]] = []
         france_activations: list[dict[str, Any]] = []
 
@@ -8761,42 +8806,56 @@ def _col_status_from_weather(temp_c, snow_cm, precip, wind_kmh):
     return {"statut": "ouvert", "couleur": "vert", "detail": f"{temp_c:.0f}°C · conditions normales"}
 
 
-def _fetch_cols_alpins_live() -> dict[str, Any]:
-    cols_out = []
-    # Requête groupée : open-meteo accepte plusieurs coordonnées séparées par des virgules
-    lats = ",".join(str(c["lat"]) for c in _COLS_ALPINS)
-    lons = ",".join(str(c["lon"]) for c in _COLS_ALPINS)
-    batch_url = (
-        f"https://api.open-meteo.com/v1/forecast"
-        f"?latitude={lats}&longitude={lons}"
-        "&current=temperature_2m,precipitation,snowfall,wind_speed_10m"
-        "&wind_speed_unit=kmh&timezone=Europe%2FParis"
-    )
-    batch_results: list[dict[str, Any]] = []
+def _fetch_single_col_weather(col: dict[str, Any]) -> dict[str, Any]:
+    """Requête météo pour un col unique via open-meteo."""
     try:
-        raw = _requests.get(batch_url, timeout=20, headers={"Accept": "application/json", "User-Agent": _BROWSER_UA})
-        raw.raise_for_status()
-        payload = raw.json()
-        # open-meteo renvoie une liste quand plusieurs coordonnées sont fournies
-        if isinstance(payload, list):
-            batch_results = payload
-        elif isinstance(payload, dict):
-            batch_results = [payload]
-    except Exception:
-        batch_results = []
+        resp = _requests.get(
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": col["lat"],
+                "longitude": col["lon"],
+                "current": "temperature_2m,precipitation,snow_depth,wind_speed_10m",
+                "wind_speed_unit": "kmh",
+                "timezone": "Europe/Paris",
+            },
+            timeout=15,
+            headers={"Accept": "application/json", "User-Agent": _BROWSER_UA},
+        )
+        resp.raise_for_status()
+        cur = (resp.json().get("current") or {})
+        return {
+            "temp": cur.get("temperature_2m"),
+            "snow": cur.get("snow_depth"),
+            "precip": cur.get("precipitation"),
+            "wind": cur.get("wind_speed_10m"),
+            "ok": True,
+        }
+    except Exception as exc:
+        return {"temp": None, "snow": None, "precip": None, "wind": None, "ok": False, "err": str(exc)}
 
-    for i, col in enumerate(_COLS_ALPINS):
+
+def _fetch_cols_alpins_live() -> dict[str, Any]:
+    cols_out: list[dict[str, Any]] = []
+    # Requêtes parallèles — 10 cols, max 5 workers
+    futures_map: dict[Any, dict[str, Any]] = {}
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        for col in _COLS_ALPINS:
+            fut = pool.submit(_fetch_single_col_weather, col)
+            futures_map[fut] = col
+
+    results_map: dict[str, dict[str, Any]] = {}
+    for fut, col in futures_map.items():
         try:
-            data = batch_results[i] if i < len(batch_results) else {}
-            cur = (data.get("current") or {}) if isinstance(data, dict) else {}
-            temp = cur.get("temperature_2m")
-            snow = cur.get("snowfall")
-            precip = cur.get("precipitation")
-            wind = cur.get("wind_speed_10m")
-            if temp is None and not cur:
-                raise ValueError("pas de donnée courante")
-            status = _col_status_from_weather(temp, snow, precip, wind)
+            results_map[col["nom"]] = fut.result(timeout=20)
         except Exception:
+            results_map[col["nom"]] = {"temp": None, "snow": None, "precip": None, "wind": None, "ok": False}
+
+    for col in _COLS_ALPINS:
+        r = results_map.get(col["nom"], {})
+        temp, snow, precip, wind = r.get("temp"), r.get("snow"), r.get("precip"), r.get("wind")
+        if r.get("ok") and temp is not None:
+            status = _col_status_from_weather(temp, snow, precip, wind)
+        else:
             status = {"statut": "inconnu", "couleur": "gris", "detail": "Météo indisponible"}
             temp = snow = precip = wind = None
         cols_out.append({**col, **status, "temperature": temp, "enneigement_cm": snow, "precipitations": precip, "vent_kmh": wind})
