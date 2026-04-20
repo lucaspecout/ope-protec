@@ -68,7 +68,6 @@
           <button class="menu-btn" data-target="api-panel" data-icon="🧩"><span class="menu-label">Interconnexions API</span></button>
           <button class="menu-btn" data-target="notifications-panel" data-icon="🔔"><span class="menu-label">Notifications</span></button>
           <button class="menu-btn" data-target="alerts-panel" data-icon="📣"><span class="menu-label">Historique alertes</span></button>
-          <button class="menu-btn" data-target="resources-panel" data-icon="🚗"><span class="menu-label">Ressources</span></button>
           <button class="menu-btn" data-target="audit-panel" data-icon="🔍" id="menu-audit-btn" class="hidden" hidden><span class="menu-label">Audit</span></button>
         </nav>
         <button id="logout-btn" class="danger">Déconnexion</button>
@@ -646,7 +645,6 @@
                 <div class="map-nav-btns">
                   <button id="map-fit-btn" type="button" class="ghost map-btn-lite">🗺️ Tout voir</button>
                   <button id="map-locate-btn" type="button" class="ghost map-btn-lite">📍 Me localiser</button>
-                  <button id="map-weather-btn" type="button" class="ghost map-btn-lite" title="Cliquer sur la carte pour obtenir la météo locale">⛅ Météo ici</button>
                 </div>
               </div>
 
@@ -1068,72 +1066,6 @@
           <div id="alerts-list" class="flux-service-list"></div>
         </section>
 
-        <!-- ── Ressources opérationnelles ── -->
-        <section id="resources-panel" class="panel view hidden" hidden>
-          <div class="flux-header" style="margin-bottom:1rem">
-            <div>
-              <h3>Ressources opérationnelles</h3>
-              <p class="muted">Véhicules, équipes et matériels — statut en temps réel.</p>
-            </div>
-            <button id="resource-add-btn" type="button" data-requires-edit>+ Ajouter</button>
-          </div>
-          <div style="display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1rem;align-items:center">
-            <select id="resource-status-filter" style="min-width:160px">
-              <option value="all">Tous les statuts</option>
-              <option value="disponible">Disponibles</option>
-              <option value="en_alerte">En alerte</option>
-              <option value="engage">Engagés</option>
-              <option value="hors_service">Hors service</option>
-            </select>
-          </div>
-          <div id="resources-summary" style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem"></div>
-          <div id="resources-list"></div>
-
-          <!-- Modal add/edit -->
-          <div id="resource-modal" class="agent-name-modal hidden" hidden aria-modal="true" role="dialog">
-            <div class="agent-name-sheet" style="max-width:480px">
-              <div class="agent-name-sheet-hd">
-                <span class="agent-name-sheet-title" id="resource-modal-title">Nouvelle ressource</span>
-                <button id="resource-modal-close" class="ghost" type="button">✕</button>
-              </div>
-              <form id="resource-form" class="form" style="gap:.6rem">
-                <input id="resource-name" placeholder="Nom (ex: VL01 — Cellule logistique)" required />
-                <select id="resource-type">
-                  <option value="vehicule_lsc">Véhicule LSC</option>
-                  <option value="vehicule_vttu">Véhicule VTTU</option>
-                  <option value="vehicule_vtu">Véhicule VTU / pick-up</option>
-                  <option value="vehicule_pl">Camion / Poids lourd</option>
-                  <option value="vehicule_tp">Transport personnel</option>
-                  <option value="groupe_electrogene">Groupe électrogène</option>
-                  <option value="lot_eau_potable">Lot eau potable</option>
-                  <option value="lot_soutien_vie">Lot soutien vie (VSB)</option>
-                  <option value="materiel_eclairage">Mât d'éclairage</option>
-                  <option value="equipe_secours">Équipe secours</option>
-                  <option value="equipe_logistique">Équipe logistique</option>
-                  <option value="poste_secours">Poste de secours médical</option>
-                  <option value="autre">Autre matériel</option>
-                </select>
-                <select id="resource-status-input">
-                  <option value="disponible">Disponible</option>
-                  <option value="en_alerte">En alerte</option>
-                  <option value="engage">Engagé</option>
-                  <option value="hors_service">Hors service</option>
-                </select>
-                <input id="resource-unit" placeholder="Unité / équipe responsable (optionnel)" />
-                <textarea id="resource-notes" placeholder="Notes (optionnel)" rows="2" style="resize:vertical"></textarea>
-                <div style="display:flex;gap:.5rem">
-                  <input id="resource-lat" type="number" step="0.00001" placeholder="Latitude (optionnel)" style="flex:1" />
-                  <input id="resource-lon" type="number" step="0.00001" placeholder="Longitude (optionnel)" style="flex:1" />
-                </div>
-                <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:.5rem">
-                  <button type="button" id="resource-modal-cancel" class="ghost">Annuler</button>
-                  <button type="submit">Enregistrer</button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </section>
-
         <!-- ── Journal d'audit (admin) ── -->
         <section id="audit-panel" class="panel view hidden" hidden>
           <div class="flux-header" style="margin-bottom:1rem">
@@ -1169,23 +1101,6 @@
       </section>
     </section>
   </main>
-  <!-- ── Météo locale modal ── -->
-  <div id="meteo-local-modal" class="agent-name-modal hidden" hidden aria-modal="true" role="dialog" aria-label="Météo locale">
-    <div class="agent-name-sheet" style="max-width:560px;overflow-y:auto;max-height:90vh">
-      <div class="agent-name-sheet-hd">
-        <span class="agent-name-sheet-title" id="meteo-local-title">⛅ Météo locale</span>
-        <button id="meteo-local-close" class="ghost" type="button" aria-label="Fermer">✕</button>
-      </div>
-      <div id="meteo-local-content" style="margin-bottom:.75rem"></div>
-      <div style="position:relative;height:180px;margin-bottom:.5rem">
-        <canvas id="meteo-local-temp-chart"></canvas>
-      </div>
-      <div style="position:relative;height:120px">
-        <canvas id="meteo-local-rain-chart"></canvas>
-      </div>
-    </div>
-  </div>
-
   <!-- ── Vue terrain mobile ── -->
   <div id="mobile-mco-overlay" class="mobile-mco-overlay hidden" hidden aria-modal="true" role="dialog" aria-label="Créer un événement">
     <div class="mobile-mco-sheet">

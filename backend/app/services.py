@@ -8401,7 +8401,7 @@ _COPERNICUS_EMS_API = "https://emergency.copernicus.eu/mapping/rest/api/v1/activ
 def _fetch_copernicus_ems_live() -> dict[str, Any]:
     try:
         params = "?format=json&status=ongoing"
-        resp = requests.get(
+        resp = _requests.get(
             f"{_COPERNICUS_EMS_API}{params}",
             timeout=15,
             headers={"Accept": "application/json"},

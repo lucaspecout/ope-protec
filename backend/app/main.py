@@ -1148,24 +1148,45 @@ def delete_user(user_id: int, db: Session = Depends(get_db), actor: User = Depen
 
 
 @app.post("/auth/login", response_model=LoginResponse)
-async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    ip = _get_client_ip(request)
+
+    def _audit(status: int, detail: str | None = None):
+        def _write():
+            db2 = SessionLocal()
+            try:
+                db2.add(AuditLog(
+                    username=form_data.username,
+                    action="POST /auth/login",
+                    resource_type="auth",
+                    details=detail,
+                    ip_address=ip,
+                    status_code=status,
+                ))
+                db2.commit()
+            except Exception:
+                pass
+            finally:
+                db2.close()
+        asyncio.get_event_loop().run_in_executor(None, _write)
+
     user = db.query(User).filter(User.username == form_data.username).first()
     if not user:
-        # Délai constant pour éviter l'énumération d'utilisateurs via timing (~25ms ≈ bcrypt 8 rounds)
         await asyncio.sleep(0.025)
+        _audit(401, "Utilisateur inconnu")
         raise HTTPException(401, "Utilisateur ou mot de passe incorrect")
-    # Exécuter bcrypt dans l'executor pour ne pas bloquer la boucle asyncio
     hashed = user.hashed_password
     password_plain = form_data.password
     ok, new_hash = await asyncio.get_running_loop().run_in_executor(
         None, lambda: verify_and_upgrade(password_plain, hashed)
     )
     if not ok:
+        _audit(401, "Mot de passe incorrect")
         raise HTTPException(401, "Utilisateur ou mot de passe incorrect")
-    # Upgrade silencieux vers 8 rounds si le hash était à 10 ou 12 rounds
     if new_hash:
         user.hashed_password = new_hash
         db.commit()
+    _audit(200)
     return {
         "access_token": create_access_token(user.username),
         "token_type": "bearer",
@@ -3178,29 +3199,6 @@ def delete_resource(
     db.commit()
     return {"deleted": resource_id}
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# FEATURE 10 — Météo hyper-locale (Open-Meteo proxy)
-# ══════════════════════════════════════════════════════════════════════════════
-
-@app.get("/api/meteo/local")
-def get_meteo_local(
-    lat: float = Query(..., ge=43.5, le=46.5),
-    lon: float = Query(..., ge=4.0, le=7.5),
-    _: User = Depends(require_roles(*READ_ROLES)),
-):
-    try:
-        url = (
-            "https://api.open-meteo.com/v1/forecast"
-            f"?latitude={lat}&longitude={lon}"
-            "&hourly=temperature_2m,precipitation,windspeed_10m,weathercode"
-            "&timezone=Europe%2FParis&forecast_days=2"
-        )
-        resp = requests.get(url, timeout=10)
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as exc:
-        raise HTTPException(503, f"Open-Meteo indisponible: {exc}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
