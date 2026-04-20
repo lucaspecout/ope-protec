@@ -7644,6 +7644,54 @@ function buildSituationKpiModalContent(key, externalRisks = {}) {
       return `<p><strong>Alertes APIC Isère:</strong> ${Number(apic.alerts_total ?? (apic.alerts || []).length)}</p><ul class="situation-kpi-modal__list">${(apic.alerts || []).slice(0, 8).map((alert) => `<li><strong>${escapeHtml(alert.zone || 'Isère')}</strong> · ${escapeHtml(normalizeLevel(alert.level || 'jaune'))}</li>`).join('') || '<li>Aucune alerte APIC en cours.</li>'}</ul>`;
     case 'vigicrues-flash':
       return `<p><strong>Alertes Vigicrues Flash Isère:</strong> ${Number(vigicruesFlash.alerts_total ?? (vigicruesFlash.alerts || []).length)}</p><ul class="situation-kpi-modal__list">${(vigicruesFlash.alerts || []).slice(0, 8).map((alert) => `<li><strong>${escapeHtml(alert.zone || 'Isère')}</strong> · ${escapeHtml(normalizeLevel(alert.level || 'jaune'))}</li>`).join('') || '<li>Aucune alerte Vigicrues Flash.</li>'}</ul>`;
+    case 'avalanche': {
+      const braData = externalRisks?.avalanche_isere || {};
+      const massifs = Array.isArray(braData.massifs) ? braData.massifs : [];
+      const braColors = { 1: '#2b8a3e', 2: '#e9a800', 3: '#e67700', 4: '#c92a2a', 5: '#6741d9' };
+      const braLabels = { 1: 'Faible', 2: 'Limité', 3: 'Marqué', 4: 'Fort', 5: 'Très fort' };
+      const items = massifs.map((m) => {
+        const color = braColors[m.niveau_bra] || '#868e96';
+        const label = braLabels[m.niveau_bra] || 'Indisponible';
+        return `<li style="padding:4px 0;border-bottom:1px solid #eee"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:6px"></span><strong>${escapeHtml(m.nom || m.massif || '?')}</strong> · <span style="color:${color};font-weight:600">Niveau ${m.niveau_bra ?? '?'}/5 — ${escapeHtml(label)}</span><br><span class="muted">${escapeHtml(m.detail || m.description || '')}</span></li>`;
+      }).join('');
+      return `<p><strong>Niveau max BRA Isère :</strong> ${braData.niveau_max_bra ?? '?'}/5 · ${massifs.length} massif(s)</p><p><strong>Source :</strong> Météo-France · Bulletin de Risque Avalanche</p><ul class="situation-kpi-modal__list">${items || '<li>Aucune donnée BRA disponible.</li>'}</ul>`;
+    }
+    case 'feux': {
+      const feuxData = externalRisks?.feux_foret_isere || {};
+      const fires = Array.isArray(feuxData.top_fires) && feuxData.top_fires.length ? feuxData.top_fires
+                   : Array.isArray(feuxData.fires) ? feuxData.fires.slice(0, 8) : [];
+      const items = fires.map((f) => {
+        const zone = escapeHtml(f.zone || `${f.lat?.toFixed(2)}°N ${f.lon?.toFixed(2)}°E`);
+        const frp = f.frp != null ? `${Number(f.frp).toFixed(0)} MW` : '–';
+        const conf = escapeHtml(f.confidence || '?');
+        const confColor = conf === 'high' ? '#c92a2a' : conf === 'nominal' ? '#e67700' : '#868e96';
+        return `<li style="padding:4px 0;border-bottom:1px solid #eee"><strong>🔥 ${zone}</strong><br><span class="muted">Puissance : ${frp} · Confiance : <span style="color:${confColor};font-weight:600">${conf}</span></span></li>`;
+      }).join('');
+      return `<p><strong>Foyers détectés (24h) :</strong> ${feuxData.fires_total ?? 0}</p><p><strong>Source :</strong> EFFIS / Copernicus / VIIRS satellite</p><ul class="situation-kpi-modal__list">${items || '<li>Aucun foyer détecté dans la région.</li>'}</ul>`;
+    }
+    case 'seismes': {
+      const seismesData = externalRisks?.seismes_isere || {};
+      const items = (Array.isArray(seismesData.items) ? seismesData.items : []).slice(0, 10).map((q) => {
+        const mag = q.magnitude != null ? q.magnitude : '?';
+        const magColor = mag >= 3 ? '#c92a2a' : mag >= 2 ? '#e67700' : '#2b8a3e';
+        return `<li style="padding:4px 0;border-bottom:1px solid #eee"><span style="font-size:1.1em;font-weight:700;color:${magColor}">M${mag}</span> · <strong>${escapeHtml(q.place || q.title || 'Isère')}</strong><br><span class="muted">${escapeHtml(q.date || '')} · Profondeur ${q.depth ?? '?'} km</span></li>`;
+      }).join('');
+      return `<p><strong>Séismes détectés (30 jours) :</strong> ${(seismesData.items || []).length}</p><p><strong>Source :</strong> BCSF-RéNaSS · Réseau Sismologique National</p><ul class="situation-kpi-modal__list">${items || '<li>Aucun séisme détecté récemment.</li>'}</ul>`;
+    }
+    case 'cols': {
+      const colsData = externalRisks?.cols_alpins_isere || {};
+      const cols = Array.isArray(colsData.cols) ? colsData.cols : [];
+      const colorMap = { vert: '#2b8a3e', jaune: '#e9a800', orange: '#e67700', rouge: '#c92a2a', gris: '#868e96' };
+      const items = cols.map((c) => {
+        const color = colorMap[c.couleur] || '#868e96';
+        const tempStr = c.temperature != null ? `${c.temperature}°C` : '–';
+        const snowStr = c.enneigement_cm != null ? `${c.enneigement_cm} cm neige` : '';
+        const windStr = c.vent_kmh != null ? `vent ${Math.round(c.vent_kmh)} km/h` : '';
+        const details = [tempStr, snowStr, windStr].filter(Boolean).join(' · ');
+        return `<li style="padding:4px 0;border-bottom:1px solid #eee"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:6px"></span><strong>${escapeHtml(c.nom)}</strong> <span class="muted">(${c.alt} m · ${escapeHtml(c.route || '')})</span><br><span style="color:${color};font-weight:600">${escapeHtml(c.statut || '?')}</span>${details ? ` · <span class="muted">${escapeHtml(details)}</span>` : ''}</li>`;
+      }).join('');
+      return `<p><strong>Cols surveillés :</strong> ${colsData.cols_total ?? 0} · <strong>À surveiller :</strong> ${colsData.dangereux_total ?? 0}</p><p><strong>Source :</strong> Open-Meteo · données météo temps réel</p><ul class="situation-kpi-modal__list">${items || '<li>Aucune donnée cols disponible.</li>'}</ul>`;
+    }
     default:
       return '<p>Aucun détail supplémentaire disponible pour ce KPI.</p>';
   }

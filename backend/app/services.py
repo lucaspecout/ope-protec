@@ -8395,21 +8395,39 @@ _COPERNICUS_EMS_CACHE_TTL_SECONDS = 1800  # 30 min
 _copernicus_ems_cache_lock = Lock()
 _copernicus_ems_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "copernicus_ems"}
 
-_COPERNICUS_EMS_API = "https://emergency.copernicus.eu/mapping/rest/api/v1/activations"
+_COPERNICUS_EMS_CANDIDATE_URLS = [
+    # v2 sans filtre de statut (plus stable)
+    "https://emergency.copernicus.eu/mapping/rest/api/v2/activations?format=json&per_page=100",
+    # v1 sans trailing slash
+    "https://emergency.copernicus.eu/mapping/rest/api/v1/activations?format=json",
+    # v1 avec filtre (ancienne URL)
+    "https://emergency.copernicus.eu/mapping/rest/api/v1/activations?format=json&status=ongoing",
+]
 
 
 def _fetch_copernicus_ems_live() -> dict[str, Any]:
     try:
-        params = "?format=json&status=ongoing"
-        resp = _requests.get(
-            f"{_COPERNICUS_EMS_API}{params}",
-            timeout=15,
-            headers={"Accept": "application/json"},
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        data = None
+        last_err = None
+        for url in _COPERNICUS_EMS_CANDIDATE_URLS:
+            try:
+                resp = _requests.get(
+                    url,
+                    timeout=15,
+                    headers={"Accept": "application/json", "User-Agent": _BROWSER_UA},
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    break
+                last_err = f"HTTP {resp.status_code} sur {url}"
+            except Exception as exc:
+                last_err = str(exc)
+        if data is None:
+            raise RuntimeError(last_err or "Toutes les URLs Copernicus EMS ont échoué")
 
-        raw_items = data if isinstance(data, list) else (data.get("items") or data.get("activations") or [])
+        raw_items = data if isinstance(data, list) else (
+            data.get("data") or data.get("items") or data.get("activations") or []
+        )
         activations: list[dict[str, Any]] = []
         france_activations: list[dict[str, Any]] = []
 
@@ -8745,20 +8763,38 @@ def _col_status_from_weather(temp_c, snow_cm, precip, wind_kmh):
 
 def _fetch_cols_alpins_live() -> dict[str, Any]:
     cols_out = []
-    for col in _COLS_ALPINS:
-        url = (
-            f"https://api.open-meteo.com/v1/forecast"
-            f"?latitude={col['lat']}&longitude={col['lon']}"
-            "&current=temperature_2m,precipitation,snowfall,wind_speed_10m"
-            "&wind_speed_unit=kmh&timezone=Europe%2FParis"
-        )
+    # Requête groupée : open-meteo accepte plusieurs coordonnées séparées par des virgules
+    lats = ",".join(str(c["lat"]) for c in _COLS_ALPINS)
+    lons = ",".join(str(c["lon"]) for c in _COLS_ALPINS)
+    batch_url = (
+        f"https://api.open-meteo.com/v1/forecast"
+        f"?latitude={lats}&longitude={lons}"
+        "&current=temperature_2m,precipitation,snowfall,wind_speed_10m"
+        "&wind_speed_unit=kmh&timezone=Europe%2FParis"
+    )
+    batch_results: list[dict[str, Any]] = []
+    try:
+        raw = _requests.get(batch_url, timeout=20, headers={"Accept": "application/json", "User-Agent": _BROWSER_UA})
+        raw.raise_for_status()
+        payload = raw.json()
+        # open-meteo renvoie une liste quand plusieurs coordonnées sont fournies
+        if isinstance(payload, list):
+            batch_results = payload
+        elif isinstance(payload, dict):
+            batch_results = [payload]
+    except Exception:
+        batch_results = []
+
+    for i, col in enumerate(_COLS_ALPINS):
         try:
-            data = _http_get_json(url, timeout=10)
-            cur = data.get("current") or {}
+            data = batch_results[i] if i < len(batch_results) else {}
+            cur = (data.get("current") or {}) if isinstance(data, dict) else {}
             temp = cur.get("temperature_2m")
             snow = cur.get("snowfall")
             precip = cur.get("precipitation")
             wind = cur.get("wind_speed_10m")
+            if temp is None and not cur:
+                raise ValueError("pas de donnée courante")
             status = _col_status_from_weather(temp, snow, precip, wind)
         except Exception:
             status = {"statut": "inconnu", "couleur": "gris", "detail": "Météo indisponible"}
