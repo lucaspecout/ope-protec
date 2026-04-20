@@ -2012,6 +2012,19 @@ const _geoState = {
 
 let _agentMarkersLayer = null;
 
+function _geoToast(msg, type = 'info') {
+  const el = document.getElementById('geo-toast');
+  if (!el) return;
+  const bg    = { info: '#e3f2fd', success: '#e8f5e9', error: '#ffebee' };
+  const brd   = { info: '#90caf9', success: '#a5d6a7', error: '#ef9a9a' };
+  const color = { info: '#1565c0', success: '#2e7d32', error: '#c62828' };
+  el.innerHTML = `<div style="padding:.5rem .85rem;border-radius:8px;font-size:.82rem;font-weight:600;
+    background:${bg[type]};border:1px solid ${brd[type]};color:${color[type]};
+    box-shadow:0 2px 8px rgba(0,0,0,.15)">${escapeHtml(msg)}</div>`;
+  clearTimeout(el._hideTimer);
+  el._hideTimer = setTimeout(() => { el.innerHTML = ''; }, 5000);
+}
+
 function _initAgentMarkersLayer() {
   if (!leafletMap || _agentMarkersLayer) return;
   _agentMarkersLayer = window.L.layerGroup().addTo(leafletMap);
@@ -2021,11 +2034,16 @@ async function _refreshAgentMarkers() {
   if (!leafletMap) return;
   _initAgentMarkersLayer();
   try {
-    const data = await api('/agents/locations', { bypassCache: true });
-    if (!data?.agents) return;
+    const origin = apiOrigins()[0];
+    const headers = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await fetch(`${origin}/agents/locations`, { headers });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!Array.isArray(data?.agents)) return;
     _agentMarkersLayer.clearLayers();
     for (const agent of data.agents) {
-      const isMe = agent.user_id && _geoState.name && agent.name === _geoState.name;
+      const isMe = _geoState.name && agent.name === _geoState.name;
       const dotColor = isMe ? '#0b4daa' : '#e53935';
       const icon = window.L.divIcon({
         className: '',
@@ -2044,28 +2062,44 @@ async function _refreshAgentMarkers() {
   } catch (_) { /* silent */ }
 }
 
+async function _geoSendPosition(lat, lon, accuracy) {
+  try {
+    const origin = apiOrigins()[0];
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await fetch(`${origin}/agents/location`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ name: _geoState.name, lat, lon, accuracy }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      _geoToast(`Erreur envoi position : ${err.detail || res.status}`, 'error');
+    }
+  } catch (e) {
+    _geoToast('Impossible d\'envoyer la position (réseau ?)', 'error');
+  }
+}
+
 async function _geoTick() {
   if (!navigator.geolocation || !_geoState.active) return;
   navigator.geolocation.getCurrentPosition(
     async (pos) => {
-      try {
-        await api('/agents/location', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: _geoState.name,
-            lat: pos.coords.latitude,
-            lon: pos.coords.longitude,
-            accuracy: pos.coords.accuracy,
-          }),
-          bypassCache: true,
-          logoutOn401: false,
-        });
-      } catch (_) { /* silent */ }
+      const { latitude: lat, longitude: lon, accuracy } = pos.coords;
+      await _geoSendPosition(lat, lon, accuracy);
+      _geoToast(`📍 Position envoyée · ±${Math.round(accuracy)} m`, 'success');
+      // Centrer la carte sur soi au premier tick
+      if (leafletMap && _geoState.firstTick) {
+        _geoState.firstTick = false;
+        leafletMap.setView([lat, lon], 14);
+      }
       _refreshAgentMarkers();
     },
-    () => { /* ignore geoloc errors */ },
-    { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
+    (err) => {
+      const msgs = { 1: 'Permission GPS refusée', 2: 'Position GPS indisponible', 3: 'Délai GPS dépassé' };
+      _geoToast(msgs[err.code] || 'Erreur GPS', 'error');
+    },
+    { enableHighAccuracy: true, timeout: 12000, maximumAge: 5000 }
   );
 }
 
@@ -2094,17 +2128,24 @@ async function _onGeoVisibilityChange() {
 async function _startGeoTracking(name) {
   _geoState.name = name;
   _geoState.active = true;
+  _geoState.firstTick = true;
   localStorage.setItem(_GEO_STORAGE_KEY, name);
+
+  // Ouvrir la carte pour voir sa position
+  setActivePanel('map-panel');
+  setTimeout(() => { if (leafletMap) leafletMap.invalidateSize(); }, 120);
+
   await _acquireWakeLock();
   await _geoTick();
   _geoState.intervalId = setInterval(_geoTick, _GEO_INTERVAL_MS);
   _geoState.markersRefreshId = setInterval(_refreshAgentMarkers, _GEO_INTERVAL_MS);
   document.addEventListener('visibilitychange', _onGeoVisibilityChange);
+
   const btn = document.getElementById('mobile-locate-btn');
   if (btn) {
     btn.classList.add('mobile-nav-btn--locate-active');
     const lbl = btn.querySelector('.mobile-nav-label');
-    if (lbl) lbl.textContent = 'En cours…';
+    if (lbl) lbl.textContent = 'Actif';
   }
 }
 
@@ -2117,6 +2158,7 @@ function _stopGeoTracking() {
   _releaseWakeLock();
   document.removeEventListener('visibilitychange', _onGeoVisibilityChange);
   if (_agentMarkersLayer) _agentMarkersLayer.clearLayers();
+  _geoToast('Partage de position arrêté', 'info');
   const btn = document.getElementById('mobile-locate-btn');
   if (btn) {
     btn.classList.remove('mobile-nav-btn--locate-active');

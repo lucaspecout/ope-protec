@@ -3323,6 +3323,22 @@ details[open] .news-stats-toggle::before { content: '▾ '; }
   .app-header-nav-actions { gap: .3rem; }
 }
 
+/* ── Toast géolocalisation (mobile) ── */
+.geo-toast {
+  display: none;
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 600;
+  pointer-events: none;
+  min-width: 220px;
+  text-align: center;
+}
+@media (max-width: 768px) {
+  .geo-toast { display: block; }
+}
+
 /* ── Marqueurs agents terrain (hors media query — visibles sur desktop aussi) ── */
 .agent-marker { display: flex; flex-direction: column; align-items: center; pointer-events: auto; }
 .agent-marker-dot {
