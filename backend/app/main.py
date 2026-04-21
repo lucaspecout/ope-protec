@@ -97,6 +97,7 @@ from .services import (
     fetch_barrages_isere,
     fetch_montagne_isere,
     fetch_helipads_isere,
+    fetch_pr_autoroutes,
     get_static_data_status,
     collect_all_static_data,
     flush_service_memory_cache,
@@ -1662,6 +1663,15 @@ def api_osm_helipads_isere(
     _: User = Depends(require_roles(*READ_ROLES)),
 ):
     return fetch_helipads_isere(force_refresh=refresh)
+
+
+@app.get("/api/osm/isere/pr-autoroutes")
+def api_pr_autoroutes(
+    refresh: bool = False,
+    _: User = Depends(require_roles(*READ_ROLES)),
+):
+    """Positions des PR (bornes kilométriques) des autoroutes isèroises, calculées depuis la géométrie OSM."""
+    return fetch_pr_autoroutes(force_refresh=refresh)
 
 
 @app.get("/api/hubeau/isere/groundwater")

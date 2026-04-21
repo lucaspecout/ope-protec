@@ -7014,6 +7014,153 @@ def _parse_road_from_text(text: str) -> str | None:
     return f"A{m.group(1).upper()}" if m else None
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# PR AUTOROUTES — géométrie OSM via Overpass (Feature 20)
+# ══════════════════════════════════════════════════════════════════════════════
+import math as _math
+
+_PR_AUTOROUTES_TTL = 86400  # 24h
+_pr_autoroutes_cache_lock = Lock()
+_pr_autoroutes_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "pr_autoroutes_osm"}
+
+# Config par autoroute : ref OSM (avec espace), lat/lon du point PR-0 (ou début section Isère), pr de départ, pas
+_OSM_MOTORWAY_PR_CONFIG: dict[str, dict[str, Any]] = {
+    "A41":  {"ref": "A 41",  "start_lat": 45.215, "start_lon": 5.840, "start_pr": 0,  "step": 5},
+    "A43":  {"ref": "A 43",  "start_lat": 45.713, "start_lon": 5.052, "start_pr": 28, "step": 4},
+    "A48":  {"ref": "A 48",  "start_lat": 45.182, "start_lon": 5.730, "start_pr": 0,  "step": 5},
+    "A49":  {"ref": "A 49",  "start_lat": 45.138, "start_lon": 5.683, "start_pr": 0,  "step": 5},
+    "A51":  {"ref": "A 51",  "start_lat": 45.140, "start_lon": 5.765, "start_pr": 0,  "step": 5},
+    "A480": {"ref": "A 480", "start_lat": 45.156, "start_lon": 5.690, "start_pr": 0,  "step": 1},
+}
+_PR_ISERE_BBOX = "44.7,4.8,45.75,6.5"
+
+
+def _hav_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    R = 6371.0
+    dlat = _math.radians(lat2 - lat1)
+    dlon = _math.radians(lon2 - lon1)
+    a = _math.sin(dlat / 2) ** 2 + _math.cos(_math.radians(lat1)) * _math.cos(_math.radians(lat2)) * _math.sin(dlon / 2) ** 2
+    return R * 2 * _math.asin(_math.sqrt(a))
+
+
+def _sample_polyline_km(coords: list[tuple[float, float]], start_pr: float, step: float) -> list[dict[str, Any]]:
+    """Échantillonne une polyligne (lat, lon) tous les `step` km à partir de `start_pr`."""
+    pts: list[dict[str, Any]] = []
+    traveled = 0.0
+    next_mark = float(start_pr)
+    for i in range(len(coords) - 1):
+        lat0, lon0 = coords[i]
+        lat1, lon1 = coords[i + 1]
+        seg = _hav_km(lat0, lon0, lat1, lon1)
+        while next_mark <= traveled + seg + 1e-9:
+            t = (next_mark - traveled) / seg if seg > 1e-9 else 0.0
+            pts.append({
+                "k": round(next_mark, 1),
+                "lat": round(lat0 + t * (lat1 - lat0), 6),
+                "lon": round(lon0 + t * (lon1 - lon0), 6),
+            })
+            next_mark += step
+        traveled += seg
+    return pts
+
+
+def _chain_osm_ways(ways: list[list[tuple[float, float]]], start_lat: float, start_lon: float) -> list[tuple[float, float]]:
+    """Ordonne et chaîne les segments OSM en une polyligne continue depuis (start_lat, start_lon)."""
+    if not ways:
+        return []
+
+    def _d(la1: float, lo1: float, la2: float, lo2: float) -> float:
+        return _hav_km(la1, lo1, la2, lo2)
+
+    # Trouver le segment le plus proche du point de départ
+    def _min_dist_to_start(nodes: list[tuple[float, float]]) -> float:
+        return min(_d(start_lat, start_lon, nodes[0][0], nodes[0][1]),
+                   _d(start_lat, start_lon, nodes[-1][0], nodes[-1][1]))
+
+    remaining = [list(w) for w in ways]
+    remaining.sort(key=_min_dist_to_start)
+    first = remaining.pop(0)
+
+    # Orienter le premier segment (l'extrémité la plus proche du point de départ = début)
+    if (_d(start_lat, start_lon, first[-1][0], first[-1][1]) <
+            _d(start_lat, start_lon, first[0][0], first[0][1])):
+        first = list(reversed(first))
+
+    chain: list[list[tuple[float, float]]] = [first]
+
+    MAX_GAP_KM = 1.0  # tolérance pour connecter deux segments
+    while remaining:
+        end_lat, end_lon = chain[-1][-1]
+        best_i, best_d, best_rev = -1, float("inf"), False
+        for i, seg in enumerate(remaining):
+            d_start = _d(end_lat, end_lon, seg[0][0], seg[0][1])
+            d_end   = _d(end_lat, end_lon, seg[-1][0], seg[-1][1])
+            d = min(d_start, d_end)
+            if d < best_d:
+                best_d, best_i, best_rev = d, i, d_end < d_start
+        if best_i < 0 or best_d > MAX_GAP_KM:
+            break
+        nxt = remaining.pop(best_i)
+        if best_rev:
+            nxt = list(reversed(nxt))
+        chain.append(nxt)
+
+    # Aplatir (éviter les doublons aux jonctions)
+    flat: list[tuple[float, float]] = []
+    for seg in chain:
+        if flat:
+            flat.extend(seg[1:])
+        else:
+            flat.extend(seg)
+    return flat
+
+
+def _fetch_pr_autoroutes_live() -> dict[str, Any]:
+    """Récupère la géométrie OSM de chaque autoroute via Overpass et calcule les positions PR."""
+    result: dict[str, list[dict[str, Any]]] = {}
+
+    for road, cfg in _OSM_MOTORWAY_PR_CONFIG.items():
+        query = f"""
+[out:json][timeout:60];
+(
+  way["highway"="motorway"]["ref"="{cfg['ref']}"]({_PR_ISERE_BBOX});
+);
+out geom;
+"""
+        try:
+            elements = _overpass_fetch_institutions(query)
+            ways: list[list[tuple[float, float]]] = []
+            for el in elements:
+                if el.get("type") != "way":
+                    continue
+                geom = el.get("geometry") or []
+                nodes = [(n["lat"], n["lon"]) for n in geom if "lat" in n and "lon" in n]
+                if len(nodes) >= 2:
+                    ways.append(nodes)
+            if not ways:
+                continue
+            coords = _chain_osm_ways(ways, cfg["start_lat"], cfg["start_lon"])
+            if len(coords) < 2:
+                continue
+            pts = _sample_polyline_km(coords, cfg["start_pr"], cfg["step"])
+            if pts:
+                result[road] = pts
+        except Exception:
+            continue
+
+    return {"roads": result, "source": "OpenStreetMap / Overpass", "updated_at": datetime.utcnow().isoformat() + "Z"}
+
+
+def fetch_pr_autoroutes(force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_pr_autoroutes_cache,
+        lock=_pr_autoroutes_cache_lock,
+        ttl_seconds=_PR_AUTOROUTES_TTL,
+        force_refresh=force_refresh,
+        loader=_fetch_pr_autoroutes_live,
+    )
+
+
 # ─── 1. APRR/AREA · Autoroutes Isère (A41, A43, A48, A51) ────────────────────
 _APRR_ISERE_CACHE_TTL = 180
 _aprr_isere_cache_lock = Lock()
@@ -7069,16 +7216,34 @@ _APRR_PR_ROAD_COORDS: dict[str, list[tuple[float, float, float]]] = {
 
 
 def _aprr_pr_to_coords(road: str, pr_str: str) -> tuple[float, float] | None:
-    """Convertit un PR type '75+363' ou '75' en (lat, lon) par interpolation linéaire."""
-    coords = _APRR_PR_ROAD_COORDS.get(road)
-    if not coords:
-        return None
+    """Convertit un PR type '75+363' ou '75' en (lat, lon) par interpolation linéaire.
+    Utilise les données OSM Overpass si disponibles, sinon les coordonnées statiques."""
     try:
         parts = pr_str.split("+")
         km = float(parts[0])
         m = float(parts[1]) / 1000 if len(parts) > 1 else 0.0
         pr_km = km + m
     except (ValueError, IndexError):
+        return None
+
+    # Essayer d'abord les données OSM (plus précises)
+    osm_payload = _pr_autoroutes_cache.get("payload")
+    osm_pts = (osm_payload or {}).get("roads", {}).get(road)
+    if osm_pts:
+        if pr_km <= osm_pts[0]["k"]:
+            return osm_pts[0]["lat"], osm_pts[0]["lon"]
+        if pr_km >= osm_pts[-1]["k"]:
+            return osm_pts[-1]["lat"], osm_pts[-1]["lon"]
+        for i in range(len(osm_pts) - 1):
+            k0, k1 = osm_pts[i]["k"], osm_pts[i + 1]["k"]
+            if k0 <= pr_km <= k1:
+                t = (pr_km - k0) / (k1 - k0) if k1 > k0 else 0.0
+                return (osm_pts[i]["lat"] + t * (osm_pts[i + 1]["lat"] - osm_pts[i]["lat"]),
+                        osm_pts[i]["lon"] + t * (osm_pts[i + 1]["lon"] - osm_pts[i]["lon"]))
+
+    # Fallback : coordonnées statiques
+    coords = _APRR_PR_ROAD_COORDS.get(road)
+    if not coords:
         return None
 
     if pr_km <= coords[0][0]:
