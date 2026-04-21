@@ -5753,6 +5753,8 @@ function _haversineKm(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.asin(Math.sqrt(a));
 }
 
+let _prApiSource = null;
+
 async function loadPrFromApi() {
   if (_prApiCache) return _prApiCache;
   try {
@@ -5760,6 +5762,7 @@ async function loadPrFromApi() {
     const roads = data?.roads;
     if (roads && Object.keys(roads).length > 0) {
       _prApiCache = roads;
+      _prApiSource = data?.source || 'données officielles';
       return roads;
     }
   } catch { /* fallback statique */ }
@@ -5800,15 +5803,15 @@ async function renderPrAutorouteLayer() {
 
   // Affichage immédiat : cache API si dispo, sinon coordonnées statiques
   const immediateCoords = _prApiCache || APRR_PR_COORDS;
-  const immediateLabel = _prApiCache ? 'OpenStreetMap / géométrie réelle' : 'coordonnées statiques';
+  const immediateLabel = _prApiCache ? (_prApiSource || 'données officielles') : 'coordonnées statiques (chargement en cours…)';
   _drawPrMarkers(immediateCoords, immediateLabel);
 
-  // Charger/rafraîchir les données OSM en arrière-plan si pas encore en cache
+  // Charger les données officielles en arrière-plan si pas encore en cache
   if (!_prApiCache) {
     loadPrFromApi().then(apiData => {
       if (!apiData) return;
       if (!(document.getElementById('filter-pr-autoroutes')?.checked)) return;
-      _drawPrMarkers(apiData, 'OpenStreetMap / géométrie réelle');
+      _drawPrMarkers(apiData, _prApiSource || 'données officielles');
     }).catch(() => {});
   }
 }

@@ -7015,15 +7015,24 @@ def _parse_road_from_text(text: str) -> str | None:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PR AUTOROUTES — géométrie OSM via Overpass (Feature 20)
+# PR AUTOROUTES — Bornage RRN (data.gouv.fr) + fallback Overpass (Feature 20)
 # ══════════════════════════════════════════════════════════════════════════════
 import math as _math
+import csv as _csv_mod
+import io as _io_mod
 
 _PR_AUTOROUTES_TTL = 86400  # 24h
 _pr_autoroutes_cache_lock = Lock()
-_pr_autoroutes_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "pr_autoroutes_osm"}
+_pr_autoroutes_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "pr_autoroutes_rrn"}
 
-# Config par autoroute : ref OSM (avec espace), lat/lon du point PR-0 (ou début section Isère), pr de départ, pas
+# Dataset officiel IGN/CEREMA — bornage du réseau routier national
+_DATAGOUV_BORNAGE_URL = "https://www.data.gouv.fr/api/1/datasets/r/1543c04e-13bb-45b3-8da3-1b47a66c4541"
+_PR_MOTORWAYS_ISERE = {"A41", "A43", "A48", "A49", "A51", "A480"}
+# Bbox Isère en WGS84 pour filtrage géographique après conversion
+_ISERE_LAT_MIN, _ISERE_LAT_MAX = 44.65, 45.80
+_ISERE_LON_MIN, _ISERE_LON_MAX = 4.75, 6.55
+
+# Config Overpass (fallback)
 _OSM_MOTORWAY_PR_CONFIG: dict[str, dict[str, Any]] = {
     "A41":  {"ref": "A 41",  "start_lat": 45.215, "start_lon": 5.840, "start_pr": 0,  "step": 5},
     "A43":  {"ref": "A 43",  "start_lat": 45.713, "start_lon": 5.052, "start_pr": 28, "step": 4},
@@ -7033,6 +7042,136 @@ _OSM_MOTORWAY_PR_CONFIG: dict[str, dict[str, Any]] = {
     "A480": {"ref": "A 480", "start_lat": 45.156, "start_lon": 5.690, "start_pr": 0,  "step": 1},
 }
 _PR_ISERE_BBOX = "44.7,4.8,45.75,6.5"
+
+
+def _lambert93_to_wgs84(x_l93: float, y_l93: float) -> tuple[float, float]:
+    """Convertit des coordonnées Lambert-93 (EPSG:2154) en WGS84 (lat, lon degrés).
+    RGF93 ≈ WGS84 à <1cm — aucun changement de datum nécessaire."""
+    # Ellipsoïde GRS80 (Lambert93 / RGF93)
+    a = 6378137.0
+    e = 0.08181919084262149   # excentricité = sqrt(2f - f²), f = 1/298.257222101
+
+    # Paramètres de projection Lambert93 (EPSG:2154)
+    lam0 = _math.radians(3.0)     # méridien central
+    phi0 = _math.radians(46.5)    # latitude d'origine
+    phi1 = _math.radians(44.0)    # 1er parallèle standard
+    phi2 = _math.radians(49.0)    # 2e parallèle standard
+    E0, N0 = 700000.0, 6600000.0  # faux-est, faux-nord
+
+    def _m(phi: float) -> float:
+        return _math.cos(phi) / _math.sqrt(1.0 - e**2 * _math.sin(phi)**2)
+
+    def _t(phi: float) -> float:
+        sp = _math.sin(phi)
+        return _math.tan(_math.pi / 4.0 - phi / 2.0) * ((1.0 + e * sp) / (1.0 - e * sp)) ** (e / 2.0)
+
+    m1, m2 = _m(phi1), _m(phi2)
+    t0, t1, t2 = _t(phi0), _t(phi1), _t(phi2)
+
+    n  = (_math.log(m1) - _math.log(m2)) / (_math.log(t1) - _math.log(t2))
+    F  = m1 / (n * t1 ** n)
+    r0 = a * F * t0 ** n
+
+    dE = x_l93 - E0
+    dN = y_l93 - N0
+    r_prime = _math.copysign(_math.sqrt(dE**2 + (r0 - dN)**2), n)
+    theta   = _math.atan2(dE, r0 - dN)
+    t_prime = abs(r_prime / (a * F)) ** (1.0 / n)
+
+    lam = theta / n + lam0
+
+    # Itération convergente pour la latitude géodésique
+    phi = _math.pi / 2.0 - 2.0 * _math.atan(t_prime)
+    for _ in range(15):
+        sp = _math.sin(phi)
+        phi_new = _math.pi / 2.0 - 2.0 * _math.atan(
+            t_prime * ((1.0 - e * sp) / (1.0 + e * sp)) ** (e / 2.0)
+        )
+        if abs(phi_new - phi) < 1e-12:
+            phi = phi_new
+            break
+        phi = phi_new
+
+    return _math.degrees(phi), _math.degrees(lam)
+
+
+def _fetch_pr_from_datagouv() -> dict[str, list[dict[str, Any]]]:
+    """Télécharge le CSV bornage RRN (data.gouv.fr) et extrait les PR des autoroutes isèroises."""
+    resp = _requests.get(
+        _DATAGOUV_BORNAGE_URL,
+        timeout=60,
+        headers={"User-Agent": _BROWSER_UA, "Accept": "text/csv,*/*"},
+        allow_redirects=True,
+    )
+    resp.raise_for_status()
+
+    # Détecter l'encodage et le séparateur
+    raw = resp.content
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        text = raw.decode("latin-1", errors="replace")
+
+    # Détecter le séparateur (;  ou ,)
+    first_line = text.split("\n")[0]
+    sep = ";" if first_line.count(";") > first_line.count(",") else ","
+
+    roads: dict[str, list[dict[str, Any]]] = {}
+    seen: set[tuple[str, float]] = set()  # (route, pr) pour éviter les doublons (cote D/G)
+
+    reader = _csv_mod.DictReader(_io_mod.StringIO(text), delimiter=sep)
+    for row in reader:
+        # Normaliser les noms de colonnes (strip + lower puis remap)
+        row = {k.strip(): v.strip() if isinstance(v, str) else v for k, v in row.items()}
+
+        route = (row.get("Route") or row.get("route") or "").strip().upper()
+        # Normaliser le nom de route : "A 48" → "A48"
+        route = route.replace(" ", "")
+        if route not in _PR_MOTORWAYS_ISERE:
+            continue
+
+        # Valeur du PR (en km, peut être entier ou décimal)
+        pr_raw = (row.get("pr") or row.get("PR") or "").replace(",", ".").strip()
+        try:
+            pr_val = float(pr_raw)
+        except (ValueError, TypeError):
+            continue
+
+        key = (route, pr_val)
+        if key in seen:
+            continue  # ignorer les doublons (cote G si cote D déjà présent)
+        seen.add(key)
+
+        # Coordonnées Lambert93
+        x_raw = (row.get("X") or row.get("x") or "").replace(",", ".").strip()
+        y_raw = (row.get("Y") or row.get("y") or "").replace(",", ".").strip()
+        try:
+            x_val = float(x_raw)
+            y_val = float(y_raw)
+        except (ValueError, TypeError):
+            continue
+        if x_val == 0.0 or y_val == 0.0:
+            continue
+
+        # Conversion Lambert93 → WGS84
+        try:
+            lat, lon = _lambert93_to_wgs84(x_val, y_val)
+        except Exception:
+            continue
+
+        # Filtrer géographiquement à l'Isère
+        if not (_ISERE_LAT_MIN <= lat <= _ISERE_LAT_MAX and _ISERE_LON_MIN <= lon <= _ISERE_LON_MAX):
+            continue
+
+        if route not in roads:
+            roads[route] = []
+        roads[route].append({"k": round(pr_val, 1), "lat": round(lat, 6), "lon": round(lon, 6)})
+
+    # Trier par numéro de PR croissant
+    for road in roads:
+        roads[road].sort(key=lambda p: p["k"])
+
+    return roads
 
 
 def _hav_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -7143,7 +7282,23 @@ out geom;
 
 
 def _fetch_pr_autoroutes_live() -> dict[str, Any]:
-    """Récupère la géométrie OSM de chaque autoroute via Overpass (requêtes parallèles)."""
+    """Récupère les positions PR :
+    1) data.gouv.fr — Bornage RRN (source officielle, coordonnées Lambert93 converties en WGS84)
+    2) Overpass OSM (fallback si data.gouv.fr inaccessible)
+    """
+    # ── Source 1 : data.gouv.fr Bornage RRN ──────────────────────────────────
+    try:
+        roads = _fetch_pr_from_datagouv()
+        if roads and len(roads) >= 3:  # au moins 3 routes trouvées = succès
+            return {
+                "roads": roads,
+                "source": "data.gouv.fr / Bornage RRN (IGN)",
+                "updated_at": datetime.utcnow().isoformat() + "Z",
+            }
+    except Exception:
+        pass
+
+    # ── Source 2 : Overpass OSM (fallback) ───────────────────────────────────
     result: dict[str, list[dict[str, Any]]] = {}
     with ThreadPoolExecutor(max_workers=6) as pool:
         futures = {pool.submit(_fetch_pr_one_road, road, cfg): road
@@ -7155,7 +7310,11 @@ def _fetch_pr_autoroutes_live() -> dict[str, Any]:
                     result[road] = pts
             except Exception:
                 continue
-    return {"roads": result, "source": "OpenStreetMap / Overpass", "updated_at": datetime.utcnow().isoformat() + "Z"}
+    return {
+        "roads": result,
+        "source": "OpenStreetMap / Overpass (fallback)",
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
 
 
 def fetch_pr_autoroutes(force_refresh: bool = False) -> dict[str, Any]:
