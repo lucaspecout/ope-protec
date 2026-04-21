@@ -5839,13 +5839,34 @@ async function renderPrAutorouteLayer() {
   });
 }
 
+// Diff stable des marqueurs autoroute — clé = id d'événement, valeur = {marker, popupHtml}
+const _autorouteMarkers = new Map();
+
+// Interpolation précise d'un PR depuis la géométrie OSRM déjà chargée
+function _prToLatLonOsrm(road, prStr) {
+  const pts = _osrmPrCache?.[road];
+  if (!pts || !pts.length || !prStr) return null;
+  const parts = String(prStr).split('+');
+  const km = parseFloat(parts[0]) + (parts[1] ? parseFloat(parts[1]) / 1000 : 0);
+  if (!Number.isFinite(km)) return null;
+  if (km <= pts[0].k) return [pts[0].lat, pts[0].lon];
+  if (km >= pts[pts.length - 1].k) return [pts[pts.length - 1].lat, pts[pts.length - 1].lon];
+  for (let i = 0; i < pts.length - 1; i++) {
+    if (km >= pts[i].k && km <= pts[i + 1].k) {
+      const t = (km - pts[i].k) / (pts[i + 1].k - pts[i].k);
+      return [pts[i].lat + t * (pts[i + 1].lat - pts[i].lat), pts[i].lon + t * (pts[i + 1].lon - pts[i].lon)];
+    }
+  }
+  return null;
+}
+
 async function renderTrafficOnMap() {
   if (!itinisereLayer || !bisonLayer || !bisonCameraLayer || typeof window.L === 'undefined') return;
   const renderSequence = ++trafficRenderSequence;
   itinisereLayer.clearLayers();
   bisonLayer.clearLayers();
   bisonCameraLayer.clearLayers();
-  if (autorouteLayer) autorouteLayer.clearLayers();
+  // autorouteLayer est mis à jour par diff stable (voir plus bas) — pas de clearLayers() ici
   mapStats.traffic = 0;
 
   // ── Événements autoroutes APRR/AREA + Vinci (avec coordonnées) ──
@@ -5857,13 +5878,18 @@ async function renderTrafficOnMap() {
       if (!leafletMap.hasLayer(autorouteLayer)) leafletMap.addLayer(autorouteLayer);
     }
   }
-  if (autorouteLayer && showAutoroutes) {
+  if (autorouteLayer) {
     const autoroutesTypeFilter = document.getElementById('filter-autoroutes-type')?.value || 'all';
-    const typeColor = { accident: '#c22f43', travaux: '#f07800', chantier: '#f07800', perturbation: '#e6a800', inconnu: '#5f7190' };
-    const allRoadEvents = [
+    const allRoadEvents = showAutoroutes ? [
       ...(cachedExternalRisksSnapshot?.aprr_isere?.events || []).map((e) => ({ ...e, src: 'APRR/AREA' })),
       ...(cachedExternalRisksSnapshot?.vinci_autoroutes?.events || []).map((e) => ({ ...e, src: 'Vinci' })),
-    ];
+    ] : [];
+
+    // Clé stable par événement : src + route + titre + PR
+    const evtKey = (evt) => `${evt.src}|${evt.road}|${evt.title}|${evt.pr || ''}`;
+
+    const activeKeys = new Set();
+
     allRoadEvents.forEach((evt) => {
       if (autoroutesTypeFilter !== 'all') {
         const t = (evt.type || '').toLowerCase();
@@ -5872,32 +5898,62 @@ async function renderTrafficOnMap() {
         else if (autoroutesTypeFilter === 'perturbation' && t !== 'perturbation') return;
         else if (autoroutesTypeFilter === 'inconnu' && ['accident','travaux','chantier','perturbation'].includes(t)) return;
       }
+
+      // Résolution des coordonnées : 1) backend lat/lon  2) OSRM+PR  3) milieu de route (statique, déterministe)
       let lat = Number(evt.lat);
       let lon = Number(evt.lon);
       if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-        // Fallback : position médiane de la route si pas de PR calculé (backend non reconstruit ou PR absent)
-        const roadPts = APRR_PR_COORDS[evt.road];
-        if (roadPts && roadPts.length) {
-          const mid = roadPts[Math.floor(roadPts.length / 2)];
-          lat = mid.lat + (Math.random() - 0.5) * 0.005;
-          lon = mid.lon + (Math.random() - 0.5) * 0.005;
+        const osrmCoord = _prToLatLonOsrm(evt.road, evt.pr);
+        if (osrmCoord) {
+          [lat, lon] = osrmCoord;
         } else {
-          return;
+          const roadPts = APRR_PR_COORDS[evt.road];
+          if (roadPts && roadPts.length) {
+            const mid = roadPts[Math.floor(roadPts.length / 2)];
+            lat = mid.lat;
+            lon = mid.lon;
+          } else {
+            return;
+          }
         }
       }
-      const color = typeColor[evt.type] || typeColor.inconnu;
-      const icon = emojiDivIcon(evt.type === 'accident' ? '⚠️' : '🚧', { iconSize: [22, 22], iconAnchor: [11, 11], popupAnchor: [0, -12] });
-      const popup = `<div class="map-popup-content">
-        <p class="tag">${escapeHtml(evt.src)} · ${escapeHtml(evt.road || 'Autoroute')}</p>
+
+      const key = evtKey(evt);
+      activeKeys.add(key);
+
+      const popupHtml = `<div class="map-popup-content">
+        <p class="tag">${escapeHtml(evt.src)} · ${escapeHtml(evt.road || 'Autoroute')}${evt.pr ? ` · PR ${escapeHtml(evt.pr)}` : ''}</p>
         <strong>${escapeHtml(evt.title || evt.type || 'Événement trafic')}</strong>
         ${evt.description ? `<p style="font-size:.8rem;margin:.3rem 0 0">${escapeHtml(evt.description.substring(0, 200))}</p>` : ''}
         ${evt.start ? `<p class="muted" style="font-size:.75rem;margin:.2rem 0 0">Depuis: ${new Date(evt.start).toLocaleString('fr-FR')}</p>` : ''}
       </div>`;
+
+      // Diff : si le marqueur existe déjà à la même position, ne pas le recréer
+      if (_autorouteMarkers.has(key)) {
+        const existing = _autorouteMarkers.get(key);
+        if (existing.popupHtml !== popupHtml) {
+          existing.marker.setPopupContent(popupHtml);
+          existing.popupHtml = popupHtml;
+        }
+        mapStats.traffic += 1;
+        return;
+      }
+
+      const icon = emojiDivIcon(evt.type === 'accident' ? '⚠️' : '🚧', { iconSize: [22, 22], iconAnchor: [11, 11], popupAnchor: [0, -12] });
       const marker = window.L.marker([lat, lon], { icon });
-      marker.bindPopup(popup);
+      marker.bindPopup(popupHtml);
       marker.addTo(autorouteLayer);
+      _autorouteMarkers.set(key, { marker, popupHtml });
       mapStats.traffic += 1;
     });
+
+    // Supprimer les marqueurs des événements qui ne sont plus présents
+    for (const [key, { marker }] of _autorouteMarkers) {
+      if (!activeKeys.has(key)) {
+        autorouteLayer.removeLayer(marker);
+        _autorouteMarkers.delete(key);
+      }
+    }
   }
 
   const showTrafficIncidents = document.getElementById('filter-traffic-incidents')?.checked ?? true;
