@@ -263,7 +263,8 @@
       "Bash(curl -s \"https://www.gdacs.org/gdacsapi/api/events/geteventlist/GDACS?eventtypes=FL\")",
       "Bash(curl -s \"https://www.gdacs.org/xml/rss.xml\")",
       "Bash(python -m pip show requests)",
-      "Bash(python3 -c ' *)"
+      "Bash(python3 -c ' *)",
+      "WebFetch(domain:static.data.gouv.fr)"
     ]
   }
 }

@@ -7116,35 +7116,46 @@ def _fetch_pr_from_datagouv() -> dict[str, list[dict[str, Any]]]:
     first_line = text.split("\n")[0]
     sep = ";" if first_line.count(";") > first_line.count(",") else ","
 
+    import re as _re_mod
+
     roads: dict[str, list[dict[str, Any]]] = {}
     seen: set[tuple[str, float]] = set()  # (route, pr) pour éviter les doublons (cote D/G)
 
     reader = _csv_mod.DictReader(_io_mod.StringIO(text), delimiter=sep)
     for row in reader:
-        # Normaliser les noms de colonnes (strip + lower puis remap)
+        # Normaliser les noms de colonnes
         row = {k.strip(): v.strip() if isinstance(v, str) else v for k, v in row.items()}
 
-        route = (row.get("Route") or row.get("route") or "").strip().upper()
-        # Normaliser le nom de route : "A 48" → "A48"
-        route = route.replace(" ", "")
+        # Filtrer par département Isère (depPr == "38")
+        dep = (row.get("depPr") or row.get("DEPPR") or "").strip()
+        if dep != "38":
+            continue
+
+        # Extraire le nom de la route depuis le code complexe (ex: "38A048..." → "A48")
+        route_code = (row.get("route") or row.get("Route") or "").strip().upper()
+        m = _re_mod.search(r'A(\d{2,3})', route_code)
+        if not m:
+            continue
+        digits = m.group(1).lstrip("0") or "0"
+        route = "A" + digits  # "048" → "A48", "480" → "A480"
         if route not in _PR_MOTORWAYS_ISERE:
             continue
 
-        # Valeur du PR (en km, peut être entier ou décimal)
-        pr_raw = (row.get("pr") or row.get("PR") or "").replace(",", ".").strip()
+        # Position km = cumul (mètres depuis début de route) / 1000
+        cumul_raw = (row.get("cumul") or row.get("Cumul") or "").replace(",", ".").strip()
         try:
-            pr_val = float(pr_raw)
+            pr_val = float(cumul_raw) / 1000.0
         except (ValueError, TypeError):
             continue
 
-        key = (route, pr_val)
+        key = (route, round(pr_val, 2))
         if key in seen:
-            continue  # ignorer les doublons (cote G si cote D déjà présent)
+            continue  # ignorer les doublons (côté G si côté D déjà présent)
         seen.add(key)
 
         # Coordonnées Lambert93
-        x_raw = (row.get("X") or row.get("x") or "").replace(",", ".").strip()
-        y_raw = (row.get("Y") or row.get("y") or "").replace(",", ".").strip()
+        x_raw = (row.get("x") or row.get("X") or "").replace(",", ".").strip()
+        y_raw = (row.get("y") or row.get("Y") or "").replace(",", ".").strip()
         try:
             x_val = float(x_raw)
             y_val = float(y_raw)
