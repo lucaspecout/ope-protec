@@ -7115,39 +7115,46 @@ def _chain_osm_ways(ways: list[list[tuple[float, float]]], start_lat: float, sta
     return flat
 
 
-def _fetch_pr_autoroutes_live() -> dict[str, Any]:
-    """Récupère la géométrie OSM de chaque autoroute via Overpass et calcule les positions PR."""
-    result: dict[str, list[dict[str, Any]]] = {}
-
-    for road, cfg in _OSM_MOTORWAY_PR_CONFIG.items():
-        query = f"""
-[out:json][timeout:60];
-(
-  way["highway"="motorway"]["ref"="{cfg['ref']}"]({_PR_ISERE_BBOX});
-);
+def _fetch_pr_one_road(road: str, cfg: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
+    """Requête Overpass pour une autoroute — retourne (road, pts) ou (road, [])."""
+    query = f"""[out:json][timeout:60];
+(way["highway"="motorway"]["ref"="{cfg['ref']}"]({_PR_ISERE_BBOX}););
 out geom;
 """
-        try:
-            elements = _overpass_fetch_institutions(query)
-            ways: list[list[tuple[float, float]]] = []
-            for el in elements:
-                if el.get("type") != "way":
-                    continue
-                geom = el.get("geometry") or []
-                nodes = [(n["lat"], n["lon"]) for n in geom if "lat" in n and "lon" in n]
-                if len(nodes) >= 2:
-                    ways.append(nodes)
-            if not ways:
+    try:
+        elements = _overpass_fetch_institutions(query)
+        ways: list[list[tuple[float, float]]] = []
+        for el in elements:
+            if el.get("type") != "way":
                 continue
-            coords = _chain_osm_ways(ways, cfg["start_lat"], cfg["start_lon"])
-            if len(coords) < 2:
-                continue
-            pts = _sample_polyline_km(coords, cfg["start_pr"], cfg["step"])
-            if pts:
-                result[road] = pts
-        except Exception:
-            continue
+            geom = el.get("geometry") or []
+            nodes = [(n["lat"], n["lon"]) for n in geom if "lat" in n and "lon" in n]
+            if len(nodes) >= 2:
+                ways.append(nodes)
+        if not ways:
+            return road, []
+        coords = _chain_osm_ways(ways, cfg["start_lat"], cfg["start_lon"])
+        if len(coords) < 2:
+            return road, []
+        pts = _sample_polyline_km(coords, cfg["start_pr"], cfg["step"])
+        return road, pts
+    except Exception:
+        return road, []
 
+
+def _fetch_pr_autoroutes_live() -> dict[str, Any]:
+    """Récupère la géométrie OSM de chaque autoroute via Overpass (requêtes parallèles)."""
+    result: dict[str, list[dict[str, Any]]] = {}
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        futures = {pool.submit(_fetch_pr_one_road, road, cfg): road
+                   for road, cfg in _OSM_MOTORWAY_PR_CONFIG.items()}
+        for fut in futures:
+            try:
+                road, pts = fut.result(timeout=90)
+                if pts:
+                    result[road] = pts
+            except Exception:
+                continue
     return {"roads": result, "source": "OpenStreetMap / Overpass", "updated_at": datetime.utcnow().isoformat() + "Z"}
 
 

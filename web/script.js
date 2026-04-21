@@ -5768,22 +5768,9 @@ async function loadPrFromApi() {
 
 async function loadPrFromIgnWfs() { return loadPrFromApi(); }
 
-async function renderPrAutorouteLayer() {
+function _drawPrMarkers(coords, sourceLabel) {
   if (!prAutorouteLayer || typeof window.L === 'undefined') return;
   prAutorouteLayer.clearLayers();
-  const show = document.getElementById('filter-pr-autoroutes')?.checked ?? false;
-  if (!show) {
-    if (leafletMap && leafletMap.hasLayer(prAutorouteLayer)) leafletMap.removeLayer(prAutorouteLayer);
-    return;
-  }
-  if (leafletMap && !leafletMap.hasLayer(prAutorouteLayer)) leafletMap.addLayer(prAutorouteLayer);
-
-  // Try IGN WFS first; fall back to static coords if unavailable
-  const osmData = await loadPrFromIgnWfs();
-  const coords = osmData || APRR_PR_COORDS;
-  const sourceLabel = osmData ? 'OpenStreetMap / géométrie réelle' : 'coordonnées statiques (fallback)';
-  prAutorouteLayer.clearLayers(); // clear again after async wait
-
   const roadColors = { A41: '#2563eb', A43: '#7c3aed', A48: '#059669', A49: '#d97706', A51: '#dc2626', A480: '#0891b2' };
   Object.entries(coords).forEach(([road, pts]) => {
     const color = roadColors[road] || '#555';
@@ -5794,11 +5781,36 @@ async function renderPrAutorouteLayer() {
         iconAnchor: [0, 8],
         popupAnchor: [0, -10],
       });
-      const marker = window.L.marker([lat, lon], { icon });
-      marker.bindPopup(`<strong>${road} — PR ${k}</strong><br><small>${lat.toFixed(5)}, ${lon.toFixed(5)}</small><br><span class="muted" style="font-size:.75rem">Source: ${sourceLabel}</span>`);
-      marker.addTo(prAutorouteLayer);
+      window.L.marker([lat, lon], { icon })
+        .bindPopup(`<strong>${road} — PR ${k}</strong><br><small>${lat.toFixed(5)}, ${lon.toFixed(5)}</small><br><span class="muted" style="font-size:.75rem">Source: ${sourceLabel}</span>`)
+        .addTo(prAutorouteLayer);
     });
   });
+}
+
+async function renderPrAutorouteLayer() {
+  if (!prAutorouteLayer || typeof window.L === 'undefined') return;
+  const show = document.getElementById('filter-pr-autoroutes')?.checked ?? false;
+  if (!show) {
+    if (leafletMap && leafletMap.hasLayer(prAutorouteLayer)) leafletMap.removeLayer(prAutorouteLayer);
+    prAutorouteLayer.clearLayers();
+    return;
+  }
+  if (leafletMap && !leafletMap.hasLayer(prAutorouteLayer)) leafletMap.addLayer(prAutorouteLayer);
+
+  // Affichage immédiat : cache API si dispo, sinon coordonnées statiques
+  const immediateCoords = _prApiCache || APRR_PR_COORDS;
+  const immediateLabel = _prApiCache ? 'OpenStreetMap / géométrie réelle' : 'coordonnées statiques';
+  _drawPrMarkers(immediateCoords, immediateLabel);
+
+  // Charger/rafraîchir les données OSM en arrière-plan si pas encore en cache
+  if (!_prApiCache) {
+    loadPrFromApi().then(apiData => {
+      if (!apiData) return;
+      if (!(document.getElementById('filter-pr-autoroutes')?.checked)) return;
+      _drawPrMarkers(apiData, 'OpenStreetMap / géométrie réelle');
+    }).catch(() => {});
+  }
 }
 
 // Diff stable des marqueurs autoroute — clé = id d'événement, valeur = {marker, popupHtml}
