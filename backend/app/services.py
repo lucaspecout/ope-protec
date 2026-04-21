@@ -3486,15 +3486,16 @@ def _extract_drupal_settings_json(page_html: str) -> dict[str, Any]:
 
 
 def _atmo_level_from_index(index_value: float | int | None) -> str:
+    """Indice ATMO France 1-6 : 1-2=Bon, 3=Modéré, 4=Dégradé, 5=Mauvais, 6=Très mauvais."""
     if index_value is None:
         return "inconnu"
     if index_value <= 2:
         return "vert"
-    if index_value <= 4:
+    if index_value <= 3:
         return "jaune"
-    if index_value <= 6:
+    if index_value <= 4:
         return "orange"
-    return "rouge"
+    return "rouge"  # indices 5-6 : Mauvais / Très mauvais
 
 
 def _atmo_label_from_index(index_value: float | int | None) -> str:

@@ -2405,11 +2405,9 @@ def _extract_service_level(key: str, data: dict) -> str:
     if key == "vigieau":
         return "jaune" if len(data.get("alerts") or []) > 0 else "vert"
     if key == "atmo_aura":
-        idx = int((data.get("today") or {}).get("index") or 0)
-        if idx >= 7: return "rouge"
-        if idx >= 5: return "orange"
-        if idx >= 3: return "jaune"
-        return "vert"
+        # Utilise le level calculé par services.py (échelle 1-6 : 5-6=rouge, 4=orange, 3=jaune, 1-2=vert)
+        lvl = str((data.get("today") or {}).get("level") or "vert").lower()
+        return lvl if lvl in _LEVEL_ORDER else "vert"
 
     # Transport
     if key in ("ter_aura", "mreseau", "cars_region_aura"):
