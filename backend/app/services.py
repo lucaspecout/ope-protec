@@ -8853,51 +8853,50 @@ def _col_status_from_weather(temp_c, snow_cm, precip, wind_kmh):
     return {"statut": "ouvert", "couleur": "vert", "detail": f"{temp_c:.0f}°C · conditions normales"}
 
 
-def _fetch_single_col_weather(col: dict[str, Any]) -> dict[str, Any]:
-    """Requête météo pour un col unique via open-meteo."""
+def _fetch_cols_alpins_live() -> dict[str, Any]:
+    cols_out: list[dict[str, Any]] = []
+    # Requête batch unique — Open-Meteo accepte latitude=lat1,lat2,... (une seule requête = pas de 429)
+    lats = ",".join(str(c["lat"]) for c in _COLS_ALPINS)
+    lons = ",".join(str(c["lon"]) for c in _COLS_ALPINS)
+    batch_results: list[dict[str, Any]] = [{"temp": None, "snow": None, "precip": None, "wind": None, "ok": False}] * len(_COLS_ALPINS)
+    first_error: str | None = None
     try:
         resp = _requests.get(
             "https://api.open-meteo.com/v1/forecast",
             params={
-                "latitude": col["lat"],
-                "longitude": col["lon"],
+                "latitude": lats,
+                "longitude": lons,
                 "current": "temperature_2m,precipitation,snow_depth,wind_speed_10m",
                 "wind_speed_unit": "kmh",
                 "timezone": "Europe/Paris",
             },
-            timeout=15,
+            timeout=20,
             headers={"Accept": "application/json", "User-Agent": _BROWSER_UA},
         )
         resp.raise_for_status()
-        cur = (resp.json().get("current") or {})
-        return {
-            "temp": cur.get("temperature_2m"),
-            "snow": cur.get("snow_depth"),
-            "precip": cur.get("precipitation"),
-            "wind": cur.get("wind_speed_10m"),
-            "ok": True,
-        }
+        raw = resp.json()
+        # Réponse batch = liste si plusieurs localisations, dict si une seule
+        items = raw if isinstance(raw, list) else [raw]
+        batch_results = []
+        for item in items:
+            cur = (item.get("current") or {})
+            batch_results.append({
+                "temp": cur.get("temperature_2m"),
+                "snow": cur.get("snow_depth"),
+                "precip": cur.get("precipitation"),
+                "wind": cur.get("wind_speed_10m"),
+                "ok": True,
+            })
+        # Compléter si la réponse est plus courte que la liste (ne devrait pas arriver)
+        while len(batch_results) < len(_COLS_ALPINS):
+            batch_results.append({"temp": None, "snow": None, "precip": None, "wind": None, "ok": False})
     except Exception as exc:
-        return {"temp": None, "snow": None, "precip": None, "wind": None, "ok": False, "err": str(exc)}
+        first_error = str(exc)
 
+    results_map: dict[str, dict[str, Any]] = {
+        col["nom"]: batch_results[i] for i, col in enumerate(_COLS_ALPINS)
+    }
 
-def _fetch_cols_alpins_live() -> dict[str, Any]:
-    cols_out: list[dict[str, Any]] = []
-    # Requêtes parallèles — 10 cols, max 5 workers
-    futures_map: dict[Any, dict[str, Any]] = {}
-    with ThreadPoolExecutor(max_workers=5) as pool:
-        for col in _COLS_ALPINS:
-            fut = pool.submit(_fetch_single_col_weather, col)
-            futures_map[fut] = col
-
-    results_map: dict[str, dict[str, Any]] = {}
-    for fut, col in futures_map.items():
-        try:
-            results_map[col["nom"]] = fut.result(timeout=20)
-        except Exception:
-            results_map[col["nom"]] = {"temp": None, "snow": None, "precip": None, "wind": None, "ok": False}
-
-    first_error: str | None = None
     for col in _COLS_ALPINS:
         r = results_map.get(col["nom"], {})
         temp   = r.get("temp")
@@ -8905,8 +8904,6 @@ def _fetch_cols_alpins_live() -> dict[str, Any]:
         snow   = round(snow_m * 100, 1) if snow_m is not None else None
         precip = r.get("precip")
         wind   = r.get("wind")
-        if not r.get("ok") and r.get("err") and first_error is None:
-            first_error = r.get("err")
         if r.get("ok") and temp is not None:
             status = _col_status_from_weather(temp, snow, precip, wind)
         else:
