@@ -3996,6 +3996,24 @@ def fetch_ars_aura_health_alerts(limit: int = 8, force_refresh: bool = False) ->
     )
 
 
+def _extract_seisme_commune(place: str) -> str:
+    text = str(place or "").strip()
+    if not text:
+        return ""
+    patterns = (
+        r"\bde\s+([A-ZÀ-ÖØ-Ý][A-Za-zÀ-ÖØ-öø-ÿ'\- ]+?)(?:\s*\(\d{2}\)|\s*,|$)",
+        r"\b(?:près de|proche de|a proximite de|à proximité de)\s+([A-ZÀ-ÖØ-Ý][A-Za-zÀ-ÖØ-öø-ÿ'\- ]+?)(?:\s*\(\d{2}\)|\s*,|$)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            candidate = re.sub(r"\s+", " ", match.group(1)).strip(" -")
+            return candidate
+    direct = re.sub(r"\s+", " ", text).strip()
+    direct = re.sub(r"\s*\(\d{2}\)\s*$", "", direct).strip(" -")
+    return direct
+
+
 def _fetch_seismes_isere_live(limit: int = 6) -> dict[str, Any]:
     # Bounding box Isère : lat 44.7-45.5, lon 4.8-6.5 — retourne QuakeML XML
     url = (
@@ -4021,6 +4039,7 @@ def _fetch_seismes_isere_live(limit: int = 6) -> dict[str, Any]:
             mag_raw = _txt("b:magnitude/b:mag/b:value")
             mag = round(float(mag_raw), 1) if mag_raw else None
             place = _txt("b:description/b:text") or "Isère"
+            commune = _extract_seisme_commune(place)
             time_val = _txt("b:origin/b:time/b:value")
             depth_raw = _txt("b:origin/b:depth/b:value")
             depth_km = round(float(depth_raw) / 1000, 1) if depth_raw else None
@@ -4032,6 +4051,13 @@ def _fetch_seismes_isere_live(limit: int = 6) -> dict[str, Any]:
             except (TypeError, ValueError):
                 lat = None
                 lon = None
+            city_center = None
+            if commune:
+                code_insee = resolve_commune_insee_code(commune, departement="38")
+                if code_insee:
+                    city_center = _commune_center(code_insee)
+            display_lat = round(float(city_center[0]), 4) if city_center else lat
+            display_lon = round(float(city_center[1]), 4) if city_center else lon
             # Formater la date ISO "2024-02-12T08:23:45.000000Z" → "12/02/2024 08:23"
             date_label = ""
             if time_val:
@@ -4044,9 +4070,12 @@ def _fetch_seismes_isere_live(limit: int = 6) -> dict[str, Any]:
                 "title": f"Séisme M{mag} — {place}",
                 "magnitude": mag,
                 "place": place,
+                "commune": commune,
                 "depth_km": depth_km,
-                "lat": lat,
-                "lon": lon,
+                "lat": display_lat,
+                "lon": display_lon,
+                "raw_lat": lat,
+                "raw_lon": lon,
                 "published_at": time_val,
                 "date_label": date_label,
                 "description": f"Magnitude {mag} · Profondeur {depth_km} km" if depth_km else f"Magnitude {mag}",
