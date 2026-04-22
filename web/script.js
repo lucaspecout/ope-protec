@@ -5759,6 +5759,32 @@ function _haversineKm(lat1, lon1, lat2, lon2) {
 
 let _prApiSource = null;
 
+function _mergePrCoords(...sources) {
+  const merged = {};
+  sources.forEach((source) => {
+    if (!source || typeof source !== 'object') return;
+    Object.entries(source).forEach(([road, pts]) => {
+      if (!Array.isArray(pts) || !pts.length) return;
+      if (!merged[road]) merged[road] = new Map();
+      pts.forEach((pt) => {
+        const k = Number(pt?.k);
+        const lat = Number(pt?.lat);
+        const lon = Number(pt?.lon);
+        if (!Number.isFinite(k) || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
+        merged[road].set(k.toFixed(3), { k, lat, lon });
+      });
+    });
+  });
+  return Object.fromEntries(Object.entries(merged).map(([road, ptsMap]) => [
+    road,
+    Array.from(ptsMap.values()).sort((a, b) => a.k - b.k),
+  ]));
+}
+
+function _getEffectivePrCoords() {
+  return _mergePrCoords(APRR_PR_COORDS, _prApiCache);
+}
+
 async function loadPrFromApi() {
   if (_prApiCache) return _prApiCache;
   try {
@@ -5806,8 +5832,10 @@ async function renderPrAutorouteLayer() {
   if (leafletMap && !leafletMap.hasLayer(prAutorouteLayer)) leafletMap.addLayer(prAutorouteLayer);
 
   // Affichage immédiat : cache API si dispo, sinon snapshot officiel embarqué
-  const immediateCoords = _prApiCache || APRR_PR_COORDS;
-  const immediateLabel = _prApiCache ? (_prApiSource || 'données officielles') : 'snapshot officiel embarque (data.gouv.fr)';
+  const immediateCoords = _getEffectivePrCoords();
+  const immediateLabel = _prApiCache
+    ? `${_prApiSource || 'données officielles'} + snapshot embarque`
+    : 'snapshot officiel embarque (data.gouv.fr)';
   _drawPrMarkers(immediateCoords, immediateLabel);
 
   // Charger les données officielles en arrière-plan si pas encore en cache
@@ -5815,7 +5843,7 @@ async function renderPrAutorouteLayer() {
     loadPrFromApi().then(apiData => {
       if (!apiData) return;
       if (!(document.getElementById('filter-pr-autoroutes')?.checked)) return;
-      _drawPrMarkers(apiData, _prApiSource || 'données officielles');
+      _drawPrMarkers(_getEffectivePrCoords(), `${_prApiSource || 'données officielles'} + snapshot embarque`);
     }).catch(() => {});
   }
 }
@@ -5831,7 +5859,7 @@ function _parsePrKm(prStr) {
 
 function _interpolatePrGeometry(road, prStr) {
   const km = _parsePrKm(prStr);
-  const pts = (_prApiCache?.[road] || APRR_PR_COORDS[road] || []);
+  const pts = (_getEffectivePrCoords()[road] || []);
   if (!Number.isFinite(km) || pts.length < 2) return null;
   if (km <= pts[0].k) {
     const next = pts[1];
