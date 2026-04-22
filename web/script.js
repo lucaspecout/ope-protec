@@ -4674,9 +4674,6 @@ function _ensureStaticDataLoaded() {
       .then(() => { _barrageLoadInFlight = false; renderBarrageLayer(); })
       .catch(() => { _barrageLoadInFlight = false; });
   }
-  renderSeismesLayer();
-  renderGroundwaterLayer();
-  renderFeuxForetLayer();
   renderColsAlpinsLayer();
 }
 
@@ -9397,9 +9394,6 @@ function renderExternalRisks(data = {}) {
   renderCopernicusEmsWidget(mergedData?.copernicus_ems || {});
   renderColsAlpinsWidget(colsAlpins);
   // Redessiner couches carte avec nouvelles données
-  renderSeismesLayer();
-  renderGroundwaterLayer();
-  renderFeuxForetLayer();
   renderColsAlpinsLayer();
   renderNewsPanel(prefecture, dauphine, franceBleu, placegrenet, grenobleMétropole, arsAura, seismesIsere);
   renderSncfAlerts(sncf);
