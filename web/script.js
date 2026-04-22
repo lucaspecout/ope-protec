@@ -5804,7 +5804,24 @@ async function loadPrFromIgnWfs() { return loadPrFromApi(); }
 function _drawPrMarkers(coords, sourceLabel) {
   if (!prAutorouteLayer || typeof window.L === 'undefined') return;
   prAutorouteLayer.clearLayers();
-  const roadColors = { A41: '#2563eb', A43: '#7c3aed', A48: '#059669', A49: '#d97706', A51: '#dc2626', A480: '#0891b2' };
+  const roadColors = {
+    A7: '#4b5563',
+    A40: '#0f766e',
+    A41: '#2563eb',
+    A42: '#7c3aed',
+    A43: '#8b5cf6',
+    A46: '#374151',
+    A47: '#52525b',
+    A48: '#059669',
+    A49: '#d97706',
+    A51: '#dc2626',
+    A89: '#7c2d12',
+    A410: '#0ea5e9',
+    A430: '#a855f7',
+    A432: '#4338ca',
+    A450: '#be123c',
+    A480: '#0891b2',
+  };
   Object.entries(coords).forEach(([road, pts]) => {
     const color = roadColors[road] || '#555';
     pts.forEach(({ k, lat, lon }) => {

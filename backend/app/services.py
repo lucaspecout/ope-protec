@@ -7029,7 +7029,10 @@ _pr_autoroutes_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.
 # Dataset officiel IGN/CEREMA — bornage du réseau routier national
 _DATAGOUV_BORNAGE_URL = "https://www.data.gouv.fr/api/1/datasets/r/1543c04e-13bb-45b3-8da3-1b47a66c4541"
 _PR_NEARBY_DEPARTMENTS = {"01", "26", "38", "42", "69", "73", "74"}
-_PR_MAJOR_MOTORWAYS = {"A7", "A40", "A41", "A42", "A43", "A46", "A47", "A48", "A49", "A51", "A89", "A432", "A480"}
+_PR_MAJOR_MOTORWAYS = {
+    "A7", "A40", "A41", "A42", "A43", "A46", "A47", "A48", "A49", "A51",
+    "A89", "A410", "A430", "A432", "A450", "A480",
+}
 
 # Config Overpass (fallback)
 _OSM_MOTORWAY_PR_CONFIG: dict[str, dict[str, Any]] = {
@@ -7482,9 +7485,10 @@ def _aprr_pr_to_coords(road: str, pr_str: str) -> tuple[float, float] | None:
 
 # Routes APRR/AREA passant par ou desservant l'Isère
 _APRR_ISERE_ROAD_SET: frozenset[str] = frozenset({
-    "A41", "A43", "A48", "A51", "A480", "A49",
+    "A40", "A41", "A42", "A43", "A46", "A47", "A48", "A49", "A51", "A89",
+    "A410", "A430", "A432", "A450", "A480", "A7",
 })
-_APRR_ROAD_PATTERN = re.compile(r'\b(A41|A43|A48|A51|A480|A49)\b', re.IGNORECASE)
+_APRR_ROAD_PATTERN = re.compile(r'\b(A7|A40|A41|A42|A43|A46|A47|A48|A49|A51|A89|A410|A430|A432|A450|A480)\b', re.IGNORECASE)
 
 # URL de la synthèse nationale Bison Futé — inclut DATEX2 de APRR/AREA/Escota (réseau concédé)
 _BISON_RECAP_URL = (
