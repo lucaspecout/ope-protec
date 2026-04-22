@@ -9504,56 +9504,33 @@ def _col_status_from_weather(temp_c, snow_cm, precip, wind_kmh):
 
 def _fetch_cols_alpins_live() -> dict[str, Any]:
     cols_out: list[dict[str, Any]] = []
-    # Requête batch unique — Open-Meteo accepte latitude=lat1,lat2,... (une seule requête = pas de 429)
-    lats = ",".join(str(c["lat"]) for c in _COLS_ALPINS)
-    lons = ",".join(str(c["lon"]) for c in _COLS_ALPINS)
-    batch_results: list[dict[str, Any]] = [{"temp": None, "snow": None, "precip": None, "wind": None, "ok": False}] * len(_COLS_ALPINS)
     first_error: str | None = None
-    try:
-        resp = _requests.get(
-            "https://api.open-meteo.com/v1/forecast",
-            params={
-                "latitude": lats,
-                "longitude": lons,
-                "current": "temperature_2m,precipitation,snow_depth,wind_speed_10m",
-                "wind_speed_unit": "kmh",
-                "timezone": "Europe/Paris",
-            },
-            timeout=20,
-            headers={"Accept": "application/json", "User-Agent": _BROWSER_UA},
-        )
-        resp.raise_for_status()
-        raw = resp.json()
-        # Réponse batch = liste si plusieurs localisations, dict si une seule
-        items = raw if isinstance(raw, list) else [raw]
-        batch_results = []
-        for item in items:
-            cur = (item.get("current") or {})
-            batch_results.append({
-                "temp": cur.get("temperature_2m"),
-                "snow": cur.get("snow_depth"),
-                "precip": cur.get("precipitation"),
-                "wind": cur.get("wind_speed_10m"),
-                "ok": True,
-            })
-        # Compléter si la réponse est plus courte que la liste (ne devrait pas arriver)
-        while len(batch_results) < len(_COLS_ALPINS):
-            batch_results.append({"temp": None, "snow": None, "precip": None, "wind": None, "ok": False})
-    except Exception as exc:
-        first_error = str(exc)
-
-    results_map: dict[str, dict[str, Any]] = {
-        col["nom"]: batch_results[i] for i, col in enumerate(_COLS_ALPINS)
-    }
-
     for col in _COLS_ALPINS:
-        r = results_map.get(col["nom"], {})
-        temp   = r.get("temp")
-        snow_m = r.get("snow")   # open-meteo renvoie snow_depth en mètres → convertir en cm
-        snow   = round(snow_m * 100, 1) if snow_m is not None else None
-        precip = r.get("precip")
-        wind   = r.get("wind")
-        if r.get("ok") and temp is not None:
+        temp = snow = precip = wind = None
+        ok = False
+        try:
+            payload = _http_get_json(
+                "https://api.open-meteo.com/v1/forecast"
+                f"?latitude={quote_plus(str(col['lat']))}"
+                f"&longitude={quote_plus(str(col['lon']))}"
+                "&current=temperature_2m,precipitation,snow_depth,wind_speed_10m"
+                "&wind_speed_unit=kmh"
+                "&timezone=Europe%2FParis",
+                timeout=12,
+            )
+            current = payload.get("current") if isinstance(payload, dict) else {}
+            if isinstance(current, dict):
+                temp = current.get("temperature_2m")
+                snow_m = current.get("snow_depth")
+                snow = round(snow_m * 100, 1) if snow_m is not None else None
+                precip = current.get("precipitation")
+                wind = current.get("wind_speed_10m")
+                ok = temp is not None
+        except Exception as exc:
+            if first_error is None:
+                first_error = str(exc)
+
+        if ok and temp is not None:
             status = _col_status_from_weather(temp, snow, precip, wind)
         else:
             status = {"statut": "inconnu", "couleur": "gris", "detail": "Météo indisponible"}
