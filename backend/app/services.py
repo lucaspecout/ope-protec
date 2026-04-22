@@ -7044,6 +7044,17 @@ _OSM_MOTORWAY_PR_CONFIG: dict[str, dict[str, Any]] = {
     "A480": {"ref": "A 480", "start_lat": 45.156, "start_lon": 5.690, "start_pr": 0,  "step": 1},
 }
 _PR_ISERE_BBOX = "44.7,4.8,45.75,6.5"
+_PR_ISERE_BBOX_NUMERIC = (44.7, 4.8, 45.75, 6.5)  # lat_min, lon_min, lat_max, lon_max
+
+
+def _is_coord_in_isere_pr_bbox(lat: float | None, lon: float | None) -> bool:
+    try:
+        safe_lat = float(lat)
+        safe_lon = float(lon)
+    except (TypeError, ValueError):
+        return False
+    lat_min, lon_min, lat_max, lon_max = _PR_ISERE_BBOX_NUMERIC
+    return lat_min <= safe_lat <= lat_max and lon_min <= safe_lon <= lon_max
 
 
 def _lambert93_to_wgs84(x_l93: float, y_l93: float) -> tuple[float, float]:
@@ -7593,10 +7604,13 @@ def _parse_bison_recap_aprr(html: str) -> list[dict[str, Any]]:
             "access": bretelle[:160] if bretelle else "",
             "commune": commune[:80] if commune else "",
         }
-        if pr:
-            coords = _aprr_pr_to_coords(road.strip(), pr)
-            if coords:
-                evt["lat"], evt["lon"] = coords
+        coords = _aprr_pr_to_coords(road.strip(), pr) if pr else None
+        if not coords:
+            continue
+        lat, lon = coords
+        if not _is_coord_in_isere_pr_bbox(lat, lon):
+            continue
+        evt["lat"], evt["lon"] = lat, lon
         events.append(evt)
 
     return events
@@ -7638,11 +7652,17 @@ def _fetch_aprr_isere_live() -> dict[str, Any]:
                 road = str(evt.get("road") or "")
                 blob = f"{road} {evt.get('title', '')} {evt.get('description', '')} {evt.get('location_summary', '')}"
                 if _APRR_ROAD_PATTERN.search(blob):
+                    lat = evt.get("lat")
+                    lon = evt.get("lon")
+                    if not _is_coord_in_isere_pr_bbox(lat, lon):
+                        continue
                     events.append({
                         "title": str(evt.get("title") or "Événement trafic")[:120],
                         "type": str(evt.get("category") or "inconnu"),
                         "road": road,
                         "description": str(evt.get("description") or "")[:400],
+                        "lat": lat,
+                        "lon": lon,
                         "start": str(evt.get("validity_start") or ""),
                         "end": str(evt.get("validity_end") or ""),
                         "level": str(evt.get("severity") or "jaune"),

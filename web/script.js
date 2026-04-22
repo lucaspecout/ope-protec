@@ -5948,10 +5948,9 @@ async function renderTrafficOnMap() {
   }
   if (autorouteLayer) {
     const autoroutesTypeFilter = document.getElementById('filter-autoroutes-type')?.value || 'all';
-    const allRoadEvents = showAutoroutes ? [
-      ...(cachedExternalRisksSnapshot?.aprr_isere?.events || []).map((e) => ({ ...e, src: 'APRR/AREA' })),
-      ...(cachedExternalRisksSnapshot?.vinci_autoroutes?.events || []).map((e) => ({ ...e, src: 'Vinci' })),
-    ] : [];
+    const allRoadEvents = showAutoroutes
+      ? (cachedExternalRisksSnapshot?.aprr_isere?.events || []).map((e) => ({ ...e, src: 'APRR/AREA' }))
+      : [];
 
     // Clé stable par événement : src + route + titre + PR + sens/acces
     const evtKey = (evt) => `${evt.src}|${evt.road}|${evt.title}|${evt.pr || ''}|${evt.direction || ''}|${evt.access || ''}`;
@@ -5972,6 +5971,7 @@ async function renderTrafficOnMap() {
       if (!placed) placed = _prToLatLonOsrm(evt.road, evt.pr);
       if (!placed) return;
       const [lat, lon] = placed;
+      if (!isPointInIsere({ lat, lon })) return;
 
       const key = evtKey(evt);
       activeKeys.add(key);
