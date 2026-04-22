@@ -7503,6 +7503,10 @@ _BISON_RECAP_URL = (
     "http://tipi.bison-fute.gouv.fr/bison-fute-ouvert/publicationsDIR/"
     "Evenementiel-DIR/cnir/RecapTraficFranceEntiere.html"
 )
+_BISON_RECAP_BOUCHONS_URL = (
+    "http://tipi.bison-fute.gouv.fr/bison-fute-ouvert/publicationsDIR/"
+    "Evenementiel-DIR/cnir/RecapBouchonsFranceEntiere.html"
+)
 
 
 def _parse_bison_recap_aprr(html: str) -> list[dict[str, Any]]:
@@ -7525,6 +7529,85 @@ def _parse_bison_recap_aprr(html: str) -> list[dict[str, Any]]:
         if s.count("*") >= 2:
             return "orange"
         return "jaune"
+
+    def _importance_to_level_from_stars(star_count: int) -> str:
+        if star_count >= 3:
+            return "rouge"
+        if star_count >= 2:
+            return "orange"
+        return "jaune"
+
+    def _guess_type_from_text(text: str) -> str:
+        lowered = str(text or "").lower()
+        if "accident" in lowered:
+            return "accident"
+        if "bouchon" in lowered or "circulation bloquée" in lowered or "circulation bloquee" in lowered:
+            return "perturbation"
+        if "travaux" in lowered or "chantier" in lowered:
+            return "travaux"
+        if "danger" in lowered or "obstacle" in lowered or "contresens" in lowered:
+            return "danger"
+        if "panne" in lowered or "incident" in lowered or "véhicule arrêté" in lowered or "vehicule arrete" in lowered:
+            return "perturbation"
+        return "inconnu"
+
+    def _parse_text_entry(entry: str, star_count: int) -> dict[str, Any] | None:
+        raw = re.sub(r"\s+", " ", str(entry or "")).strip(" ;*")
+        if not raw:
+            return None
+        road = _normalize_aprr_road_label(raw)
+        if road not in _APRR_ISERE_ROAD_SET:
+            return None
+
+        pr = _extract_pr_from_text(raw)
+        coords = _aprr_pr_to_coords(road, pr) if pr else None
+        if not coords:
+            coords = _ISERE_ROAD_COORDS.get(road)
+        if not coords:
+            return None
+        lat, lon = coords
+        if not _is_coord_in_isere_pr_bbox(lat, lon):
+            return None
+
+        origin_match = re.search(r"\[Origine\s*:\s*([^\]]+)\]", raw, re.IGNORECASE)
+        origin = str(origin_match.group(1) if origin_match else "").strip()
+        direction_match = re.search(r"\((sens [^)]+)\)", raw, re.IGNORECASE)
+        direction = str(direction_match.group(1) if direction_match else "").strip()
+        commune_match = re.search(r"\bà\s+([^,;\[]+)", raw)
+        commune = str(commune_match.group(1) if commune_match else "").strip()
+        access_match = re.search(r"(Sur [^;\[]+)", raw)
+        access = str(access_match.group(1) if access_match else "").strip()
+        end_match = re.search(r"prévu jusqu['’]au\s+([^,;\[]+)", raw, re.IGNORECASE)
+        end_time = str(end_match.group(1) if end_match else "").strip()
+        category = _guess_type_from_text(raw)
+        category_label = {
+            "accident": "Accident",
+            "travaux": "Travaux",
+            "danger": "Danger",
+            "perturbation": "Perturbation",
+            "inconnu": "Événement",
+        }.get(category, "Événement")
+        title = f"{category_label} · {road}"
+        if direction:
+            title = f"{title} · {direction}"
+
+        return {
+            "title": title[:160],
+            "description": raw[:500],
+            "road": road,
+            "type": category,
+            "level": _importance_to_level_from_stars(star_count),
+            "start": "",
+            "end": end_time[:60] if end_time else "",
+            "severity": _importance_to_level_from_stars(star_count),
+            "source": f"Bison Futé / {origin or 'SCA autoroutes'}",
+            "pr": pr,
+            "direction": direction[:120],
+            "access": access[:160],
+            "commune": commune[:80],
+            "lat": lat,
+            "lon": lon,
+        }
 
     blocks = re.findall(r'<div class="interligne">(.*?)</div>', html, re.DOTALL)
     for block in blocks:
@@ -7610,6 +7693,40 @@ def _parse_bison_recap_aprr(html: str) -> list[dict[str, Any]]:
         evt["lat"], evt["lon"] = lat, lon
         events.append(evt)
 
+    if events:
+        return events
+
+    # Fallback robuste pour le format texte actuellement publié par Bison Futé.
+    text = unescape(str(html or ""))
+    text = re.sub(r"(?i)<br\s*/?>", "\n", text)
+    text = re.sub(r"(?i)</?(?:p|div|li|ul|ol|table|tr|td|section|article|pre|h\d)[^>]*>", "\n", text)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = text.replace("\xa0", " ")
+    text = re.sub(r"\r", "", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    section_match = re.search(
+        r"Département\s+38\s+\(Is[èe]re\)(.*?)(?:Département\s+\d+\s+\(|\Z)",
+        text,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if not section_match:
+        return events
+
+    section = section_match.group(1)
+    chunks = re.split(r"(?m)^\s*(\*{1,3})\s+", section)
+    pending_stars = ""
+    for chunk in chunks:
+        piece = str(chunk or "").strip()
+        if not piece:
+            continue
+        if re.fullmatch(r"\*{1,3}", piece):
+            pending_stars = piece
+            continue
+        evt = _parse_text_entry(piece, len(pending_stars or "*"))
+        pending_stars = ""
+        if evt:
+            events.append(evt)
+
     return events
 
 
@@ -7674,18 +7791,23 @@ def _fetch_aprr_isere_live() -> dict[str, Any]:
 
     try:
         hdrs = {"User-Agent": _BROWSER_UA, "Accept": "text/html,*/*"}
-        if _REQUESTS_OK and _requests is not None:
-            resp = _requests.get(_BISON_RECAP_URL, headers=hdrs, timeout=20, verify=False)
-            resp.raise_for_status()
-            try:
-                html = resp.content.decode("utf-8")
-            except UnicodeDecodeError:
-                html = resp.content.decode("iso-8859-1", errors="replace")
-        else:
-            html = _http_get_text(_BISON_RECAP_URL, timeout=20, headers=hdrs)
-
-        if html:
-            events = _parse_bison_recap_aprr(html)
+        recap_urls = (_BISON_RECAP_URL, _BISON_RECAP_BOUCHONS_URL)
+        recap_events: list[dict[str, Any]] = []
+        for recap_url in recap_urls:
+            if _REQUESTS_OK and _requests is not None:
+                resp = _requests.get(recap_url, headers=hdrs, timeout=20, verify=False)
+                resp.raise_for_status()
+                try:
+                    html = resp.content.decode("utf-8")
+                except UnicodeDecodeError:
+                    html = resp.content.decode("iso-8859-1", errors="replace")
+            else:
+                html = _http_get_text(recap_url, timeout=20, headers=hdrs)
+            if html:
+                recap_events.extend(_parse_bison_recap_aprr(html))
+        if recap_events:
+            events = recap_events
+            source_used = f"{_BISON_RECAP_URL} + {_BISON_RECAP_BOUCHONS_URL}"
     except Exception:
         pass
 
@@ -9124,6 +9246,8 @@ def flush_service_memory_cache(service_key: str) -> dict[str, str]:
         "vigicrues":           (_vigicrues_cache,             _vigicrues_cache_lock),
         "itinisere":           (_itinisere_cache,             _itinisere_cache_lock),
         "bison_fute":          (_bison_cache,                 _bison_cache_lock),
+        "aprr_isere":          (_aprr_isere_cache,            _aprr_isere_cache_lock),
+        "vinci_autoroutes":    (_vinci_autoroutes_cache,      _vinci_autoroutes_cache_lock),
         "vigieau":             (_vigieau_cache,               _vigieau_cache_lock),
         "atmo_aura":           (_atmo_aura_cache,             _atmo_aura_cache_lock),
         "sncf_isere":          (_sncf_isere_cache,            _sncf_isere_cache_lock),
