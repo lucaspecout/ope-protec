@@ -7024,14 +7024,12 @@ import io as _io_mod
 
 _PR_AUTOROUTES_TTL = 86400  # 24h
 _pr_autoroutes_cache_lock = Lock()
-_pr_autoroutes_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "pr_autoroutes_rrn"}
+_pr_autoroutes_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "pr_autoroutes_rrn_region"}
 
 # Dataset officiel IGN/CEREMA — bornage du réseau routier national
 _DATAGOUV_BORNAGE_URL = "https://www.data.gouv.fr/api/1/datasets/r/1543c04e-13bb-45b3-8da3-1b47a66c4541"
-_PR_MOTORWAYS_ISERE = {"A41", "A43", "A48", "A49", "A51", "A480"}
-# Bbox Isère en WGS84 pour filtrage géographique après conversion
-_ISERE_LAT_MIN, _ISERE_LAT_MAX = 44.65, 45.80
-_ISERE_LON_MIN, _ISERE_LON_MAX = 4.75, 6.55
+_PR_NEARBY_DEPARTMENTS = {"01", "26", "38", "42", "69", "73", "74"}
+_PR_MAJOR_MOTORWAYS = {"A7", "A40", "A41", "A42", "A43", "A46", "A47", "A48", "A49", "A51", "A89", "A432", "A480"}
 
 # Config Overpass (fallback)
 _OSM_MOTORWAY_PR_CONFIG: dict[str, dict[str, Any]] = {
@@ -7127,9 +7125,9 @@ def _fetch_pr_from_datagouv() -> dict[str, list[dict[str, Any]]]:
         # Normaliser les noms de colonnes
         row = {k.strip(): v.strip() if isinstance(v, str) else v for k, v in row.items()}
 
-        # Filtrer par département Isère (depPr == "38")
+        # Couvrir l'Isère et les grands axes autoroutiers régionaux à proximité.
         dep = (row.get("depPr") or row.get("DEPPR") or "").strip()
-        if dep != "38":
+        if dep not in _PR_NEARBY_DEPARTMENTS:
             continue
 
         # Extraire le nom de la route depuis le code complexe (ex: "38A048..." → "A48")
@@ -7139,7 +7137,7 @@ def _fetch_pr_from_datagouv() -> dict[str, list[dict[str, Any]]]:
             continue
         digits = m.group(1).lstrip("0") or "0"
         route = "A" + digits  # "048" → "A48", "480" → "A480"
-        if route not in _PR_MOTORWAYS_ISERE:
+        if route not in _PR_MAJOR_MOTORWAYS:
             continue
 
         # Utiliser le vrai numéro de PR routier pour pouvoir interpoler correctement
@@ -7171,10 +7169,6 @@ def _fetch_pr_from_datagouv() -> dict[str, list[dict[str, Any]]]:
         try:
             lat, lon = _lambert93_to_wgs84(x_val, y_val)
         except Exception:
-            continue
-
-        # Filtrer géographiquement à l'Isère
-        if not (_ISERE_LAT_MIN <= lat <= _ISERE_LAT_MAX and _ISERE_LON_MIN <= lon <= _ISERE_LON_MAX):
             continue
 
         if route not in roads:
