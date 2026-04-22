@@ -3111,7 +3111,7 @@ function renderSeismesLayer() {
       iconSize: [r * 2, r * 2], iconAnchor: [r, r],
     });
     window.L.marker([q.lat, q.lon], { icon })
-      .bindPopup(`<strong>🌍 M${mag} — ${escapeHtml(q.place || q.title || '?')}</strong><br><span class="muted">${escapeHtml(q.date || '')}</span><br>Profondeur : ${escapeHtml(String(q.depth || '?'))} km`)
+      .bindPopup(`<strong>🌍 M${mag} — ${escapeHtml(q.place || q.title || '?')}</strong><br><span class="muted">${escapeHtml(q.date_label || q.published_at || '')}</span><br>Profondeur : ${escapeHtml(String(q.depth_km ?? '?'))} km`)
       .addTo(seismesLayer);
   });
 }

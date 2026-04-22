@@ -4024,6 +4024,14 @@ def _fetch_seismes_isere_live(limit: int = 6) -> dict[str, Any]:
             time_val = _txt("b:origin/b:time/b:value")
             depth_raw = _txt("b:origin/b:depth/b:value")
             depth_km = round(float(depth_raw) / 1000, 1) if depth_raw else None
+            lat_raw = _txt("b:origin/b:latitude/b:value")
+            lon_raw = _txt("b:origin/b:longitude/b:value")
+            try:
+                lat = round(float(lat_raw), 4) if lat_raw else None
+                lon = round(float(lon_raw), 4) if lon_raw else None
+            except (TypeError, ValueError):
+                lat = None
+                lon = None
             # Formater la date ISO "2024-02-12T08:23:45.000000Z" → "12/02/2024 08:23"
             date_label = ""
             if time_val:
@@ -4037,6 +4045,8 @@ def _fetch_seismes_isere_live(limit: int = 6) -> dict[str, Any]:
                 "magnitude": mag,
                 "place": place,
                 "depth_km": depth_km,
+                "lat": lat,
+                "lon": lon,
                 "published_at": time_val,
                 "date_label": date_label,
                 "description": f"Magnitude {mag} · Profondeur {depth_km} km" if depth_km else f"Magnitude {mag}",
