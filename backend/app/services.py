@@ -9488,6 +9488,51 @@ _COLS_ALPINS: list[dict[str, Any]] = [
 ]
 
 
+def _normalize_col_token(value: str) -> str:
+    raw = unicodedata.normalize("NFKD", str(value or "")).encode("ascii", "ignore").decode("ascii")
+    raw = raw.lower().replace("'", " ").replace("-", " ")
+    return re.sub(r"\s+", " ", raw).strip()
+
+
+def _match_col_event(col_name: str, event: dict[str, Any]) -> bool:
+    haystack = _normalize_col_token(
+        f"{event.get('title', '')} {event.get('description', '')} {' '.join(event.get('locations') or [])}"
+    )
+    col_token = _normalize_col_token(col_name)
+    if not haystack or not col_token:
+        return False
+    if col_token in haystack:
+        return True
+    aliases = {
+        "col du lautaret": ("lautaret",),
+        "col du galibier": ("galibier",),
+        "col de la croix de fer": ("croix de fer",),
+        "col du glandon": ("glandon",),
+        "col de l ornon": ("ornon",),
+        "col de mens": ("mens",),
+        "col de porte": ("porte",),
+        "col du coq": ("coq",),
+        "col du granier": ("granier",),
+        "col de la chartreuse": ("chartreuse",),
+    }
+    return any(alias in haystack for alias in aliases.get(col_token, ()))
+
+
+def _col_status_from_itinisere_event(event: dict[str, Any]) -> dict[str, Any] | None:
+    text = _normalize_col_token(f"{event.get('title', '')} {event.get('description', '')}")
+    end_hint = str(event.get("period_end") or event.get("published_at") or "").strip()
+    if any(token in text for token in ("ferme", "fermee", "fermeture", "route fermee", "circulation interrompue")):
+        detail = "Fermé selon Itinisère"
+        if end_hint:
+            detail = f"{detail} · jusqu'au {end_hint}"
+        return {"statut": "fermé", "couleur": "rouge", "detail": detail, "source_status": "itinisere"}
+    if any(token in text for token in ("reouvert", "reouverte", "ouvert", "ouverte", "reprise du trafic")):
+        return {"statut": "ouvert", "couleur": "vert", "detail": "Ouvert selon Itinisère", "source_status": "itinisere"}
+    if any(token in text for token in ("prudence", "equipements speciaux", "chaines", "delicat", "difficile")):
+        return {"statut": "prudence", "couleur": "jaune", "detail": "Conditions signalées par Itinisère", "source_status": "itinisere"}
+    return None
+
+
 def _col_status_from_weather(temp_c, snow_cm, precip, wind_kmh):
     if temp_c is None:
         return {"statut": "inconnu", "couleur": "gris", "detail": "Météo indisponible"}
@@ -9505,6 +9550,10 @@ def _col_status_from_weather(temp_c, snow_cm, precip, wind_kmh):
 def _fetch_cols_alpins_live() -> dict[str, Any]:
     cols_out: list[dict[str, Any]] = []
     first_error: str | None = None
+    itinisere_payload = fetch_itinisere_disruptions(limit=120, force_refresh=False)
+    itinisere_events = itinisere_payload.get("events") if isinstance(itinisere_payload, dict) else []
+    if not isinstance(itinisere_events, list):
+        itinisere_events = []
     for col in _COLS_ALPINS:
         temp = snow = precip = wind = None
         ok = False
@@ -9530,9 +9579,11 @@ def _fetch_cols_alpins_live() -> dict[str, Any]:
             if first_error is None:
                 first_error = str(exc)
 
-        if ok and temp is not None:
+        matched_event = next((evt for evt in itinisere_events if isinstance(evt, dict) and _match_col_event(col["nom"], evt)), None)
+        status = _col_status_from_itinisere_event(matched_event or {}) if matched_event else None
+        if status is None and ok and temp is not None:
             status = _col_status_from_weather(temp, snow, precip, wind)
-        else:
+        if status is None:
             status = {"statut": "inconnu", "couleur": "gris", "detail": "Météo indisponible"}
             temp = snow = precip = wind = None
         cols_out.append({**col, **status, "temperature": temp, "enneigement_cm": snow, "precipitations": precip, "vent_kmh": wind})
@@ -9541,7 +9592,7 @@ def _fetch_cols_alpins_live() -> dict[str, Any]:
     result: dict[str, Any] = {
         "service": "Cols alpins Isère",
         "status": "online",
-        "source": "https://api.open-meteo.com",
+        "source": "https://www.itinisere.fr",
         "cols": cols_out,
         "cols_total": len(cols_out),
         "dangereux_total": nb_dangereux,

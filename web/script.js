@@ -8888,7 +8888,7 @@ const SVC_CARD_META = {
   avalanche_isere:       { statusId: 'avalanche-svc-status',   infoId: null,                   url: 'https://meteofrance.com/meteo-montagne' },
   feux_foret_isere:      { statusId: 'feux-svc-status',        infoId: null,                   url: 'https://effis.jrc.ec.europa.eu' },
   copernicus_ems:        { statusId: 'copernicus-svc-status',  infoId: null,                   url: 'https://www.gdacs.org' },
-  cols_alpins_isere:     { statusId: 'cols-svc-status',        infoId: null,                   url: 'https://api.open-meteo.com' },
+  cols_alpins_isere:     { statusId: 'cols-svc-status',        infoId: null,                   url: 'https://www.itinisere.fr/fr/perturbations/17/Disruption/index?PartnerId=0' },
   anfr_isere:            { statusId: 'anfr-status',            infoId: 'anfr-info',            url: 'https://www.data.gouv.fr/fr/datasets/donnees-sur-les-installations-radioelectriques-de-plus-de-5-watts-1/' },
   arcep_isere:           { statusId: 'arcep-status',           infoId: 'arcep-info',           url: 'https://www.data.gouv.fr/fr/datasets/sites-indisponibles/' },
   isere_opendata:        { statusId: 'opendata-status',        infoId: 'opendata-info',        url: 'https://opendata.isere.fr' },
