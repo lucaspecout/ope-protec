@@ -62,7 +62,7 @@ const FLUX_SERVICES = [
   { key: 'seismes_isere',          label: 'Séismes Isère',             icon: '🌍', category: 'Risques',       interval: 600,   metric: (d) => `${(d.items || []).length} séisme(s) détecté(s)` },
   { key: 'avalanche_isere',        label: 'Avalanches BRA · Isère',    icon: '🏔️', category: 'Risques',       interval: 1800,  metric: (d) => `Niveau max ${d.niveau_max_bra ?? '?'}/5 · ${(d.massifs || []).length} massif(s)` },
   { key: 'feux_foret_isere',       label: 'Feux de forêt EFFIS',       icon: '🔥', category: 'Risques',       interval: 600,   metric: (d) => `${d.fires_total ?? 0} foyer(s) détecté(s) 24h` },
-  { key: 'copernicus_ems',         label: 'GDACS · Inondations Europe',   icon: '🛰️', category: 'Risques',    interval: 1800,  metric: (d) => `${d.france_total ?? 0} activation(s) France · ${d.activations_total ?? 0} Europe` },
+  { key: 'copernicus_ems',         label: 'GDACS · Catastrophes Europe',  icon: '🛰️', category: 'Risques',    interval: 1800,  metric: (d) => `${d.france_total ?? 0} événement(s) France · ${d.activations_total ?? 0} Europe` },
   { key: 'cols_alpins_isere',      label: 'Cols alpins Isère',         icon: '⛰️', category: 'Transport',     interval: 1800,  metric: (d) => `${d.cols_total ?? 0} cols · ${d.dangereux_total ?? 0} à surveiller` },
   { key: 'anfr_isere',             label: 'ANFR · Antennes mobiles',   icon: '📡', category: 'Télécom',       interval: 21600, metric: (d) => `${d.supports_total ?? 0} support(s) mobile recensés` },
   { key: 'arcep_isere',            label: 'ARCEP · Sites mobiles',     icon: '📶', category: 'Télécom',       interval: 600,   metric: (d) => `${d.outages_total ?? 0} indisponibilité(s)` },
@@ -8809,7 +8809,7 @@ const SVC_DETAIL_LISTS = {
   seismes_isere:         [{ id: 'seismes-svc-list',      label: 'Séismes récents Isère' }],
   avalanche_isere:       [{ id: 'avalanche-svc-list',    label: 'BRA — Risque avalanche massifs Isère' }],
   feux_foret_isere:      [{ id: 'feux-svc-list',         label: 'Foyers actifs EFFIS (24h)' }],
-  copernicus_ems:        [{ id: 'copernicus-svc-list',   label: 'Inondations actives — GDACS' }],
+  copernicus_ems:        [{ id: 'copernicus-svc-list',   label: 'Catastrophes actives — GDACS' }],
   cols_alpins_isere:     [{ id: 'cols-svc-list',         label: 'État des cols alpins Isère' }],
 };
 
@@ -11966,17 +11966,19 @@ function renderCopernicusEmsWidget(data = {}) {
   const france = data.france_total ?? 0;
   const total = data.activations_total ?? 0;
   const level = france > 0 ? 'orange' : total > 0 ? 'jaune' : 'vert';
-  const src = data.source ? ` · ${escapeHtml(data.service || 'GDACS')}` : '';
-  setRiskText('copernicus-svc-status', `${france} activation(s) France · ${total} Europe${src}`, level);
+  setRiskText('copernicus-svc-status', `${france} événement(s) France · ${total} Europe`, level);
+  const _gdacsTypeIcon = { FL: '🌊', EQ: '🌍', TC: '🌀', VO: '🌋', WF: '🔥', DR: '🏜️', TS: '🌊', LS: '⛰️' };
+  const alertColors = { Red: '#c92a2a', Orange: '#e67700', Green: '#2b8a3e' };
   const items = Array.isArray(data.france_activations) && data.france_activations.length
     ? data.france_activations
-    : (Array.isArray(data.activations) ? data.activations.slice(0, 8) : []);
-  const alertColors = { Red: '#c92a2a', Orange: '#e67700', Green: '#2b8a3e' };
+    : (Array.isArray(data.activations) ? data.activations.slice(0, 10) : []);
   setHtml('copernicus-svc-list', items.map((a) => {
+    const icon = _gdacsTypeIcon[a.type] || '⚠️';
     const color = alertColors[a.level] || '#868e96';
     const country = a.country ? ` · ${escapeHtml(a.country)}` : '';
-    return `<li>🌊 <strong>${escapeHtml(a.title || a.id || '?')}</strong><span class="muted">${country} — ${escapeHtml(a.date || '?')}</span>${a.level ? ` <span style="color:${color};font-weight:600">(${escapeHtml(a.level)})</span>` : ''}</li>`;
-  }).join('') || '<li class="muted">Aucune inondation active détectée en Europe.</li>');
+    const typeLabel = a.type_label ? ` <span class="muted">[${escapeHtml(a.type_label)}]</span>` : '';
+    return `<li>${icon}${typeLabel} <strong>${escapeHtml(a.title || a.id || '?')}</strong><span class="muted">${country} — ${escapeHtml(a.date || '?')}</span>${a.level ? ` <span style="color:${color};font-weight:600">(${escapeHtml(a.level)})</span>` : ''}</li>`;
+  }).join('') || '<li class="muted">Aucune catastrophe active détectée en Europe.</li>');
 }
 
 // ════════════════════════════════════════════════════════════════════════════

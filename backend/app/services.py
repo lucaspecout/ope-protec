@@ -8749,10 +8749,41 @@ def _gdacs_text(item: Any, tag: str, ns: str | None = None) -> str:
     return (el.text or "").strip() if el is not None else ""
 
 
+_GDACS_EVENT_LABELS: dict[str, str] = {
+    "FL": "Inondation",
+    "EQ": "Séisme",
+    "TC": "Cyclone tropical",
+    "VO": "Volcan",
+    "WF": "Feux de forêt",
+    "DR": "Sécheresse",
+    "TS": "Tsunami",
+    "LS": "Glissement de terrain",
+}
+# Pays européens (ISO3) pour filtrage géographique
+_EUROPE_ISO3 = {
+    "FRA","DEU","GBR","ESP","ITA","PRT","BEL","NLD","LUX","CHE","AUT","POL","CZE","SVK",
+    "HUN","ROU","BGR","HRV","SVN","SRB","BIH","MNE","MKD","ALB","GRC","TUR","CYP","MLT",
+    "DNK","SWE","NOR","FIN","ISL","IRL","EST","LVA","LTU","BLR","UKR","MDA","GEO","ARM",
+    "AZE","RUS","AND","MCO","SMR","VAT","LIE","XKX","NOR",
+}
+# BBox Europe élargie (inclut Turquie, Caucase, Maroc/Algérie proches)
+_EUROPE_LAT_MIN, _EUROPE_LAT_MAX = 27.0, 72.0
+_EUROPE_LON_MIN, _EUROPE_LON_MAX = -32.0, 50.0
+
+
+def _is_in_europe(lat: float | None, lon: float | None, iso3: str) -> bool:
+    if iso3.upper() in _EUROPE_ISO3:
+        return True
+    if lat is not None and lon is not None:
+        return _EUROPE_LAT_MIN <= lat <= _EUROPE_LAT_MAX and _EUROPE_LON_MIN <= lon <= _EUROPE_LON_MAX
+    return False
+
+
 def _fetch_copernicus_ems_live() -> dict[str, Any]:
     """
-    Inondations actives en Europe via le flux RSS GDACS.
-    URL : https://www.gdacs.org/xml/rss.xml (toutes catastrophes, filtrées sur FL)
+    Toutes catastrophes actives en Europe et France via le flux RSS GDACS.
+    URL : https://www.gdacs.org/xml/rss.xml (FL, EQ, TC, VO, WF, DR, TS...)
+    Filtre : événements en cours uniquement, scope France + Europe.
     """
     try:
         resp = _requests.get(
@@ -8761,85 +8792,93 @@ def _fetch_copernicus_ems_live() -> dict[str, Any]:
             headers={"Accept": "application/xml,text/xml,*/*", "User-Agent": _BROWSER_UA},
         )
         resp.raise_for_status()
-        # Supprime le BOM UTF-8 éventuel avant parsing XML
         content = resp.content.lstrip(b"\xef\xbb\xbf")
         root = ET.fromstring(content)
         channel = root.find("channel")
         all_items = (channel or root).findall("item")
 
-        activations: list[dict[str, Any]] = []
+        europe_activations: list[dict[str, Any]] = []
         france_activations: list[dict[str, Any]] = []
 
         for item in all_items:
-            # Filtrer sur les inondations uniquement
-            event_type = _gdacs_text(item, "eventtype", _GDACS_NS)
-            link = _gdacs_text(item, "link")
-            if event_type != "FL" and "eventtype=FL" not in link:
-                continue
             # Garder seulement les événements en cours
             is_current = _gdacs_text(item, "iscurrent", _GDACS_NS)
             if is_current == "false":
                 continue
 
+            event_type = _gdacs_text(item, "eventtype", _GDACS_NS) or "?"
             title   = _gdacs_text(item, "title")
             country = _gdacs_text(item, "country", _GDACS_NS)
             iso3    = _gdacs_text(item, "iso3", _GDACS_NS)
             alert   = _gdacs_text(item, "alertlevel", _GDACS_NS)
             event_id = _gdacs_text(item, "eventid", _GDACS_NS)
+            link    = _gdacs_text(item, "link")
             pub     = _gdacs_text(item, "pubDate")[:16] if _gdacs_text(item, "pubDate") else ""
+            severity = _gdacs_text(item, "severity", _GDACS_NS)
 
-            # Coordonnées : <georss:point> = "lat lon" (plus simple)
+            # Coordonnées : <georss:point> = "lat lon"
             _GEORSS_NS = "http://www.georss.org/georss"
             georss_pt = _gdacs_text(item, "point", _GEORSS_NS)
-            lat_s = lon_s = ""
+            lat_val: float | None = None
+            lon_val: float | None = None
             if georss_pt and " " in georss_pt:
                 parts = georss_pt.split()
-                lat_s, lon_s = parts[0], parts[1]
-            else:
-                # fallback : <geo:Point><geo:lat>
+                try:
+                    lat_val, lon_val = float(parts[0]), float(parts[1])
+                except ValueError:
+                    pass
+            if lat_val is None:
                 geo_point = item.find(f"{{{_GEO_NS}}}Point")
                 if geo_point is not None:
-                    lat_s = _gdacs_text(geo_point, "lat", _GEO_NS)
-                    lon_s = _gdacs_text(geo_point, "long", _GEO_NS)
+                    try:
+                        lat_val = float(_gdacs_text(geo_point, "lat", _GEO_NS))
+                        lon_val = float(_gdacs_text(geo_point, "long", _GEO_NS))
+                    except ValueError:
+                        pass
 
             is_france = (
                 "FRANCE" in country.upper()
                 or iso3.upper() == "FRA"
                 or country.upper() == "FR"
             )
+            in_europe = is_france or _is_in_europe(lat_val, lon_val, iso3)
+
+            if not in_europe:
+                continue
+
+            type_label = _GDACS_EVENT_LABELS.get(event_type.upper(), event_type)
             activation = {
                 "id": event_id or link,
-                "title": title or "Inondation",
-                "type": "FL",
+                "title": title or type_label,
+                "type": event_type.upper(),
+                "type_label": type_label,
                 "date": pub,
                 "level": alert,
+                "severity": severity,
                 "country": country,
                 "iso3": iso3,
-                "lat": float(lat_s) if lat_s else None,
-                "lon": float(lon_s) if lon_s else None,
+                "lat": lat_val,
+                "lon": lon_val,
                 "france": is_france,
                 "url": link or "https://www.gdacs.org",
             }
-            activations.append(activation)
+            europe_activations.append(activation)
             if is_france:
                 france_activations.append(activation)
 
-            if len(activations) >= 50:
-                break
-
         return {
-            "service": "GDACS · Inondations Europe",
+            "service": "GDACS · Catastrophes Europe",
             "status": "online",
             "source": "https://www.gdacs.org",
-            "activations_total": len(activations),
+            "activations_total": len(europe_activations),
             "france_total": len(france_activations),
-            "activations": activations[:20],
+            "activations": europe_activations[:30],
             "france_activations": france_activations[:10],
             "updated_at": datetime.utcnow().isoformat() + "Z",
         }
     except Exception as exc:
         return {
-            "service": "GDACS · Inondations Europe",
+            "service": "GDACS · Catastrophes Europe",
             "status": "degraded",
             "source": "https://www.gdacs.org",
             "activations_total": 0,

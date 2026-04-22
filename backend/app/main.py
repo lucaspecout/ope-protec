@@ -400,7 +400,7 @@ _SVC_LABELS: dict[str, str] = {
     "meteo_france": "Météo-France", "vigicrues": "Vigicrues", "apic_isere": "APIC",
     "avalanche_isere": "Avalanches BRA", "feux_foret_isere": "Feux de forêt EFFIS",
     "seismes_isere": "Séismes Isère", "vigicrues_flash_isere": "Vigicrues Flash",
-    "vigieau": "Vigieau", "atmo_aura": "Atmo AURA", "copernicus_ems": "GDACS · Inondations",
+    "vigieau": "Vigieau", "atmo_aura": "Atmo AURA", "copernicus_ems": "GDACS · Catastrophes Europe",
     "cols_alpins_isere": "Cols alpins", "prefecture_isere": "Préfecture Isère",
 }
 
