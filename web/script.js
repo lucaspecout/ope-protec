@@ -17,6 +17,7 @@ const STORAGE_KEYS = {
   staticMontagneCache: 'staticMontagneCacheV1',
   staticHelipadCache: 'staticHelipadCacheV1',
   staticBarrageCache: 'staticBarrageCacheV1',
+  staticPrAutoroutesCache: 'staticPrAutoroutesCacheV1',
   serviceStatusHistory: 'serviceStatusHistory',
 };
 const AUTO_REFRESH_MS = 45000;
@@ -35,6 +36,7 @@ const API_MAX_RETRIES_NON_GET = 1;
 const API_ORIGIN_COOLDOWN_MS = 60000;
 const STATIC_POINTS_CACHE_TTL_MS = 10 * 60 * 1000;
 const TELECOM_POINTS_CACHE_TTL_MS = 10 * 60 * 1000;
+const PR_AUTOROUTES_LOCAL_CACHE_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 const OSM_DETAILS_MIN_ZOOM = 15;
 const FLUX_SERVICES = [
   { key: 'meteo_france',           label: 'Météo-France',              icon: '⛅', category: 'Météo',         interval: 120,   metric: (d) => d.level ? `Vigilance ${d.level}` : `${(d.alerts || []).length} alerte(s)` },
@@ -46,12 +48,10 @@ const FLUX_SERVICES = [
   { key: 'atmo_aura',              label: "Atmo AURA · Qualité de l'air", icon: '🌫️', category: 'Environnement', interval: 600, metric: (d) => d.today?.index ? `Indice ${d.today.index}${d.today.label ? ' — ' + d.today.label : ''}` : 'Indice non disponible' },
   { key: 'georisques',             label: 'Géorisques',                icon: '🌋', category: 'Risques',       interval: 600,   metric: (d) => `${d.flood_documents_total ?? 0} doc(s) inondation · zone sismique ${d.highest_seismic_zone_label || '?'}` },
   { key: 'itinisere',              label: 'Itinisère · Transports',    icon: '🚌', category: 'Transport',     interval: 120,   metric: (d) => `${d.events_total ?? (d.events || []).length} perturbation(s)` },
-  { key: 'bison_fute',             label: 'Bison Futé',                icon: '🚗', category: 'Transport',     interval: 300,   metric: (d) => d.today?.isere?.departure ? `Départ: ${d.today.isere.departure} · Retour: ${d.today.isere.return || '?'}` : 'Trafic non disponible' },
+  { key: 'autoroutes_isere',       label: 'Autoroutes Isère',          icon: '🛣️', category: 'Transport',     interval: 180,   metric: (d) => `${d.events_total ?? 0} événement(s) · ${(d.routes || []).join(' ')}` },
   { key: 'sncf_isere',             label: 'SNCF Isère',                icon: '🚆', category: 'Transport',     interval: 120,   metric: (d) => `${(d.alerts || []).length} alerte(s) voie ferrée` },
   { key: 'ter_aura',               label: 'TER SNCF · AURA',           icon: '🚄', category: 'Transport',     interval: 120,   metric: (d) => `${d.disruptions_total ?? 0} perturbation(s) TER` },
   { key: 'mreseau',                 label: 'M Réseau · Grenoble',       icon: '🚊', category: 'Transport',     interval: 120,   metric: (d) => d.normal_service ? 'Trafic normal' : `${d.disruptions_total ?? 0} perturbation(s)` },
-  { key: 'aprr_isere',             label: 'APRR/AREA · Autoroutes',    icon: '🛣️', category: 'Transport',     interval: 180,   metric: (d) => `${d.events_total ?? 0} événement(s) · ${(d.routes || []).join(' ')}` },
-  { key: 'vinci_autoroutes',       label: 'Vinci Autoroutes · Isère',  icon: '🚧', category: 'Transport',     interval: 180,   metric: (d) => `${d.events_total ?? 0} événement(s) · ${(d.routes || []).join(' ')}` },
   { key: 'cars_region_aura',       label: 'Cars Région · AURA',        icon: '🚐', category: 'Transport',     interval: 300,   metric: (d) => `${d.disruptions_total ?? 0} perturbation(s) cars région` },
   { key: 'prefecture_isere',       label: 'Préfecture Isère',          icon: '🏛️', category: 'Actualités',   interval: 90,    metric: (d) => `${(d.items || []).length} actualité(s)` },
   { key: 'dauphine_isere',         label: 'Dauphiné Libéré',           icon: '📰', category: 'Actualités',   interval: 180,   metric: (d) => `${(d.items || []).length} article(s)` },
@@ -69,6 +69,9 @@ const FLUX_SERVICES = [
   { key: 'isere_opendata',         label: 'Isère OpenData · Résilience', icon: '📊', category: 'Données',    interval: 1800,  metric: (d) => `${d.totals?.schools ?? 0} écoles · ${d.totals?.health_centers ?? 0} santé · ${d.totals?.food_aid_points ?? 0} aide alim.` },
   { key: 'finess_isere',           label: 'FINESS · Établissements santé', icon: '🏥', category: 'Santé',    interval: 21600, metric: (d) => `${d.resources_total ?? 0} établissement(s)` },
 ];
+const AUTOROUTES_ISERE_ROADS = Object.freeze(['A41', 'A43', 'A48', 'A49', 'A51', 'A480']);
+const AUTOROUTES_ISERE_ROAD_SET = new Set(AUTOROUTES_ISERE_ROADS);
+const AUTOROUTES_ISERE_ROAD_REGEX = /\bA\s?(480|49|48|51|43|41)\b/i;
 const PANEL_TITLES = {
   'situation-panel': 'Situation opérationnelle',
   'services-panel': 'Services connectés',
@@ -5746,6 +5749,7 @@ const APRR_PR_COORDS = {
 
 // Cache des PR autoroutes (bornage officiel via backend)
 let _prApiCache = null;
+let _prLocalCacheHydrated = false;
 
 // Interpolation précise depuis les données backend / snapshot officiel
 function _haversineKm(lat1, lon1, lat2, lon2) {
@@ -5758,6 +5762,40 @@ function _haversineKm(lat1, lon1, lat2, lon2) {
 }
 
 let _prApiSource = null;
+
+function _readPrAutoroutesLocalCache() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.staticPrAutoroutesCache);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || !parsed.payload || typeof parsed.payload !== 'object') return null;
+    const savedAt = Number(parsed.savedAt || 0);
+    if (savedAt > 0 && (Date.now() - savedAt) > PR_AUTOROUTES_LOCAL_CACHE_TTL_MS) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function _savePrAutoroutesLocalCache(payload, source = '') {
+  try {
+    if (!payload || typeof payload !== 'object' || !Object.keys(payload).length) return;
+    localStorage.setItem(STORAGE_KEYS.staticPrAutoroutesCache, JSON.stringify({
+      savedAt: Date.now(),
+      source,
+      payload,
+    }));
+  } catch {}
+}
+
+function _hydratePrAutoroutesFromLocalCache() {
+  if (_prLocalCacheHydrated) return;
+  _prLocalCacheHydrated = true;
+  const cached = _readPrAutoroutesLocalCache();
+  if (!cached?.payload) return;
+  _prApiCache = cached.payload;
+  _prApiSource = cached.source || 'cache local navigateur';
+}
 
 function _mergePrCoords(...sources) {
   const merged = {};
@@ -5782,10 +5820,12 @@ function _mergePrCoords(...sources) {
 }
 
 function _getEffectivePrCoords() {
+  _hydratePrAutoroutesFromLocalCache();
   return _mergePrCoords(APRR_PR_COORDS, _prApiCache);
 }
 
 async function loadPrFromApi() {
+  _hydratePrAutoroutesFromLocalCache();
   if (_prApiCache) return _prApiCache;
   try {
     const data = await api('/api/osm/isere/pr-autoroutes', { cacheTtlMs: 24 * 60 * 60 * 1000 });
@@ -5793,6 +5833,7 @@ async function loadPrFromApi() {
     if (roads && Object.keys(roads).length > 0) {
       _prApiCache = roads;
       _prApiSource = data?.source || 'données officielles';
+      _savePrAutoroutesLocalCache(roads, _prApiSource);
       return roads;
     }
   } catch { /* fallback snapshot officiel embarque */ }
@@ -5937,7 +5978,7 @@ async function renderTrafficOnMap() {
   // autorouteLayer est mis à jour par diff stable (voir plus bas) — pas de clearLayers() ici
   mapStats.traffic = 0;
 
-  // ── Événements autoroutes APRR/AREA + Vinci (avec coordonnées) ──
+  // ── Événements autoroutes Isère agrégés (Bison + APRR/AREA + Vinci) ──
   const showAutoroutes = document.getElementById('filter-autoroutes')?.checked ?? true;
   if (autorouteLayer) {
     if (!showAutoroutes) {
@@ -5948,8 +5989,9 @@ async function renderTrafficOnMap() {
   }
   if (autorouteLayer) {
     const autoroutesTypeFilter = document.getElementById('filter-autoroutes-type')?.value || 'all';
+    const autoroutesPayload = buildAutoroutesIsereService(cachedExternalRisksSnapshot || {});
     const allRoadEvents = showAutoroutes
-      ? (cachedExternalRisksSnapshot?.aprr_isere?.events || []).map((e) => ({ ...e, src: 'APRR/AREA' }))
+      ? (autoroutesPayload?.events || []).map((e) => ({ ...e, src: e?.source_label || 'Autoroutes Isère' }))
       : [];
 
     // Clé stable par événement : src + route + titre + PR + sens/acces
@@ -8834,7 +8876,7 @@ const SVC_CARD_META = {
   atmo_aura:             { statusId: 'atmo-status',            infoId: 'atmo-info',            url: 'https://www.atmo-auvergnerhonealpes.fr' },
   georisques:            { statusId: 'georisques-status',      infoId: 'georisques-info',      url: 'https://www.georisques.gouv.fr' },
   itinisere:             { statusId: 'itinisere-status',       infoId: null,                   url: 'https://www.itinisere.fr' },
-  bison_fute:            { statusId: 'bison-status',           infoId: 'bison-info',           url: 'https://www.bison-fute.gouv.fr', extraHtml: '<div id="bison-isere-square" class="bison-isere-square" aria-live="polite"></div>' },
+  autoroutes_isere:      { statusId: 'autoroutes-status',      infoId: 'autoroutes-info',      url: 'https://www.bison-fute.gouv.fr' },
   sncf_isere:            { statusId: 'sncf-status',            infoId: 'sncf-info',            url: 'https://www.sncf.com/fr/itineraire-reservation/info-trafic' },
   prefecture_isere:      { statusId: 'prefecture-status',      infoId: 'prefecture-info',      url: 'https://www.isere.gouv.fr' },
   dauphine_isere:        { statusId: 'dauphine-status',        infoId: 'dauphine-info',        url: 'https://www.ledauphine.com' },
@@ -8853,8 +8895,6 @@ const SVC_CARD_META = {
   finess_isere:          { statusId: 'finess-status',          infoId: 'finess-info',          url: 'https://www.data.gouv.fr/datasets/finess-extraction-du-fichier-des-etablissements' },
   ter_aura:              { statusId: 'ter-aura-status',        infoId: 'ter-aura-info',        url: 'https://www.ter.sncf.com/auvergne-rhone-alpes/se-deplacer/info-trafic' },
   mreseau:               { statusId: 'mreseau-status',         infoId: 'mreseau-info',         url: 'https://www.reso-m.fr/55-infotrafic.htm' },
-  aprr_isere:            { statusId: 'aprr-status',            infoId: 'aprr-info',            url: 'https://voyage.aprr.fr/information-trafic' },
-  vinci_autoroutes:      { statusId: 'vinci-status',           infoId: 'vinci-info',           url: 'https://www.vinci-autoroutes.com/fr/autoroutes-temps-reel/' },
   cars_region_aura:      { statusId: 'cars-region-status',     infoId: 'cars-region-info',     url: 'https://www.laregionvoustransporte.fr/fr/votre-region/infos-trafic' },
 };
 
@@ -8878,7 +8918,7 @@ const SVC_DETAIL_LISTS = {
   vigicrues:             [{ id: 'stations-list',         label: 'Stations' }, { id: 'troncons-list', label: 'Tronçons' }],
   vigicrues_flash_isere: [{ id: 'vigicrues-flash-list',  label: 'Alertes crues rapides' }],
   vigieau:               [{ id: 'vigieau-list',          label: 'Restrictions eau' }],
-  bison_fute:            [{ id: 'bison-communique-list', label: 'Communiqués' }],
+  autoroutes_isere:      [{ id: 'autoroutes-list',       label: 'Événements grands axes Isère' }],
   sncf_isere:            [{ id: 'sncf-alerts-list',      label: 'Alertes voie ferrée' }],
   prefecture_isere:      [{ id: 'prefecture-news-list',  label: 'Actualités', titleId: 'prefecture-news-title' }],
   dauphine_isere:        [{ id: 'dauphine-news-list',    label: 'Articles' }],
@@ -8887,8 +8927,6 @@ const SVC_DETAIL_LISTS = {
   arcep_isere:           [{ id: 'arcep-list',            label: 'Indisponibilités' }],
   ter_aura:              [{ id: 'ter-aura-list',         label: 'Perturbations TER Isère' }],
   mreseau:               [{ id: 'mreseau-list',          label: 'Alertes M Réseau (trams · bus · cars)' }],
-  aprr_isere:            [{ id: 'aprr-list',             label: 'Événements autoroutes Isère' }],
-  vinci_autoroutes:      [{ id: 'vinci-list',            label: 'Événements Vinci Isère' }],
   cars_region_aura:      [{ id: 'cars-region-list',      label: 'Perturbations cars Région AURA' }],
   placegrenet:           [{ id: 'placegrenet-svc-list',  label: "Derniers articles Place Gre'net" }],
   grenoble_metro:        [{ id: 'grenoble-metro-svc-list', label: 'Actualités Grenoble Alpes Métropole' }],
@@ -8899,6 +8937,110 @@ const SVC_DETAIL_LISTS = {
   copernicus_ems:        [{ id: 'copernicus-svc-list',   label: 'Catastrophes actives — GDACS' }],
   cols_alpins_isere:     [{ id: 'cols-svc-list',         label: 'État des cols alpins Isère' }],
 };
+
+function buildAutoroutesIsereService(data = {}) {
+  const bison = data?.bison_fute || {};
+  const aprr = data?.aprr_isere || {};
+  const vinci = data?.vinci_autoroutes || {};
+  const normalizeRoad = (value) => {
+    const text = String(value || '').toUpperCase().replace(/\s+/g, '');
+    if (AUTOROUTES_ISERE_ROAD_SET.has(text)) return text;
+    const match = text.match(/A(480|49|48|51|43|41)/);
+    return match ? `A${match[1]}` : '';
+  };
+  const inferRoad = (item) => {
+    const direct = normalizeRoad(item?.road);
+    if (direct) return direct;
+    const blob = [
+      item?.title,
+      item?.description,
+      item?.location_summary,
+      item?.access,
+    ].map((part) => String(part || '')).join(' ');
+    const match = blob.match(AUTOROUTES_ISERE_ROAD_REGEX);
+    return match ? `A${match[1]}` : '';
+  };
+  const isAutoroutesIsereEvent = (item) => {
+    const road = inferRoad(item);
+    if (!road) return false;
+    const prPlaced = _resolveAutoroutePrPoint({ road, pr: item?.pr });
+    if (prPlaced && isPointInIsere({ lat: prPlaced[0], lon: prPlaced[1] })) return true;
+    const lat = Number(item?.lat);
+    const lon = Number(item?.lon);
+    if (Number.isFinite(lat) && Number.isFinite(lon)) return isPointInIsere({ lat, lon });
+    return true;
+  };
+  const bisonLive = Array.isArray(bison?.live?.events) ? bison.live.events.filter(isAutoroutesIsereEvent) : [];
+  const aprrEvents = Array.isArray(aprr?.events) ? aprr.events : [];
+  const vinciEvents = Array.isArray(vinci?.events) ? vinci.events : [];
+  const normalized = [];
+  const dedupe = new Map();
+  const pushEvents = (items, sourceLabel) => {
+    items.forEach((item) => {
+      const road = inferRoad(item);
+      if (!road) return;
+      const title = String(item?.title || '').trim();
+      const pr = String(item?.pr || '').trim();
+      const key = `${road}|${title}|${pr}|${String(item?.direction || '').trim()}|${String(item?.access || '').trim()}`;
+      if (dedupe.has(key)) return;
+      const normalizedItem = {
+        ...item,
+        source_label: sourceLabel,
+        title: title || 'Événement trafic',
+        road,
+        pr,
+        level: item?.level || item?.severity || 'jaune',
+        severity: item?.severity || item?.level || 'jaune',
+      };
+      dedupe.set(key, normalizedItem);
+      normalized.push(normalizedItem);
+    });
+  };
+  pushEvents(aprrEvents, 'APRR/AREA');
+  pushEvents(vinciEvents, 'Vinci');
+  pushEvents(bisonLive, 'Bison Futé');
+
+  normalized.sort((a, b) => {
+    const rank = { rouge: 0, orange: 1, jaune: 2, vert: 3 };
+    const ar = rank[String(a?.severity || a?.level || '').toLowerCase()] ?? 9;
+    const br = rank[String(b?.severity || b?.level || '').toLowerCase()] ?? 9;
+    if (ar !== br) return ar - br;
+    return String(a?.road || '').localeCompare(String(b?.road || ''), 'fr');
+  });
+
+  const allRoutes = new Set([
+    ...(Array.isArray(aprr?.routes) ? aprr.routes : []),
+    ...(Array.isArray(vinci?.routes) ? vinci.routes : []),
+    ...normalized.map((item) => String(item?.road || '').trim()).filter(Boolean),
+  ]);
+  const statuses = [bison?.status, aprr?.status, vinci?.status].map((v) => String(v || '').toLowerCase());
+  const status = statuses.includes('online')
+    ? 'online'
+    : statuses.some((v) => v && v !== 'pending' && v !== 'idle') ? 'degraded' : 'pending';
+  const isereDeparture = bison?.today?.isere?.departure || 'inconnu';
+  const isereReturn = bison?.today?.isere?.return || 'inconnu';
+
+  return {
+    service: 'Autoroutes Isère',
+    status,
+    routes: Array.from(allRoutes).sort((a, b) => a.localeCompare(b, 'fr')),
+    events: normalized,
+    events_total: normalized.length,
+    source: 'Bison Futé + APRR/AREA + Vinci Autoroutes',
+    sources: [
+      { label: 'Bison Futé', url: 'https://www.bison-fute.gouv.fr' },
+      { label: 'APRR', url: 'https://voyage.aprr.fr/information-trafic' },
+      { label: 'Vinci Autoroutes', url: 'https://www.vinci-autoroutes.com/fr/autoroutes-temps-reel/' },
+    ],
+    today: { isere: { departure: isereDeparture, return: isereReturn } },
+    updated_at: aprr?.updated_at || vinci?.updated_at || bison?.updated_at || new Date().toISOString(),
+  };
+}
+
+function getFluxPayload(key, data = {}) {
+  if (key === 'autoroutes_isere') return buildAutoroutesIsereService(data);
+  return data?.[key] || {};
+}
 
 function buildServiceCards() {
   const root = document.getElementById('svc-cards-root');
@@ -8925,8 +9067,7 @@ function buildServiceCards() {
       const infoId   = meta.infoId || '';
       const url      = meta.url || '#';
       const lists    = SVC_DETAIL_LISTS[svc.key] || [];
-      const hasBison = svc.key === 'bison_fute';
-      const hasDetail = lists.length > 0 || infoId || hasBison;
+      const hasDetail = lists.length > 0 || infoId;
 
       // Résumé compact toujours visible (summary)
       html += `<details class="svc-card" data-svc-key="${escapeHtml(svc.key)}">`;
@@ -8943,7 +9084,6 @@ function buildServiceCards() {
       if (hasDetail) {
         html += `<div class="svc-card-detail">`;
         if (infoId) html += `<p id="${escapeHtml(infoId)}" class="svc-card-info muted">–</p>`;
-        if (hasBison) html += `<div id="bison-isere-square" class="bison-isere-square" aria-live="polite"></div>`;
         for (const lst of lists) {
           const titleAttr = lst.titleId ? ` id="${escapeHtml(lst.titleId)}"` : '';
           html += `<p class="svc-list-label"${titleAttr}>${escapeHtml(lst.label)}</p>`;
@@ -8964,7 +9104,7 @@ function renderSvcSummaryBar(data = {}) {
   if (!bar) return;
   const counts = { online: 0, error: 0, stale: 0, pending: 0 };
   for (const svc of FLUX_SERVICES) {
-    const { state } = _fluxServiceState(data[svc.key] || {}, svc.interval);
+    const { state } = _fluxServiceState(getFluxPayload(svc.key, data), svc.interval);
     counts[state] = (counts[state] || 0) + 1;
   }
   const pills = [];
@@ -9086,6 +9226,7 @@ function _renderEventsList(listId, items, emptyMsg = 'Aucun événement signalé
     const color = lvlColor[level] || lvlColor.jaune;
     const badge = lvlLabel[level] || level;
     const road = e.road ? `<strong>${escapeHtml(e.road)}</strong>` : '';
+    const sourceLabel = e.source_label ? ` · ${escapeHtml(e.source_label)}` : '';
 
     // Date de fin
     const endStr = e.end ? ` · jusqu'au <em>${escapeHtml(e.end)}</em>` : '';
@@ -9099,7 +9240,7 @@ function _renderEventsList(listId, items, emptyMsg = 'Aucun événement signalé
       : `<span style="font-size:.84rem">${escapeHtml(title || desc || 'Événement')}</span>`;
 
     return `<li style="border-left:3px solid ${color};padding-left:.6rem;margin-bottom:.5rem">
-      <span style="font-size:.78rem;font-weight:600;color:${color}">${badge}</span> ${icon}${road ? ' · ' + road : ''}${endStr}${startStr}<br>
+      <span style="font-size:.78rem;font-weight:600;color:${color}">${badge}</span> ${icon}${road ? ' · ' + road : ''}${sourceLabel}${endStr}${startStr}<br>
       ${bodyHtml}
     </li>`;
   }).join('') || `<li class="muted">${emptyMsg}</li>`);
@@ -9150,29 +9291,28 @@ function renderTransportFlux(data = {}) {
         : (mreseau.error ? mreseau.error.substring(0, 80) : 'Données non disponibles')));
   _renderMreseauList('mreseau-list', mreseauDisruptions);
 
-  // APRR/AREA
-  const aprr = data?.aprr_isere || {};
-  const aprEvents = aprr.events || [];
-  setRiskText('aprr-status',
-    `${aprr.status || 'inconnu'} · ${aprEvents.length} événement(s) · ${(aprr.routes || []).join(' ')}`,
-    aprEvents.length > 0 ? 'orange' : (aprr.status === 'online' ? 'vert' : 'jaune'),
+  // Service agrégé autoroutes Isère
+  const autoroutes = buildAutoroutesIsereService(data);
+  const autorouteEvents = Array.isArray(autoroutes.events) ? autoroutes.events : [];
+  const bisonDeparture = autoroutes?.today?.isere?.departure || 'inconnu';
+  const bisonReturn = autoroutes?.today?.isere?.return || 'inconnu';
+  setRiskText('autoroutes-status',
+    `${autoroutes.status || 'inconnu'} · ${autorouteEvents.length} événement(s) · ${(autoroutes.routes || []).join(' ')}`,
+    autorouteEvents.length > 0 ? 'orange' : (autoroutes.status === 'online' ? 'vert' : 'jaune'),
   );
-  setText('aprr-info', aprr.status === 'online'
-    ? (aprEvents.length === 0 ? 'Trafic autoroutier fluide sur Isère' : `${aprEvents.length} événement(s) sur ${(aprr.routes || []).join(', ')}`)
-    : (aprr.error ? aprr.error.substring(0, 80) : 'Données non disponibles'));
-  _renderEventsList('aprr-list', aprEvents, 'Trafic autoroutier fluide sur les axes Isère.');
-
-  // Vinci Autoroutes
-  const vinci = data?.vinci_autoroutes || {};
-  const vinciEvents = vinci.events || [];
-  setRiskText('vinci-status',
-    `${vinci.status || 'inconnu'} · ${vinciEvents.length} événement(s)`,
-    vinciEvents.length > 0 ? 'orange' : (vinci.status === 'online' ? 'vert' : 'jaune'),
+  setText('autoroutes-info',
+    autoroutes.status === 'online'
+      ? `Bison départ/retour Isère: ${bisonDeparture} / ${bisonReturn} · ${autorouteEvents.length} événement(s) grands axes`
+      : 'Données autoroutes non disponibles'
   );
-  setText('vinci-info', vinci.status === 'online'
-    ? (vinciEvents.length === 0 ? 'Trafic fluide sur Isère' : `${vinciEvents.length} événement(s) Vinci`)
-    : (vinci.error ? vinci.error.substring(0, 80) : 'Données non disponibles'));
-  _renderEventsList('vinci-list', vinciEvents, 'Trafic Vinci fluide sur Isère.');
+  _renderEventsList(
+    'autoroutes-list',
+    autorouteEvents.map((item) => ({
+      ...item,
+      title: item?.source_label ? `${item.source_label} · ${item.title || 'Événement trafic'}` : item?.title,
+    })),
+    'Trafic autoroutier fluide sur les grands axes isérois.',
+  );
 
 
   // Cars Région AURA
@@ -9374,7 +9514,7 @@ function renderApiInterconnections(data = {}) {
   // Compute state for every service
   const now = Date.now();
   const rows = FLUX_SERVICES.map((svc) => {
-    const payload = data[svc.key] || {};
+    const payload = getFluxPayload(svc.key, data);
     const { state, updatedAt, ageMs } = _fluxServiceState(payload, svc.interval);
     return { svc, payload, state, updatedAt, ageMs };
   });
@@ -9431,6 +9571,7 @@ function renderApiInterconnections(data = {}) {
       ? `<a class="flux-source-link" href="${escapeHtml(String(sourceUrl))}" target="_blank" rel="noreferrer noopener">Source officielle ↗</a>`
       : '';
 
+    const canForceRefresh = svc.key !== 'autoroutes_isere';
     return `<div class="flux-row status-${state}" data-key="${escapeHtml(svc.key)}">
       <div class="flux-dot ${state}"></div>
       <div class="flux-row-main">
@@ -9442,7 +9583,9 @@ function renderApiInterconnections(data = {}) {
       <div class="flux-row-meta">
         <span class="flux-age ${ageCss}" data-updated-at="${updatedAt || ''}" data-interval="${svc.interval}">${escapeHtml(ageText)}</span>
         <span class="flux-interval">${escapeHtml(nextText)}</span>
-        <button class="flux-force-btn" data-action="force-refresh-service" data-service-key="${escapeHtml(svc.key)}" title="Forcer l'actualisation maintenant">⟳</button>
+        ${canForceRefresh
+          ? `<button class="flux-force-btn" data-action="force-refresh-service" data-service-key="${escapeHtml(svc.key)}" title="Forcer l'actualisation maintenant">⟳</button>`
+          : '<span class="flux-force-btn" style="opacity:.35;cursor:default" title="Service agrégé">⟳</span>'}
       </div>
     </div>`;
   }).join('');
@@ -9451,7 +9594,7 @@ function renderApiInterconnections(data = {}) {
 
   // Raw JSON (collapsed)
   const rawBlocks = FLUX_SERVICES.map((svc) => {
-    const payload = data[svc.key] || {};
+    const payload = getFluxPayload(svc.key, data);
     return `<details class="api-raw-item"><summary>${escapeHtml(svc.icon)} ${escapeHtml(svc.label)}</summary><pre>${formatApiJson(payload)}</pre></details>`;
   }).join('');
   setHtml('api-raw-list', rawBlocks);
@@ -11589,11 +11732,10 @@ const _NOTIF_SERVICES = [
   { key: 'vigieau',               label: 'Vigieau · Restrictions eau', icon: '💧', cat: 'Eau' },
   { key: 'atmo_aura',             label: "Atmo AURA · Qualité de l'air", icon: '🌫️', cat: 'Environnement' },
   { key: 'itinisere',             label: 'Itinisère · Transports',     icon: '🚌', cat: 'Transport' },
+  { key: 'autoroutes_isere',      label: 'Autoroutes Isère',           icon: '🛣️', cat: 'Transport' },
   { key: 'sncf_isere',            label: 'SNCF Isère',                 icon: '🚆', cat: 'Transport' },
   { key: 'ter_aura',              label: 'TER SNCF · AURA',            icon: '🚄', cat: 'Transport' },
   { key: 'mreseau',               label: 'M Réseau · Grenoble',        icon: '🚊', cat: 'Transport' },
-  { key: 'aprr_isere',            label: 'APRR/AREA · Autoroutes',     icon: '🛣️', cat: 'Transport' },
-  { key: 'vinci_autoroutes',      label: 'Vinci Autoroutes · Isère',   icon: '🚧', cat: 'Transport' },
   { key: 'cars_region_aura',      label: 'Cars Région · AURA',         icon: '🚐', cat: 'Transport' },
   { key: 'prefecture_isere',      label: 'Préfecture Isère',           icon: '🏛️', cat: 'Actualités' },
   { key: 'france_bleu_isere',     label: 'France Bleu Isère',          icon: '📻', cat: 'Actualités' },
@@ -11978,6 +12120,11 @@ const _NOTIF_LEVEL_SEV = { inconnu: -1, pending: -1, vert: 0, online: 0, partial
 function _getServiceDisplayLevel(key, data) {
   const status = String(data?.status || 'inconnu');
   if (status === 'unavailable') return 'rouge';
+  if (key === 'autoroutes_isere') {
+    const total = Number(data?.events_total || 0);
+    if (total > 0) return normalizeLevel(data?.events?.[0]?.severity || data?.events?.[0]?.level || status);
+    return normalizeLevel(status);
+  }
   if (key === 'meteo_france') return normalizeLevel(data?.level || status);
   if (key === 'vigicrues') return normalizeLevel(data?.water_alert_level || status);
   if (key === 'apic_isere') return (data?.alerts_total || 0) > 0 ? 'orange' : 'vert';
@@ -11994,8 +12141,10 @@ function _getServiceDisplayLevel(key, data) {
 
 function checkServiceAlertsFromSnapshot(snapshot) {
   if (!notificationsEnabled || !snapshot || typeof snapshot !== 'object') return;
-  for (const [key, data] of Object.entries(snapshot)) {
-    if (!data || typeof data !== 'object' || key === 'updated_at') continue;
+  for (const svc of FLUX_SERVICES) {
+    const key = svc.key;
+    const data = getFluxPayload(key, snapshot);
+    if (!data || typeof data !== 'object') continue;
     const newLevel = _getServiceDisplayLevel(key, data);
     const prevLevel = _svcAlertLevels[key];
     _svcAlertLevels[key] = newLevel;
