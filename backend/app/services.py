@@ -7353,7 +7353,7 @@ def fetch_pr_autoroutes(force_refresh: bool = False) -> dict[str, Any]:
 _APRR_ISERE_CACHE_TTL = 180
 _aprr_isere_cache_lock = Lock()
 _aprr_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "aprr_isere"}
-_APRR_ISERE_ROUTES = ["A41", "A43", "A48", "A51"]
+_APRR_ISERE_ROUTES = ["A41", "A43", "A48", "A49", "A51", "A480"]
 
 # Points de repère (PR) → (lat, lon) par autoroute pour interpolation linéaire.
 # Snapshot officiel issu du bornage RRN data.gouv.fr (mise à jour 2025-07-22).
@@ -7494,12 +7494,9 @@ def _aprr_pr_to_coords(road: str, pr_str: str) -> tuple[float, float] | None:
             return lat0 + t * (lat1 - lat0), lon0 + t * (lon1 - lon0)
     return None
 
-# Routes APRR/AREA passant par ou desservant l'Isère
-_APRR_ISERE_ROAD_SET: frozenset[str] = frozenset({
-    "A40", "A41", "A42", "A43", "A46", "A47", "A48", "A49", "A51", "A89",
-    "A410", "A430", "A432", "A450", "A480", "A7",
-})
-_APRR_ROAD_PATTERN = re.compile(r'\b(A7|A40|A41|A42|A43|A46|A47|A48|A49|A51|A89|A410|A430|A432|A450|A480)\b', re.IGNORECASE)
+# Grands axes autoroutiers isérois suivis sur la carte.
+_APRR_ISERE_ROAD_SET: frozenset[str] = frozenset({"A41", "A43", "A48", "A49", "A51", "A480"})
+_APRR_ROAD_PATTERN = re.compile(r'\b(A41|A43|A48|A49|A51|A480)\b', re.IGNORECASE)
 
 # URL de la synthèse nationale Bison Futé — inclut DATEX2 de APRR/AREA/Escota (réseau concédé)
 _BISON_RECAP_URL = (
@@ -7616,6 +7613,55 @@ def _parse_bison_recap_aprr(html: str) -> list[dict[str, Any]]:
     return events
 
 
+def _normalize_aprr_road_label(value: str) -> str:
+    match = re.search(r'\bA\s*(41|43|48|49|51|480)\b', str(value or ""), re.IGNORECASE)
+    return f"A{match.group(1)}" if match else str(value or "").strip().upper()
+
+
+def _extract_pr_from_text(*chunks: Any) -> str:
+    text = " ".join(str(chunk or "") for chunk in chunks)
+    match = re.search(r'\bP(?:R|K)\s*(\d{1,3}(?:\+\d{1,3})?)\b', text, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    match = re.search(r'\b(\d{1,3}\+\d{1,3})\b', text)
+    return match.group(1) if match else ""
+
+
+def _merge_aprr_events(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_key: dict[str, dict[str, Any]] = {}
+    severity_rank = {"rouge": 4, "orange": 3, "jaune": 2, "vert": 1}
+    for group in groups:
+        for event in group:
+            road = _normalize_aprr_road_label(event.get("road") or "")
+            if road not in _APRR_ISERE_ROAD_SET:
+                continue
+            lat = event.get("lat")
+            lon = event.get("lon")
+            if not _is_coord_in_isere_pr_bbox(lat, lon):
+                continue
+            pr = str(event.get("pr") or "").strip()
+            key = "|".join([
+                road,
+                pr,
+                str(event.get("title") or "").strip().lower(),
+                str(event.get("direction") or "").strip().lower(),
+                str(event.get("access") or "").strip().lower(),
+            ])
+            candidate = dict(event)
+            candidate["road"] = road
+            current = by_key.get(key)
+            if current is None:
+                by_key[key] = candidate
+                continue
+            current_rank = severity_rank.get(str(current.get("severity") or current.get("level") or "").lower(), 0)
+            candidate_rank = severity_rank.get(str(candidate.get("severity") or candidate.get("level") or "").lower(), 0)
+            if candidate_rank >= current_rank:
+                merged = dict(current)
+                merged.update({k: v for k, v in candidate.items() if v not in (None, "", [])})
+                by_key[key] = merged
+    return list(by_key.values())
+
+
 def _fetch_aprr_isere_live() -> dict[str, Any]:
     """Événements temps réel APRR/AREA sur A41/A43/A48/A51 via Bison Futé récapitulatif national.
 
@@ -7643,36 +7689,51 @@ def _fetch_aprr_isere_live() -> dict[str, Any]:
     except Exception:
         pass
 
-    # Fallback : filtrer le DATEX2 RRN (réseau non-concédé, peu de routes APRR mais parfois utile)
-    if not events:
-        try:
-            bison_data = fetch_bison_fute_live_events()
-            all_events: list[dict[str, Any]] = bison_data.get("events") or []
-            for evt in all_events:
-                road = str(evt.get("road") or "")
-                blob = f"{road} {evt.get('title', '')} {evt.get('description', '')} {evt.get('location_summary', '')}"
-                if _APRR_ROAD_PATTERN.search(blob):
-                    lat = evt.get("lat")
-                    lon = evt.get("lon")
-                    if not _is_coord_in_isere_pr_bbox(lat, lon):
-                        continue
-                    events.append({
-                        "title": str(evt.get("title") or "Événement trafic")[:120],
-                        "type": str(evt.get("category") or "inconnu"),
-                        "road": road,
-                        "description": str(evt.get("description") or "")[:400],
-                        "lat": lat,
-                        "lon": lon,
-                        "start": str(evt.get("validity_start") or ""),
-                        "end": str(evt.get("validity_end") or ""),
-                        "level": str(evt.get("severity") or "jaune"),
-                        "severity": str(evt.get("severity") or "jaune"),
-                        "source": "Bison Futé DATEX2 RRN",
-                    })
-            if events:
-                source_used = "https://www.bison-fute.gouv.fr (DATEX2 RRN)"
-        except Exception:
-            pass
+    bison_events: list[dict[str, Any]] = []
+    try:
+        bison_data = fetch_bison_fute_live_events()
+        all_events: list[dict[str, Any]] = bison_data.get("events") or []
+        for evt in all_events:
+            road = _normalize_aprr_road_label(evt.get("road") or "")
+            blob = f"{road} {evt.get('title', '')} {evt.get('description', '')} {evt.get('location_summary', '')}"
+            if road not in _APRR_ISERE_ROAD_SET and not _APRR_ROAD_PATTERN.search(blob):
+                continue
+            lat = evt.get("lat")
+            lon = evt.get("lon")
+            if not _is_coord_in_isere_pr_bbox(lat, lon):
+                continue
+            pr = _extract_pr_from_text(evt.get("title"), evt.get("description"), evt.get("location_summary"))
+            pr_coords = _aprr_pr_to_coords(road, pr) if pr else None
+            bison_events.append({
+                "title": str(evt.get("title") or "Événement trafic")[:120],
+                "type": str(evt.get("category") or "inconnu"),
+                "road": road,
+                "description": str(evt.get("description") or "")[:400],
+                "lat": pr_coords[0] if pr_coords else lat,
+                "lon": pr_coords[1] if pr_coords else lon,
+                "pr": pr,
+                "direction": str(evt.get("direction") or "")[:120],
+                "access": str(evt.get("location_summary") or "")[:160],
+                "start": str(evt.get("validity_start") or ""),
+                "end": str(evt.get("validity_end") or ""),
+                "level": str(evt.get("severity") or "jaune"),
+                "severity": str(evt.get("severity") or "jaune"),
+                "source": "Bison Futé DATEX2 Isère",
+            })
+        if bison_events:
+            source_used = "https://www.bison-fute.gouv.fr (DATEX2 Isère)"
+    except Exception:
+        pass
+
+    events = _merge_aprr_events(events, bison_events)
+    events.sort(
+        key=lambda item: (
+            {"rouge": 0, "orange": 1, "jaune": 2, "vert": 3}.get(str(item.get("severity") or item.get("level") or "").lower(), 9),
+            str(item.get("road") or ""),
+            str(item.get("pr") or ""),
+            str(item.get("title") or ""),
+        )
+    )
 
     return {
         "service": "APRR/AREA · Autoroutes Isère",

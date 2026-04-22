@@ -5966,9 +5966,12 @@ async function renderTrafficOnMap() {
         else if (autoroutesTypeFilter === 'inconnu' && ['accident','travaux','chantier','perturbation'].includes(t)) return;
       }
 
-      // Placement strict sur un PR connu du référentiel. Sinon, pas d'affichage.
+      // Priorité au PR lorsqu'il existe, sinon fallback sur la position DATEX.
       let placed = _resolveAutoroutePrPoint(evt);
       if (!placed) placed = _prToLatLonOsrm(evt.road, evt.pr);
+      if (!placed && Number.isFinite(Number(evt.lat)) && Number.isFinite(Number(evt.lon))) {
+        placed = [Number(evt.lat), Number(evt.lon)];
+      }
       if (!placed) return;
       const [lat, lon] = placed;
       if (!isPointInIsere({ lat, lon })) return;
