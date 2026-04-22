@@ -7591,6 +7591,9 @@ def _parse_bison_recap_aprr(html: str) -> list[dict[str, Any]]:
             "severity": level,
             "source": "Bison Futé / APRR AREA DATEXII",
             "pr": pr,
+            "direction": direction[:120] if direction else "",
+            "access": bretelle[:160] if bretelle else "",
+            "commune": commune[:80] if commune else "",
         }
         if pr:
             coords = _aprr_pr_to_coords(road.strip(), pr)

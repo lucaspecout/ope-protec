@@ -5823,6 +5823,102 @@ async function renderPrAutorouteLayer() {
 // Diff stable des marqueurs autoroute — clé = id d'événement, valeur = {marker, popupHtml}
 const _autorouteMarkers = new Map();
 
+const _AUTOROUTE_DIRECTION_HINTS = {
+  A41: { forward: ['chambery', 'chambe', 'savoie', 'geneve', 'annecy', 'pontcharra'], backward: ['grenoble', 'meylan'] },
+  A43: { forward: ['chambery', 'chambe', 'savoie', 'modane', 'turin', 'italie'], backward: ['lyon', 'bourgoin', 'isle d abeau', "l'isle d'abeau", 'grenoble'] },
+  A48: { forward: ['grenoble', 'voreppe', 'voiron', 'moirans'], backward: ['lyon', 'bourgoin', 'tour du pin'] },
+  A49: { forward: ['romans', 'valence', 'marseille', 'saint-marcellin'], backward: ['grenoble', 'voreppe', 'voiron'] },
+  A51: { forward: ['gap', 'sisteron', 'marseille', 'la mure', 'corps'], backward: ['grenoble', 'pont de claix', 'vizille'] },
+  A480: { forward: ['seyssins', 'echirolles', 'pont de claix', 'claix'], backward: ['grenoble', 'saint egreve', 'voreppe', 'sassenage'] },
+};
+
+function _parsePrKm(prStr) {
+  const parts = String(prStr || '').split('+');
+  const km = parseFloat(parts[0]) + (parts[1] ? parseFloat(parts[1]) / 1000 : 0);
+  return Number.isFinite(km) ? km : null;
+}
+
+function _offsetLatLonMeters(lat, lon, eastMeters, northMeters) {
+  const latRad = lat * Math.PI / 180;
+  const dLat = northMeters / 111320;
+  const dLon = eastMeters / (111320 * Math.cos(latRad) || 1);
+  return [lat + dLat, lon + dLon];
+}
+
+function _hashTextSeed(text) {
+  const raw = String(text || '');
+  let hash = 0;
+  for (let i = 0; i < raw.length; i += 1) hash = ((hash * 31) + raw.charCodeAt(i)) | 0;
+  return Math.abs(hash);
+}
+
+function _interpolatePrGeometry(road, prStr) {
+  const km = _parsePrKm(prStr);
+  const pts = (_prApiCache?.[road] || APRR_PR_COORDS[road] || []);
+  if (!Number.isFinite(km) || pts.length < 2) return null;
+  if (km <= pts[0].k) {
+    const next = pts[1];
+    return { lat: pts[0].lat, lon: pts[0].lon, dx: next.lon - pts[0].lon, dy: next.lat - pts[0].lat };
+  }
+  if (km >= pts[pts.length - 1].k) {
+    const prev = pts[pts.length - 2];
+    const last = pts[pts.length - 1];
+    return { lat: last.lat, lon: last.lon, dx: last.lon - prev.lon, dy: last.lat - prev.lat };
+  }
+  for (let i = 0; i < pts.length - 1; i += 1) {
+    const a = pts[i];
+    const b = pts[i + 1];
+    if (km >= a.k && km <= b.k) {
+      const span = b.k - a.k || 1;
+      const t = (km - a.k) / span;
+      return {
+        lat: a.lat + t * (b.lat - a.lat),
+        lon: a.lon + t * (b.lon - a.lon),
+        dx: b.lon - a.lon,
+        dy: b.lat - a.lat,
+      };
+    }
+  }
+  return null;
+}
+
+function _autorouteSideSign(road, direction, access) {
+  const blob = `${direction || ''} ${access || ''}`.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const hints = _AUTOROUTE_DIRECTION_HINTS[road];
+  if (hints?.forward?.some((token) => blob.includes(token))) return 1;
+  if (hints?.backward?.some((token) => blob.includes(token))) return -1;
+  if (/\b(nord|est|interieur|interieure|droite)\b/.test(blob)) return 1;
+  if (/\b(sud|ouest|exterieur|exterieure|gauche)\b/.test(blob)) return -1;
+  return (_hashTextSeed(blob || road) % 2 === 0) ? 1 : -1;
+}
+
+function _positionAutorouteEvent(evt) {
+  const base = _interpolatePrGeometry(evt.road, evt.pr);
+  if (!base) {
+    const lat = Number(evt.lat);
+    const lon = Number(evt.lon);
+    return Number.isFinite(lat) && Number.isFinite(lon) ? [lat, lon] : null;
+  }
+
+  const tangentNorm = Math.hypot(base.dx, base.dy) || 1;
+  const tangentX = base.dx / tangentNorm;
+  const tangentY = base.dy / tangentNorm;
+  const perpX = -tangentY;
+  const perpY = tangentX;
+
+  const sideSign = _autorouteSideSign(evt.road, evt.direction, evt.access);
+  const accessSeed = _hashTextSeed(evt.access || evt.direction || evt.title || '');
+  const alongSign = (accessSeed % 2 === 0) ? 1 : -1;
+  const accessBlob = `${evt.access || ''} ${evt.direction || ''}`.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const isRamp = /\b(sortie|entree|echangeur|bretelle|diffuseur|acces)\b/.test(accessBlob);
+
+  const lateralMeters = isRamp ? 32 : 18;
+  const alongMeters = isRamp ? (40 + (accessSeed % 60)) * alongSign : 0;
+  const eastMeters = perpX * lateralMeters * sideSign + tangentX * alongMeters;
+  const northMeters = perpY * lateralMeters * sideSign + tangentY * alongMeters;
+  return _offsetLatLonMeters(base.lat, base.lon, eastMeters, northMeters);
+}
+
 // Interpolation précise d'un PR depuis les données OSM backend
 function _prToLatLonOsrm(road, prStr) {
   const pts = _prApiCache?.[road];
@@ -5866,8 +5962,8 @@ async function renderTrafficOnMap() {
       ...(cachedExternalRisksSnapshot?.vinci_autoroutes?.events || []).map((e) => ({ ...e, src: 'Vinci' })),
     ] : [];
 
-    // Clé stable par événement : src + route + titre + PR
-    const evtKey = (evt) => `${evt.src}|${evt.road}|${evt.title}|${evt.pr || ''}`;
+    // Clé stable par événement : src + route + titre + PR + sens/acces
+    const evtKey = (evt) => `${evt.src}|${evt.road}|${evt.title}|${evt.pr || ''}|${evt.direction || ''}|${evt.access || ''}`;
 
     const activeKeys = new Set();
 
@@ -5881,23 +5977,24 @@ async function renderTrafficOnMap() {
       }
 
       // Résolution des coordonnées : 1) backend lat/lon  2) OSRM+PR  3) milieu de route (statique, déterministe)
-      let lat = Number(evt.lat);
-      let lon = Number(evt.lon);
-      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      let placed = _positionAutorouteEvent(evt);
+      if (!placed) {
         const osrmCoord = _prToLatLonOsrm(evt.road, evt.pr);
-        if (osrmCoord) {
-          [lat, lon] = osrmCoord;
+        if (osrmCoord) placed = osrmCoord;
+      }
+      if (!placed) {
+        const lat = Number(evt.lat);
+        const lon = Number(evt.lon);
+        if (Number.isFinite(lat) && Number.isFinite(lon)) {
+          placed = [lat, lon];
         } else {
           const roadPts = APRR_PR_COORDS[evt.road];
-          if (roadPts && roadPts.length) {
-            const mid = roadPts[Math.floor(roadPts.length / 2)];
-            lat = mid.lat;
-            lon = mid.lon;
-          } else {
-            return;
-          }
+          if (!roadPts?.length) return;
+          const mid = roadPts[Math.floor(roadPts.length / 2)];
+          placed = [mid.lat, mid.lon];
         }
       }
+      const [lat, lon] = placed;
 
       const key = evtKey(evt);
       activeKeys.add(key);
@@ -5905,6 +6002,8 @@ async function renderTrafficOnMap() {
       const popupHtml = `<div class="map-popup-content">
         <p class="tag">${escapeHtml(evt.src)} · ${escapeHtml(evt.road || 'Autoroute')}${evt.pr ? ` · PR ${escapeHtml(evt.pr)}` : ''}</p>
         <strong>${escapeHtml(evt.title || evt.type || 'Événement trafic')}</strong>
+        ${evt.direction ? `<p class="muted" style="font-size:.78rem;margin:.25rem 0 0">Sens: ${escapeHtml(evt.direction)}</p>` : ''}
+        ${evt.access ? `<p class="muted" style="font-size:.78rem;margin:.25rem 0 0">Accès: ${escapeHtml(evt.access)}</p>` : ''}
         ${evt.description ? `<p style="font-size:.8rem;margin:.3rem 0 0">${escapeHtml(evt.description.substring(0, 200))}</p>` : ''}
         ${evt.start ? `<p class="muted" style="font-size:.75rem;margin:.2rem 0 0">Depuis: ${new Date(evt.start).toLocaleString('fr-FR')}</p>` : ''}
       </div>`;
@@ -5912,6 +6011,10 @@ async function renderTrafficOnMap() {
       // Diff : si le marqueur existe déjà à la même position, ne pas le recréer
       if (_autorouteMarkers.has(key)) {
         const existing = _autorouteMarkers.get(key);
+        const prev = existing.marker.getLatLng?.();
+        if (!prev || Math.abs(prev.lat - lat) > 1e-6 || Math.abs(prev.lng - lon) > 1e-6) {
+          existing.marker.setLatLng([lat, lon]);
+        }
         if (existing.popupHtml !== popupHtml) {
           existing.marker.setPopupContent(popupHtml);
           existing.popupHtml = popupHtml;
