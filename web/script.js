@@ -5651,98 +5651,103 @@ async function buildItinisereMapPoints(events = []) {
   return spreadOverlappingTrafficPoints(points);
 }
 
-// Points de repère (PR kilométriques) par autoroute — tracés réels Isère
+// Points de repère (PR) par autoroute — snapshot officiel bornage RRN data.gouv.fr (2025-07-22)
 const APRR_PR_COORDS = {
-  // A41 : Grenoble (Meylan) → vallée Grésivaudan → Pontcharra → frontière Savoie (~PR 38)
   A41: [
-    {k:0, lat:45.207,lon:5.837},  // Échangeur Meylan
-    {k:5, lat:45.244,lon:5.867},  // Bernin
-    {k:10,lat:45.277,lon:5.891},  // Crolles
-    {k:15,lat:45.312,lon:5.913},  // Chapareillan direction
-    {k:20,lat:45.348,lon:5.943},  // Goncelin
-    {k:25,lat:45.385,lon:5.973},  // Le Cheylas
-    {k:30,lat:45.416,lon:6.001},  // Pontcharra
-    {k:35,lat:45.441,lon:6.022},  // Nord Pontcharra
-    {k:38,lat:45.458,lon:6.033},  // Frontière Savoie
+    {k:0,lat:45.200545,lon:5.759221},{k:1,lat:45.202649,lon:5.771386},{k:2,lat:45.204464,lon:5.783846},
+    {k:3,lat:45.206932,lon:5.796071},{k:4,lat:45.210893,lon:5.807473},{k:5,lat:45.217223,lon:5.816476},
+    {k:6,lat:45.224641,lon:5.823679},{k:7,lat:45.231565,lon:5.831715},{k:8,lat:45.237508,lon:5.841266},
+    {k:9,lat:45.241611,lon:5.852545},{k:10,lat:45.245236,lon:5.86407},{k:11,lat:45.250451,lon:5.874709},
+    {k:12,lat:45.256732,lon:5.883685},{k:13,lat:45.263619,lon:5.89194},{k:14,lat:45.270526,lon:5.899549},
+    {k:15,lat:45.278176,lon:5.906883},{k:16,lat:45.285815,lon:5.913552},{k:17,lat:45.293749,lon:5.91973},
+    {k:18,lat:45.301773,lon:5.925282},{k:19,lat:45.30955,lon:5.93176},{k:20,lat:45.316281,lon:5.940161},
+    {k:21,lat:45.322525,lon:5.949307},{k:22,lat:45.32966,lon:5.957152},{k:23,lat:45.33768,lon:5.962869},
+    {k:24,lat:45.346308,lon:5.966313},{k:25,lat:45.355153,lon:5.968739},{k:26,lat:45.363852,lon:5.97195},
+    {k:27,lat:45.372367,lon:5.97604},{k:28,lat:45.380734,lon:5.980736},{k:29,lat:45.388889,lon:5.985983},
+    {k:30,lat:45.39702,lon:5.991438},{k:31,lat:45.405143,lon:5.997033},{k:32,lat:45.413855,lon:5.999419},
+    {k:33,lat:45.422841,lon:5.99786},{k:34,lat:45.431444,lon:6.000984},{k:35,lat:45.440252,lon:6.003791},
+    {k:36,lat:45.449179,lon:6.003475},{k:37,lat:45.457535,lon:6.007851},
   ],
-  // A43 : Nord Isère — Pont-de-Cheruy (Ain) → Bourgoin-Jallieu → La Tour-du-Pin → frontière Savoie
-  // ⚠ Section Isère uniquement (PR 28→64). L'ancienne donnée pointait vers Modane (Savoie) — CORRIGÉ
   A43: [
-    {k:28,lat:45.656,lon:5.072},  // Entrée Isère (Ain/Pont-de-Cheruy)
-    {k:32,lat:45.637,lon:5.108},  // Jonction A48 (Saint-Quentin-Fallavier)
-    {k:36,lat:45.619,lon:5.171},  // L'Isle-d'Abeau ouest
-    {k:40,lat:45.599,lon:5.229},  // L'Isle-d'Abeau
-    {k:44,lat:45.588,lon:5.280},  // Bourgoin-Jallieu ouest
-    {k:48,lat:45.582,lon:5.335},  // Bourgoin-Jallieu
-    {k:52,lat:45.578,lon:5.391},  // Bourgoin-Jallieu est
-    {k:56,lat:45.570,lon:5.447},  // La Tour-du-Pin ouest
-    {k:60,lat:45.562,lon:5.504},  // La Tour-du-Pin
-    {k:64,lat:45.545,lon:5.570},  // Les Abrets — frontière Savoie
+    {k:16,lat:45.6651,lon:5.059739},{k:17,lat:45.660979,lon:5.071127},{k:18,lat:45.657073,lon:5.082681},
+    {k:19,lat:45.654498,lon:5.094645},{k:20,lat:45.651816,lon:5.107528},{k:21,lat:45.64809,lon:5.119882},
+    {k:22,lat:45.646129,lon:5.131696},{k:23,lat:45.642743,lon:5.143248},{k:24,lat:45.637087,lon:5.153157},
+    {k:25,lat:45.631234,lon:5.162912},{k:26,lat:45.626202,lon:5.173669},{k:27,lat:45.620761,lon:5.183961},
+    {k:28,lat:45.616082,lon:5.19477},{k:29,lat:45.613322,lon:5.20697},{k:30,lat:45.611554,lon:5.219811},
+    {k:31,lat:45.608327,lon:5.23149},{k:32,lat:45.605817,lon:5.24368},{k:33,lat:45.603323,lon:5.256067},
+    {k:34,lat:45.600743,lon:5.26836},{k:35,lat:45.596484,lon:5.279678},{k:36,lat:45.593416,lon:5.291409},
+    {k:37,lat:45.587436,lon:5.300846},{k:38,lat:45.578842,lon:5.304404},{k:39,lat:45.572987,lon:5.313573},
+    {k:40,lat:45.571709,lon:5.326201},{k:41,lat:45.569064,lon:5.338171},{k:42,lat:45.565409,lon:5.349892},
+    {k:43,lat:45.563998,lon:5.362646},{k:44,lat:45.562081,lon:5.374925},{k:45,lat:45.560015,lon:5.387367},
+    {k:46,lat:45.559546,lon:5.400248},{k:47,lat:45.560266,lon:5.412966},{k:48,lat:45.560764,lon:5.425689},
+    {k:49,lat:45.560941,lon:5.438832},{k:50,lat:45.558992,lon:5.450815},{k:51,lat:45.557642,lon:5.463252},
+    {k:52,lat:45.561338,lon:5.474963},{k:53,lat:45.563542,lon:5.487273},{k:54,lat:45.563827,lon:5.499945},
+    {k:55,lat:45.564204,lon:5.512424},{k:56,lat:45.56524,lon:5.52529},{k:57,lat:45.566735,lon:5.538154},
+    {k:58,lat:45.568938,lon:5.550082},{k:59,lat:45.570519,lon:5.562604},{k:60,lat:45.569425,lon:5.575475},
+    {k:61,lat:45.570327,lon:5.587745},{k:62,lat:45.571945,lon:5.600771},{k:63,lat:45.576624,lon:5.611629},
+    {k:64,lat:45.578944,lon:5.623965},{k:65,lat:45.576897,lon:5.636276},{k:66,lat:45.573497,lon:5.647994},
   ],
-  // A48 : Grenoble (jonction A480) → Voreppe → Voiron → Renage → Bourgoin-Jallieu
   A48: [
-    {k:0, lat:45.177,lon:5.695},  // Grenoble/Seyssins (jonction A480)
-    {k:5, lat:45.213,lon:5.655},  // Vers Voreppe
-    {k:10,lat:45.248,lon:5.618},  // Voreppe
-    {k:15,lat:45.282,lon:5.583},  // Moirans
-    {k:20,lat:45.308,lon:5.570},  // Tullins
-    {k:25,lat:45.353,lon:5.573},  // Voiron approche
-    {k:30,lat:45.369,lon:5.525},  // Voiron (bifurcation O)
-    {k:35,lat:45.368,lon:5.462},  // Renage
-    {k:40,lat:45.368,lon:5.405},  // Rives
-    {k:45,lat:45.393,lon:5.345},  // La Côte-Saint-André
-    {k:50,lat:45.450,lon:5.289},  // Vers nord
-    {k:55,lat:45.515,lon:5.257},  // Saint-Clair-de-la-Tour
-    {k:60,lat:45.572,lon:5.229},  // L'Isle-d'Abeau
-    {k:65,lat:45.620,lon:5.195},  // Jonction A43 (Saint-Quentin-Fallavier)
+    {k:41,lat:45.566344,lon:5.346575},{k:42,lat:45.564058,lon:5.348311},{k:43,lat:45.556394,lon:5.354566},
+    {k:44,lat:45.550937,lon:5.364705},{k:45,lat:45.545858,lon:5.374697},{k:46,lat:45.542202,lon:5.386217},
+    {k:47,lat:45.537194,lon:5.396623},{k:48,lat:45.532328,lon:5.407076},{k:49,lat:45.523864,lon:5.410492},
+    {k:50,lat:45.515281,lon:5.407277},{k:51,lat:45.507243,lon:5.401478},{k:52,lat:45.498447,lon:5.399077},
+    {k:53,lat:45.489389,lon:5.398917},{k:54,lat:45.480465,lon:5.398321},{k:55,lat:45.471523,lon:5.400019},
+    {k:56,lat:45.46253,lon:5.401759},{k:57,lat:45.45379,lon:5.400484},{k:58,lat:45.445251,lon:5.401381},
+    {k:59,lat:45.439444,lon:5.411119},{k:60,lat:45.434261,lon:5.421329},{k:61,lat:45.427762,lon:5.430137},
+    {k:62,lat:45.424485,lon:5.441948},{k:63,lat:45.419447,lon:5.452431},{k:64,lat:45.413183,lon:5.461263},
+    {k:65,lat:45.40457,lon:5.46411},{k:66,lat:45.395701,lon:5.466577},{k:67,lat:45.387644,lon:5.471981},
+    {k:68,lat:45.380293,lon:5.479419},{k:69,lat:45.372778,lon:5.486336},{k:70,lat:45.36972,lon:5.498137},
+    {k:71,lat:45.365005,lon:5.509051},{k:72,lat:45.358665,lon:5.518},{k:73,lat:45.354428,lon:5.528632},
+    {k:74,lat:45.351217,lon:5.540758},{k:75,lat:45.347075,lon:5.551837},{k:76,lat:45.344953,lon:5.56422},
+    {k:77,lat:45.340185,lon:5.574933},{k:78,lat:45.334396,lon:5.584839},{k:79,lat:45.328365,lon:5.594161},
+    {k:80,lat:45.322535,lon:5.603928},{k:81,lat:45.315765,lon:5.612214},{k:82,lat:45.308044,lon:5.618745},
+    {k:83,lat:45.29939,lon:5.621541},{k:84,lat:45.290486,lon:5.619992},{k:85,lat:45.281677,lon:5.621881},
+    {k:86,lat:45.273054,lon:5.62561},{k:87,lat:45.26496,lon:5.630944},{k:88,lat:45.25824,lon:5.639576},
+    {k:89,lat:45.252358,lon:5.649169},{k:90,lat:45.245078,lon:5.656488},{k:91,lat:45.236962,lon:5.661991},
+    {k:92,lat:45.228734,lon:5.666766},{k:93,lat:45.220753,lon:5.67277},
   ],
-  // A49 : Voreppe (jonction A48) → Saint-Marcellin → Romans-sur-Isère (puis Drôme)
   A49: [
-    {k:0, lat:45.301,lon:5.616},  // Voreppe (jonction A48)
-    {k:5, lat:45.271,lon:5.568},  // Coublevie
-    {k:10,lat:45.237,lon:5.515},  // Saint-Siméon-de-Bressieux
-    {k:15,lat:45.199,lon:5.463},  // Saint-Étienne-de-Saint-Geoirs
-    {k:20,lat:45.166,lon:5.408},  // Roybon direction
-    {k:25,lat:45.148,lon:5.352},  // Saint-Antoine-l'Abbaye
-    {k:30,lat:45.143,lon:5.293},  // Saint-Marcellin
-    {k:35,lat:45.100,lon:5.225},  // Saint-Bonnet-de-Chavagne
-    {k:40,lat:45.069,lon:5.160},  // Vers Romans
-    {k:45,lat:45.052,lon:5.094},  // Romans-sur-Isère approche
-    {k:48,lat:45.046,lon:5.055},  // Romans — frontière Drôme
+    {k:0,lat:45.290875,lon:5.620164},{k:1,lat:45.298814,lon:5.619243},{k:2,lat:45.303933,lon:5.608772},
+    {k:3,lat:45.304657,lon:5.596264},{k:4,lat:45.300462,lon:5.585094},{k:5,lat:45.298585,lon:5.573242},
+    {k:6,lat:45.297835,lon:5.561022},{k:7,lat:45.29421,lon:5.549697},{k:8,lat:45.293294,lon:5.537035},
+    {k:9,lat:45.288897,lon:5.526285},{k:10,lat:45.280285,lon:5.523314},{k:11,lat:45.27151,lon:5.520551},
+    {k:12,lat:45.263094,lon:5.516374},{k:13,lat:45.255633,lon:5.50926},{k:14,lat:45.247826,lon:5.503037},
+    {k:15,lat:45.240243,lon:5.496326},{k:16,lat:45.234464,lon:5.486706},{k:17,lat:45.226408,lon:5.481441},
+    {k:18,lat:45.217986,lon:5.477235},{k:19,lat:45.211502,lon:5.468605},{k:20,lat:45.208901,lon:5.456587},
+    {k:21,lat:45.205901,lon:5.444573},{k:22,lat:45.202684,lon:5.4327},{k:23,lat:45.19779,lon:5.422083},
+    {k:24,lat:45.191121,lon:5.413584},{k:25,lat:45.184509,lon:5.405087},{k:26,lat:45.177794,lon:5.39675},
+    {k:27,lat:45.173008,lon:5.386039},{k:28,lat:45.167614,lon:5.37585},{k:29,lat:45.162153,lon:5.365775},
+    {k:30,lat:45.154975,lon:5.358333},{k:31,lat:45.148091,lon:5.350436},{k:32,lat:45.142889,lon:5.340121},
+    {k:33,lat:45.137831,lon:5.32969},{k:34,lat:45.133525,lon:5.318547},{k:35,lat:45.12999,lon:5.306961},
+    {k:36,lat:45.125094,lon:5.296414},{k:37,lat:45.124019,lon:5.283884},{k:38,lat:45.120712,lon:5.272157},
+    {k:39,lat:45.11545,lon:5.261848},{k:40,lat:45.108322,lon:5.254398},{k:41,lat:45.103178,lon:5.244203},
+    {k:42,lat:45.099762,lon:5.232474},{k:43,lat:45.094171,lon:5.222666},{k:44,lat:45.086292,lon:5.216565},
   ],
-  // A51 : Grenoble (Échirolles) → Pont-de-Claix → Vizille → La Mure → Corps (puis Hautes-Alpes)
   A51: [
-    {k:0, lat:45.148,lon:5.748},  // Grenoble/Échirolles
-    {k:5, lat:45.108,lon:5.750},  // Pont-de-Claix
-    {k:10,lat:45.073,lon:5.769},  // Vizille approche
-    {k:15,lat:45.037,lon:5.781},  // Vizille
-    {k:20,lat:44.999,lon:5.787},  // La Valette
-    {k:25,lat:44.958,lon:5.789},  // Pierre-Châtel
-    {k:30,lat:44.914,lon:5.787},  // La Mure approche
-    {k:35,lat:44.873,lon:5.788},  // La Mure
-    {k:40,lat:44.835,lon:5.801},  // Sud La Mure (virage SE)
-    {k:45,lat:44.826,lon:5.868},  // Corps approche
-    {k:50,lat:44.817,lon:5.948},  // Corps
-    {k:54,lat:44.809,lon:5.988},  // Frontière Hautes-Alpes
+    {k:0,lat:45.115561,lon:5.683907},{k:1,lat:45.107525,lon:5.67857},{k:2,lat:45.09907,lon:5.674041},
+    {k:3,lat:45.090991,lon:5.669034},{k:4,lat:45.08404,lon:5.6759},{k:5,lat:45.075827,lon:5.679466},
+    {k:6,lat:45.066945,lon:5.681188},{k:7,lat:45.058429,lon:5.684915},{k:8,lat:45.049762,lon:5.684957},
+    {k:9,lat:45.04493,lon:5.67509},{k:10,lat:45.039603,lon:5.665347},{k:11,lat:45.030855,lon:5.662378},
+    {k:12,lat:45.022061,lon:5.661403},{k:13,lat:45.0133,lon:5.658195},{k:14,lat:45.004556,lon:5.655462},
+    {k:15,lat:44.995951,lon:5.652125},{k:16,lat:44.987286,lon:5.648963},{k:17,lat:44.978592,lon:5.646041},
+    {k:18,lat:44.969781,lon:5.64341},{k:19,lat:44.961828,lon:5.648211},{k:20,lat:44.955017,lon:5.655644},
+    {k:21,lat:44.946762,lon:5.651194},{k:22,lat:44.939097,lon:5.644513},{k:23,lat:44.931388,lon:5.638998},
+    {k:24,lat:44.924768,lon:5.630682},{k:25,lat:44.9173,lon:5.624934},{k:26,lat:44.909011,lon:5.625768},
   ],
-  // A480 : Rocade ouest Grenoble (S→N), ~8 km
   A480: [
-    {k:0,lat:45.152,lon:5.688},  // Sud (Échirolles/Seyssins)
-    {k:1,lat:45.160,lon:5.691},
-    {k:2,lat:45.168,lon:5.694},
-    {k:3,lat:45.176,lon:5.698},
-    {k:4,lat:45.184,lon:5.702},
-    {k:5,lat:45.192,lon:5.707},
-    {k:6,lat:45.200,lon:5.710},
-    {k:7,lat:45.208,lon:5.713},
-    {k:8,lat:45.215,lon:5.715},  // Nord (jonction A48)
+    {k:0,lat:45.217774,lon:5.67611},{k:1,lat:45.211622,lon:5.684988},{k:2,lat:45.204559,lon:5.691199},
+    {k:3,lat:45.197843,lon:5.70074},{k:4,lat:45.189302,lon:5.702644},{k:5,lat:45.180286,lon:5.702359},
+    {k:6,lat:45.171168,lon:5.701954},{k:7,lat:45.16219,lon:5.701546},{k:8,lat:45.153591,lon:5.698247},
+    {k:9,lat:45.14521,lon:5.694262},{k:10,lat:45.136651,lon:5.690554},{k:11,lat:45.127678,lon:5.690999},
+    {k:12,lat:45.119404,lon:5.686422},{k:13,lat:45.110393,lon:5.681475},
   ],
 };
 
-// Cache des PR autoroutes (géométrie OSM via backend)
+// Cache des PR autoroutes (bornage officiel via backend)
 let _prApiCache = null;
 
-// Interpolation précise depuis les données OSM backend
+// Interpolation précise depuis les données backend / snapshot officiel
 function _haversineKm(lat1, lon1, lat2, lon2) {
   const R = 6371;
   const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -5764,7 +5769,7 @@ async function loadPrFromApi() {
       _prApiSource = data?.source || 'données officielles';
       return roads;
     }
-  } catch { /* fallback statique */ }
+  } catch { /* fallback snapshot officiel embarque */ }
   return null;
 }
 
@@ -5800,9 +5805,9 @@ async function renderPrAutorouteLayer() {
   }
   if (leafletMap && !leafletMap.hasLayer(prAutorouteLayer)) leafletMap.addLayer(prAutorouteLayer);
 
-  // Affichage immédiat : cache API si dispo, sinon coordonnées statiques
+  // Affichage immédiat : cache API si dispo, sinon snapshot officiel embarqué
   const immediateCoords = _prApiCache || APRR_PR_COORDS;
-  const immediateLabel = _prApiCache ? (_prApiSource || 'données officielles') : 'coordonnées statiques (chargement en cours…)';
+  const immediateLabel = _prApiCache ? (_prApiSource || 'données officielles') : 'snapshot officiel embarque (data.gouv.fr)';
   _drawPrMarkers(immediateCoords, immediateLabel);
 
   // Charger les données officielles en arrière-plan si pas encore en cache

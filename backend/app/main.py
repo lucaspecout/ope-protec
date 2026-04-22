@@ -1670,7 +1670,7 @@ def api_pr_autoroutes(
     refresh: bool = False,
     _: User = Depends(require_roles(*READ_ROLES)),
 ):
-    """Positions des PR (bornes kilométriques) des autoroutes isèroises, calculées depuis la géométrie OSM."""
+    """Positions des PR des autoroutes isèroises depuis le bornage officiel RRN, avec fallback OSM."""
     return fetch_pr_autoroutes(force_refresh=refresh)
 
 
