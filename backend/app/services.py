@@ -8207,13 +8207,25 @@ _GERMAN_ALERT_WORDS: frozenset[str] = frozenset({
     "totalunterbrechung", "verkehrs", "gleis", "bahnhof", "fahrgäste",
     "fahrt", "ankunft", "abfahrt", "strecke zwischen", "betrieb",
     "störung", "sperrung", "ihr zug",
+    "zugverkehr", "zwischen", "freitag", "samstag", "sonntag", "montag",
+    "dienstag", "mittwoch", "donnerstag", "uhr", "bis", "von",
+    "bauarbeiten", "beeinträchtigt", "beeintraechtigt", "eingerichtet",
+    "schienenersatzverkehr", "arbeiten im", "rendezvous auf",
 })
 
 
 def _is_german_alert(text: str) -> bool:
     """Retourne True si le texte est clairement en allemand."""
-    lower = text.lower()
-    return sum(1 for w in _GERMAN_ALERT_WORDS if w in lower) >= 1
+    lower = str(text or "").lower()
+    hit_count = sum(1 for w in _GERMAN_ALERT_WORDS if w in lower)
+    if hit_count >= 2:
+        return True
+    # Quelques tournures très spécifiques des alertes TER allemandes.
+    return bool(re.search(
+        r"\b(?:zugverkehr|schienenersatzverkehr|bauarbeiten|beeintr[aä]chtigt|von freitag|bis samstag)\b",
+        lower,
+        re.IGNORECASE,
+    ))
 
 
 _TER_SIRI_NAMESPACES = [
