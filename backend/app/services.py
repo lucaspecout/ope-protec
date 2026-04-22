@@ -8473,6 +8473,102 @@ _CARS_REGION_ISERE_KEYWORDS: tuple[str, ...] = (
 )
 
 
+def _cars_region_extract_isere_line_alerts_from_html(html: str) -> list[dict[str, Any]]:
+    alerts: list[dict[str, Any]] = []
+    if not html:
+        return alerts
+
+    seen: set[str] = set()
+    for match in re.finditer(
+        r'href=["\'](?P<link>/fr/schedules/line/ISERE[^"\']+)["\'][\s\S]{0,300}?'
+        r'(?P<code>T[A-Z0-9]{1,6})[\s\S]{0,200}?'
+        r'(?P<label>[A-ZÀ-ÖØ-Ý0-9 \'-]{8,140})[\s\S]{0,200}?'
+        r'(?P<count>\d+)\s+perturbation',
+        html,
+        re.IGNORECASE,
+    ):
+        code = re.sub(r"\s+", " ", str(match.group("code") or "").strip()).upper()
+        label = re.sub(r"\s+", " ", str(match.group("label") or "").strip(" -"))
+        count = int(match.group("count") or 0)
+        link = str(match.group("link") or "").strip()
+        if not code or count <= 0:
+            continue
+        dedupe_key = f"{code}|{label}"
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        alerts.append({
+            "title": f"{code} · {label}"[:200],
+            "description": f"{count} perturbation(s) signalée(s) sur cette ligne Cars Région Isère",
+            "line": code[:80],
+            "level": "jaune",
+            "effect": "perturbation",
+            "valid_from": "",
+            "valid_until": "",
+            "link": f"https://sim.laregionvoustransporte.fr{link}",
+        })
+
+    if alerts:
+        return alerts
+
+    text = _strip_html_tags(html)
+    for chunk in re.split(r"(?:\n|\r){2,}", text):
+        blob = re.sub(r"\s+", " ", str(chunk or "")).strip()
+        if "cars région isère" not in blob.lower() or "perturbation" not in blob.lower():
+            continue
+        code_match = re.search(r"\b(T[A-Z0-9]{1,6})\b", blob, re.IGNORECASE)
+        count_match = re.search(r"\b(\d+)\s+perturbation", blob, re.IGNORECASE)
+        if not code_match or not count_match:
+            continue
+        code = code_match.group(1).upper()
+        count = int(count_match.group(1))
+        dedupe_key = f"{code}|{blob[:80]}"
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        alerts.append({
+            "title": blob[:200],
+            "description": f"{count} perturbation(s) signalée(s) sur cette ligne Cars Région Isère",
+            "line": code[:80],
+            "level": "jaune",
+            "effect": "perturbation",
+            "valid_from": "",
+            "valid_until": "",
+            "link": "https://sim.laregionvoustransporte.fr/fr/schedules",
+        })
+    return alerts
+
+
+def _cars_region_extract_isere_infos_trafic(html: str) -> list[dict[str, Any]]:
+    text = _strip_html_tags(html)
+    chunks = [re.sub(r"\s+", " ", chunk).strip() for chunk in re.split(r"(?:\n|\r){2,}", text) if str(chunk or "").strip()]
+    alerts: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for chunk in chunks:
+        lower = chunk.lower()
+        if not any(token in lower for token in ("cars région 38", "cars region 38", "cars région isère", "cars region isere")):
+            continue
+        line_match = re.search(r"\b([A-Z]{0,3}\d{1,4}(?:/\w+)?)\b", chunk)
+        if not line_match:
+            continue
+        line = line_match.group(1).upper()
+        dedupe_key = f"{line}|{chunk[:120]}"
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        alerts.append({
+            "title": chunk[:200],
+            "description": chunk[:400],
+            "line": line[:80],
+            "level": "jaune",
+            "effect": "perturbation",
+            "valid_from": "",
+            "valid_until": "",
+            "link": "https://www.laregionvoustransporte.fr/infos-trafic",
+        })
+    return alerts
+
+
 def _cars_region_find_isere_disruptions(obj: Any, depth: int = 0) -> list[dict[str, Any]]:
     """Parcourt récursivement le JSON Next.js pour trouver les lignes Isère avec perturbations."""
     if depth > 12 or obj is None:
@@ -8604,6 +8700,11 @@ def _fetch_cars_region_live() -> dict[str, Any]:
                             source_used = _next_data_url
                     except Exception:
                         pass
+            if not disruptions:
+                found = _cars_region_extract_isere_line_alerts_from_html(html)
+                if found:
+                    disruptions.extend(found)
+                    source_used = _SCHEDULES_URL
     except Exception:
         pass
 
@@ -8627,6 +8728,23 @@ def _fetch_cars_region_live() -> dict[str, Any]:
                     source_used = _api_url
             except Exception:
                 continue
+
+    # ── Source 2 bis : page officielle Infos trafic ───────────────────────────
+    if not disruptions:
+        _INFOS_TRAFIC_URL = "https://www.laregionvoustransporte.fr/infos-trafic"
+        _bot_headers = {
+            "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+            "Accept": "text/html,application/xhtml+xml,*/*",
+            "Accept-Language": "fr-FR,fr;q=0.9",
+        }
+        try:
+            infos_html = _http_get_text(_INFOS_TRAFIC_URL, timeout=15, headers=_bot_headers)
+            found = _cars_region_extract_isere_infos_trafic(infos_html)
+            if found:
+                disruptions.extend(found)
+                source_used = _INFOS_TRAFIC_URL
+        except Exception:
+            pass
 
     # ── Source 3 : GTFS-RT service alerts transport.data.gouv.fr ─────────────
     if not disruptions:
