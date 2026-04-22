@@ -81,7 +81,6 @@ const PANEL_TITLES = {
   'map-panel': 'Carte stratégique Isère',
   'users-panel': 'Gestion des utilisateurs',
   'notifications-panel': 'Notifications Discord',
-  'alerts-panel': 'Historique des alertes',
   'resources-panel': 'Ressources opérationnelles',
   'audit-panel': "Journal d'audit",
 };
@@ -11980,97 +11979,6 @@ function renderCopernicusEmsWidget(data = {}) {
     return `<li>${icon}${typeLabel} <strong>${escapeHtml(a.title || a.id || '?')}</strong><span class="muted">${country} — ${escapeHtml(a.date || '?')}</span>${a.level ? ` <span style="color:${color};font-weight:600">(${escapeHtml(a.level)})</span>` : ''}</li>`;
   }).join('') || '<li class="muted">Aucune catastrophe active détectée en Europe.</li>');
 }
-
-// ════════════════════════════════════════════════════════════════════════════
-// FEATURE 3 — Historique des alertes
-// ════════════════════════════════════════════════════════════════════════════
-
-let _alertsChartInstance = null;
-
-async function loadAlertsHistory() {
-  const el = document.getElementById('alerts-list');
-  if (el) el.innerHTML = '<p class="muted">Chargement…</p>';
-  try {
-    const data = await api('/api/alerts/history?days=30&limit=300');
-    renderAlertsHistory(Array.isArray(data) ? data : []);
-  } catch (err) {
-    if (el) el.innerHTML = `<p class="error">Erreur : ${escapeHtml(sanitizeErrorMessage(err.message))}</p>`;
-  }
-}
-
-function renderAlertsHistory(alerts) {
-  // ── Chart : alertes par jour ─────────────────────────────────────────────
-  const canvas = document.getElementById('alerts-chart');
-  if (canvas) {
-    const countsByDay = {};
-    alerts.forEach((a) => {
-      const day = (a.triggered_at || '').slice(0, 10);
-      if (day) countsByDay[day] = (countsByDay[day] || 0) + 1;
-    });
-    const days = [];
-    for (let i = 29; i >= 0; i--) {
-      const d = new Date(Date.now() - i * 86400000);
-      days.push(d.toISOString().slice(0, 10));
-    }
-    const counts = days.map((d) => countsByDay[d] || 0);
-    if (_alertsChartInstance) _alertsChartInstance.destroy();
-    _alertsChartInstance = new Chart(canvas, {
-      type: 'bar',
-      data: {
-        labels: days.map((d) => d.slice(5)),
-        datasets: [{
-          label: 'Alertes / jour',
-          data: counts,
-          backgroundColor: 'rgba(230, 119, 0, 0.7)',
-          borderColor: 'rgba(230, 119, 0, 1)',
-          borderWidth: 1,
-        }],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } },
-      },
-    });
-  }
-
-  // ── Liste des alertes ────────────────────────────────────────────────────
-  const el = document.getElementById('alerts-list');
-  if (!el) return;
-  if (!alerts.length) {
-    el.innerHTML = '<p class="muted" style="padding:1rem">Aucune alerte enregistrée ces 30 derniers jours.</p>';
-    return;
-  }
-  const levelColor = { vert: '#2b8a3e', jaune: '#e9a800', orange: '#e67700', rouge: '#c92a2a', degraded: '#e67700', unavailable: '#c92a2a', stale: '#868e96' };
-  el.innerHTML = alerts.map((a) => {
-    const newCol = levelColor[a.new_level] || '#868e96';
-    const prevCol = levelColor[a.previous_level] || '#868e96';
-    const dt = new Date(a.triggered_at);
-    const dtStr = isNaN(dt) ? '' : dt.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-    const svc = FLUX_SERVICES.find((s) => s.key === a.service_key);
-    const icon = svc?.icon || '📡';
-    return `<div class="flux-row" style="align-items:center;gap:.5rem;padding:.5rem .75rem">
-      <span style="font-size:1.1rem">${icon}</span>
-      <div style="flex:1;min-width:0">
-        <strong>${escapeHtml(a.service_label || a.service_key)}</strong>
-        <span class="muted" style="font-size:.8rem;margin-left:.4rem">${escapeHtml(dtStr)}</span>
-      </div>
-      <span style="color:${prevCol};font-weight:600;font-size:.85rem">${escapeHtml(a.previous_level || '?')}</span>
-      <span class="muted" style="font-size:.8rem">→</span>
-      <span style="color:${newCol};font-weight:700;font-size:.9rem">${escapeHtml(a.new_level)}</span>
-    </div>`;
-  }).join('');
-}
-
-// Bind alerts panel
-(function initAlertsPanel() {
-  const btn = document.getElementById('alerts-refresh-btn');
-  if (btn) btn.addEventListener('click', loadAlertsHistory);
-  document.querySelectorAll('.menu-btn[data-target="alerts-panel"]').forEach((b) => {
-    b.addEventListener('click', () => loadAlertsHistory());
-  });
-})();
 
 // ════════════════════════════════════════════════════════════════════════════
 // FEATURE 8 — Ressources opérationnelles

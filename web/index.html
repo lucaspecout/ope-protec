@@ -67,7 +67,6 @@
           <button class="menu-btn" data-target="users-panel" data-icon="👤"><span class="menu-label">Utilisateurs</span></button>
           <button class="menu-btn" data-target="api-panel" data-icon="🧩"><span class="menu-label">Interconnexions API</span></button>
           <button class="menu-btn" data-target="notifications-panel" data-icon="🔔"><span class="menu-label">Notifications</span></button>
-          <button class="menu-btn" data-target="alerts-panel" data-icon="📣"><span class="menu-label">Historique alertes</span></button>
           <button class="menu-btn" data-target="audit-panel" data-icon="🔍" id="menu-audit-btn" class="hidden" hidden><span class="menu-label">Audit</span></button>
         </nav>
         <button id="logout-btn" class="danger">Déconnexion</button>
@@ -1049,21 +1048,6 @@
           <div id="notif-log-list" class="notif-log-list">
             <div class="muted">Chargement…</div>
           </div>
-        </section>
-
-        <!-- ── Historique alertes ── -->
-        <section id="alerts-panel" class="panel view hidden" hidden>
-          <div class="flux-header" style="margin-bottom:1rem">
-            <div>
-              <h3>Historique des alertes · 30 jours</h3>
-              <p class="muted">Transitions de niveau détectées automatiquement sur les services surveillés (ex: vert → orange).</p>
-            </div>
-            <button id="alerts-refresh-btn" type="button">Actualiser</button>
-          </div>
-          <div id="alerts-chart-wrap" style="max-width:900px;margin:0 auto 1.5rem;background:var(--panel-bg,#fff);border-radius:.5rem;padding:1rem">
-            <canvas id="alerts-chart" height="70"></canvas>
-          </div>
-          <div id="alerts-list" class="flux-service-list"></div>
         </section>
 
         <!-- ── Journal d'audit (admin) ── -->
