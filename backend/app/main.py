@@ -1448,11 +1448,11 @@ def isere_refresh_one_service(
     if service_key not in SERVICE_REFRESH_INTERVALS:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail=f"Service inconnu : {service_key}")
-    Thread(target=_refresh_one_service, args=(service_key,), daemon=True).start()
+    _refresh_one_service(service_key)
     snapshot = _get_external_risks_snapshot()
     return {
         "service_key": service_key,
-        "status": "refresh_triggered",
+        "status": "refreshed",
         "current": snapshot.get(service_key, {}),
     }
 

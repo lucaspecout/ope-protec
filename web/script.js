@@ -35,7 +35,7 @@ const API_RETRY_BASE_DELAY_MS = 500;
 const API_MAX_RETRIES_GET = 3;
 const API_MAX_RETRIES_NON_GET = 1;
 const PENDING_SERVICE_AUTO_RETRY_MS = 15000;
-const PENDING_SERVICE_SETTLE_MS = 2500;
+const PENDING_SERVICE_SETTLE_MS = 250;
 const API_ORIGIN_COOLDOWN_MS = 60000;
 const STATIC_POINTS_CACHE_TTL_MS = 10 * 60 * 1000;
 const TELECOM_POINTS_CACHE_TTL_MS = 10 * 60 * 1000;
@@ -9458,11 +9458,11 @@ function isPendingServicePayload(payload = {}) {
   return status === 'pending' || status === 'idle';
 }
 
-async function _reloadExternalRiskViews(forceRefresh = false) {
+async function _reloadExternalRiskViews(forceRefresh = false, bypassCache = forceRefresh) {
   const suffix = forceRefresh ? '?refresh=true' : '';
   const data = await api(`/external/isere/risks${suffix}`, {
-    bypassCache: forceRefresh,
-    cacheTtlMs: forceRefresh ? 0 : API_CACHE_TTL_MS,
+    bypassCache,
+    cacheTtlMs: bypassCache ? 0 : API_CACHE_TTL_MS,
     timeoutMs: API_SLOW_ENDPOINT_TIMEOUT_MS,
   });
   cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, data);
@@ -9477,8 +9477,10 @@ async function _reloadExternalRiskViews(forceRefresh = false) {
 
 async function _requestServiceRefreshAndReload(serviceKey) {
   await api(`/external/isere/risks/${encodeURIComponent(serviceKey)}/refresh`, { method: 'POST' });
-  await new Promise((resolve) => setTimeout(resolve, PENDING_SERVICE_SETTLE_MS));
-  return _reloadExternalRiskViews(true);
+  if (PENDING_SERVICE_SETTLE_MS > 0) {
+    await new Promise((resolve) => setTimeout(resolve, PENDING_SERVICE_SETTLE_MS));
+  }
+  return _reloadExternalRiskViews(false, true);
 }
 
 function _clearPendingServiceAutoRefresh(serviceKey) {
