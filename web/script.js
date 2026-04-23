@@ -7298,7 +7298,7 @@ function closeMunicipalityEditor() {
 }
 
 async function loadMunicipalityFiles(municipalityId) {
-  const files = await api(`/municipalities/${municipalityId}/files`);
+  const files = await api(`/municipalities/${municipalityId}/files`, { bypassCache: true, cacheTtlMs: 0 });
   return Array.isArray(files) ? files : [];
 }
 
@@ -7721,21 +7721,26 @@ async function submitMunicipalityUploadForm(form, municipalityId) {
     submitButton.textContent = 'Envoi...';
   }
 
+  let uploadReached100 = false;
   try {
-    await uploadMunicipalityDocumentWithFallback(municipalityId, formData, (progress) => {
+    const uploadPromise = uploadMunicipalityDocumentWithFallback(municipalityId, formData, (progress) => {
       if (progressBar) progressBar.style.width = `${progress}%`;
       if (progressLabel) progressLabel.textContent = `${progress}%`;
+      if (progress >= 100) uploadReached100 = true;
     });
-    if (progressBar) progressBar.style.width = '100%';
-    if (progressLabel) progressLabel.textContent = '100%';
-  } catch (error) {
-    const recovered = await waitForMunicipalityDocumentAppearance(municipalityId, title, file.name);
-    if (!recovered) throw error;
-    if (progressBar) progressBar.style.width = '100%';
-    if (progressLabel) progressLabel.textContent = '100%';
-  }
 
-  try {
+    const completionPromise = (async () => {
+      while (!uploadReached100) {
+        await wait(150);
+      }
+      const found = await waitForMunicipalityDocumentAppearance(municipalityId, title, file.name, 30000);
+      if (!found) throw new Error("Document non visible après téléversement");
+      return true;
+    })();
+
+    await Promise.race([uploadPromise, completionPromise]);
+    if (progressBar) progressBar.style.width = '100%';
+    if (progressLabel) progressLabel.textContent = '100%';
     const refreshed = getMunicipality(municipalityId);
     form.reset();
     if (refreshed) await openMunicipalityDetailsModal(refreshed);
