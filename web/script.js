@@ -5069,6 +5069,8 @@ function trafficPopupDetails(point = {}, sourceLabel = '', trafficType = '') {
   const periodEnd = point.period_end || point.end_at || point.validity_end || '';
   const scope = [point.direction, point.carriageway, point.lane_status].filter(Boolean).join(' · ');
   const restriction = point.vehicle_restriction || point.mobility || '';
+  const sourceLocation = point.location_summary || '';
+  const placementBasis = point.placement_basis || '';
   const precisionEmoji = { source: '📍', exact: '📍', commune: '🏘️', mairie: '🏛️', adresse: '🏠', localité: '🗺️', 'axe+commune': '🛣️', axe: '🛣️', estimée: '⚠️' };
   const precisionKey = point.precision || 'estimée';
   const precisionIcon = precisionEmoji[precisionKey] || '⚠️';
@@ -5076,7 +5078,9 @@ function trafficPopupDetails(point = {}, sourceLabel = '', trafficType = '') {
     <span class="badge neutral">${escapeHtml(sourceLabel)} · ${escapeHtml(trafficType)} · ${escapeHtml(level)}</span><br/>
     ${escapeHtml(point.description || 'Aucun détail complémentaire fourni.')}<br/>
     Axe(s): ${escapeHtml(roads)}<br/>
+    ${sourceLocation ? `Repère source: ${escapeHtml(sourceLocation)}<br/>` : ''}
     ${precisionIcon} Localisation: ${escapeHtml(locations)} <em>(précision: ${escapeHtml(precisionKey)})</em><br/>
+    ${placementBasis ? `Placement carte: ${escapeHtml(placementBasis)}<br/>` : ''}
     Catégorie: ${escapeHtml(category)}${reference ? `<br/>Référence: ${escapeHtml(String(reference))}` : ''}${periodStart || periodEnd ? `<br/>Période: ${escapeHtml(periodStart ? safeDateToLocale(periodStart) : '?')} → ${escapeHtml(periodEnd ? safeDateToLocale(periodEnd) : '?')}` : ''}${scope ? `<br/>Sens/voies: ${escapeHtml(scope)}` : ''}${restriction ? `<br/>Véhicules concernés: ${escapeHtml(restriction)}` : ''}${point.mandatory ? '<br/>Mesure obligatoire: oui' : ''}${publishedAt ? `<br/>Mis à jour: ${escapeHtml(safeDateToLocale(publishedAt))}` : ''}${coords ? `<br/>Coordonnées: ${coords.lat.toFixed(5)}, ${coords.lon.toFixed(5)}` : ''}<br/>
     <a href="${escapeHtml(point.link || '#')}" target="_blank" rel="noreferrer">Voir la source officielle</a>`;
 }
@@ -5344,6 +5348,53 @@ function extractAlertDynamicHints(fullText = '') {
   return hints.slice(0, 8);
 }
 
+function extractTrafficLocationSummaryHints(event = {}, roads = []) {
+  const hints = [];
+  const pushHint = (value) => {
+    const label = String(value || '').replace(/\s+/g, ' ').trim().replace(/^[-:> ]+|[-:> ]+$/g, '');
+    if (!label || hints.includes(label)) return;
+    if (/^(?:is[èe]re|info|trafic|circulation|route|routes|sens|voie|voies)$/i.test(label)) return;
+    hints.push(label);
+  };
+
+  const summaryParts = [
+    event.location_summary,
+    event.anchor,
+    event.city,
+    event.address,
+    event.direction,
+    event.carriageway,
+  ]
+    .filter(Boolean)
+    .flatMap((value) => String(value).split(/→|;|\||,|\s+-\s+/))
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  summaryParts.forEach((part) => {
+    pushHint(part);
+    roads.forEach((road) => pushHint(`${road} ${part}`));
+  });
+
+  return hints.slice(0, 10);
+}
+
+function snapTrafficPointToRoadCorridor(point = null, roads = []) {
+  if (!point || !roads.length) return null;
+  let best = null;
+  roads.forEach((road) => {
+    const corridor = ITINISERE_ROAD_CORRIDORS[road];
+    if (!corridor || !corridor.length) return;
+    const projected = nearestPointOnCorridor(corridor, point);
+    if (!projected) return;
+    const distanceKm = _haversineKm(point.lat, point.lon, projected.lat, projected.lon);
+    if (!Number.isFinite(distanceKm)) return;
+    if (!best || distanceKm < best.distanceKm) {
+      best = { ...projected, road, distanceKm };
+    }
+  });
+  return best && best.distanceKm <= 5 ? best : null;
+}
+
 function buildItinisereMapQuery(event = {}) {
   const candidates = [
     event.address,
@@ -5462,32 +5513,43 @@ async function buildItinisereMapPoints(events = []) {
   const points = [];
   for (const event of events.slice(0, 80)) {
     const isBisonEvent = String(event.source || '').toLowerCase().includes('bison');
-    const fullText = `${event.title || ''} ${event.description || ''}`;
-    const roads = (Array.isArray(event.roads) && event.roads.length ? event.roads : detectRoadCodes(fullText))
+    const fullText = `${event.title || ''} ${event.description || ''} ${event.location_summary || ''} ${event.road || ''} ${event.direction || ''} ${event.carriageway || ''}`;
+    const roads = (Array.isArray(event.roads) && event.roads.length ? event.roads : [event.road, ...detectRoadCodes(fullText)])
       .map((road) => normalizeRoadCode(road))
       .filter(Boolean);
     const isClosureEvent = /ferm|barr|interdit|coup/.test(fullText.toLowerCase())
       || String(event.category || '').toLowerCase() === 'fermeture';
     const locationHints = extractItinisereLocationHints(event, fullText, roads);
+    const locationSummaryHints = extractTrafficLocationSummaryHints(event, roads);
     const dynamicAlertHints = extractAlertDynamicHints(fullText);
-    const locations = Array.isArray(event.locations) ? event.locations.filter(Boolean) : locationHints;
+    const locations = Array.isArray(event.locations) && event.locations.length
+      ? event.locations.filter(Boolean)
+      : [...locationHints, ...locationSummaryHints];
     const communeHints = TRAFFIC_COMMUNES.filter((commune) => {
       const escaped = commune.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      return new RegExp(`\\b${escaped}\\b`, 'i').test(`${fullText} ${locationHints.join(' ')}`);
+      return new RegExp(`\\b${escaped}\\b`, 'i').test(`${fullText} ${locationHints.join(' ')} ${locationSummaryHints.join(' ')}`);
     });
-    const candidateLocationHints = [...new Set([...locations, ...locationHints, ...dynamicAlertHints, ...communeHints])];
+    const candidateLocationHints = [...new Set([...locations, ...locationHints, ...locationSummaryHints, ...dynamicAlertHints, ...communeHints])];
     let position = null;
     let anchor = '';
     let precision = 'estimée';
     let communeAnchor = null;
+    let placementBasis = '';
 
-    // 1. Coordonnées directes depuis l'API (Cityway ou Bison Futé)
+    // 1. Coordonnées directes depuis l'API
     const providedCoords = normalizeMapCoordinates(event.lat, event.lon);
     if (isBisonEvent && !providedCoords) continue;
-    if (providedCoords) {
-      position = providedCoords;
+    const trustedSourceCoords = providedCoords && !isBisonEvent && String(event.source_api || '').toLowerCase() === 'cityway';
+    const snappedProvidedCoords = providedCoords ? snapTrafficPointToRoadCorridor(providedCoords, roads) : null;
+    if (trustedSourceCoords) {
+      position = snappedProvidedCoords
+        ? { lat: snappedProvidedCoords.lat, lon: snappedProvidedCoords.lon }
+        : providedCoords;
       anchor = locations[0] || roads[0] || 'Itinisère';
-      precision = 'source';
+      precision = snappedProvidedCoords ? 'axe+commune' : 'source';
+      placementBasis = snappedProvidedCoords
+        ? `coordonnée source recalée sur ${snappedProvidedCoords.road}`
+        : 'coordonnée fournie par la source';
     }
 
     // 2. Landmark spécifique (col, tunnel, site nommé) dans le texte complet
@@ -5498,6 +5560,7 @@ async function buildItinisereMapPoints(events = []) {
         position = lm;
         anchor = lm.name || 'Lieu spécifique';
         precision = 'exact';
+        placementBasis = 'lieu nommé détecté dans le texte';
       }
     }
 
@@ -5517,6 +5580,7 @@ async function buildItinisereMapPoints(events = []) {
         position = betweenPt;
         anchor = betweenPt.anchor || 'Tronçon';
         precision = betweenPt.precision || 'entre';
+        placementBasis = 'tronçon entre deux repères';
       }
     }
 
@@ -5531,6 +5595,7 @@ async function buildItinisereMapPoints(events = []) {
             position = roadPoint;
             anchor = `${road} · ${communeAnchor.communeName || communeHints[0] || road}`;
             precision = 'axe+commune';
+            placementBasis = `projection sur l'axe ${road} à hauteur de ${communeAnchor.communeName || communeHints[0] || road}`;
             break;
           }
         }
@@ -5542,7 +5607,9 @@ async function buildItinisereMapPoints(events = []) {
       const specificHints = [...new Set([...locations, ...locationHints])].filter((h) => h && h.length > 3);
       for (const hint of specificHints) {
         const knownPt = lookupKnownLocation(hint);
-        if (knownPt && isPointInIsere(knownPt)) { position = knownPt; anchor = hint; precision = 'exact'; break; }
+        if (knownPt && isPointInIsere(knownPt)) {
+          position = knownPt; anchor = hint; precision = 'exact'; placementBasis = 'repère local connu'; break;
+        }
         const geocodedPt = await geocodeTrafficLabel(hint);
         if (geocodedPt && isPointInIsere(geocodedPt)) {
           // Si event a des roads → placer sur le corridor plutôt que sur la ville
@@ -5552,11 +5619,13 @@ async function buildItinisereMapPoints(events = []) {
               if (!corridor) continue;
               const roadPoint = nearestPointOnCorridor(corridor, geocodedPt);
               if (roadPoint && isPointInIsere(roadPoint)) {
-                position = roadPoint; anchor = `${road} · ${hint}`; precision = 'axe+commune'; break;
+                position = roadPoint; anchor = `${road} · ${hint}`; precision = 'axe+commune'; placementBasis = `projection sur l'axe ${road} depuis ${hint}`; break;
               }
             }
           }
-          if (!position) { position = geocodedPt; anchor = hint; precision = geocodedPt.precision || 'localité'; }
+          if (!position) {
+            position = geocodedPt; anchor = hint; precision = geocodedPt.precision || 'localité'; placementBasis = 'géocodage du lieu transmis';
+          }
           break;
         }
       }
@@ -5567,12 +5636,27 @@ async function buildItinisereMapPoints(events = []) {
       for (const hint of dynamicAlertHints) {
         const geocodedPt = await geocodeTrafficLabel(hint);
         if (geocodedPt && isPointInIsere(geocodedPt)) {
-          position = geocodedPt; anchor = hint; precision = geocodedPt.precision || 'localité'; break;
+          position = geocodedPt; anchor = hint; precision = geocodedPt.precision || 'localité'; placementBasis = 'géocodage contextuel'; break;
         }
       }
     }
 
-    // 7. Milieu du corridor routier (fallback sans commune)
+    // 7. Coordonnée source non fiable (Bison/flux non précis) : recaler sur l'axe le plus proche
+    if (!position && providedCoords) {
+      if (snappedProvidedCoords) {
+        position = { lat: snappedProvidedCoords.lat, lon: snappedProvidedCoords.lon };
+        anchor = locations[0] || `${snappedProvidedCoords.road} · secteur signalé`;
+        precision = 'axe';
+        placementBasis = `coordonnée source recalée sur ${snappedProvidedCoords.road}`;
+      } else {
+        position = providedCoords;
+        anchor = locations[0] || roads[0] || 'Source trafic';
+        precision = 'source';
+        placementBasis = 'coordonnée fournie par la source';
+      }
+    }
+
+    // 8. Milieu du corridor routier (fallback sans commune)
     if (!position && roads.length) {
       for (const road of roads) {
         const corridor = ITINISERE_ROAD_CORRIDORS[road];
@@ -5581,11 +5665,12 @@ async function buildItinisereMapPoints(events = []) {
         position = { lat: corridor[midIdx][0], lon: corridor[midIdx][1] };
         anchor = `Axe ${road}`;
         precision = 'axe';
+        placementBasis = `position médiane de l'axe ${road}`;
         break;
       }
     }
 
-    // 8. Fermeture avec commune (mairie)
+    // 9. Fermeture avec commune (mairie)
     if (!position && isClosureEvent) {
       const closureCommuneHints = extractClosureCommuneHints(event, fullText);
       for (const commune of closureCommuneHints) {
@@ -5594,15 +5679,17 @@ async function buildItinisereMapPoints(events = []) {
         position = { lat: communePoint.lat, lon: communePoint.lon };
         anchor = `Mairie de ${communePoint.communeName || commune}`;
         precision = 'mairie';
+        placementBasis = `commune de fermeture ${communePoint.communeName || commune}`;
         break;
       }
     }
 
-    // 9. Commune seule (événement sans route)
+    // 10. Commune seule (événement sans route)
     if (!position && communeAnchor && isPointInIsere(communeAnchor)) {
       position = { lat: communeAnchor.lat, lon: communeAnchor.lon };
       anchor = communeAnchor.communeName || 'Commune';
       precision = 'commune';
+      placementBasis = `centre de commune ${communeAnchor.communeName || 'Isère'}`;
     }
 
     if (!position) {
@@ -5612,6 +5699,7 @@ async function buildItinisereMapPoints(events = []) {
         position = { lat: corridor[0][0], lon: corridor[0][1] };
         anchor = `Axe ${road}`;
         precision = 'axe';
+        placementBasis = `début de l'axe ${road}`;
         break;
       }
     }
@@ -5624,6 +5712,7 @@ async function buildItinisereMapPoints(events = []) {
         anchor = commune;
         if (position) {
           precision = 'commune';
+          placementBasis = `géocodage de la commune ${commune}`;
           break;
         }
       }
@@ -5632,6 +5721,7 @@ async function buildItinisereMapPoints(events = []) {
     if (!position) {
       position = await geocodeTrafficLabel((event.title || '').slice(0, 90));
       anchor = 'Localisation estimée';
+      placementBasis = 'estimation depuis le titre';
     }
     if (!position) continue;
 
@@ -5646,6 +5736,7 @@ async function buildItinisereMapPoints(events = []) {
       roads,
       anchor,
       precision,
+      placement_basis: placementBasis || 'position calculée',
       severity: normalizeTrafficSeverity(event.severity || (event.category === 'fermeture' ? 'rouge' : 'jaune')),
     });
   }
