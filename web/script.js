@@ -60,7 +60,6 @@ const FLUX_SERVICES = [
   { key: 'placegrenet',            label: "Place Gre'net",             icon: '🗞️', category: 'Actualités',   interval: 180,   metric: (d) => `${(d.items || []).length} article(s)` },
   { key: 'grenoble_metro',         label: 'Grenoble Alpes Métropole',  icon: '🏙️', category: 'Actualités',   interval: 300,   metric: (d) => `${(d.items || []).length} actualité(s)` },
   { key: 'ars_aura',               label: 'ARS AURA · Santé',          icon: '🏥', category: 'Actualités',   interval: 300,   metric: (d) => `${(d.items || []).length} alerte(s) sanitaire(s)` },
-  { key: 'ma_securite',            label: 'Ma Sécurité',               icon: '🛡️', category: 'Actualités',   interval: 300,   metric: (d) => `${d.items_total ?? (d.items || []).length} actualité(s)` },
   { key: 'seismes_isere',          label: 'Séismes Isère',             icon: '🌍', category: 'Risques',       interval: 600,   metric: (d) => `${(d.items || []).length} séisme(s) détecté(s)` },
   { key: 'avalanche_isere',        label: 'Avalanches BRA · Isère',    icon: '🏔️', category: 'Risques',       interval: 1800,  metric: (d) => `Niveau max ${d.niveau_max_bra ?? '?'}/5 · ${(d.massifs || []).length} massif(s)` },
   { key: 'feux_foret_isere',       label: 'Feux de forêt EFFIS',       icon: '🔥', category: 'Risques',       interval: 600,   metric: (d) => `${d.fires_total ?? 0} foyer(s) détecté(s) 24h` },
@@ -630,12 +629,6 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
       ...(previous.ars_aura || {}),
       ...(next.ars_aura || {}),
       items: keepPreviousArray((previous.ars_aura || {}).items, (next.ars_aura || {}).items),
-    },
-    ma_securite: {
-      ...(previous.ma_securite || {}),
-      ...(next.ma_securite || {}),
-      items_total: keepPreviousValue((previous.ma_securite || {}).items_total, (next.ma_securite || {}).items_total),
-      items: keepPreviousArray((previous.ma_securite || {}).items, (next.ma_securite || {}).items),
     },
     seismes_isere: {
       ...(previous.seismes_isere || {}),
@@ -6652,13 +6645,6 @@ function renderArsAuraAlerts(data = {}) {
   }).join('') || '<li>Aucune alerte sanitaire ARS.</li>');
 }
 
-function renderMaSecuriteAlerts(data = {}) {
-  _renderNewsSvcCard('ma-securite-status', 'ma-securite-list', data, 'https://www.data.gouv.fr/dataservices/api-ma-securite', 'Aucune actualité Ma Sécurité filtrée sur l’Isère.');
-  if (data.status !== 'online' && data.error) {
-    setHtml('ma-securite-list', `<li class="muted">${escapeHtml(data.error)}</li>`);
-  }
-}
-
 function renderSireneOpenData(data = {}) {
   const topCommunes = Array.isArray(data.top_communes) ? data.top_communes : [];
   const topSectors = Array.isArray(data.top_sectors) ? data.top_sectors : [];
@@ -9088,7 +9074,6 @@ const SVC_CARD_META = {
   placegrenet:           { statusId: 'placegrenet-svc-status', infoId: null,                   url: 'https://www.placegrenet.fr' },
   grenoble_metro:        { statusId: 'grenoble-metro-svc-status', infoId: null,                url: 'https://www.grenoblealpesmetropole.fr' },
   ars_aura:              { statusId: 'ars-aura-svc-status',    infoId: null,                   url: 'https://www.auvergne-rhone-alpes.ars.sante.fr/alertes-sanitaires-en-cours' },
-  ma_securite:           { statusId: 'ma-securite-status',     infoId: null,                   url: 'https://www.data.gouv.fr/dataservices/api-ma-securite' },
   seismes_isere:         { statusId: 'seismes-svc-status',     infoId: 'seismes-svc-info',     url: 'https://www.franceseisme.fr' },
   avalanche_isere:       { statusId: 'avalanche-svc-status',   infoId: null,                   url: 'https://meteofrance.com/meteo-montagne' },
   feux_foret_isere:      { statusId: 'feux-svc-status',        infoId: null,                   url: 'https://effis.jrc.ec.europa.eu' },
@@ -9137,7 +9122,6 @@ const SVC_DETAIL_LISTS = {
   placegrenet:           [{ id: 'placegrenet-svc-list',  label: "Derniers articles Place Gre'net" }],
   grenoble_metro:        [{ id: 'grenoble-metro-svc-list', label: 'Actualités Grenoble Alpes Métropole' }],
   ars_aura:              [{ id: 'ars-aura-svc-list',     label: 'Alertes sanitaires ARS AURA' }],
-  ma_securite:           [{ id: 'ma-securite-list',      label: 'Actualités sécurité locales' }],
   seismes_isere:         [{ id: 'seismes-svc-list',      label: 'Séismes récents Isère' }],
   avalanche_isere:       [{ id: 'avalanche-svc-list',    label: 'BRA — Risque avalanche massifs Isère' }],
   feux_foret_isere:      [{ id: 'feux-svc-list',         label: 'Foyers actifs EFFIS (24h)' }],
@@ -9248,16 +9232,6 @@ function buildAutoroutesIsereService(data = {}) {
 function getFluxPayload(key, data = {}) {
   if (key === 'autoroutes_isere') return buildAutoroutesIsereService(data);
   if (!data || typeof data !== 'object' || !(key in data)) {
-    if (key === 'ma_securite') {
-      return {
-        service: 'Ma Sécurité',
-        status: 'degraded',
-        items: [],
-        items_total: 0,
-        error: 'Service absent du snapshot backend. Redémarre le backend ou configure la clé API Ma Sécurité.',
-        source: 'https://www.data.gouv.fr/dataservices/api-ma-securite',
-      };
-    }
     if (key === 'sirene_open_data') {
       return {
         service: 'Sirene open data',
@@ -9596,7 +9570,6 @@ function renderExternalRisks(data = {}) {
   const placegrenet = mergedData?.placegrenet || {};
   const grenobleMétropole = mergedData?.grenoble_metro || {};
   const arsAura = mergedData?.ars_aura || {};
-  const maSecurite = mergedData?.ma_securite || {};
   const seismesIsere = mergedData?.seismes_isere || {};
   const avalancheIsere = mergedData?.avalanche_isere || {};
   const feuxForet = mergedData?.feux_foret_isere || {};
@@ -9626,7 +9599,6 @@ function renderExternalRisks(data = {}) {
   renderPlacegrenetNews(placegrenet);
   renderGrenobleMetroNews(grenobleMétropole);
   renderArsAuraAlerts(arsAura);
-  renderMaSecuriteAlerts(maSecurite);
   renderSeismesIsere(seismesIsere);
   renderAvalancheIsere(avalancheIsere);
   renderFeuxForetWidget(feuxForet);
