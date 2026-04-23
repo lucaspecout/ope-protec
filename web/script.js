@@ -7083,9 +7083,12 @@ function renderGeorisquesPcsDetail(commune) {
     longitude: commune.longitude,
   });
   const georisquesMainUrl = 'https://www.georisques.gouv.fr/';
+  const dicrimUrl = commune.dicrim_publication_year && insee
+    ? `https://www.georisques.gouv.fr/DICRIM/${encodeURIComponent(insee)}`
+    : '';
   const cityDocuments = [];
   if (commune.dicrim_publication_year) {
-    cityDocuments.push(`DICRIM · publication ${escapeHtml(String(commune.dicrim_publication_year))}`);
+    cityDocuments.push(`DICRIM · publication ${escapeHtml(String(commune.dicrim_publication_year))}${dicrimUrl ? ` · <a href="${dicrimUrl}" target="_blank" rel="noreferrer">ouvrir le document ↗</a>` : ''}`);
   }
   if (Number(commune.ppr_by_risk?.pprn || 0) > 0) {
     cityDocuments.push(`PPRN · ${Number(commune.ppr_by_risk?.pprn || 0)} document(s)`);
