@@ -34,6 +34,8 @@ const SESSION_RESTORE_TIMEOUT_MS = 6000;  // 6s pour la vérification de session
 const API_RETRY_BASE_DELAY_MS = 500;
 const API_MAX_RETRIES_GET = 3;
 const API_MAX_RETRIES_NON_GET = 1;
+const PENDING_SERVICE_AUTO_RETRY_MS = 15000;
+const PENDING_SERVICE_SETTLE_MS = 2500;
 const API_ORIGIN_COOLDOWN_MS = 60000;
 const STATIC_POINTS_CACHE_TTL_MS = 10 * 60 * 1000;
 const TELECOM_POINTS_CACHE_TTL_MS = 10 * 60 * 1000;
@@ -345,6 +347,7 @@ let lastRenderedExternalRisksSignature = null;
 let lastRenderedApiInterconnectionsSignature = null;
 let _currentFluxFilter = 'all';
 let lastRenderedGeorisquesSignature = null;
+const pendingServiceAutoRefreshState = new Map();
 
 function keepPreviousValue(previousValue, nextValue) {
   if (nextValue === undefined || nextValue === null) return previousValue;
@@ -9450,6 +9453,82 @@ function getFluxPayload(key, data = {}) {
   return data?.[key] || {};
 }
 
+function isPendingServicePayload(payload = {}) {
+  const status = String(payload?.status || '').toLowerCase();
+  return status === 'pending' || status === 'idle';
+}
+
+async function _reloadExternalRiskViews(forceRefresh = false) {
+  const suffix = forceRefresh ? '?refresh=true' : '';
+  const data = await api(`/external/isere/risks${suffix}`, {
+    bypassCache: forceRefresh,
+    cacheTtlMs: forceRefresh ? 0 : API_CACHE_TTL_MS,
+    timeoutMs: API_SLOW_ENDPOINT_TIMEOUT_MS,
+  });
+  cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, data);
+  renderExternalRisks(cachedExternalRisksSnapshot);
+  renderApiInterconnections(cachedExternalRisksSnapshot);
+  saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
+  saveSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot, cachedExternalRisksSnapshot);
+  checkServiceAlertsFromSnapshot(cachedExternalRisksSnapshot);
+  await renderTrafficOnMap();
+  return cachedExternalRisksSnapshot;
+}
+
+async function _requestServiceRefreshAndReload(serviceKey) {
+  await api(`/external/isere/risks/${encodeURIComponent(serviceKey)}/refresh`, { method: 'POST' });
+  await new Promise((resolve) => setTimeout(resolve, PENDING_SERVICE_SETTLE_MS));
+  return _reloadExternalRiskViews(true);
+}
+
+function _clearPendingServiceAutoRefresh(serviceKey) {
+  const state = pendingServiceAutoRefreshState.get(serviceKey);
+  if (state?.timerId) window.clearTimeout(state.timerId);
+  pendingServiceAutoRefreshState.delete(serviceKey);
+}
+
+function _queuePendingServiceAutoRefresh(serviceKey, payload = {}) {
+  if (serviceKey !== 'cols_alpins_isere') return;
+  if (!isPendingServicePayload(payload)) {
+    _clearPendingServiceAutoRefresh(serviceKey);
+    return;
+  }
+
+  const state = pendingServiceAutoRefreshState.get(serviceKey) || { inFlight: false, lastAttemptAt: 0, timerId: 0 };
+  if (state.inFlight || state.timerId) return;
+
+  const elapsedMs = state.lastAttemptAt > 0 ? (Date.now() - state.lastAttemptAt) : PENDING_SERVICE_AUTO_RETRY_MS;
+  const waitMs = Math.max(0, PENDING_SERVICE_AUTO_RETRY_MS - elapsedMs);
+
+  state.timerId = window.setTimeout(async () => {
+    const liveState = pendingServiceAutoRefreshState.get(serviceKey) || state;
+    liveState.timerId = 0;
+    if (liveState.inFlight) return;
+
+    liveState.inFlight = true;
+    liveState.lastAttemptAt = Date.now();
+    pendingServiceAutoRefreshState.set(serviceKey, liveState);
+
+    try {
+      const snapshot = await _requestServiceRefreshAndReload(serviceKey);
+      const latestPayload = getFluxPayload(serviceKey, snapshot);
+      if (isPendingServicePayload(latestPayload)) {
+        liveState.inFlight = false;
+        pendingServiceAutoRefreshState.set(serviceKey, liveState);
+        _queuePendingServiceAutoRefresh(serviceKey, latestPayload);
+        return;
+      }
+      _clearPendingServiceAutoRefresh(serviceKey);
+    } catch (_) {
+      liveState.inFlight = false;
+      pendingServiceAutoRefreshState.set(serviceKey, liveState);
+      _queuePendingServiceAutoRefresh(serviceKey, payload);
+    }
+  }, waitMs);
+
+  pendingServiceAutoRefreshState.set(serviceKey, state);
+}
+
 function buildServiceCards() {
   const root = document.getElementById('svc-cards-root');
   if (!root || root.dataset.built) return;
@@ -9775,6 +9854,7 @@ function renderExternalRisks(data = {}) {
   const avalancheIsere = mergedData?.avalanche_isere || {};
   const feuxForet = mergedData?.feux_foret_isere || {};
   const colsAlpins = mergedData?.cols_alpins_isere || {};
+  _queuePendingServiceAutoRefresh('cols_alpins_isere', colsAlpins);
 
   setRiskText('meteo-status', `${meteo.status || 'inconnu'} · niveau ${normalizeLevel(meteo.level || 'inconnu')}`, meteo.level || 'vert');
   setText('meteo-info', sanitizeMeteoInformation(meteo.info_state) || meteo.bulletin_title || '');
@@ -9916,6 +9996,7 @@ function renderApiInterconnections(data = {}) {
   const signature = createPayloadSignature(data, ['updated_at', 'fetched_at', 'retrieved_at']);
   if (signature === lastRenderedApiInterconnectionsSignature) return false;
   lastRenderedApiInterconnectionsSignature = signature;
+  _queuePendingServiceAutoRefresh('cols_alpins_isere', getFluxPayload('cols_alpins_isere', data));
 
   // Compute state for every service
   const now = Date.now();
@@ -12538,10 +12619,7 @@ async function _forceRefreshService(serviceKey, btn) {
   const row = btn.closest('.flux-row');
   if (row) row.classList.add('flux-row--refreshing');
   try {
-    await api(`/external/isere/risks/${encodeURIComponent(serviceKey)}/refresh`, { method: 'POST' });
-    // Attendre 2s que le thread backend ait fini, puis recharger le panel
-    await new Promise((r) => setTimeout(r, 2000));
-    await loadApiInterconnections(true);
+    await _requestServiceRefreshAndReload(serviceKey);
   } catch (_) {
     // silencieux — l'erreur sera visible dans le statut du service
   } finally {
