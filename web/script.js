@@ -191,6 +191,7 @@ const RESOURCE_POINTS = [
   { id: 'pc-rumilly', name: 'Antenne de Rumilly — Protection Civile', type: 'protection_civile', active: true, lat: 45.859974, lon: 5.957009, address: '1 Rue des Bauges, 74150 Rumilly', priority: 'vital', info: 'Antenne Protection Civile de Rumilly (Haute-Savoie).', source: '' },
   { id: 'pc-annemasse', name: 'Antenne d\'Annemasse — Protection Civile', type: 'protection_civile', active: true, lat: 46.196477, lon: 6.232161, address: '13 Avenue Emile Zola, 74100 Annemasse', priority: 'vital', info: 'Antenne Protection Civile d\'Annemasse.', source: '' },
   { id: 'pc-chambery', name: 'Antenne de Chambéry — Protection Civile', type: 'protection_civile', active: true, lat: 45.591000, lon: 5.951000, address: '2610 avenue des Landiers, 73000 Chambéry', priority: 'vital', info: 'Antenne Protection Civile de Chambéry.', source: '' },
+  { id: 'pc-hautes-alpes-briancon', name: 'Antenne des Hautes-Alpes — Protection Civile', type: 'protection_civile', active: true, lat: 44.89663846389449, lon: 6.635444741586887, address: '6 place Paul Blein, 05100 Briançon', priority: 'vital', info: 'Antenne Protection Civile des Hautes-Alpes.', source: '' },
 ];
 
 let token = localStorage.getItem(STORAGE_KEYS.token);
