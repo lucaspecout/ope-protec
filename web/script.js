@@ -7412,6 +7412,25 @@ async function uploadMunicipalityDocumentWithFallback(municipalityId, formData, 
   throw new Error(sanitizeErrorMessage(lastError?.message || 'Téléversement impossible'));
 }
 
+async function waitForMunicipalityDocumentAppearance(municipalityId, expectedTitle, expectedFilename, timeoutMs = 20000) {
+  const startedAt = Date.now();
+  const normalizedTitle = String(expectedTitle || '').trim().toLowerCase();
+  const normalizedFilename = String(expectedFilename || '').trim().toLowerCase();
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const docs = await api(`/municipalities/${municipalityId}/files`, { bypassCache: true, cacheTtlMs: 0, timeoutMs: 15000 });
+      const found = (Array.isArray(docs) ? docs : []).some((doc) => {
+        const docTitle = String(doc?.title || '').trim().toLowerCase();
+        const docFilename = String(doc?.filename || '').trim().toLowerCase();
+        return (normalizedTitle && docTitle === normalizedTitle) || (normalizedFilename && docFilename.includes(normalizedFilename));
+      });
+      if (found) return true;
+    } catch (_) {}
+    await wait(1200);
+  }
+  return false;
+}
+
 async function openMunicipalityFile(municipalityId, fileId) {
   const { blob, contentType } = await apiFile(`/municipalities/${municipalityId}/files/${fileId}`);
   const objectUrl = URL.createObjectURL(blob);
@@ -7709,6 +7728,14 @@ async function submitMunicipalityUploadForm(form, municipalityId) {
     });
     if (progressBar) progressBar.style.width = '100%';
     if (progressLabel) progressLabel.textContent = '100%';
+  } catch (error) {
+    const recovered = await waitForMunicipalityDocumentAppearance(municipalityId, title, file.name);
+    if (!recovered) throw error;
+    if (progressBar) progressBar.style.width = '100%';
+    if (progressLabel) progressLabel.textContent = '100%';
+  }
+
+  try {
     const refreshed = getMunicipality(municipalityId);
     form.reset();
     if (refreshed) await openMunicipalityDetailsModal(refreshed);
