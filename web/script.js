@@ -193,6 +193,15 @@ const RESOURCE_POINTS = [
 
 let token = localStorage.getItem(STORAGE_KEYS.token);
 let currentUser = null;
+const MAIRIE_ALLOWED_PANELS = new Set([
+  'situation-panel',
+  'services-panel',
+  'meteo-panel',
+  'georisques-panel',
+  'municipalities-panel',
+  'logs-panel',
+  'map-panel',
+]);
 let pendingCurrentPassword = '';
 let refreshTimer = null;
 let liveEventsTimer = null;
@@ -1387,10 +1396,14 @@ function setVisibility(node, visible) {
 }
 
 function canEdit() { return ['admin', 'ope'].includes(currentUser?.role); }
-function canCreateMapPoints() { return ['admin', 'ope', 'mairie'].includes(currentUser?.role); }
-function canMunicipalityFiles() { return ['admin', 'ope', 'mairie'].includes(currentUser?.role); }
+function canCreateMapPoints() { return ['admin', 'ope'].includes(currentUser?.role); }
+function canMunicipalityFiles() { return ['admin', 'ope'].includes(currentUser?.role); }
 function canManageUsers() { return ['admin', 'ope'].includes(currentUser?.role); }
 function roleLabel(role) { return { admin: 'Admin', ope: 'Opérateur', securite: 'Sécurité', visiteur: 'Visiteur', mairie: 'Mairie' }[role] || role; }
+function canAccessPanel(panelId) {
+  if (currentUser?.role === 'mairie') return MAIRIE_ALLOWED_PANELS.has(panelId);
+  return true;
+}
 function escapeHtml(value) {
   return String(value || '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 }
@@ -2273,6 +2286,7 @@ function syncMobileNavWithPanel() {
 }
 
 function setActivePanel(panelId) {
+  if (!canAccessPanel(panelId)) panelId = 'situation-panel';
   closeMobileSidebar();
   localStorage.setItem(STORAGE_KEYS.activePanel, panelId);
   document.querySelectorAll('.menu-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.target === panelId));
@@ -9075,7 +9089,7 @@ function renderMeteoHourlyForecast(cityForecast) {
 }
 
 async function getMeteoCityOptions() {
-  const byKey = new Map(ISERE_MAJOR_CITIES.map((city) => [city.key, city]));
+  const byKey = new Map((currentUser?.role === 'mairie' ? [] : ISERE_MAJOR_CITIES).map((city) => [city.key, city]));
   const pcsMunicipalities = (Array.isArray(cachedMunicipalities) ? cachedMunicipalities : [])
     .filter((municipality) => municipality?.pcs_active);
 
@@ -9112,11 +9126,14 @@ async function getMeteoCityOptions() {
 
   const options = Array.from(byKey.values())
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'fr'));
-  meteoCityOptions = options.length ? options : [...ISERE_MAJOR_CITIES];
+  meteoCityOptions = options.length ? options : (currentUser?.role === 'mairie' ? [] : [...ISERE_MAJOR_CITIES]);
   return meteoCityOptions;
 }
 
 function getSelectedMeteoCity() {
+  if (currentUser?.role === 'mairie') {
+    return meteoCityOptions.find((city) => city.key === selectedMeteoCityKey) || meteoCityOptions[0] || null;
+  }
   return meteoCityOptions.find((city) => city.key === selectedMeteoCityKey) || meteoCityOptions[0] || ISERE_MAJOR_CITIES[0];
 }
 
@@ -9215,6 +9232,13 @@ async function renderWeeklyWeatherPanel(externalRisks = {}) {
   const meteo = externalRisks?.meteo_france || {};
   await renderMeteoCitySelector();
   const selectedCity = getSelectedMeteoCity();
+  if (!selectedCity) {
+    setHtml('meteo-city-current', '<p class="muted">Aucune commune PCS géolocalisée disponible pour ce compte.</p>');
+    setHtml('meteo-hourly-list', '<p class="muted">Prévisions horaires indisponibles pour le moment.</p>');
+    setHtml('meteo-week-list', '<p class="muted">Aucune commune météo disponible pour ce compte.</p>');
+    setText('meteo-week-updated', 'Dernière mise à jour météo: non disponible');
+    return;
+  }
   const cityForecast = await fetchWeeklyForecastForCity(selectedCity);
   const dailySource = Array.isArray(cityForecast?.daily_forecast) && cityForecast.daily_forecast.length
     ? cityForecast.daily_forecast
@@ -10148,6 +10172,7 @@ async function loadMunicipalities(preloaded = null) {
 
   cachedMunicipalityRecords = municipalities;
   cachedMunicipalities = municipalities;
+  populateUserMunicipalityOptions();
   const georisquesPayload = cachedExternalRisksSnapshot?.georisques || {};
   const georisquesData = georisquesPayload?.data && typeof georisquesPayload.data === 'object'
     ? { ...georisquesPayload.data, ...georisquesPayload }
@@ -10603,12 +10628,27 @@ function applyRoleVisibility() {
   document.querySelectorAll('[data-requires-map-point]').forEach((node) => setVisibility(node, canCreateMapPoints()));
   document.querySelectorAll('[data-admin-only]').forEach((node) => setVisibility(node, currentUser?.role === 'admin'));
   setVisibility(document.querySelector('[data-target="users-panel"]'), canManageUsers());
+  document.querySelectorAll('.menu-btn').forEach((node) => {
+    const target = String(node.getAttribute('data-target') || '');
+    setVisibility(node, canAccessPanel(target));
+  });
+  const activePanel = localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel';
+  if (!canAccessPanel(activePanel)) setActivePanel('situation-panel');
 }
 
 
 function syncUserCreateMunicipalityVisibility() {
   const role = document.getElementById('user-create-role')?.value;
   setVisibility(document.getElementById('user-create-municipality-wrap'), role === 'mairie');
+}
+
+function populateUserMunicipalityOptions() {
+  const select = document.getElementById('user-create-municipality');
+  if (!select) return;
+  const pcsMunicipalities = (Array.isArray(cachedMunicipalities) ? cachedMunicipalities : [])
+    .filter((municipality) => municipality?.pcs_active)
+    .sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || ''), 'fr'));
+  select.innerHTML = `<option value="">Sélectionner une commune PCS</option>${pcsMunicipalities.map((municipality) => `<option value="${escapeHtml(municipality.name)}">${escapeHtml(municipality.name)}${municipality.postal_code ? ` (${escapeHtml(municipality.postal_code)})` : ''}</option>`).join('')}`;
 }
 
 async function handleUsersTableAction(event) {
@@ -11414,6 +11454,7 @@ function bindAppInteractions() {
         }),
       });
       event.target.reset();
+      populateUserMunicipalityOptions();
       syncUserCreateMunicipalityVisibility();
       document.getElementById('users-success').textContent = 'Utilisateur créé avec succès.';
       await loadUsers();

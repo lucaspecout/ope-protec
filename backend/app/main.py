@@ -885,13 +885,9 @@ def list_map_points(db: Session = Depends(get_db), user: User = Depends(require_
 
 
 @app.post("/map/points", response_model=MapPointOut)
-def create_map_point(payload: MapPointCreate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "ope", "mairie"))):
+def create_map_point(payload: MapPointCreate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "ope"))):
     if payload.municipality_id:
         ensure_municipality_scope(user, db, payload.municipality_id)
-
-    if user.role == "mairie" and payload.municipality_id is None:
-        payload = payload.model_copy(update={"municipality_id": get_user_municipality_id(user, db)})
-
     point = MapPoint(**payload.model_dump(), created_by_id=user.id)
     db.add(point)
     db.commit()
@@ -900,15 +896,10 @@ def create_map_point(payload: MapPointCreate, db: Session = Depends(get_db), use
 
 
 @app.delete("/map/points/{point_id}")
-def delete_map_point(point_id: int, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "ope", "mairie"))):
+def delete_map_point(point_id: int, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "ope"))):
     point = db.get(MapPoint, point_id)
     if not point:
         raise HTTPException(404, "Point introuvable")
-
-    if user.role == "mairie":
-        municipality_id = get_user_municipality_id(user, db)
-        if municipality_id is None or point.municipality_id not in {None, municipality_id}:
-            raise HTTPException(403, "Suppression non autorisée")
 
     db.delete(point)
     db.commit()
@@ -942,12 +933,9 @@ def list_map_annotations(db: Session = Depends(get_db), user: User = Depends(req
 
 
 @app.post("/map/annotations", response_model=MapAnnotationOut)
-def create_map_annotation(payload: MapAnnotationCreate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "ope", "mairie"))):
+def create_map_annotation(payload: MapAnnotationCreate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "ope"))):
     if payload.municipality_id:
         ensure_municipality_scope(user, db, payload.municipality_id)
-
-    if user.role == "mairie" and payload.municipality_id is None:
-        payload = payload.model_copy(update={"municipality_id": get_user_municipality_id(user, db)})
 
     entity = MapAnnotation(
         annotation_type=payload.annotation_type,
@@ -978,15 +966,10 @@ def create_map_annotation(payload: MapAnnotationCreate, db: Session = Depends(ge
 
 
 @app.delete("/map/annotations/{annotation_id}")
-def delete_map_annotation(annotation_id: int, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "ope", "mairie"))):
+def delete_map_annotation(annotation_id: int, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "ope"))):
     entity = db.get(MapAnnotation, annotation_id)
     if not entity:
         raise HTTPException(404, "Annotation introuvable")
-
-    if user.role == "mairie":
-        municipality_id = get_user_municipality_id(user, db)
-        if municipality_id is None or entity.municipality_id not in {None, municipality_id}:
-            raise HTTPException(403, "Suppression non autorisée")
 
     db.delete(entity)
     db.commit()
@@ -1867,7 +1850,7 @@ def upload_municipality_docs(
     orsec_plan: UploadFile | None = File(None),
     convention: UploadFile | None = File(None),
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles("admin", "ope", "mairie")),
+    user: User = Depends(require_roles("admin", "ope")),
 ):
     municipality = ensure_municipality_scope(user, db, municipality_id)
 
@@ -1917,7 +1900,7 @@ def delete_municipality_document(
     municipality_id: int,
     doc_type: str,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles("admin", "ope", "mairie")),
+    user: User = Depends(require_roles("admin", "ope")),
 ):
     municipality = ensure_municipality_scope(user, db, municipality_id)
 
@@ -1976,7 +1959,7 @@ def upload_municipality_file(
     title: str = Form(...),
     doc_type: str = Form("annexe"),
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles("admin", "ope", "mairie")),
+    user: User = Depends(require_roles("admin", "ope")),
 ):
     ensure_municipality_scope(user, db, municipality_id)
 
@@ -2026,7 +2009,7 @@ def delete_municipality_file(
     municipality_id: int,
     file_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles("admin", "ope", "mairie")),
+    user: User = Depends(require_roles("admin", "ope")),
 ):
     ensure_municipality_scope(user, db, municipality_id)
     record = db.get(MunicipalityDocument, file_id)
@@ -2086,17 +2069,11 @@ def update_event_status(
     event_id: int,
     data: IncidentEventStatusUpdate,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(*EDIT_ROLES, "mairie")),
+    user: User = Depends(require_roles(*EDIT_ROLES)),
 ):
     event = db.get(IncidentEvent, event_id)
     if not event:
         raise HTTPException(404, "Évènement introuvable")
-
-    if user.role == "mairie":
-        municipality_id = get_user_municipality_id(user, db)
-        if municipality_id is None or event.municipality_id != municipality_id:
-            raise HTTPException(403, "Accès refusé à cette commune")
-
     event.status = data.status
     db.commit()
     db.refresh(event)
@@ -2107,17 +2084,11 @@ def update_event_status(
 def delete_event(
     event_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(*EDIT_ROLES, "mairie")),
+    user: User = Depends(require_roles(*EDIT_ROLES)),
 ):
     event = db.get(IncidentEvent, event_id)
     if not event:
         raise HTTPException(404, "Évènement introuvable")
-
-    if user.role == "mairie":
-        municipality_id = get_user_municipality_id(user, db)
-        if municipality_id is None or event.municipality_id != municipality_id:
-            raise HTTPException(403, "Accès refusé à cette commune")
-
     db.query(OperationalLog).filter(OperationalLog.event_id == event_id).delete(synchronize_session=False)
     db.delete(event)
     db.commit()
@@ -2183,17 +2154,11 @@ def update_log_status(
     log_id: int,
     data: OperationalLogStatusUpdate,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(*EDIT_ROLES, "mairie")),
+    user: User = Depends(require_roles(*EDIT_ROLES)),
 ):
     entry = db.get(OperationalLog, log_id)
     if not entry:
         raise HTTPException(404, "Entrée introuvable")
-
-    if user.role == "mairie":
-        municipality_id = get_user_municipality_id(user, db)
-        if municipality_id is None or entry.municipality_id != municipality_id:
-            raise HTTPException(403, "Accès refusé à cette commune")
-
     entry.status = data.status
     db.commit()
     db.refresh(entry)
@@ -2204,17 +2169,11 @@ def update_log_status(
 def delete_log(
     log_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(*EDIT_ROLES, "mairie")),
+    user: User = Depends(require_roles(*EDIT_ROLES)),
 ):
     entry = db.get(OperationalLog, log_id)
     if not entry:
         raise HTTPException(404, "Entrée introuvable")
-
-    if user.role == "mairie":
-        municipality_id = get_user_municipality_id(user, db)
-        if municipality_id is None or entry.municipality_id != municipality_id:
-            raise HTTPException(403, "Accès refusé à cette commune")
-
     db.delete(entry)
     db.commit()
     return {"status": "deleted", "id": log_id}
@@ -2225,20 +2184,13 @@ def update_log(
     log_id: int,
     data: OperationalLogUpdate,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(*EDIT_ROLES, "mairie")),
+    user: User = Depends(require_roles(*EDIT_ROLES)),
 ):
     entry = db.get(OperationalLog, log_id)
     if not entry:
         raise HTTPException(404, "Entrée introuvable")
 
     event = db.get(IncidentEvent, entry.event_id) if entry.event_id else None
-
-    if user.role == "mairie":
-        municipality_id = get_user_municipality_id(user, db)
-        event_municipality_id = event.municipality_id if event else entry.municipality_id
-        if municipality_id is None or event_municipality_id != municipality_id:
-            raise HTTPException(403, "Accès refusé à cette commune")
-
     payload = data.model_dump()
     target_scope = payload.get("target_scope", "departemental")
     municipality_id = payload.get("municipality_id")
