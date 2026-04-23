@@ -9027,7 +9027,11 @@ function renderMeteoHourlyForecast(cityForecast) {
 async function getMeteoCityOptions() {
   const byKey = new Map((currentUser?.role === 'mairie' ? [] : ISERE_MAJOR_CITIES).map((city) => [city.key, city]));
   const pcsMunicipalities = (Array.isArray(cachedMunicipalities) ? cachedMunicipalities : [])
-    .filter((municipality) => municipality?.pcs_active);
+    .filter((municipality) => municipality?.pcs_active)
+    .filter((municipality) => {
+      if (currentUser?.role !== 'mairie') return true;
+      return String(municipality?.name || '').trim().toLowerCase() === String(currentUser?.municipality_name || '').trim().toLowerCase();
+    });
 
   const geocoded = await Promise.all(
     pcsMunicipalities.map(async (municipality) => ({
@@ -9131,6 +9135,9 @@ async function renderMeteoCitySelector() {
   const select = document.getElementById('meteo-city-select');
   if (!select) return;
   const options = await getMeteoCityOptions();
+  if (currentUser?.role === 'mairie' && options.length === 1) {
+    selectedMeteoCityKey = options[0].key;
+  }
   const previousValue = select.value || selectedMeteoCityKey;
   select.innerHTML = options.map((city) => `<option value="${escapeHtml(city.key)}">${escapeHtml(city.name)}${city.isPcs ? ' · PCS' : ''}</option>`).join('');
   const found = options.some((city) => city.key === previousValue);
