@@ -10375,6 +10375,43 @@ def _fetch_itinisere_cols_layer() -> list[dict[str, Any]]:
     return features if isinstance(features, list) else []
 
 
+def _build_col_from_itinisere_feature(feature: dict[str, Any]) -> dict[str, Any] | None:
+    properties = feature.get("properties") if isinstance(feature, dict) else {}
+    geometry = feature.get("geometry") if isinstance(feature, dict) else {}
+    if not isinstance(properties, dict):
+        return None
+    name = str(properties.get("titre") or properties.get("title") or "").strip()
+    if not name:
+        return None
+    status = _col_status_from_itinisere_feature(feature) or {
+        "statut": "inconnu",
+        "couleur": "gris",
+        "detail": "Statut officiel non publie",
+        "source_status": "itinisere_layer",
+    }
+    coordinates = geometry.get("coordinates") if isinstance(geometry, dict) else None
+    lon = lat = None
+    if isinstance(coordinates, list) and len(coordinates) >= 2:
+        try:
+            lon = float(coordinates[0])
+            lat = float(coordinates[1])
+        except Exception:
+            lon = lat = None
+    return {
+        "nom": name,
+        "route": "",
+        "alt": None,
+        "lat": lat,
+        "lon": lon,
+        "id_repere": properties.get("id_repere"),
+        **status,
+        "temperature": None,
+        "enneigement_cm": None,
+        "precipitations": None,
+        "vent_kmh": None,
+    }
+
+
 def _col_status_from_weather(temp_c, snow_cm, precip, wind_kmh):
     if temp_c is None:
         return {"statut": "inconnu", "couleur": "gris", "detail": "Météo indisponible"}
@@ -10463,47 +10500,28 @@ def _fetch_cols_alpins_live() -> dict[str, Any]:
 
 
 def _fetch_cols_alpins_live_fast() -> dict[str, Any]:
-    cols_out: list[dict[str, Any]] = []
     first_error: str | None = None
     official_cols_features: list[dict[str, Any]] = []
     try:
         official_cols_features = _fetch_itinisere_cols_layer()
     except Exception as exc:
         first_error = f"itinisere_layer: {exc}"
-    try:
-        itinisere_payload = fetch_itinisere_disruptions(limit=120, force_refresh=False)
-    except Exception as exc:
-        if first_error is None:
-            first_error = f"itinisere_events: {exc}"
-        itinisere_payload = {}
-    itinisere_events = itinisere_payload.get("events") if isinstance(itinisere_payload, dict) else []
-    if not isinstance(itinisere_events, list):
-        itinisere_events = []
-
-    for col in _COLS_ALPINS:
-        official_feature = next(
-            (feature for feature in official_cols_features if isinstance(feature, dict) and _match_itinisere_col_feature(col["nom"], feature)),
-            None,
-        )
-        status = _col_status_from_itinisere_feature(official_feature or {}) if official_feature else None
-        matched_event = next((evt for evt in itinisere_events if isinstance(evt, dict) and _match_col_event(col["nom"], evt)), None)
-        if status is None and matched_event:
-            status = _col_status_from_itinisere_event(matched_event or {})
-        if status is None:
-            status = {"statut": "inconnu", "couleur": "gris", "detail": "Statut officiel non publie"}
-        cols_out.append({**col, **status, "temperature": None, "enneigement_cm": None, "precipitations": None, "vent_kmh": None})
+    cols_out = [
+        built
+        for built in (_build_col_from_itinisere_feature(feature) for feature in official_cols_features if isinstance(feature, dict))
+        if built
+    ]
+    cols_out.sort(key=lambda col: _normalize_col_token(str(col.get("nom") or "")))
 
     nb_dangereux = sum(1 for c in cols_out if c["couleur"] in ("orange", "rouge"))
-    matched_total = sum(1 for c in cols_out if str(c.get("source_status") or "").startswith("itinisere"))
-    source = _ITINISERE_COLS_LAYER_URL if official_cols_features else "https://www.itinisere.fr"
+    source = _ITINISERE_COLS_LAYER_URL
     result: dict[str, Any] = {
         "service": "Cols alpins Isere",
-        "status": "online" if official_cols_features else ("degraded" if matched_total > 0 else "unavailable"),
+        "status": "online" if official_cols_features else "unavailable",
         "source": source,
         "cols": cols_out,
         "cols_total": len(cols_out),
         "dangereux_total": nb_dangereux,
-        "matched_total": matched_total,
         "updated_at": datetime.utcnow().isoformat() + "Z",
     }
     if first_error:

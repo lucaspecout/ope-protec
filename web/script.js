@@ -8944,7 +8944,6 @@ function renderFeuxForetWidget(data = {}) {
 
 function renderColsAlpinsWidget(data = {}) {
   const cols = Array.isArray(data.cols) ? data.cols : [];
-  const dangereux = cols.filter((c) => c.couleur !== 'vert' && c.couleur !== 'gris');
   const braColors = { vert: '#2b8a3e', jaune: '#e9a800', orange: '#e67700', rouge: '#c92a2a', gris: '#868e96' };
   const sourceIsOfficial = isOfficialColsSource(data);
   const colorLevel = (data.dangereux_total ?? 0) > 0 ? 'jaune' : (sourceIsOfficial ? 'vert' : (data.status === 'pending' ? 'jaune' : 'gris'));
@@ -8952,6 +8951,23 @@ function renderColsAlpinsWidget(data = {}) {
   setHtml('cols-svc-list', cols.map((c) => {
     const color = braColors[c.couleur] || '#868e96';
     return `<li><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:4px"></span><strong>${escapeHtml(c.nom)}</strong> <span style="color:${color};font-weight:600">${escapeHtml(c.statut || '?')}</span> <span class="muted">· ${c.alt} m · ${escapeHtml(c.detail || '')}</span></li>`;
+  }).join('') || `<li class="muted">${data.status === 'pending' ? 'Actualisation Itinisère en cours…' : 'Aucune donnée cols disponible.'}</li>`);
+}
+
+function renderOfficialColsAlpinsWidget(data = {}) {
+  const cols = Array.isArray(data.cols) ? data.cols : [];
+  const braColors = { vert: '#2b8a3e', jaune: '#e9a800', orange: '#e67700', rouge: '#c92a2a', gris: '#868e96' };
+  const sourceIsOfficial = isOfficialColsSource(data);
+  const colorLevel = (data.dangereux_total ?? 0) > 0 ? 'jaune' : (sourceIsOfficial ? 'vert' : (data.status === 'pending' ? 'jaune' : 'gris'));
+  setRiskText('cols-svc-status', `${data.status || 'inconnu'} · ${data.dangereux_total ?? 0} à surveiller / ${data.cols_total ?? 0} cols`, colorLevel);
+  setHtml('cols-svc-list', cols.map((c) => {
+    const color = braColors[c.couleur] || '#868e96';
+    const metaParts = [];
+    if (Number.isFinite(Number(c.alt))) metaParts.push(`${Number(c.alt)} m`);
+    if (String(c.route || '').trim()) metaParts.push(String(c.route).trim());
+    if (String(c.detail || '').trim()) metaParts.push(String(c.detail).trim());
+    const meta = metaParts.length ? ` <span class="muted">· ${escapeHtml(metaParts.join(' · '))}</span>` : '';
+    return `<li><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:4px"></span><strong>${escapeHtml(c.nom)}</strong> <span style="color:${color};font-weight:600">${escapeHtml(c.statut || '?')}</span>${meta}</li>`;
   }).join('') || `<li class="muted">${data.status === 'pending' ? 'Actualisation Itinisère en cours…' : 'Aucune donnée cols disponible.'}</li>`);
 }
 
@@ -9885,7 +9901,7 @@ function renderExternalRisks(data = {}) {
   renderAvalancheIsere(avalancheIsere);
   renderFeuxForetWidget(feuxForet);
   renderCopernicusEmsWidget(mergedData?.copernicus_ems || {});
-  renderColsAlpinsWidget(colsAlpins);
+  renderOfficialColsAlpinsWidget(colsAlpins);
   // Redessiner couches carte avec nouvelles données
   renderColsAlpinsLayer();
   renderNewsPanel(prefecture, dauphine, franceBleu, placegrenet, grenobleMétropole, arsAura, seismesIsere);
