@@ -7274,6 +7274,7 @@ function openMunicipalityEditor(municipality) {
   const form = document.getElementById('municipality-edit-form');
   if (!panel || !form || !municipality) return;
   form.elements.id.value = municipality.id;
+  form.elements.name.value = municipality.name || '';
   form.elements.phone.value = municipality.phone || '';
   form.elements.email.value = municipality.email || '';
   form.elements.postal_code.value = municipality.postal_code || '';
@@ -7284,6 +7285,8 @@ function openMunicipalityEditor(municipality) {
   form.elements.shelter_capacity.value = municipality.shelter_capacity ?? '';
   form.elements.vigilance_color.value = normalizeLevel(municipality.vigilance_color || 'vert');
   form.elements.pcs_active.checked = Boolean(municipality.pcs_active);
+  setMunicipalityLookupOptions(form, [], municipality.name || '');
+  autofillMunicipalityFromPostalCode(form).catch(() => {});
   setText('municipality-editor-title', `Éditer ${municipality.name}`);
   setVisibility(panel, true);
 }
@@ -11038,6 +11041,8 @@ function bindAppInteractions() {
     const form = event.target;
     const municipalityId = form.elements.id.value;
     const payload = {
+      name: form.elements.name.value.trim(),
+      manager: form.elements.name.value.trim(),
       phone: form.elements.phone.value.trim(),
       email: form.elements.email.value.trim(),
       postal_code: form.elements.postal_code.value.trim() || null,
@@ -11585,18 +11590,48 @@ passwordForm.addEventListener('submit', async (event) => {
 });
 
 
-async function fetchMunicipalityByPostalCode(postalCode) {
+async function fetchMunicipalitiesByPostalCode(postalCode) {
   const code = String(postalCode || '').trim();
-  if (!/^\d{5}$/.test(code)) return null;
-  const response = await queueApiRequest(() => fetchWithTimeout(`https://geo.api.gouv.fr/communes?codePostal=${encodeURIComponent(code)}&fields=nom,code,population&boost=population&limit=1`));
+  if (!/^\d{5}$/.test(code)) return [];
+  const response = await queueApiRequest(() => fetchWithTimeout(`https://geo.api.gouv.fr/communes?codePostal=${encodeURIComponent(code)}&fields=nom,code,population&boost=population`));
   const payload = await parseJsonResponse(response, 'geo-api-commune-by-postal-code');
-  if (!Array.isArray(payload) || !payload.length) return null;
-  const commune = payload[0] || {};
-  return {
-    name: String(commune.nom || '').trim(),
-    insee_code: String(commune.code || '').trim(),
-    population: Number(commune.population || 0) || null,
-  };
+  if (!Array.isArray(payload) || !payload.length) return [];
+  return payload
+    .map((commune) => ({
+      name: String(commune?.nom || '').trim(),
+      insee_code: String(commune?.code || '').trim(),
+      population: Number(commune?.population || 0) || null,
+    }))
+    .filter((commune) => commune.name)
+    .sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }));
+}
+
+function setMunicipalityLookupOptions(formEl, municipalities = [], selectedName = '') {
+  const select = formEl?.elements?.municipality_lookup;
+  if (!select) return;
+  const items = Array.isArray(municipalities) ? municipalities : [];
+  const normalizedSelected = String(selectedName || '').trim().toLowerCase();
+  const options = ['<option value="">Ville trouvée via code postal</option>'].concat(
+    items.map((municipality) => {
+      const isSelected = normalizedSelected && municipality.name.toLowerCase() === normalizedSelected;
+      const populationSuffix = municipality.population ? ` (${Number(municipality.population).toLocaleString('fr-FR')} hab.)` : '';
+      return `<option value="${escapeHtml(municipality.name)}" data-insee="${escapeHtml(municipality.insee_code || '')}" data-population="${escapeHtml(String(municipality.population ?? ''))}"${isSelected ? ' selected' : ''}>${escapeHtml(municipality.name)}${populationSuffix}</option>`;
+    }),
+  );
+  select.innerHTML = options.join('');
+  select.disabled = items.length === 0;
+}
+
+function applyMunicipalityLookupSelection(formEl, selection = null) {
+  if (!formEl || !selection) return;
+  const nameInput = formEl.elements.name;
+  const inseeInput = formEl.elements.insee_code;
+  const populationInput = formEl.elements.population;
+  if (nameInput) nameInput.value = selection.name || '';
+  if (inseeInput) inseeInput.value = selection.insee_code || '';
+  if (populationInput && (selection.population != null || !String(populationInput.value || '').trim())) {
+    populationInput.value = selection.population ?? '';
+  }
 }
 
 async function autofillMunicipalityFromPostalCode(formEl) {
@@ -11606,19 +11641,46 @@ async function autofillMunicipalityFromPostalCode(formEl) {
   const inseeInput = formEl.elements.insee_code;
   const populationInput = formEl.elements.population;
   const postalCode = String(postalInput?.value || '').trim();
-  if (!/^\d{5}$/.test(postalCode)) return;
+  if (!/^\d{5}$/.test(postalCode)) {
+    setMunicipalityLookupOptions(formEl, []);
+    return;
+  }
 
   try {
-    const municipality = await fetchMunicipalityByPostalCode(postalCode);
-    if (!municipality) return;
-    if (nameInput && !String(nameInput.value || '').trim()) nameInput.value = municipality.name || '';
-    if (inseeInput) inseeInput.value = municipality.insee_code || '';
-    if (populationInput && !String(populationInput.value || '').trim()) {
-      populationInput.value = municipality.population ?? '';
+    const municipalities = await fetchMunicipalitiesByPostalCode(postalCode);
+    const currentName = String(nameInput?.value || '').trim();
+    setMunicipalityLookupOptions(formEl, municipalities, currentName);
+    if (!municipalities.length) return;
+
+    const preferred = municipalities.find((municipality) => municipality.name.toLowerCase() === currentName.toLowerCase())
+      || (municipalities.length === 1 ? municipalities[0] : null);
+    if (preferred) {
+      applyMunicipalityLookupSelection(formEl, preferred);
+      if (formEl.elements.municipality_lookup) formEl.elements.municipality_lookup.value = preferred.name;
+    } else {
+      if (inseeInput && !currentName) inseeInput.value = '';
+      if (populationInput && !currentName) populationInput.value = '';
     }
   } catch (error) {
     // silence: user can still enter values manually
   }
+}
+
+function bindMunicipalityLookup(formId) {
+  const formEl = document.getElementById(formId);
+  const lookupSelect = formEl?.elements?.municipality_lookup;
+  if (!formEl || !lookupSelect) return;
+  lookupSelect.addEventListener('change', () => {
+    const selectedOption = lookupSelect.options[lookupSelect.selectedIndex];
+    if (!selectedOption || !selectedOption.value) return;
+    const rawPopulation = selectedOption.getAttribute('data-population') || '';
+    const numericPopulation = Number(rawPopulation);
+    applyMunicipalityLookupSelection(formEl, {
+      name: selectedOption.value,
+      insee_code: selectedOption.getAttribute('data-insee') || '',
+      population: Number.isFinite(numericPopulation) && numericPopulation > 0 ? numericPopulation : null,
+    });
+  });
 }
 
 document.getElementById('municipality-form')?.elements?.postal_code?.addEventListener('change', async (event) => {
@@ -11636,6 +11698,9 @@ document.getElementById('municipality-edit-form')?.elements?.postal_code?.addEve
 document.getElementById('municipality-edit-form')?.elements?.postal_code?.addEventListener('blur', async (event) => {
   await autofillMunicipalityFromPostalCode(event.target?.form);
 });
+
+bindMunicipalityLookup('municipality-form');
+bindMunicipalityLookup('municipality-edit-form');
 
 document.getElementById('municipality-form').addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -11660,6 +11725,7 @@ document.getElementById('municipality-form').addEventListener('submit', async (e
       }),
     });
     event.target.reset();
+    setMunicipalityLookupOptions(event.target, []);
     if (errorTarget) errorTarget.textContent = '';
     document.getElementById('municipality-feedback').textContent = 'Commune créée avec succès. Vous pouvez maintenant lancer des actions depuis la fiche.';
     await loadMunicipalities();

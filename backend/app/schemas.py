@@ -197,6 +197,7 @@ class MunicipalityCreate(BaseModel):
 
 
 class MunicipalityUpdate(BaseModel):
+    name: str | None = None
     manager: str | None = None
     phone: str | None = None
     email: EmailStr | None = None
@@ -210,7 +211,7 @@ class MunicipalityUpdate(BaseModel):
     vigilance_color: str | None = None
     pcs_active: bool | None = None
 
-    @field_validator("manager", "phone", "postal_code", "contacts", "additional_info", "radio_channel")
+    @field_validator("name", "manager", "phone", "postal_code", "contacts", "additional_info", "radio_channel")
     @classmethod
     def strip_optional_text_fields(cls, value: str | None) -> str | None:
         if value is None:
