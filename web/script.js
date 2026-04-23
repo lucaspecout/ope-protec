@@ -10021,7 +10021,10 @@ async function exportLogsCsv() {
 async function loadUsers(preloaded = null) {
   if (!canManageUsers()) return;
   const usersSnapshot = readSnapshot(STORAGE_KEYS.usersSnapshot);
-  const users = keepPreviousArray(Array.isArray(usersSnapshot) ? usersSnapshot : [], Array.isArray(preloaded) ? preloaded : await api('/auth/users'));
+  const users = keepPreviousArray(
+    Array.isArray(usersSnapshot) ? usersSnapshot : [],
+    Array.isArray(preloaded) ? preloaded : await api('/auth/users', { bypassCache: true, cacheTtlMs: 0 }),
+  );
   saveSnapshot(STORAGE_KEYS.usersSnapshot, users);
   const isAdmin = currentUser?.role === 'admin';
   const formatUserDateTime = (value) => {
@@ -11427,6 +11430,7 @@ loginForm.addEventListener('submit', async (event) => {
 
       _setLoginStatus('');
       token = result.access_token;
+      clearApiCache();
       localStorage.setItem(STORAGE_KEYS.token, token);
       pendingCurrentPassword = password;
       currentUser = result.user;

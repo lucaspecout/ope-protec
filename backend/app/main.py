@@ -1189,6 +1189,7 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
         user.hashed_password = new_hash
     user.last_login_at = datetime.utcnow()
     db.commit()
+    db.refresh(user)
     _audit(200)
     return {
         "access_token": create_access_token(user.username),
