@@ -632,23 +632,47 @@ label { display: block; margin-bottom: .8rem; }
   gap: .55rem;
 }
 .muni-public-card {
-  padding: .7rem .8rem;
-  border-radius: 12px;
-  border: 1px solid #dbe5f5;
-  background: linear-gradient(180deg, #ffffff, #f7faff);
+  padding: .85rem .9rem;
+  border-radius: 14px;
+  border: 1px solid #d7e3f8;
+  background: linear-gradient(180deg, #ffffff, #f6faff);
+  box-shadow: 0 8px 18px rgba(27, 54, 93, .06);
 }
 .muni-public-card__head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: .4rem;
-  margin-bottom: .35rem;
+  margin-bottom: .55rem;
   flex-wrap: wrap;
+}
+.muni-public-card__head strong {
+  font-size: 1rem;
+  line-height: 1.15;
+  color: #163766;
+  max-width: 100%;
 }
 .muni-public-card__body {
   display: grid;
-  gap: .22rem;
-  font-size: .83rem;
+  gap: .45rem;
+  font-size: .86rem;
+}
+.muni-public-row {
+  display: grid;
+  gap: .14rem;
+  padding-top: .28rem;
+  border-top: 1px solid #e7eefb;
+}
+.muni-public-row:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+.muni-public-label {
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: #6880a8;
 }
 /* ── Page Interconnexions — supervision flux en direct ── */
 .flux-header { display: flex; justify-content: space-between; align-items: flex-start; gap: .8rem; flex-wrap: wrap; margin-bottom: .7rem; }

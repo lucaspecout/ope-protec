@@ -5416,6 +5416,78 @@ def _annuaire_scalar(value: Any) -> str:
     return ""
 
 
+def _annuaire_collect_strings(value: Any) -> list[str]:
+    results: list[str] = []
+    if value is None:
+        return results
+    if isinstance(value, str):
+        text = value.strip()
+        if text:
+            results.append(text)
+        return results
+    if isinstance(value, (int, float)):
+        results.append(str(value))
+        return results
+    if isinstance(value, dict):
+        for nested in value.values():
+            results.extend(_annuaire_collect_strings(nested))
+        return results
+    if isinstance(value, list):
+        for item in value:
+            results.extend(_annuaire_collect_strings(item))
+        return results
+    return results
+
+
+def _annuaire_phone_from_value(value: Any) -> str:
+    candidates = _annuaire_collect_strings(value)
+    seen: set[str] = set()
+    for candidate in candidates:
+        normalized = re.sub(r"[^\d+]", "", candidate)
+        if len(re.sub(r"\D", "", normalized)) < 10:
+            continue
+        pretty = candidate.strip()
+        if pretty not in seen:
+            return pretty
+    return ""
+
+
+def _annuaire_email_from_value(value: Any) -> str:
+    for candidate in _annuaire_collect_strings(value):
+        match = re.search(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", candidate, re.IGNORECASE)
+        if match:
+            return match.group(0)
+    return ""
+
+
+def _annuaire_address_from_value(value: Any) -> str:
+    if isinstance(value, list):
+        for item in value:
+            text = _annuaire_address_from_value(item)
+            if text:
+                return text
+        return ""
+    if isinstance(value, dict):
+        parts = [
+            _annuaire_scalar(value.get("complement1")),
+            _annuaire_scalar(value.get("complement2")),
+            " ".join(part for part in [
+                _annuaire_scalar(value.get("numero_voie")),
+                _annuaire_scalar(value.get("nom_voie")),
+            ] if part),
+            _annuaire_scalar(value.get("service_distribution")),
+            " ".join(part for part in [
+                _annuaire_scalar(value.get("code_postal")),
+                _annuaire_scalar(value.get("nom_commune") or value.get("commune")),
+            ] if part),
+            _annuaire_scalar(value.get("pays")),
+        ]
+        parts = [part.strip(" ,") for part in parts if str(part or "").strip(" ,")]
+        if parts:
+            return ", ".join(parts)
+    return _annuaire_scalar(value)
+
+
 def _annuaire_record_label(record: dict[str, Any]) -> str:
     for key in ("nom", "nom_organisme", "nom_service_public", "nom_service", "intitule"):
         text = _annuaire_scalar(record.get(key))
@@ -5440,7 +5512,7 @@ def _annuaire_record_type(record: dict[str, Any]) -> str:
 
 def _annuaire_record_phone(record: dict[str, Any]) -> str:
     for key in ("telephone", "telephone_1", "telephone_2", "numero_telephone", "tel"):
-        text = _annuaire_scalar(record.get(key))
+        text = _annuaire_phone_from_value(record.get(key))
         if text:
             return text
     return ""
@@ -5456,7 +5528,7 @@ def _annuaire_record_url(record: dict[str, Any]) -> str:
 
 def _annuaire_record_email(record: dict[str, Any]) -> str:
     for key in ("adresse_courriel", "email", "mail"):
-        text = _annuaire_scalar(record.get(key))
+        text = _annuaire_email_from_value(record.get(key))
         if text:
             return text
     return ""
@@ -5464,7 +5536,7 @@ def _annuaire_record_email(record: dict[str, Any]) -> str:
 
 def _annuaire_record_address(record: dict[str, Any]) -> str:
     for key in ("adresse", "adresse_complete", "adresse_libelle", "adresse_physique"):
-        text = _annuaire_scalar(record.get(key))
+        text = _annuaire_address_from_value(record.get(key))
         if text:
             return text
     return ""

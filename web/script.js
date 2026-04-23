@@ -7623,13 +7623,69 @@ async function openMunicipalityDetailsModal(municipality) {
   const municipalityContacts = Array.isArray(publicServices?.municipality_contacts) ? publicServices.municipality_contacts : [];
   const importantContacts = Array.isArray(publicServices?.important_contacts) ? publicServices.important_contacts : [];
   const emergencyNumbers = Array.isArray(publicServices?.emergency_numbers) ? publicServices.emergency_numbers : [];
-  const normalizeDisplayPhone = (value) => String(value || '').replace(/\s+/g, ' ').trim();
-  const normalizeDisplayMail = (value) => {
-    const text = String(value || '').trim();
-    const match = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
-    return match ? match[0] : '';
+  const parseAnnuaireValue = (value) => {
+    if (value == null) return null;
+    if (typeof value === 'string') {
+      const text = value.trim();
+      if (!text) return '';
+      if ((text.startsWith('{') && text.endsWith('}')) || (text.startsWith('[') && text.endsWith(']'))) {
+        try {
+          return JSON.parse(text);
+        } catch (_) {
+          return text;
+        }
+      }
+      return text;
+    }
+    return value;
   };
-  const normalizeDisplayAddress = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+  const collectAnnuaireStrings = (value) => {
+    const parsed = parseAnnuaireValue(value);
+    if (parsed == null) return [];
+    if (typeof parsed === 'string') return parsed.trim() ? [parsed.trim()] : [];
+    if (typeof parsed === 'number') return [String(parsed)];
+    if (Array.isArray(parsed)) return parsed.flatMap((item) => collectAnnuaireStrings(item));
+    if (typeof parsed === 'object') return Object.values(parsed).flatMap((item) => collectAnnuaireStrings(item));
+    return [];
+  };
+  const normalizeDisplayPhone = (value) => {
+    const candidates = collectAnnuaireStrings(value);
+    for (const candidate of candidates) {
+      const compact = candidate.replace(/[^\d+]/g, '');
+      if ((compact.match(/\d/g) || []).length >= 10) return candidate.replace(/\s+/g, ' ').trim();
+    }
+    return '';
+  };
+  const normalizeDisplayMail = (value) => {
+    const candidates = collectAnnuaireStrings(value);
+    for (const candidate of candidates) {
+      const match = candidate.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+      if (match) return match[0];
+    }
+    return '';
+  };
+  const normalizeDisplayAddress = (value) => {
+    const parsed = parseAnnuaireValue(value);
+    if (Array.isArray(parsed)) {
+      for (const item of parsed) {
+        const text = normalizeDisplayAddress(item);
+        if (text) return text;
+      }
+      return '';
+    }
+    if (parsed && typeof parsed === 'object') {
+      const parts = [
+        String(parsed.complement1 || '').trim(),
+        String(parsed.complement2 || '').trim(),
+        [parsed.numero_voie, parsed.nom_voie].filter(Boolean).map((part) => String(part).trim()).join(' ').trim(),
+        String(parsed.service_distribution || '').trim(),
+        [parsed.code_postal, parsed.nom_commune || parsed.commune].filter(Boolean).map((part) => String(part).trim()).join(' ').trim(),
+        String(parsed.pays || '').trim(),
+      ].filter(Boolean);
+      return parts.join(', ');
+    }
+    return String(parsed || '').replace(/\s+/g, ' ').trim();
+  };
   const publicServiceCard = (item) => {
     const phoneValue = normalizeDisplayPhone(item?.phone);
     const emailValue = normalizeDisplayMail(item?.email);
@@ -7643,9 +7699,9 @@ async function openMunicipalityDetailsModal(municipality) {
         <span class="badge neutral">${escapeHtml(item?.type || 'Service')}</span>
       </div>
       <div class="muni-public-card__body">
-        ${phone ? `<div><strong>Tél.</strong> ${phone}</div>` : ''}
-        ${addressValue ? `<div><strong>Adresse</strong> ${escapeHtml(addressValue)}</div>` : ''}
-        ${email ? `<div><strong>Email</strong> ${email}</div>` : ''}
+        ${phone ? `<div class="muni-public-row"><span class="muni-public-label">Téléphone</span><span>${phone}</span></div>` : ''}
+        ${addressValue ? `<div class="muni-public-row"><span class="muni-public-label">Adresse</span><span>${escapeHtml(addressValue)}</span></div>` : ''}
+        ${email ? `<div class="muni-public-row"><span class="muni-public-label">Email</span><span>${email}</span></div>` : ''}
       </div>
     </div>`;
   };
