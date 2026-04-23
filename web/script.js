@@ -6966,6 +6966,11 @@ function buildGeorisquesMunicipalityUrl({ communeName = '', insee = '', postalCo
 function renderGeorisquesPcsDetail(commune) {
   if (!commune) {
     setHtml('georisques-pcs-detail', '<p class="muted">Sélectionnez une commune PCS pour afficher sa lecture opérationnelle.</p>');
+    const overview = document.getElementById('georisques-overview');
+    if (overview) {
+      overview.hidden = true;
+      overview.classList.add('hidden');
+    }
     return;
   }
 
@@ -7111,6 +7116,25 @@ function renderGeorisquesPcsDetail(commune) {
     { label: 'Cavités', value: String(Number(commune.cavities_total || 0)) },
     { label: 'TIM', value: String(Number(commune.tim_total || 0)) },
   ];
+  const hasDetailedData = Boolean(
+    Number(commune.flood_documents || commune.nb_documents || 0)
+    || Number(commune.ppr_total || 0)
+    || Number(commune.ground_movements_total || 0)
+    || Number(commune.cavities_total || 0)
+    || Number(commune.tim_total || 0)
+    || Number(commune.risques_information_total || 0)
+    || String(commune.seismic_zone || commune.zone_sismicite || '').trim()
+    || String(commune.radon_label || '').trim()
+    || Array.isArray(commune.gaspar_risks) && commune.gaspar_risks.length
+  );
+  const fallbackInfo = hasDetailedData
+    ? ''
+    : `<p class="muted">Aucune donnée détaillée Géorisques n’a encore été remontée pour cette commune. Le sélecteur reste néanmoins disponible à partir de tes communes PCS locales.</p>`;
+  const overview = document.getElementById('georisques-overview');
+  if (overview) {
+    overview.hidden = true;
+    overview.classList.add('hidden');
+  }
 
   setHtml('georisques-pcs-detail', `
     <div class="georisques-commune-head">
@@ -7127,6 +7151,7 @@ function renderGeorisquesPcsDetail(commune) {
     <div class="georisques-commune-kpis">
       ${topKpis.map((item) => `<article class="georisques-commune-kpi"><span>${escapeHtml(item.label)}</span><strong class="${escapeHtml(item.chip || '')}">${escapeHtml(item.value)}</strong></article>`).join('')}
     </div>
+    ${fallbackInfo}
     <div class="georisques-commune-columns">
       <section class="georisques-commune-card">
         <h5>Risques confirmés ou signalés</h5>
@@ -7151,22 +7176,41 @@ function renderGeorisquesPcsDetail(commune) {
 }
 
 function renderGeorisquesPcsRisks(monitored = []) {
-  const pcsByName = new Map(
-    cachedMunicipalities
-      .filter((municipality) => municipality?.pcs_active)
-      .map((municipality) => [String(municipality.name || '').trim().toLowerCase(), municipality]),
+  const pcsMunicipalities = cachedMunicipalities
+    .filter((municipality) => municipality?.pcs_active)
+    .sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || ''), 'fr'));
+  const monitoredByKey = new Map(
+    (Array.isArray(monitored) ? monitored : []).map((commune) => [georisquesCommuneKey(commune), commune]),
   );
-
-  const pcsMonitored = monitored
-    .filter((commune) => pcsByName.has(String(commune.name || commune.commune || '').trim().toLowerCase()))
-    .sort((a, b) => georisquesDangerRank(b) - georisquesDangerRank(a));
-
-  if (!selectedGeorisquesPcsCommuneKey && pcsMonitored.length) {
-    selectedGeorisquesPcsCommuneKey = georisquesCommuneKey(pcsMonitored[0]);
-  }
+  const monitoredByName = new Map(
+    (Array.isArray(monitored) ? monitored : []).map((commune) => [String(commune?.name || commune?.commune || '').trim().toLowerCase(), commune]),
+  );
+  const pcsMonitored = pcsMunicipalities.map((municipality) => {
+    const insee = String(municipality.insee_code || '').trim();
+    const byInsee = insee ? monitoredByKey.get(insee) : null;
+    const byName = monitoredByName.get(String(municipality.name || '').trim().toLowerCase());
+    if (byInsee || byName) return byInsee || byName;
+    return {
+      name: municipality.name || 'Commune inconnue',
+      commune: municipality.name || 'Commune inconnue',
+      code_insee: insee,
+      insee,
+      postal_code: municipality.postal_code || '',
+      gaspar_danger_level: municipality.vigilance_color || 'Faible',
+      seismic_zone: 'inconnue',
+      radon_label: 'inconnu',
+      flood_documents: 0,
+      ppr_total: 0,
+      ground_movements_total: 0,
+      cavities_total: 0,
+      tim_total: 0,
+      risques_information_total: 0,
+      gaspar_risks: [],
+    };
+  });
 
   if (selectedGeorisquesPcsCommuneKey && !pcsMonitored.some((commune) => georisquesCommuneKey(commune) === selectedGeorisquesPcsCommuneKey)) {
-    selectedGeorisquesPcsCommuneKey = pcsMonitored.length ? georisquesCommuneKey(pcsMonitored[0]) : '';
+    selectedGeorisquesPcsCommuneKey = '';
   }
 
   const select = document.getElementById('georisques-pcs-select');
@@ -7178,6 +7222,8 @@ function renderGeorisquesPcsRisks(monitored = []) {
     setHtml('georisques-pcs-select', `<option value="">Sélectionnez une commune PCS</option>${options}`);
     if (selectedGeorisquesPcsCommuneKey) {
       select.value = selectedGeorisquesPcsCommuneKey;
+    } else {
+      select.value = '';
     }
   }
 
@@ -7216,6 +7262,12 @@ function renderGeorisquesDetails(georisques = {}) {
   const preventionText = ` · DICRIM: ${Number(georisques.dicrim_total || 0)} · TIM: ${Number(georisques.tim_total || 0)} · Info-risques: ${Number(georisques.risques_information_total || 0)}`;
   setText('georisques-page-source', `${sourceText}${radonText}${pprText}${preventionText}${errorsText}`);
   setText('georisques-page-debug', monitored.length ? '' : `Aucune commune détaillée reçue (clés: ${Object.keys(georisques || {}).join(', ') || 'aucune'}).`);
+
+  const overview = document.getElementById('georisques-overview');
+  if (overview) {
+    overview.hidden = true;
+    overview.classList.add('hidden');
+  }
 
   const movementTypesMarkup = Object.entries(movementTypes)
     .sort((a, b) => Number(b[1]) - Number(a[1]))
@@ -7571,31 +7623,52 @@ async function openMunicipalityDetailsModal(municipality) {
   const municipalityContacts = Array.isArray(publicServices?.municipality_contacts) ? publicServices.municipality_contacts : [];
   const importantContacts = Array.isArray(publicServices?.important_contacts) ? publicServices.important_contacts : [];
   const emergencyNumbers = Array.isArray(publicServices?.emergency_numbers) ? publicServices.emergency_numbers : [];
+  const normalizeDisplayPhone = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+  const normalizeDisplayMail = (value) => {
+    const text = String(value || '').trim();
+    const match = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+    return match ? match[0] : '';
+  };
+  const normalizeDisplayAddress = (value) => String(value || '').replace(/\s+/g, ' ').trim();
   const publicServiceCard = (item) => {
-    const phone = item?.phone ? `<a href="tel:${encodeURIComponent(String(item.phone).replace(/\s/g, ''))}" style="color:var(--primary)">${escapeHtml(item.phone)}</a>` : '—';
-    const email = item?.email ? `<a href="mailto:${encodeURIComponent(item.email)}" style="color:var(--primary)">${escapeHtml(item.email)}</a>` : '';
-    const url = item?.url && String(item.url).startsWith('http') ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer" style="color:var(--primary)">Site ↗</a>` : '';
+    const phoneValue = normalizeDisplayPhone(item?.phone);
+    const emailValue = normalizeDisplayMail(item?.email);
+    const addressValue = normalizeDisplayAddress(item?.address);
+    if (!phoneValue && !emailValue && !addressValue) return '';
+    const phone = phoneValue ? `<a href="tel:${encodeURIComponent(phoneValue.replace(/\s/g, ''))}" style="color:var(--primary)">${escapeHtml(phoneValue)}</a>` : '';
+    const email = emailValue ? `<a href="mailto:${encodeURIComponent(emailValue)}" style="color:var(--primary)">${escapeHtml(emailValue)}</a>` : '';
     return `<div class="muni-public-card">
       <div class="muni-public-card__head">
         <strong>${escapeHtml(item?.name || 'Service public')}</strong>
         <span class="badge neutral">${escapeHtml(item?.type || 'Service')}</span>
       </div>
       <div class="muni-public-card__body">
-        <div><strong>Tél.</strong> ${phone}</div>
-        ${item?.address ? `<div><strong>Adresse</strong> ${escapeHtml(item.address)}</div>` : ''}
+        ${phone ? `<div><strong>Tél.</strong> ${phone}</div>` : ''}
+        ${addressValue ? `<div><strong>Adresse</strong> ${escapeHtml(addressValue)}</div>` : ''}
         ${email ? `<div><strong>Email</strong> ${email}</div>` : ''}
-        ${url ? `<div>${url}</div>` : ''}
       </div>
     </div>`;
   };
+  const filteredMunicipalityContacts = municipalityContacts.filter((item) => {
+    const phoneValue = normalizeDisplayPhone(item?.phone);
+    const emailValue = normalizeDisplayMail(item?.email);
+    const addressValue = normalizeDisplayAddress(item?.address);
+    return Boolean(phoneValue || emailValue || addressValue);
+  });
+  const filteredImportantContacts = importantContacts.filter((item) => {
+    const phoneValue = normalizeDisplayPhone(item?.phone);
+    const emailValue = normalizeDisplayMail(item?.email);
+    const addressValue = normalizeDisplayAddress(item?.address);
+    return Boolean(phoneValue || emailValue || addressValue);
+  });
   const emergencyMarkup = emergencyNumbers.length
     ? `<div class="muni-emergency-strip">${emergencyNumbers.map((item) => `<span class="muni-emergency-pill"><strong>${escapeHtml(item.label || '')}</strong> · ${escapeHtml(item.phone || '')}</span>`).join('')}</div>`
     : '';
-  const municipalityContactsMarkup = municipalityContacts.length
-    ? `<div class="muni-public-grid">${municipalityContacts.map(publicServiceCard).join('')}</div>`
+  const municipalityContactsMarkup = filteredMunicipalityContacts.length
+    ? `<div class="muni-public-grid">${filteredMunicipalityContacts.map(publicServiceCard).join('')}</div>`
     : '<p class="muted">Aucun contact public complémentaire trouvé pour cette commune.</p>';
-  const importantContactsMarkup = importantContacts.length
-    ? `<div class="muni-public-grid">${importantContacts.map(publicServiceCard).join('')}</div>`
+  const importantContactsMarkup = filteredImportantContacts.length
+    ? `<div class="muni-public-grid">${filteredImportantContacts.map(publicServiceCard).join('')}</div>`
     : '<p class="muted">Aucun contact départemental clé récupéré pour le moment.</p>';
 
   // ── Tab: Fiche ────────────────────────────────────────────
@@ -9972,6 +10045,11 @@ async function loadMunicipalities(preloaded = null) {
 
   cachedMunicipalityRecords = municipalities;
   cachedMunicipalities = municipalities;
+  const georisquesPayload = cachedExternalRisksSnapshot?.georisques || {};
+  const georisquesData = georisquesPayload?.data && typeof georisquesPayload.data === 'object'
+    ? { ...georisquesPayload.data, ...georisquesPayload }
+    : georisquesPayload;
+  renderGeorisquesPcsRisks(georisquesData.monitored_communes || georisquesData.monitored_municipalities || georisquesData.communes || []);
   populateLogMunicipalityOptions(municipalities);
   syncLogScopeFields();
   syncLogOtherFields();
