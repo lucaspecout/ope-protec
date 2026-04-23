@@ -9118,10 +9118,83 @@ _CARS_REGION_ISERE_KEYWORDS: tuple[str, ...] = (
 )
 
 
+_CARS_REGION_OFFICIAL_SCHEDULES_URL = "https://sim.laregionvoustransporte.fr/fr/schedules"
+_CARS_REGION_SEARCH_TERMS: tuple[str, ...] = ("T", "X", "N")
+
+
+def _normalize_cars_region_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", str(value or ""))
+    ascii_only = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    return re.sub(r"\s+", " ", ascii_only).strip().lower()
+
+
+def _repair_mojibake_text(value: str) -> str:
+    raw = str(value or "")
+    if not raw or ("Ã" not in raw and "Â" not in raw):
+        return raw
+    try:
+        repaired = raw.encode("latin1", errors="ignore").decode("utf-8", errors="ignore")
+        return repaired or raw
+    except Exception:
+        return raw
+
+
+def _dedupe_cars_region_disruptions(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in items:
+        line = str(item.get("line") or "").strip().upper()
+        title = _repair_mojibake_text(str(item.get("title") or "").strip())
+        description = _repair_mojibake_text(str(item.get("description") or "").strip())
+        key = f"{line}|{title}|{description}"
+        if not line or key in seen:
+            continue
+        seen.add(key)
+        item["title"] = title
+        item["description"] = description
+        deduped.append(item)
+    return deduped
+
+
 def _cars_region_extract_isere_line_alerts_from_html(html: str) -> list[dict[str, Any]]:
     alerts: list[dict[str, Any]] = []
     if not html:
         return alerts
+
+    card_positions = [m.start() for m in re.finditer(r'data-cy="line-card"', html)]
+    if card_positions:
+        card_positions.append(len(html))
+        severity_to_level = {"MAJOR": "orange", "MEDIUM": "orange", "MINOR": "jaune"}
+        for idx, start in enumerate(card_positions[:-1]):
+            segment = html[start:card_positions[idx + 1]]
+            network_match = re.search(r"<small[^>]*>(?P<network>.*?)</small>", segment, re.IGNORECASE | re.DOTALL)
+            network = _strip_html_tags(network_match.group("network") if network_match else "")
+            if "cars region isere" not in _normalize_cars_region_text(network):
+                continue
+            code_match = re.search(r'<span class="line-number"[^>]*>(?P<code>.*?)</span>', segment, re.IGNORECASE | re.DOTALL)
+            label_match = re.search(r"<h3[^>]*>(?P<label>.*?)</h3>", segment, re.IGNORECASE | re.DOTALL)
+            count_match = re.search(r'>(?P<count>\d+)\s+perturbation', segment, re.IGNORECASE)
+            if not count_match:
+                count_match = re.search(r'aria-label="(?P<count>\d+)\s+Perturbation', segment, re.IGNORECASE)
+            code = _strip_html_tags(code_match.group("code") if code_match else "").upper()
+            label = _strip_html_tags(label_match.group("label") if label_match else "")
+            count = int(count_match.group("count")) if count_match else 0
+            if not code or count <= 0:
+                continue
+            severity_match = re.search(r'class="disruptions\s+(?P<severity>[A-Z]+)"', segment)
+            severity = str(severity_match.group("severity") if severity_match else "MINOR").upper()
+            alerts.append({
+                "title": f"{code} Â· {label}"[:200] if label else code[:200],
+                "description": f"{count} perturbation(s) en cours sur cette ligne Cars RÃ©gion IsÃ¨re",
+                "line": code[:80],
+                "level": severity_to_level.get(severity, "jaune"),
+                "effect": "perturbation",
+                "valid_from": "",
+                "valid_until": "",
+                "link": f"{_CARS_REGION_OFFICIAL_SCHEDULES_URL}?search={quote_plus(code)}",
+            })
+        if alerts:
+            return _dedupe_cars_region_disruptions(alerts)
 
     seen: set[str] = set()
     for match in re.finditer(
@@ -9300,6 +9373,47 @@ def _fetch_cars_region_live() -> dict[str, Any]:
         "Referer": "https://sim.laregionvoustransporte.fr/",
         "Sec-Fetch-Mode": "navigate",
     }
+    _SCHEDULES_URL = _CARS_REGION_OFFICIAL_SCHEDULES_URL
+    official_source_reached = False
+
+    for search_term in _CARS_REGION_SEARCH_TERMS:
+        query_url = f"{_SCHEDULES_URL}?search={quote_plus(search_term)}"
+        try:
+            if _REQUESTS_OK and _requests is not None:
+                resp = _requests.get(query_url, headers=_hdrs_html, timeout=20, verify=False)
+                resp.raise_for_status()
+                html = resp.text
+            else:
+                html = _http_get_text(query_url, timeout=20, headers=_hdrs_html)
+            if not html:
+                continue
+            official_source_reached = True
+            disruptions.extend(_cars_region_extract_isere_line_alerts_from_html(html))
+        except Exception:
+            continue
+
+    disruptions = _dedupe_cars_region_disruptions(disruptions)
+    if official_source_reached:
+        if disruptions:
+            return {
+                "service": "Cars RÃ©gion Â· Auvergne-RhÃ´ne-Alpes",
+                "status": "online",
+                "source": _SCHEDULES_URL,
+                "disruptions": disruptions[:20],
+                "disruptions_total": len(disruptions),
+                "normal_service": False,
+                "updated_at": datetime.utcnow().isoformat() + "Z",
+            }
+        return {
+            "service": "Cars RÃ©gion Â· Auvergne-RhÃ´ne-Alpes",
+            "status": "online",
+            "source": _SCHEDULES_URL,
+            "disruptions": [],
+            "disruptions_total": 0,
+            "normal_service": True,
+            "note": "Aucune perturbation bus Isere visible sur la source officielle en cours",
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
 
     # ── Source 1 : __NEXT_DATA__ de sim.laregionvoustransporte.fr/fr/schedules ─
     # La page est une app Next.js — les lignes avec perturbations sont en SSR JSON.

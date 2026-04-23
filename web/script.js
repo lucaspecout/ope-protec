@@ -8194,6 +8194,13 @@ function buildSituationKpiModalContent(key, externalRisks = {}) {
         const windStrOfficial = c.vent_kmh != null ? `vent ${Math.round(c.vent_kmh)} km/h` : '';
         const metricsOfficial = [tempStrOfficial, snowStrOfficial, windStrOfficial].filter(Boolean).join(' · ');
         const operationalDetail = escapeHtml(c.detail || '');
+        const routeLabelOfficialClean = String(c.route || '').trim();
+        const routeMetaOfficialClean = routeLabelOfficialClean ? ` <span class="muted">(${escapeHtml(routeLabelOfficialClean)})</span>` : '';
+        const detailOfficialClean = operationalDetail ? ` - <span class="muted">${operationalDetail}</span>` : '';
+        return `<li style="padding:4px 0;border-bottom:1px solid #eee"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:6px"></span><strong>${escapeHtml(c.nom)}</strong>${routeMetaOfficialClean}<br><span style="color:${color};font-weight:600">${escapeHtml(c.statut || '?')}</span>${detailOfficialClean}${metricsOfficial ? `<br><span class="muted">${escapeHtml(metricsOfficial)}</span>` : ''}</li>`;
+        const routeLabelOfficial = String(c.route || '').trim();
+        const routeMetaOfficial = routeLabelOfficial ? ` <span class="muted">(${escapeHtml(routeLabelOfficial)})</span>` : '';
+        return `<li style="padding:4px 0;border-bottom:1px solid #eee"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:6px"></span><strong>${escapeHtml(c.nom)}</strong>${routeMetaOfficial}<br><span style="color:${color};font-weight:600">${escapeHtml(c.statut || '?')}</span>${operationalDetail ? ` Â· <span class="muted">${operationalDetail}</span>` : ''}${metricsOfficial ? `<br><span class="muted">${escapeHtml(metricsOfficial)}</span>` : ''}</li>`;
         return `<li style="padding:4px 0;border-bottom:1px solid #eee"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:6px"></span><strong>${escapeHtml(c.nom)}</strong> <span class="muted">(${c.alt} m · ${escapeHtml(c.route || '')})</span><br><span style="color:${color};font-weight:600">${escapeHtml(c.statut || '?')}</span>${operationalDetail ? ` · <span class="muted">${operationalDetail}</span>` : ''}${metricsOfficial ? `<br><span class="muted">${escapeHtml(metricsOfficial)}</span>` : ''}</li>`;
       }).join('');
       const colsSourceLineOfficial = isOfficialColsSource(colsData) ? 'Itinisère · couche officielle des cols' : 'Itinisère + fallback météo';
@@ -8950,6 +8957,8 @@ function renderColsAlpinsWidget(data = {}) {
   setRiskText('cols-svc-status', `${data.status || 'inconnu'} · ${data.dangereux_total ?? 0} à surveiller / ${data.cols_total ?? 0} cols`, colorLevel);
   setHtml('cols-svc-list', cols.map((c) => {
     const color = braColors[c.couleur] || '#868e96';
+    return `<li><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:4px"></span><strong>${escapeHtml(c.nom)}</strong> <span style="color:${color};font-weight:600">${escapeHtml(c.statut || '?')}</span> <span class="muted">- ${escapeHtml(c.detail || '')}</span></li>`;
+    return `<li><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:4px"></span><strong>${escapeHtml(c.nom)}</strong> <span style="color:${color};font-weight:600">${escapeHtml(c.statut || '?')}</span> <span class="muted">Â· ${escapeHtml(c.detail || '')}</span></li>`;
     return `<li><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:4px"></span><strong>${escapeHtml(c.nom)}</strong> <span style="color:${color};font-weight:600">${escapeHtml(c.statut || '?')}</span> <span class="muted">· ${c.alt} m · ${escapeHtml(c.detail || '')}</span></li>`;
   }).join('') || `<li class="muted">${data.status === 'pending' ? 'Actualisation Itinisère en cours…' : 'Aucune donnée cols disponible.'}</li>`);
 }
@@ -8962,6 +8971,16 @@ function renderOfficialColsAlpinsWidget(data = {}) {
   setRiskText('cols-svc-status', `${data.status || 'inconnu'} · ${data.dangereux_total ?? 0} à surveiller / ${data.cols_total ?? 0} cols`, colorLevel);
   setHtml('cols-svc-list', cols.map((c) => {
     const color = braColors[c.couleur] || '#868e96';
+    const metaPartsClean = [];
+    if (String(c.route || '').trim()) metaPartsClean.push(String(c.route).trim());
+    if (String(c.detail || '').trim()) metaPartsClean.push(String(c.detail).trim());
+    const metaClean = metaPartsClean.length ? ` <span class="muted">- ${escapeHtml(metaPartsClean.join(' - '))}</span>` : '';
+    return `<li><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:4px"></span><strong>${escapeHtml(c.nom)}</strong> <span style="color:${color};font-weight:600">${escapeHtml(c.statut || '?')}</span>${metaClean}</li>`;
+    const metaPartsWithoutAltitude = [];
+    if (String(c.route || '').trim()) metaPartsWithoutAltitude.push(String(c.route).trim());
+    if (String(c.detail || '').trim()) metaPartsWithoutAltitude.push(String(c.detail).trim());
+    const metaWithoutAltitude = metaPartsWithoutAltitude.length ? ` <span class="muted">Â· ${escapeHtml(metaPartsWithoutAltitude.join(' Â· '))}</span>` : '';
+    return `<li><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:4px"></span><strong>${escapeHtml(c.nom)}</strong> <span style="color:${color};font-weight:600">${escapeHtml(c.statut || '?')}</span>${metaWithoutAltitude}</li>`;
     const metaParts = [];
     if (Number.isFinite(Number(c.alt))) metaParts.push(`${Number(c.alt)} m`);
     if (String(c.route || '').trim()) metaParts.push(String(c.route).trim());
