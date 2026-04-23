@@ -222,6 +222,7 @@ const ISERE_MAJOR_CITIES = [
   { key: 'isle', name: 'L’Isle-d’Abeau', lat: 45.6256, lon: 5.226, population: 16840 },
   { key: 'meylan', name: 'Meylan', lat: 45.2125, lon: 5.7773, population: 17790 },
 ];
+let meteoCityOptions = [...ISERE_MAJOR_CITIES];
 
 let leafletMap = null;
 let boundaryLayer = null;
@@ -9073,8 +9074,50 @@ function renderMeteoHourlyForecast(cityForecast) {
   }).join('');
 }
 
+async function getMeteoCityOptions() {
+  const byKey = new Map(ISERE_MAJOR_CITIES.map((city) => [city.key, city]));
+  const pcsMunicipalities = (Array.isArray(cachedMunicipalities) ? cachedMunicipalities : [])
+    .filter((municipality) => municipality?.pcs_active);
+
+  const geocoded = await Promise.all(
+    pcsMunicipalities.map(async (municipality) => ({
+      municipality,
+      point: await geocodeMunicipality(municipality),
+    })),
+  );
+
+  geocoded.forEach(({ municipality, point }) => {
+    if (!municipality || !point) return;
+    const normalizedName = String(municipality.name || '').trim();
+    if (!normalizedName) return;
+    const key = `pcs-${String(municipality.insee_code || normalizedName)
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')}`;
+    const duplicate = Array.from(byKey.values()).some((city) => {
+      const sameName = String(city.name || '').trim().toLowerCase() === normalizedName.toLowerCase();
+      const closePoint = Math.abs(Number(city.lat || 0) - point.lat) < 0.001 && Math.abs(Number(city.lon || 0) - point.lon) < 0.001;
+      return sameName || closePoint;
+    });
+    if (duplicate) return;
+    byKey.set(key, {
+      key,
+      name: normalizedName,
+      lat: point.lat,
+      lon: point.lon,
+      population: municipality.population || 0,
+      isPcs: true,
+    });
+  });
+
+  const options = Array.from(byKey.values())
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'fr'));
+  meteoCityOptions = options.length ? options : [...ISERE_MAJOR_CITIES];
+  return meteoCityOptions;
+}
+
 function getSelectedMeteoCity() {
-  return ISERE_MAJOR_CITIES.find((city) => city.key === selectedMeteoCityKey) || ISERE_MAJOR_CITIES[0];
+  return meteoCityOptions.find((city) => city.key === selectedMeteoCityKey) || meteoCityOptions[0] || ISERE_MAJOR_CITIES[0];
 }
 
 function cityForecastCacheKey(city) {
@@ -9131,13 +9174,14 @@ async function fetchWeeklyForecastForCity(city) {
   return weeklyMeteoInFlight[key];
 }
 
-function renderMeteoCitySelector() {
+async function renderMeteoCitySelector() {
   const select = document.getElementById('meteo-city-select');
   if (!select) return;
+  const options = await getMeteoCityOptions();
   const previousValue = select.value || selectedMeteoCityKey;
-  select.innerHTML = ISERE_MAJOR_CITIES.map((city) => `<option value="${escapeHtml(city.key)}">${escapeHtml(city.name)}</option>`).join('');
-  const found = ISERE_MAJOR_CITIES.some((city) => city.key === previousValue);
-  select.value = found ? previousValue : ISERE_MAJOR_CITIES[0].key;
+  select.innerHTML = options.map((city) => `<option value="${escapeHtml(city.key)}">${escapeHtml(city.name)}${city.isPcs ? ' · PCS' : ''}</option>`).join('');
+  const found = options.some((city) => city.key === previousValue);
+  select.value = found ? previousValue : (options[0]?.key || ISERE_MAJOR_CITIES[0].key);
   selectedMeteoCityKey = select.value;
   if (select.dataset.bound === '1') return;
   select.addEventListener('change', async () => {
@@ -9169,7 +9213,7 @@ function renderMeteoCurrentCard(cityForecast, city) {
 
 async function renderWeeklyWeatherPanel(externalRisks = {}) {
   const meteo = externalRisks?.meteo_france || {};
-  renderMeteoCitySelector();
+  await renderMeteoCitySelector();
   const selectedCity = getSelectedMeteoCity();
   const cityForecast = await fetchWeeklyForecastForCity(selectedCity);
   const dailySource = Array.isArray(cityForecast?.daily_forecast) && cityForecast.daily_forecast.length
