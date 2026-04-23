@@ -7522,6 +7522,7 @@ async function openMunicipalityDetailsModal(municipality) {
       ${municipality.crisis_mode ? '<span style="font-weight:700;color:#c91c2e;font-size:.85rem">🔴 MODE CRISE</span>' : '<span style="color:#5f7190;font-size:.85rem">🟢 Veille normale</span>'}
       <span class="muni-pill ${municipality.pcs_active ? 'pcs-on' : 'pcs-off'}">${municipality.pcs_active ? '✅ PCS actif' : '⬜ PCS inactif'}</span>
     </div>
+    ${municipality.contacts ? `<p style="margin:.35rem 0 .65rem"><strong style="font-size:.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Contacts d'astreinte</strong><br><span style="white-space:pre-wrap">${escapeHtml(municipality.contacts)}</span></p>` : ''}
     <div class="muni-info-grid">
       <p class="muni-info-item"><strong>Code postal</strong>${escapeHtml(municipality.postal_code || '-')}</p>
       <p class="muni-info-item"><strong>Code INSEE</strong>${escapeHtml(municipality.insee_code || '-')}</p>
@@ -7530,7 +7531,6 @@ async function openMunicipalityDetailsModal(municipality) {
       <p class="muni-info-item"><strong>Téléphone</strong>${municipality.phone ? `<a href="tel:${encodeURIComponent(municipality.phone.replace(/\s/g,''))}" style="color:var(--primary)">${escapeHtml(municipality.phone)}</a>` : '-'}</p>
       <p class="muni-info-item"><strong>Email</strong>${municipality.email ? `<a href="mailto:${encodeURIComponent(municipality.email)}" style="color:var(--primary)">${escapeHtml(municipality.email)}</a>` : '-'}</p>
     </div>
-    ${municipality.contacts ? `<p style="margin:.3rem 0 .5rem"><strong style="font-size:.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Contacts d'astreinte</strong><br><span style="white-space:pre-wrap">${escapeHtml(municipality.contacts)}</span></p>` : ''}
     ${municipality.additional_info ? `<p style="margin:.3rem 0"><strong style="font-size:.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Informations complémentaires</strong><br><span style="white-space:pre-wrap;font-size:.88rem">${escapeHtml(municipality.additional_info)}</span></p>` : ''}
     ${crisisActions}
   `;
