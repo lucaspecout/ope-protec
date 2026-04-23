@@ -7612,8 +7612,7 @@ async function openMunicipalityDetailsModal(municipality) {
   const content = document.getElementById('municipality-details-content');
   if (!modal || !content || !municipality) return;
 
-  const [files, logs, publicServices] = await Promise.all([
-    loadMunicipalityFiles(municipality.id).catch(() => []),
+  const [logs, publicServices] = await Promise.all([
     api('/logs').catch(() => []),
     api(`/municipalities/${municipality.id}/public-services`).catch(() => ({})),
   ]);
@@ -7623,24 +7622,6 @@ async function openMunicipalityDetailsModal(municipality) {
   const municipalityEvents = sortOperationalEvents(cachedEvents)
     .filter((event) => String(event.municipality_id || '') === String(municipality.id) && isOpenOrActiveEvent(event))
     .slice(0, 10);
-  const previousState = municipalityDocumentsUiState.get(String(municipality.id)) || { search: '', type: 'all', sort: 'date_desc', uploading: false, progress: 0 };
-  const state = { ...previousState, uploading: false, progress: 0 };
-  municipalityDocumentsUiState.set(String(municipality.id), state);
-  const filteredFiles = files
-    .filter((file) => {
-      const search = (state.search || '').trim().toLowerCase();
-      if (state.type !== 'all' && file.doc_type !== state.type) return false;
-      if (!search) return true;
-      return [file.title, file.doc_type, file.uploaded_by].some((value) => String(value || '').toLowerCase().includes(search));
-    })
-    .sort((left, right) => {
-      if (state.sort === 'title') return String(left.title || '').localeCompare(String(right.title || ''), 'fr');
-      const leftDate = new Date(left.created_at).getTime();
-      const rightDate = new Date(right.created_at).getTime();
-      if (state.sort === 'date_asc') return leftDate - rightDate;
-      return rightDate - leftDate;
-    });
-
   const level = normalizeLevel(municipality.vigilance_color || 'vert');
   const badgeClass = level === 'rouge' ? 'red' : level === 'orange' ? 'orange' : level === 'jaune' ? 'yellow' : 'green';
   const municipalityContacts = Array.isArray(publicServices?.municipality_contacts) ? publicServices.municipality_contacts : [];
@@ -7784,54 +7765,6 @@ async function openMunicipalityDetailsModal(municipality) {
     ${crisisActions}
   `;
 
-  // ── Tab: Documents ────────────────────────────────────────
-  const docTypeIcon = (type) => ({ pcs: '📋', orsec: '🚨', convention: '🤝', cartographie: '🗺️', annexe: '📎', document: '📄' }[type] || '📄');
-  const richFilesMarkup = filteredFiles.length
-    ? filteredFiles.map((file) => `
-        <div class="muni-doc-item">
-          <div class="muni-doc-icon">${docTypeIcon(file.doc_type)}</div>
-          <div class="muni-doc-meta">
-            <div class="muni-doc-title">${escapeHtml(file.title)}</div>
-            <div class="muni-doc-sub">${escapeHtml(file.doc_type)} · ${new Date(file.created_at).toLocaleDateString('fr-FR')} · ${escapeHtml(file.uploaded_by)}</div>
-          </div>
-          <div style="display:flex;flex-direction:column;gap:.25rem;flex-shrink:0">
-            <button type="button" class="ghost inline-action" style="padding:.28rem .65rem;font-size:.77rem" data-muni-file-open="${file.id}" data-muni-id="${municipality.id}">Ouvrir</button>
-            <button type="button" class="ghost inline-action" style="padding:.28rem .65rem;font-size:.77rem" data-muni-file-download="${file.id}" data-muni-id="${municipality.id}" data-muni-file-name="${escapeHtml(file.title || 'document')}">Télécharger</button>
-            ${canMunicipalityFiles() ? `<button type="button" class="ghost inline-action danger" style="padding:.28rem .65rem;font-size:.77rem" data-muni-file-delete="${file.id}" data-muni-id="${municipality.id}">Supprimer</button>` : ''}
-          </div>
-        </div>`)
-      .join('')
-    : '<p class="muted" style="margin:.4rem 0">Aucun document pour cette commune.</p>';
-
-  const uploadForm = canMunicipalityFiles()
-    ? `<div class="muni-upload-section">
-         <h6>Ajouter un document</h6>
-         <form class="municipality-upload-form" data-muni-upload-form="${municipality.id}">
-           <input name="title" placeholder="Titre du document" required />
-           <select name="doc_type">
-             <option value="pcs">PCS</option>
-             <option value="orsec">ORSEC</option>
-             <option value="convention">Convention</option>
-             <option value="cartographie">Cartographie</option>
-             <option value="annexe">Annexe</option>
-             <option value="document" selected>Document</option>
-           </select>
-           <input name="file" type="file" accept=".pdf,.png,.jpg,.jpeg" required />
-           <button type="submit" class="ghost inline-action">Ajouter</button>
-         </form>
-         <div class="municipality-upload-progress hidden" data-muni-upload-progress="${municipality.id}" hidden>
-           <div class="municipality-upload-progress__bar" style="width:${state.progress}%"></div>
-           <span data-muni-upload-progress-label="${municipality.id}">${state.progress}%</span>
-         </div>
-       </div>`
-    : '';
-
-  const docsTab = `
-    ${municipalityDocumentFiltersMarkup(state, municipality.id)}
-    ${richFilesMarkup}
-    ${uploadForm}
-  `;
-
   // ── Tab: Événements ──────────────────────────────────────
   const eventsTab = municipalityEvents.length
     ? municipalityEvents.map((event) => {
@@ -7871,12 +7804,10 @@ async function openMunicipalityDetailsModal(municipality) {
     </div>
     <nav class="muni-detail-tabs" id="muni-tabs-nav-${municipality.id}">
       <button class="muni-tab-btn active" data-muni-tab="fiche">Fiche</button>
-      <button class="muni-tab-btn" data-muni-tab="docs">Documents${files.length > 0 ? `<span class="muni-tab-badge">${files.length}</span>` : ''}</button>
       <button class="muni-tab-btn" data-muni-tab="events">Évènements${municipalityEvents.length > 0 ? `<span class="muni-tab-badge">${municipalityEvents.length}</span>` : ''}</button>
       <button class="muni-tab-btn" data-muni-tab="mco">MCO${municipalityLogs.length > 0 ? `<span class="muni-tab-badge">${municipalityLogs.length}</span>` : ''}</button>
     </nav>
     <div class="muni-detail-section active" data-muni-section="fiche">${ficheTab}</div>
-    <div class="muni-detail-section" data-muni-section="docs">${docsTab}</div>
     <div class="muni-detail-section" data-muni-section="events">${eventsTab}</div>
     <div class="muni-detail-section" data-muni-section="mco">${mcoTab}</div>
   `);
@@ -11172,11 +11103,7 @@ function bindAppInteractions() {
     const crisisButton = event.target.closest('[data-muni-detail-crisis]');
     const editButton = event.target.closest('[data-muni-edit]');
     const openEventButton = event.target.closest('[data-muni-open-event]');
-    const openFileButton = event.target.closest('[data-muni-file-open]');
-    const downloadFileButton = event.target.closest('[data-muni-file-download]');
-    const uploadFileButton = event.target.closest('[data-muni-file-upload]');
-    const deleteFileButton = event.target.closest('[data-muni-file-delete]');
-    if (!crisisButton && !editButton && !openEventButton && !openFileButton && !downloadFileButton && !uploadFileButton && !deleteFileButton) return;
+    if (!crisisButton && !editButton && !openEventButton) return;
 
     const getMunicipality = (id) => cachedMunicipalityRecords.find((m) => String(m.id) === String(id));
 
@@ -11210,67 +11137,6 @@ function bindAppInteractions() {
         return;
       }
 
-      if (openFileButton) {
-        if (!canMunicipalityFiles()) return;
-        const municipalityId = openFileButton.getAttribute('data-muni-id');
-        const fileId = openFileButton.getAttribute('data-muni-file-open');
-        await openMunicipalityFile(municipalityId, fileId);
-        return;
-      }
-
-      if (downloadFileButton) {
-        if (!canMunicipalityFiles()) return;
-        const municipalityId = downloadFileButton.getAttribute('data-muni-id');
-        const fileId = downloadFileButton.getAttribute('data-muni-file-download');
-        const name = downloadFileButton.getAttribute('data-muni-file-name') || 'document';
-        await downloadMunicipalityFile(municipalityId, fileId, name);
-        return;
-      }
-
-      if (uploadFileButton) {
-        if (!canMunicipalityFiles()) return;
-        await pickMunicipalityFile(uploadFileButton.getAttribute('data-muni-file-upload'));
-        return;
-      }
-
-      if (deleteFileButton) {
-        if (!canMunicipalityFiles()) return;
-        const municipalityId = deleteFileButton.getAttribute('data-muni-id');
-        const fileId = deleteFileButton.getAttribute('data-muni-file-delete');
-        await api(`/municipalities/${municipalityId}/files/${fileId}`, { method: 'DELETE' });
-        const municipality = getMunicipality(municipalityId);
-        if (municipality) await openMunicipalityDetailsModal(municipality);
-        return;
-      }
-
-    } catch (error) {
-      document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
-    }
-  });
-  document.getElementById('municipality-details-content')?.addEventListener('change', async (event) => {
-    const search = event.target.closest('[data-muni-doc-search]');
-    const typeFilter = event.target.closest('[data-muni-doc-type-filter]');
-    const sortFilter = event.target.closest('[data-muni-doc-sort]');
-    if (!search && !typeFilter && !sortFilter) return;
-    const municipalityId = search?.getAttribute('data-muni-doc-search') || typeFilter?.getAttribute('data-muni-doc-type-filter') || sortFilter?.getAttribute('data-muni-doc-sort');
-    const municipality = cachedMunicipalityRecords.find((m) => String(m.id) === String(municipalityId));
-    if (!municipality) return;
-    const state = municipalityDocumentsUiState.get(String(municipalityId)) || { search: '', type: 'all', sort: 'date_desc' };
-    municipalityDocumentsUiState.set(String(municipalityId), {
-      ...state,
-      search: search ? search.value || '' : state.search,
-      type: typeFilter ? typeFilter.value : state.type,
-      sort: sortFilter ? sortFilter.value : state.sort,
-    });
-    await openMunicipalityDetailsModal(municipality);
-  });
-  document.getElementById('municipality-details-content')?.addEventListener('submit', async (event) => {
-    const form = event.target.closest('[data-muni-upload-form]');
-    if (!form) return;
-    event.preventDefault();
-    try {
-      await submitMunicipalityUploadForm(form, form.getAttribute('data-muni-upload-form'));
-      document.getElementById('municipality-feedback').textContent = 'Document chargé avec succès.';
     } catch (error) {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
     }
