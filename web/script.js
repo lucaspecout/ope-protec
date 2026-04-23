@@ -9765,7 +9765,14 @@ function renderMunicipalitiesList(municipalities = []) {
       ? `<div class="muni-crisis-banner">Mode crise activé</div>`
       : '';
 
-    const phoneHref = m.phone ? `<a class="muni-contact-btn" href="tel:${encodeURIComponent(m.phone.replace(/\s/g,''))}">📞 ${escapeHtml(m.phone)}</a>` : '';
+    const astreintePhone = (() => {
+      const contactBlob = String(m.contacts || '');
+      const match = contactBlob.match(/(?:\+33\s?[1-9]|0[1-9])(?:[\s.:-]?\d{2}){4}/);
+      return match ? match[0].trim() : '';
+    })();
+    const quickPhone = astreintePhone || String(m.phone || '').trim();
+    const quickPhoneLabel = astreintePhone ? `Astreinte ${astreintePhone}` : String(m.phone || '').trim();
+    const phoneHref = quickPhone ? `<a class="muni-contact-btn" href="tel:${encodeURIComponent(quickPhone.replace(/\s/g,''))}">📞 ${escapeHtml(quickPhoneLabel)}</a>` : '';
     const emailHref = m.email ? `<a class="muni-contact-btn" href="mailto:${encodeURIComponent(m.email)}">✉️ ${escapeHtml(m.email)}</a>` : '';
 
     const pills = `<div class="muni-pills">
