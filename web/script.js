@@ -10024,12 +10024,17 @@ async function loadUsers(preloaded = null) {
   const users = keepPreviousArray(Array.isArray(usersSnapshot) ? usersSnapshot : [], Array.isArray(preloaded) ? preloaded : await api('/auth/users'));
   saveSnapshot(STORAGE_KEYS.usersSnapshot, users);
   const isAdmin = currentUser?.role === 'admin';
+  const formatUserDateTime = (value) => {
+    if (!value) return 'Jamais';
+    const dt = new Date(value);
+    return Number.isNaN(dt.getTime()) ? String(value) : dt.toLocaleString('fr-FR');
+  };
   setHtml('users-table', users.map((u) => {
     const actionButtons = isAdmin
       ? `<div class="users-actions"><button type="button" data-user-edit="${u.id}">Modifier</button><button type="button" data-user-reset="${u.id}">Réinitialiser mot de passe</button><button type="button" class="ghost" data-user-delete="${u.id}">Supprimer</button></div>`
       : '-';
-    return `<tr><td>${escapeHtml(u.username)}</td><td>${roleLabel(u.role)}</td><td>${escapeHtml(u.municipality_name || '-')}</td><td>${new Date(u.created_at).toLocaleDateString()}</td><td>${u.must_change_password ? 'Changement requis' : 'Actif'}</td><td>${actionButtons}</td></tr>`;
-  }).join('') || '<tr><td colspan="6">Aucun utilisateur.</td></tr>');
+    return `<tr><td>${escapeHtml(u.username)}</td><td>${roleLabel(u.role)}</td><td>${escapeHtml(u.municipality_name || '-')}</td><td>${new Date(u.created_at).toLocaleDateString()}</td><td>${escapeHtml(formatUserDateTime(u.last_login_at))}</td><td>${u.must_change_password ? 'Changement requis' : 'Actif'}</td><td>${actionButtons}</td></tr>`;
+  }).join('') || '<tr><td colspan="7">Aucun utilisateur.</td></tr>');
 }
 
 async function loadOperationsBootstrap(forceRefresh = false) {

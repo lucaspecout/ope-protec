@@ -57,6 +57,7 @@ class UserOut(BaseModel):
     two_factor_enabled: bool
     must_change_password: bool
     created_at: datetime
+    last_login_at: datetime | None = None
 
     class Config:
         from_attributes = True
