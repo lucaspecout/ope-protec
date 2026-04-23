@@ -7880,10 +7880,10 @@ function renderSituationOverview() {
 
   const vigilance = normalizeLevel(dashboard.vigilance || externalRisks?.meteo_france?.level || 'vert');
 
-  // ── Niveau crues : tronçons AN11/12/20 + règle 5 stations orange/rouge ──
+  // ── Niveau crues : tronçons AN11/12/20/30/31 + règle 5 stations orange/rouge ──
   const vigicruesTroncons = Array.isArray(externalRisks?.vigicrues?.troncons)
     ? externalRisks.vigicrues.troncons : [];
-  const mainTronconCodes = new Set(['AN11', 'AN12', 'AN20']);
+  const mainTronconCodes = new Set(['AN11', 'AN12', 'AN20', 'AN30', 'AN31']);
   const mainTronconLevels = vigicruesTroncons
     .filter((t) => mainTronconCodes.has(String(t.code || '')))
     .map((t) => normalizeLevel(t.level || 'vert'));
@@ -7935,7 +7935,7 @@ function renderSituationOverview() {
 
   const kpiCards = [
     { key: 'meteo', label: 'Vigilance météo', value: vigilance, info: 'Source Météo-France', css: normalizeLevel(vigilance) },
-    { key: 'crues', label: 'Niveau crues', value: crues, info: `Tronçons AN11/12/20 · ${alertCount} station(s) en alerte`, css: normalizeLevel(crues), detail: cruesAlertHtml },
+    { key: 'crues', label: 'Niveau crues', value: crues, info: `Tronçons AN11/12/20/30/31 · ${alertCount} station(s) en alerte`, css: normalizeLevel(crues), detail: cruesAlertHtml },
     { key: 'global-risk', label: 'Risque global', value: globalRisk, info: 'Calcul consolidé', css: normalizeLevel(globalRisk) },
     { key: 'communes-crise', label: 'Communes en crise', value: String(crisisCount), info: 'PCS actif', css: crisisCount > 0 ? 'rouge' : 'vert' },
   ];
