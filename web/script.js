@@ -7670,9 +7670,9 @@ async function pickMunicipalityFile(municipalityId) {
     formData.append('title', title);
     formData.append('doc_type', 'document');
     await api(`/municipalities/${municipalityId}/files`, { method: 'POST', body: formData });
-    await loadMunicipalities();
-    const refreshed = cachedMunicipalityRecords.find((m) => String(m.id) === String(municipalityId));
+    const refreshed = getMunicipality(municipalityId);
     if (refreshed) await openMunicipalityDetailsModal(refreshed);
+    loadMunicipalities().catch(() => {});
   };
   picker.click();
 }
@@ -7709,10 +7709,11 @@ async function submitMunicipalityUploadForm(form, municipalityId) {
     });
     if (progressBar) progressBar.style.width = '100%';
     if (progressLabel) progressLabel.textContent = '100%';
-    await loadMunicipalities();
-    const refreshed = cachedMunicipalityRecords.find((m) => String(m.id) === String(municipalityId));
+    const refreshed = getMunicipality(municipalityId);
     form.reset();
     if (refreshed) await openMunicipalityDetailsModal(refreshed);
+    document.getElementById('municipality-feedback').textContent = 'Document chargé avec succès.';
+    loadMunicipalities().catch(() => {});
   } finally {
     if (submitButton) {
       submitButton.disabled = false;
