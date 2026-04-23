@@ -1022,7 +1022,6 @@ const BISON_FUTE_CAMERAS = [
   { name: 'A480/RN481 direction Ouest/Sud', road: 'A480 / RN481', lat: 45.21650958839951, lon: 5.6784500109717335, manager: 'AREA', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/at_area10.mp4' },
   { name: 'A48 aire de l’Île rose', road: 'A48', lat: 45.272598746702336, lon: 5.625897585313137, manager: 'AREA', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/at_area08.mp4' },
   { name: 'A41S près de Grenoble vers Grenoble', road: 'A41S', lat: 45.203406837349334, lon: 5.7762608185576765, manager: 'AREA', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/at_area05.mp4' },
-  { name: 'Bifurcation A43/A48 près de Bourgoin vers Chambéry', road: 'A43 / A48', lat: 45.56699881012449, lon: 5.344117226835471, manager: 'AREA', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/at_area06.mp4' },
   { name: 'A48 Châbons voie Sud', road: 'A48', lat: 45.44780572102549, lon: 5.399438919782866, manager: 'AREA', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/at_area11.mp4' },
   { name: 'Saut du Moine N85 PR52+595', road: 'N85', lat: 45.09107420388591, lon: 5.724767451985743, manager: 'DIR Centre-Est', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/nce_38.mp4' },
   { name: 'Vienne N7 PR5+434', road: 'N7', lat: 45.531422895527555, lon: 4.873893232425462, manager: 'DIR Centre-Est', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/nce_29.mp4' },
