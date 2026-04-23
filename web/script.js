@@ -6654,6 +6654,9 @@ function renderArsAuraAlerts(data = {}) {
 
 function renderMaSecuriteAlerts(data = {}) {
   _renderNewsSvcCard('ma-securite-status', 'ma-securite-list', data, 'https://www.data.gouv.fr/dataservices/api-ma-securite', 'Aucune actualité Ma Sécurité filtrée sur l’Isère.');
+  if (data.status !== 'online' && data.error) {
+    setHtml('ma-securite-list', `<li class="muted">${escapeHtml(data.error)}</li>`);
+  }
 }
 
 function renderSireneOpenData(data = {}) {
@@ -9244,6 +9247,31 @@ function buildAutoroutesIsereService(data = {}) {
 
 function getFluxPayload(key, data = {}) {
   if (key === 'autoroutes_isere') return buildAutoroutesIsereService(data);
+  if (!data || typeof data !== 'object' || !(key in data)) {
+    if (key === 'ma_securite') {
+      return {
+        service: 'Ma Sécurité',
+        status: 'degraded',
+        items: [],
+        items_total: 0,
+        error: 'Service absent du snapshot backend. Redémarre le backend ou configure la clé API Ma Sécurité.',
+        source: 'https://www.data.gouv.fr/dataservices/api-ma-securite',
+      };
+    }
+    if (key === 'sirene_open_data') {
+      return {
+        service: 'Sirene open data',
+        status: 'degraded',
+        items: [],
+        items_total: 0,
+        establishments_total: 0,
+        top_communes: [],
+        top_sectors: [],
+        error: 'Service absent du snapshot backend. Redémarre le backend ou configure le jeton Sirene.',
+        source: 'https://www.data.gouv.fr/dataservices/api-sirene-open-data',
+      };
+    }
+  }
   return data?.[key] || {};
 }
 
