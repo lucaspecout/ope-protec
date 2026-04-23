@@ -10271,11 +10271,12 @@ def fetch_feux_foret_isere(force_refresh: bool = False) -> dict[str, Any]:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# COLS ALPINS — État en temps réel via open-meteo (Feature 19)
+# COLS ALPINS — État officiel Itinisère + fallback météo (Feature 19)
 # ══════════════════════════════════════════════════════════════════════════════
 _COLS_CACHE_TTL_SECONDS = 1800
 _cols_cache_lock = Lock()
 _cols_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "cols_alpins_isere"}
+_ITINISERE_COLS_LAYER_URL = "https://itinisere.fr/mod_turbolead/mod/inforoute/index.php?action=367&layer=Layer-repere_cols"
 
 _COLS_ALPINS: list[dict[str, Any]] = [
     {"nom": "Col du Lautaret",        "route": "N91",   "alt": 2058, "lat": 45.036, "lon": 6.408},
@@ -10289,6 +10290,19 @@ _COLS_ALPINS: list[dict[str, Any]] = [
     {"nom": "Col du Granier",          "route": "D912",  "alt": 1134, "lat": 45.451, "lon": 5.924},
     {"nom": "Col de la Chartreuse",    "route": "D512",  "alt": 1139, "lat": 45.333, "lon": 5.824},
 ]
+
+_COLS_ALIASES: dict[str, tuple[str, ...]] = {
+    "col du lautaret": ("lautaret",),
+    "col du galibier": ("galibier",),
+    "col de la croix de fer": ("croix de fer",),
+    "col du glandon": ("glandon",),
+    "col de l ornon": ("col d ornon", "ornon"),
+    "col de mens": ("mens",),
+    "col de porte": ("porte",),
+    "col du coq": ("coq",),
+    "col du granier": ("granier",),
+    "col de la chartreuse": ("chartreuse",),
+}
 
 
 def _normalize_col_token(value: str) -> str:
@@ -10306,19 +10320,21 @@ def _match_col_event(col_name: str, event: dict[str, Any]) -> bool:
         return False
     if col_token in haystack:
         return True
-    aliases = {
-        "col du lautaret": ("lautaret",),
-        "col du galibier": ("galibier",),
-        "col de la croix de fer": ("croix de fer",),
-        "col du glandon": ("glandon",),
-        "col de l ornon": ("ornon",),
-        "col de mens": ("mens",),
-        "col de porte": ("porte",),
-        "col du coq": ("coq",),
-        "col du granier": ("granier",),
-        "col de la chartreuse": ("chartreuse",),
-    }
-    return any(alias in haystack for alias in aliases.get(col_token, ()))
+    return any(alias in haystack for alias in _COLS_ALIASES.get(col_token, ()))
+
+
+def _match_itinisere_col_feature(col_name: str, feature: dict[str, Any]) -> bool:
+    properties = feature.get("properties") if isinstance(feature, dict) else {}
+    if not isinstance(properties, dict):
+        return False
+    official_name = str(properties.get("titre") or properties.get("title") or "").strip()
+    haystack = _normalize_col_token(official_name)
+    col_token = _normalize_col_token(col_name)
+    if not haystack or not col_token:
+        return False
+    if col_token == haystack or col_token in haystack or haystack in col_token:
+        return True
+    return any(alias in haystack for alias in _COLS_ALIASES.get(col_token, ()))
 
 
 def _col_status_from_itinisere_event(event: dict[str, Any]) -> dict[str, Any] | None:
@@ -10334,6 +10350,29 @@ def _col_status_from_itinisere_event(event: dict[str, Any]) -> dict[str, Any] | 
     if any(token in text for token in ("prudence", "equipements speciaux", "chaines", "delicat", "difficile")):
         return {"statut": "prudence", "couleur": "jaune", "detail": "Conditions signalées par Itinisère", "source_status": "itinisere"}
     return None
+
+
+def _col_status_from_itinisere_feature(feature: dict[str, Any]) -> dict[str, Any] | None:
+    properties = feature.get("properties") if isinstance(feature, dict) else {}
+    if not isinstance(properties, dict):
+        return None
+    code = _normalize_col_token(str(properties.get("code") or ""))
+    icon = _normalize_col_token(str(properties.get("url_icone") or ""))
+    date_label = str(properties.get("date") or properties.get("date_courte") or "").strip()
+    detail_suffix = f" · {date_label}" if date_label else ""
+    if "ferme" in code or "ferme" in icon:
+        return {"statut": "fermé", "couleur": "rouge", "detail": f"Statut officiel Itinisère{detail_suffix}", "source_status": "itinisere_layer"}
+    if any(token in code or token in icon for token in ("equip", "special", "speciaux", "chaine")):
+        return {"statut": "équipements spéciaux", "couleur": "orange", "detail": f"Statut officiel Itinisère{detail_suffix}", "source_status": "itinisere_layer"}
+    if "ouvert" in code or "ouvert" in icon:
+        return {"statut": "ouvert", "couleur": "vert", "detail": f"Statut officiel Itinisère{detail_suffix}", "source_status": "itinisere_layer"}
+    return None
+
+
+def _fetch_itinisere_cols_layer() -> list[dict[str, Any]]:
+    payload = _http_get_json(_ITINISERE_COLS_LAYER_URL, timeout=12)
+    features = payload.get("features") if isinstance(payload, dict) else None
+    return features if isinstance(features, list) else []
 
 
 def _col_status_from_weather(temp_c, snow_cm, precip, wind_kmh):
@@ -10353,6 +10392,11 @@ def _col_status_from_weather(temp_c, snow_cm, precip, wind_kmh):
 def _fetch_cols_alpins_live() -> dict[str, Any]:
     cols_out: list[dict[str, Any]] = []
     first_error: str | None = None
+    official_cols_features: list[dict[str, Any]] = []
+    try:
+        official_cols_features = _fetch_itinisere_cols_layer()
+    except Exception as exc:
+        first_error = f"itinisere_layer: {exc}"
     itinisere_payload = fetch_itinisere_disruptions(limit=120, force_refresh=False)
     itinisere_events = itinisere_payload.get("events") if isinstance(itinisere_payload, dict) else []
     if not isinstance(itinisere_events, list):
@@ -10382,8 +10426,14 @@ def _fetch_cols_alpins_live() -> dict[str, Any]:
             if first_error is None:
                 first_error = str(exc)
 
+        official_feature = next(
+            (feature for feature in official_cols_features if isinstance(feature, dict) and _match_itinisere_col_feature(col["nom"], feature)),
+            None,
+        )
+        status = _col_status_from_itinisere_feature(official_feature or {}) if official_feature else None
         matched_event = next((evt for evt in itinisere_events if isinstance(evt, dict) and _match_col_event(col["nom"], evt)), None)
-        status = _col_status_from_itinisere_event(matched_event or {}) if matched_event else None
+        if status is None and matched_event:
+            status = _col_status_from_itinisere_event(matched_event or {})
         if status is None and ok and temp is not None:
             status = _col_status_from_weather(temp, snow, precip, wind)
         if status is None:
@@ -10392,10 +10442,11 @@ def _fetch_cols_alpins_live() -> dict[str, Any]:
         cols_out.append({**col, **status, "temperature": temp, "enneigement_cm": snow, "precipitations": precip, "vent_kmh": wind})
 
     nb_dangereux = sum(1 for c in cols_out if c["couleur"] in ("orange", "rouge"))
+    source = _ITINISERE_COLS_LAYER_URL if official_cols_features else "https://www.itinisere.fr"
     result: dict[str, Any] = {
         "service": "Cols alpins Isère",
-        "status": "online",
-        "source": "https://www.itinisere.fr",
+        "status": "online" if official_cols_features else "degraded",
+        "source": source,
         "cols": cols_out,
         "cols_total": len(cols_out),
         "dangereux_total": nb_dangereux,

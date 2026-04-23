@@ -342,7 +342,7 @@ SERVICE_REFRESH_INTERVALS: dict[str, int] = {
     "seismes_isere":        600,    # Séismes Isère (BCSF-RéNaSS)
     "avalanche_isere":     1800,    # BRA Météo-France massifs Isère
     "feux_foret_isere":     600,    # Feux de forêt EFFIS/JRC
-    "cols_alpins_isere":   1800,    # État cols alpins Isère (open-meteo)
+    "cols_alpins_isere":   1800,    # État cols alpins Isère (couche officielle Itinisère)
     "copernicus_ems":      1800,    # Copernicus EMS cartographie d'urgence
 }
 
