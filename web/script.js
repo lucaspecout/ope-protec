@@ -9287,7 +9287,7 @@ function _renderDisruptionsList(listId, items, emptyMsg = 'Aucune perturbation s
     const fromStr = _fmtDate(d.valid_from);
     const untilStr = _fmtDate(d.valid_until);
     const dateHtml = fromStr || untilStr
-      ? `<br><span style="font-size:.76rem;color:#666">📅 ${fromStr && untilStr ? `Du ${escapeHtml(fromStr)} au ${escapeHtml(untilStr)}` : fromStr ? `Depuis le ${escapeHtml(fromStr)}` : `Jusqu'au ${escapeHtml(untilStr)}`}</span>`
+      ? `<br><span style="font-size:.76rem;color:#666">🕒 ${fromStr && untilStr ? `Du ${escapeHtml(fromStr)} au ${escapeHtml(untilStr)}` : fromStr ? `Depuis le ${escapeHtml(fromStr)}` : `Jusqu'au ${escapeHtml(untilStr)}`}</span>`
       : '';
 
     // Titre + description

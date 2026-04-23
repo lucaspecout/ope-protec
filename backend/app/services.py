@@ -8240,7 +8240,7 @@ _TER_ISERE_GEO_KEYWORDS: tuple[str, ...] = (
     "romans", "valence", "chambéry", "chamb", "lyon", "genève", "briançon",
 )
 
-# Mots spécifiquement allemands qui indiquent une alerte en allemand à exclure
+# Mots spécifiquement non français qui indiquent une alerte étrangère à exclure
 _GERMAN_ALERT_WORDS: frozenset[str] = frozenset({
     "verspätung", "zug hat", "baustelleninfo", "holzfällerarbeiten",
     "totalunterbrechung", "verkehrs", "gleis", "bahnhof", "fahrgäste",
@@ -8252,19 +8252,56 @@ _GERMAN_ALERT_WORDS: frozenset[str] = frozenset({
     "schienenersatzverkehr", "arbeiten im", "rendezvous auf",
 })
 
+_ITALIAN_ALERT_WORDS: frozenset[str] = frozenset({
+    "treni", "treno", "circolazione", "interrotta", "interrotto",
+    "lavori", "cantiere", "guasto", "ritardo", "ritardi", "sostitutivo",
+    "servizio", "binario", "stazione", "venerdi", "sabato", "domenica",
+    "lunedi", "martedi", "mercoledi", "giovedi", "ore", "fino al",
+})
 
-def _is_german_alert(text: str) -> bool:
-    """Retourne True si le texte est clairement en allemand."""
+_ENGLISH_ALERT_WORDS: frozenset[str] = frozenset({
+    "train service", "service disruption", "replacement bus", "track works",
+    "between", "delayed", "cancelled", "station", "line closed",
+    "engineering works", "until", "from", "saturday", "friday",
+})
+
+_FRENCH_RAIL_MARKERS: frozenset[str] = frozenset({
+    "ligne", "travaux", "circulation", "perturbation", "train", "trains",
+    "reprise du trafic", "interrompu", "supprimé", "supprime", "retard",
+    "desserte", "substitution routière", "bus de substitution", "gare",
+    "jusqu'au", "jusqu’à", "à partir de", "du ", " au ", "sens de circulation",
+})
+
+
+def _is_non_french_ter_alert(text: str) -> bool:
+    """Retourne True si le texte ressemble clairement à une alerte ferroviaire non française."""
     lower = str(text or "").lower()
-    hit_count = sum(1 for w in _GERMAN_ALERT_WORDS if w in lower)
-    if hit_count >= 2:
+    if not lower.strip():
+        return False
+
+    german_hits = sum(1 for w in _GERMAN_ALERT_WORDS if w in lower)
+    italian_hits = sum(1 for w in _ITALIAN_ALERT_WORDS if w in lower)
+    english_hits = sum(1 for w in _ENGLISH_ALERT_WORDS if w in lower)
+    french_hits = sum(1 for w in _FRENCH_RAIL_MARKERS if w in lower)
+
+    if german_hits >= 2 or italian_hits >= 2 or english_hits >= 2:
         return True
-    # Quelques tournures très spécifiques des alertes TER allemandes.
+    if german_hits >= 1 and french_hits == 0:
+        return True
+    if italian_hits >= 1 and french_hits == 0:
+        return True
+    if english_hits >= 1 and french_hits == 0:
+        return True
     return bool(re.search(
-        r"\b(?:zugverkehr|schienenersatzverkehr|bauarbeiten|beeintr[aä]chtigt|von freitag|bis samstag)\b",
+        r"\b(?:zugverkehr|schienenersatzverkehr|bauarbeiten|beeintr[aä]chtigt|von freitag|bis samstag|circolazione|servizio sostitutivo|replacement bus|track works)\b",
         lower,
         re.IGNORECASE,
     ))
+
+
+def _is_german_alert(text: str) -> bool:
+    """Compatibilité historique: délègue au filtre non-français renforcé."""
+    return _is_non_french_ter_alert(text)
 
 
 _TER_SIRI_NAMESPACES = [
