@@ -694,6 +694,8 @@ _FINESS_ISERE_CACHE_TTL_SECONDS = 43200
 _FINESS_ISERE_MAX_LIMIT = 20000
 _FINESS_ISERE_STABLE_CSV_URL = "https://static.data.gouv.fr/resources/finess-extraction-du-fichier-des-etablissements/20260312-094547/etalab-cs1100507-stock-20260311-0343.csv"
 _ISERE_OPENDATA_CACHE_TTL_SECONDS = 1800
+_MA_SECURITE_CACHE_TTL_SECONDS = 300
+_SIRENE_OPEN_DATA_CACHE_TTL_SECONDS = 1800
 _ANFR_ISERE_CACHE_TTL_SECONDS = 43200
 _ARCEP_ISERE_CACHE_TTL_SECONDS = 900
 _HUBEAU_GROUNDWATER_CACHE_TTL_SECONDS = 10800
@@ -744,6 +746,10 @@ _rte_oauth_tokens: dict[str, dict[str, Any]] = {}
 _rte_oauth_lock = Lock()
 _finess_isere_cache_lock = Lock()
 _finess_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "finess_isere"}
+_ma_securite_cache_lock = Lock()
+_ma_securite_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "ma_securite"}
+_sirene_open_data_cache_lock = Lock()
+_sirene_open_data_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "sirene_open_data"}
 _finess_isere_communes_lock = Lock()
 _finess_isere_communes_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 
@@ -5041,6 +5047,330 @@ def fetch_isere_opendata_resilience(force_refresh: bool = False, limit: int = 80
         cache=_isere_opendata_cache,
         lock=_isere_opendata_cache_lock,
         ttl_seconds=_ISERE_OPENDATA_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=loader,
+    )
+
+
+_ISERE_MA_SECURITE_KEYWORDS = (
+    "isere",
+    "isère",
+    "38",
+    "grenoble",
+    "voiron",
+    "vienne",
+    "bourgoin",
+    "bourgoin-jallieu",
+    "la tour-du-pin",
+    "saint-marcellin",
+    "pont-de-claix",
+    "meylan",
+    "echirolles",
+    "échirolles",
+    "fontaine",
+)
+
+
+def _extract_first_list(payload: Any) -> list[Any]:
+    if isinstance(payload, list):
+        return payload
+    if not isinstance(payload, dict):
+        return []
+    for key in ("items", "results", "data", "content", "actualites", "news"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return value
+        if isinstance(value, dict):
+            for nested_key in ("items", "results", "content", "data"):
+                nested_value = value.get(nested_key)
+                if isinstance(nested_value, list):
+                    return nested_value
+    return []
+
+
+def _normalize_ma_securite_item(item: Any) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    title = str(item.get("title") or item.get("titre") or item.get("headline") or item.get("name") or "").strip()
+    description = str(item.get("message") or item.get("description") or item.get("content") or item.get("texte") or "").strip()
+    locality = str(item.get("locality") or item.get("localite") or item.get("location") or item.get("ville") or item.get("commune") or "").strip()
+    theme = str(item.get("theme") or item.get("thematique") or item.get("category") or item.get("rubrique") or "").strip()
+    published_at = str(
+        item.get("created_at")
+        or item.get("dateCreation")
+        or item.get("published_at")
+        or item.get("date")
+        or item.get("createdAt")
+        or ""
+    ).strip()
+    link = str(item.get("url") or item.get("link") or item.get("href") or "").strip()
+    image = str(item.get("image") or item.get("image_url") or item.get("illustration") or "").strip()
+    blob = " ".join(part for part in (title, description, locality, theme) if part).lower()
+    if not blob or not any(token in blob for token in _ISERE_MA_SECURITE_KEYWORDS):
+        return None
+    return {
+        "title": title or "Actualité Ma Sécurité",
+        "description": description[:500],
+        "locality": locality,
+        "theme": theme,
+        "published_at": published_at,
+        "link": link,
+        "image": image,
+    }
+
+
+def _fetch_ma_securite_isere_live(limit: int = 12) -> dict[str, Any]:
+    source = str(settings.ma_securite_api_url or "").strip()
+    api_key = str(settings.ma_securite_api_key or "").strip()
+    doc_url = "https://www.data.gouv.fr/dataservices/api-ma-securite"
+    if not api_key:
+        return {
+            "service": "Ma Sécurité",
+            "status": "degraded",
+            "source": doc_url,
+            "items": [],
+            "items_total": 0,
+            "error": "Clé API Ma Sécurité non configurée",
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+    if not source:
+        return {
+            "service": "Ma Sécurité",
+            "status": "degraded",
+            "source": doc_url,
+            "items": [],
+            "items_total": 0,
+            "error": "Endpoint API Ma Sécurité non configuré",
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+
+    safe_limit = max(1, min(limit, 30))
+    params = {"department": "38", "departement": "38", "limit": safe_limit, "size": safe_limit}
+    final_source = source.format(department="38", departement="38", limit=safe_limit)
+    if "?" not in final_source:
+        final_source = f"{final_source}?{urlencode(params)}"
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": _BROWSER_UA,
+        "Authorization": f"Bearer {api_key}",
+        "X-API-Key": api_key,
+        "apikey": api_key,
+    }
+    payload = _http_get_json(final_source, timeout=20, headers=headers)
+    raw_items = _extract_first_list(payload)
+    items = [normalized for normalized in (_normalize_ma_securite_item(item) for item in raw_items) if normalized]
+    items.sort(key=lambda row: str(row.get("published_at") or ""), reverse=True)
+    total_raw = payload.get("total") if isinstance(payload, dict) else None
+    try:
+        items_total = int(total_raw)
+    except (TypeError, ValueError):
+        items_total = len(items)
+    return {
+        "service": "Ma Sécurité",
+        "status": "online",
+        "source": final_source,
+        "items": items[:safe_limit],
+        "items_total": items_total,
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+def fetch_ma_securite_isere(force_refresh: bool = False, limit: int = 12) -> dict[str, Any]:
+    safe_limit = max(1, min(limit, 30))
+
+    def loader() -> dict[str, Any]:
+        try:
+            return _fetch_ma_securite_isere_live(limit=safe_limit)
+        except Exception as exc:
+            return {
+                "service": "Ma Sécurité",
+                "status": "degraded",
+                "source": str(settings.ma_securite_api_url or "https://www.data.gouv.fr/dataservices/api-ma-securite"),
+                "items": [],
+                "items_total": 0,
+                "error": str(exc),
+                "updated_at": datetime.utcnow().isoformat() + "Z",
+            }
+
+    return _cached_external_payload(
+        cache=_ma_securite_cache,
+        lock=_ma_securite_cache_lock,
+        ttl_seconds=_MA_SECURITE_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=loader,
+    )
+
+
+def _sirene_parse_total(payload: dict[str, Any]) -> int:
+    for candidate in (
+        payload.get("total"),
+        payload.get("total_results"),
+        payload.get("nombre"),
+        (payload.get("header") or {}).get("total"),
+    ):
+        try:
+            return int(candidate)
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
+def _sirene_build_label(item: dict[str, Any]) -> str:
+    unite = item.get("uniteLegale") or {}
+    for candidate in (
+        item.get("enseigne1Etablissement"),
+        item.get("enseigne2Etablissement"),
+        item.get("enseigne3Etablissement"),
+        unite.get("denominationUniteLegale"),
+        " ".join(
+            part
+            for part in (
+                str(unite.get("prenom1UniteLegale") or "").strip(),
+                str(unite.get("nomUniteLegale") or "").strip(),
+            )
+            if part
+        ).strip(),
+    ):
+        text = str(candidate or "").strip()
+        if text:
+            return text
+    return "Établissement actif"
+
+
+def _sirene_normalize_item(item: Any) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    unite = item.get("uniteLegale") or {}
+    periods = unite.get("periodesUniteLegale")
+    period = periods[0] if isinstance(periods, list) and periods and isinstance(periods[0], dict) else {}
+    commune = str(item.get("libelleCommuneEtablissement") or "").strip()
+    postal_code = str(item.get("codePostalEtablissement") or "").strip()
+    if not postal_code.startswith("38"):
+        return None
+    activity_code = str(
+        item.get("activitePrincipaleRegistreMetiersEtablissement")
+        or item.get("activitePrincipaleEtablissement")
+        or unite.get("activitePrincipaleUniteLegale")
+        or period.get("activitePrincipaleUniteLegale")
+        or ""
+    ).strip()
+    return {
+        "name": _sirene_build_label(item),
+        "siret": str(item.get("siret") or "").strip(),
+        "commune": commune,
+        "postal_code": postal_code,
+        "naf_code": activity_code,
+        "employee_range": str(item.get("trancheEffectifsEtablissement") or unite.get("trancheEffectifsUniteLegale") or "").strip(),
+    }
+
+
+def _fetch_sirene_open_data_isere_live(limit: int = 100) -> dict[str, Any]:
+    token = str(settings.sirene_api_token or "").strip()
+    base_url = str(settings.sirene_api_base_url or "").rstrip("/")
+    doc_url = "https://www.data.gouv.fr/dataservices/api-sirene-open-data"
+    if not token:
+        return {
+            "service": "Sirene open data",
+            "status": "degraded",
+            "source": doc_url,
+            "items": [],
+            "items_total": 0,
+            "establishments_total": 0,
+            "top_communes": [],
+            "top_sectors": [],
+            "error": "Jeton API Sirene non configuré",
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+    if not base_url:
+        return {
+            "service": "Sirene open data",
+            "status": "degraded",
+            "source": doc_url,
+            "items": [],
+            "items_total": 0,
+            "establishments_total": 0,
+            "top_communes": [],
+            "top_sectors": [],
+            "error": "Base URL API Sirene non configurée",
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+
+    safe_limit = max(20, min(limit, 100))
+    query = "etatAdministratifEtablissement:A AND codePostalEtablissement:38*"
+    endpoint = f"{base_url}/siret?{urlencode({'q': query, 'nombre': safe_limit})}"
+    payload = _http_get_json(
+        endpoint,
+        timeout=20,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": _BROWSER_UA,
+            "Authorization": f"Bearer {token}",
+        },
+    )
+    raw_items = payload.get("etablissements") if isinstance(payload, dict) else []
+    raw_items = raw_items if isinstance(raw_items, list) else []
+    items = [normalized for normalized in (_sirene_normalize_item(item) for item in raw_items) if normalized]
+
+    commune_counts: dict[str, int] = {}
+    sector_counts: dict[str, int] = {}
+    for item in items:
+        commune = str(item.get("commune") or "").strip()
+        sector = str(item.get("naf_code") or "").strip()
+        if commune:
+            commune_counts[commune] = commune_counts.get(commune, 0) + 1
+        if sector:
+            sector_counts[sector] = sector_counts.get(sector, 0) + 1
+
+    top_communes = [
+        {"commune": name, "count": count}
+        for name, count in sorted(commune_counts.items(), key=lambda row: (-row[1], row[0]))[:6]
+    ]
+    top_sectors = [
+        {"naf_code": code, "count": count}
+        for code, count in sorted(sector_counts.items(), key=lambda row: (-row[1], row[0]))[:6]
+    ]
+
+    total = _sirene_parse_total(payload if isinstance(payload, dict) else {})
+    if total <= 0:
+        total = len(items)
+
+    return {
+        "service": "Sirene open data",
+        "status": "online",
+        "source": endpoint,
+        "items": items[:8],
+        "items_total": len(items),
+        "establishments_total": total,
+        "top_communes": top_communes,
+        "top_sectors": top_sectors,
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+def fetch_sirene_open_data_isere(force_refresh: bool = False, limit: int = 100) -> dict[str, Any]:
+    safe_limit = max(20, min(limit, 100))
+
+    def loader() -> dict[str, Any]:
+        try:
+            return _fetch_sirene_open_data_isere_live(limit=safe_limit)
+        except Exception as exc:
+            return {
+                "service": "Sirene open data",
+                "status": "degraded",
+                "source": "https://www.data.gouv.fr/dataservices/api-sirene-open-data",
+                "items": [],
+                "items_total": 0,
+                "establishments_total": 0,
+                "top_communes": [],
+                "top_sectors": [],
+                "error": str(exc),
+                "updated_at": datetime.utcnow().isoformat() + "Z",
+            }
+
+    return _cached_external_payload(
+        cache=_sirene_open_data_cache,
+        lock=_sirene_open_data_cache_lock,
+        ttl_seconds=_SIRENE_OPEN_DATA_CACHE_TTL_SECONDS,
         force_refresh=force_refresh,
         loader=loader,
     )
@@ -9459,6 +9789,8 @@ def flush_service_memory_cache(service_key: str) -> dict[str, str]:
         "sncf_isere":          (_sncf_isere_cache,            _sncf_isere_cache_lock),
         "anfr_isere":          (_anfr_isere_cache,            _anfr_isere_cache_lock),
         "arcep_isere":         (_arcep_isere_cache,           _arcep_isere_cache_lock),
+        "ma_securite":         (_ma_securite_cache,           _ma_securite_cache_lock),
+        "sirene_open_data":    (_sirene_open_data_cache,      _sirene_open_data_cache_lock),
         "groundwater_isere":   (_hubeau_groundwater_cache,    _hubeau_groundwater_cache_lock),
         "apic_isere":          (_apic_isere_cache,            _apic_isere_cache_lock),
         "isere_opendata":      (_isere_opendata_cache,        _isere_opendata_cache_lock),

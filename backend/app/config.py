@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     rte_consumption_b64: str = ""
     # NASA FIRMS — clé gratuite sur https://firms.modaps.eosdis.nasa.gov/api/map_key/
     firms_map_key: str = ""
+    # Ma Sécurité — accès restreint, endpoint fourni par la documentation partenaire.
+    ma_securite_api_key: str = ""
+    ma_securite_api_url: str = ""
+    # INSEE SIRENE open data — jeton "ouvert avec compte".
+    sirene_api_token: str = ""
+    sirene_api_base_url: str = "https://api.insee.fr/api-sirene/3.11"
 
     class Config:
         env_file = ".env"
