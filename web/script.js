@@ -7230,6 +7230,9 @@ function renderGeorisquesPcsRisks(monitored = []) {
   if (selectedGeorisquesPcsCommuneKey && !pcsMonitored.some((commune) => georisquesCommuneKey(commune) === selectedGeorisquesPcsCommuneKey)) {
     selectedGeorisquesPcsCommuneKey = '';
   }
+  if (currentUser?.role === 'mairie' && pcsMonitored.length === 1) {
+    selectedGeorisquesPcsCommuneKey = georisquesCommuneKey(pcsMonitored[0]);
+  }
 
   const select = document.getElementById('georisques-pcs-select');
   if (select) {
@@ -7237,7 +7240,9 @@ function renderGeorisquesPcsRisks(monitored = []) {
       const key = georisquesCommuneKey(commune);
       return `<option value="${escapeHtml(key)}">${escapeHtml(commune.name || commune.commune || 'Commune inconnue')} (${escapeHtml(commune.code_insee || '-')})</option>`;
     }).join('');
-    setHtml('georisques-pcs-select', `<option value="">Sélectionnez une commune PCS</option>${options}`);
+    const placeholder = currentUser?.role === 'mairie' ? '' : '<option value="">Sélectionnez une commune PCS</option>';
+    setHtml('georisques-pcs-select', `${placeholder}${options}`);
+    select.disabled = currentUser?.role === 'mairie';
     if (selectedGeorisquesPcsCommuneKey) {
       select.value = selectedGeorisquesPcsCommuneKey;
     } else {
@@ -9200,6 +9205,7 @@ async function renderMeteoCitySelector() {
   const found = options.some((city) => city.key === previousValue);
   select.value = found ? previousValue : (options[0]?.key || ISERE_MAJOR_CITIES[0].key);
   selectedMeteoCityKey = select.value;
+  select.disabled = currentUser?.role === 'mairie';
   if (select.dataset.bound === '1') return;
   select.addEventListener('change', async () => {
     selectedMeteoCityKey = select.value;
