@@ -7371,12 +7371,15 @@ function uploadMunicipalityDocument(origin, municipalityId, formData, onProgress
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', url, true);
+    xhr.timeout = 90000;
+    xhr.setRequestHeader('Accept', 'application/json');
     if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
     xhr.upload.onprogress = (event) => {
       if (!event.lengthComputable || typeof onProgress !== 'function') return;
       onProgress(Math.round((event.loaded / event.total) * 100));
     };
     xhr.onerror = () => reject(new Error('Failed to fetch'));
+    xhr.ontimeout = () => reject(new Error("Téléversement expiré avant réponse du serveur"));
     xhr.onload = () => {
       if (xhr.status === 401) {
         logout();
@@ -7679,6 +7682,7 @@ async function submitMunicipalityUploadForm(form, municipalityId) {
   if (!file) return;
   const title = form.elements.title.value.trim() || file.name;
   const docType = form.elements.doc_type.value || 'document';
+  const submitButton = form.querySelector('button[type="submit"]');
   const formData = new FormData();
   formData.append('file', file);
   formData.append('title', title);
@@ -7686,20 +7690,43 @@ async function submitMunicipalityUploadForm(form, municipalityId) {
 
   const progressWrap = document.querySelector(`[data-muni-upload-progress="${municipalityId}"]`);
   const progressLabel = document.querySelector(`[data-muni-upload-progress-label="${municipalityId}"]`);
+  const progressBar = progressWrap?.querySelector('.municipality-upload-progress__bar');
   if (progressWrap) {
     progressWrap.hidden = false;
     progressWrap.classList.remove('hidden');
   }
+  if (progressBar) progressBar.style.width = '0%';
+  if (progressLabel) progressLabel.textContent = '0%';
+  if (submitButton) {
+    submitButton.disabled = true;
+    submitButton.textContent = 'Envoi...';
+  }
 
-  await uploadMunicipalityDocumentWithFallback(municipalityId, formData, (progress) => {
-    const bar = progressWrap?.querySelector('.municipality-upload-progress__bar');
-    if (bar) bar.style.width = `${progress}%`;
-    if (progressLabel) progressLabel.textContent = `${progress}%`;
-  });
-
-  await loadMunicipalities();
-  const refreshed = cachedMunicipalityRecords.find((m) => String(m.id) === String(municipalityId));
-  if (refreshed) await openMunicipalityDetailsModal(refreshed);
+  try {
+    await uploadMunicipalityDocumentWithFallback(municipalityId, formData, (progress) => {
+      if (progressBar) progressBar.style.width = `${progress}%`;
+      if (progressLabel) progressLabel.textContent = `${progress}%`;
+    });
+    if (progressBar) progressBar.style.width = '100%';
+    if (progressLabel) progressLabel.textContent = '100%';
+    await loadMunicipalities();
+    const refreshed = cachedMunicipalityRecords.find((m) => String(m.id) === String(municipalityId));
+    form.reset();
+    if (refreshed) await openMunicipalityDetailsModal(refreshed);
+  } finally {
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.textContent = 'Ajouter';
+    }
+    if (progressWrap) {
+      setTimeout(() => {
+        progressWrap.hidden = true;
+        progressWrap.classList.add('hidden');
+        if (progressBar) progressBar.style.width = '0%';
+        if (progressLabel) progressLabel.textContent = '0%';
+      }, 500);
+    }
+  }
 }
 
 function parseUtcTimestamp(value) {
