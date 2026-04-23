@@ -68,7 +68,6 @@ const FLUX_SERVICES = [
   { key: 'anfr_isere',             label: 'ANFR · Antennes mobiles',   icon: '📡', category: 'Télécom',       interval: 21600, metric: (d) => `${d.supports_total ?? 0} support(s) mobile recensés` },
   { key: 'arcep_isere',            label: 'ARCEP · Sites mobiles',     icon: '📶', category: 'Télécom',       interval: 600,   metric: (d) => `${d.outages_total ?? 0} indisponibilité(s)` },
   { key: 'isere_opendata',         label: 'Isère OpenData · Résilience', icon: '📊', category: 'Données',    interval: 1800,  metric: (d) => `${d.totals?.schools ?? 0} écoles · ${d.totals?.health_centers ?? 0} santé · ${d.totals?.food_aid_points ?? 0} aide alim.` },
-  { key: 'sirene_open_data',       label: 'Sirene open data',          icon: '🏢', category: 'Données',       interval: 1800,  metric: (d) => `${d.establishments_total ?? 0} établissement(s) actifs` },
   { key: 'finess_isere',           label: 'FINESS · Établissements santé', icon: '🏥', category: 'Santé',    interval: 21600, metric: (d) => `${d.resources_total ?? 0} établissement(s)` },
 ];
 const AUTOROUTES_ISERE_ROADS = Object.freeze(['A41', 'A43', 'A48', 'A49', 'A51', 'A480']);
@@ -685,14 +684,6 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
     isere_opendata: mergeServiceSlot(previous.isere_opendata || {}, next.isere_opendata || {}, (p, n) => ({
       ...p, ...n,
       totals: (n.totals && Object.keys(n.totals).length > 0) ? n.totals : (p.totals || {}),
-    })),
-    sirene_open_data: mergeServiceSlot(previous.sirene_open_data || {}, next.sirene_open_data || {}, (p, n) => ({
-      ...p, ...n,
-      items_total: keepPreviousValue(p.items_total, n.items_total),
-      establishments_total: keepPreviousValue(p.establishments_total, n.establishments_total),
-      items: keepPreviousArray(p.items, n.items),
-      top_communes: keepPreviousArray(p.top_communes, n.top_communes),
-      top_sectors: keepPreviousArray(p.top_sectors, n.top_sectors),
     })),
     avalanche_isere: mergeServiceSlot(previous.avalanche_isere || {}, next.avalanche_isere || {}, (p, n) => ({
       ...p, ...n,
@@ -6645,35 +6636,6 @@ function renderArsAuraAlerts(data = {}) {
   }).join('') || '<li>Aucune alerte sanitaire ARS.</li>');
 }
 
-function renderSireneOpenData(data = {}) {
-  const topCommunes = Array.isArray(data.top_communes) ? data.top_communes : [];
-  const topSectors = Array.isArray(data.top_sectors) ? data.top_sectors : [];
-  const items = Array.isArray(data.items) ? data.items : [];
-  const total = Number(data.establishments_total ?? 0);
-  setRiskText('sirene-status', `${data.status || 'inconnu'} · ${total} établissement(s) actifs`, data.status === 'online' ? 'vert' : 'jaune');
-  setText(
-    'sirene-info',
-    data.status === 'online'
-      ? `${items.length} établissement(s) échantillonnés · ${topCommunes.length} commune(s) dominantes`
-      : (data.error ? data.error.substring(0, 110) : 'Données Sirene non disponibles'),
-  );
-  const communeText = topCommunes.length
-    ? `Communes: ${topCommunes.map((item) => `${item.commune} (${item.count})`).join(', ')}`
-    : 'Communes dominantes indisponibles';
-  const sectorText = topSectors.length
-    ? `Codes NAF: ${topSectors.map((item) => `${item.naf_code} (${item.count})`).join(', ')}`
-    : 'Codes NAF indisponibles';
-  const sampleText = items.length
-    ? `Exemples: ${items.slice(0, 3).map((item) => `${item.name}${item.commune ? ` · ${item.commune}` : ''}`).join(' ; ')}`
-    : 'Aucun échantillon disponible';
-  setHtml('sirene-list', [
-    `<li><strong>Établissements actifs estimés:</strong> ${escapeHtml(String(total || 0))}</li>`,
-    `<li>${escapeHtml(communeText)}</li>`,
-    `<li>${escapeHtml(sectorText)}</li>`,
-    `<li>${escapeHtml(sampleText)}</li>`,
-  ].join(''));
-}
-
 function renderSeismesIsere(data = {}) {
   const items = Array.isArray(data.items) ? data.items : [];
   const last = items[0];
@@ -7003,7 +6965,7 @@ function buildGeorisquesMunicipalityUrl({ communeName = '', insee = '', postalCo
 
 function renderGeorisquesPcsDetail(commune) {
   if (!commune) {
-    setHtml('georisques-pcs-detail', '<p class="muted">Sélectionnez une commune PCS pour afficher ses informations.</p>');
+    setHtml('georisques-pcs-detail', '<p class="muted">Sélectionnez une commune PCS pour afficher sa lecture opérationnelle.</p>');
     return;
   }
 
@@ -7099,7 +7061,7 @@ function renderGeorisquesPcsDetail(commune) {
   const risksMarkup = allHazards
     .map((hazard) => {
       const tone = georisquesHazardTone(hazard);
-      return `<li><strong>${escapeHtml(String(hazard.label || 'Risque'))}</strong> · <span class="hazard-chip ${tone}">${escapeHtml(String(hazard.knownDanger || 'inconnu'))}</span> · Applicabilité ville: <strong>${hazard.applies ? 'Oui' : 'Non confirmé'}</strong>${hazard.detail ? `<br><span class="muted">${escapeHtml(String(hazard.detail))}</span>` : ''}</li>`;
+      return `<li class="georisques-risk-line"><strong>${escapeHtml(String(hazard.label || 'Risque'))}</strong> <span class="hazard-chip ${tone}">${escapeHtml(String(hazard.knownDanger || 'inconnu'))}</span> <span class="muted">· ${hazard.applies ? 'applicable' : 'non confirmé'}</span>${hazard.detail ? `<br><span class="muted">${escapeHtml(String(hazard.detail))}</span>` : ''}</li>`;
     })
     .join('');
 
@@ -7139,16 +7101,52 @@ function renderGeorisquesPcsDetail(commune) {
     ? cityDocuments.map((doc) => `<li>${doc}</li>`).join('')
     : '<li>Aucun document communal supplémentaire détecté.</li>';
 
+  const topKpis = [
+    { label: 'Danger agrégé', value: commune.gaspar_danger_level || danger.label, chip: `danger-chip ${danger.css}` },
+    { label: 'Sismicité', value: commune.seismic_zone || commune.zone_sismicite || 'inconnue' },
+    { label: 'Radon', value: commune.radon_label || 'inconnu' },
+    { label: 'Inondation', value: `${Number(commune.flood_documents || commune.nb_documents || 0)} doc(s)` },
+    { label: 'PPR', value: String(Number(commune.ppr_total || 0)) },
+    { label: 'Terrain', value: String(Number(commune.ground_movements_total || 0)) },
+    { label: 'Cavités', value: String(Number(commune.cavities_total || 0)) },
+    { label: 'TIM', value: String(Number(commune.tim_total || 0)) },
+  ];
+
   setHtml('georisques-pcs-detail', `
-    <p><strong>${escapeHtml(communeName)}</strong> <span class="danger-chip ${danger.css}">${escapeHtml(commune.gaspar_danger_level || danger.label)}</span></p>
-    <p>INSEE: <strong>${escapeHtml(insee || '-')}</strong> · Danger agrégé: <strong>${escapeHtml(commune.gaspar_danger_level || danger.label)}</strong> · Sismicité: <strong>${escapeHtml(commune.seismic_zone || commune.zone_sismicite || 'inconnue')}</strong> · Radon: <strong>${escapeHtml(commune.radon_label || 'inconnu')}</strong></p>
-    <p><strong>Liste complète des risques et applicabilité pour la ville</strong></p>
-    <ul class="list compact">${risksMarkup}</ul>
-    <p><strong>Documents inondation (AZI)</strong></p>
-    <ul class="list compact">${docsText}</ul>
-    <p><strong>Documents communaux disponibles (DICRIM, PPR, TIM…)</strong></p>
-    <ul class="list compact">${cityDocumentsMarkup}</ul>
-    <p><a href="${georisquesSearchUrl}" target="_blank" rel="noreferrer">Rechercher cette commune sur Géorisques</a> · <a href="${georisquesMainUrl}" target="_blank" rel="noreferrer">Site Géorisques</a></p>
+    <div class="georisques-commune-head">
+      <div>
+        <p class="tag">Commune sélectionnée</p>
+        <h3>${escapeHtml(communeName)}</h3>
+        <p class="muted">Code INSEE ${escapeHtml(insee || '-')}</p>
+      </div>
+      <div class="georisques-commune-links">
+        <a href="${georisquesSearchUrl}" target="_blank" rel="noreferrer">Rapport Géorisques ↗</a>
+        <a href="${georisquesMainUrl}" target="_blank" rel="noreferrer">Portail national ↗</a>
+      </div>
+    </div>
+    <div class="georisques-commune-kpis">
+      ${topKpis.map((item) => `<article class="georisques-commune-kpi"><span>${escapeHtml(item.label)}</span><strong class="${escapeHtml(item.chip || '')}">${escapeHtml(item.value)}</strong></article>`).join('')}
+    </div>
+    <div class="georisques-commune-columns">
+      <section class="georisques-commune-card">
+        <h5>Risques confirmés ou signalés</h5>
+        <ul class="list compact">${risksMarkup}</ul>
+      </section>
+      <section class="georisques-commune-card">
+        <h5>Documents et prévention</h5>
+        <p class="muted" style="margin:.2rem 0 .5rem">DICRIM, PPR, TIM et documents inondation utiles pour la commune.</p>
+        <div class="georisques-doc-columns">
+          <div>
+            <strong style="font-size:.82rem">Inondation / AZI</strong>
+            <ul class="list compact">${docsText}</ul>
+          </div>
+          <div>
+            <strong style="font-size:.82rem">Prévention communale</strong>
+            <ul class="list compact">${cityDocumentsMarkup}</ul>
+          </div>
+        </div>
+      </section>
+    </div>
   `);
 }
 
@@ -7539,9 +7537,10 @@ async function openMunicipalityDetailsModal(municipality) {
   const content = document.getElementById('municipality-details-content');
   if (!modal || !content || !municipality) return;
 
-  const [files, logs] = await Promise.all([
+  const [files, logs, publicServices] = await Promise.all([
     loadMunicipalityFiles(municipality.id).catch(() => []),
     api('/logs').catch(() => []),
+    api(`/municipalities/${municipality.id}/public-services`).catch(() => ({})),
   ]);
   const municipalityLogs = (Array.isArray(logs) ? logs : [])
     .filter((log) => String(log.municipality_id || '') === String(municipality.id))
@@ -7569,6 +7568,35 @@ async function openMunicipalityDetailsModal(municipality) {
 
   const level = normalizeLevel(municipality.vigilance_color || 'vert');
   const badgeClass = level === 'rouge' ? 'red' : level === 'orange' ? 'orange' : level === 'jaune' ? 'yellow' : 'green';
+  const municipalityContacts = Array.isArray(publicServices?.municipality_contacts) ? publicServices.municipality_contacts : [];
+  const importantContacts = Array.isArray(publicServices?.important_contacts) ? publicServices.important_contacts : [];
+  const emergencyNumbers = Array.isArray(publicServices?.emergency_numbers) ? publicServices.emergency_numbers : [];
+  const publicServiceCard = (item) => {
+    const phone = item?.phone ? `<a href="tel:${encodeURIComponent(String(item.phone).replace(/\s/g, ''))}" style="color:var(--primary)">${escapeHtml(item.phone)}</a>` : '—';
+    const email = item?.email ? `<a href="mailto:${encodeURIComponent(item.email)}" style="color:var(--primary)">${escapeHtml(item.email)}</a>` : '';
+    const url = item?.url && String(item.url).startsWith('http') ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer" style="color:var(--primary)">Site ↗</a>` : '';
+    return `<div class="muni-public-card">
+      <div class="muni-public-card__head">
+        <strong>${escapeHtml(item?.name || 'Service public')}</strong>
+        <span class="badge neutral">${escapeHtml(item?.type || 'Service')}</span>
+      </div>
+      <div class="muni-public-card__body">
+        <div><strong>Tél.</strong> ${phone}</div>
+        ${item?.address ? `<div><strong>Adresse</strong> ${escapeHtml(item.address)}</div>` : ''}
+        ${email ? `<div><strong>Email</strong> ${email}</div>` : ''}
+        ${url ? `<div>${url}</div>` : ''}
+      </div>
+    </div>`;
+  };
+  const emergencyMarkup = emergencyNumbers.length
+    ? `<div class="muni-emergency-strip">${emergencyNumbers.map((item) => `<span class="muni-emergency-pill"><strong>${escapeHtml(item.label || '')}</strong> · ${escapeHtml(item.phone || '')}</span>`).join('')}</div>`
+    : '';
+  const municipalityContactsMarkup = municipalityContacts.length
+    ? `<div class="muni-public-grid">${municipalityContacts.map(publicServiceCard).join('')}</div>`
+    : '<p class="muted">Aucun contact public complémentaire trouvé pour cette commune.</p>';
+  const importantContactsMarkup = importantContacts.length
+    ? `<div class="muni-public-grid">${importantContacts.map(publicServiceCard).join('')}</div>`
+    : '<p class="muted">Aucun contact départemental clé récupéré pour le moment.</p>';
 
   // ── Tab: Fiche ────────────────────────────────────────────
   const crisisActions = canEdit()
@@ -7590,6 +7618,15 @@ async function openMunicipalityDetailsModal(municipality) {
       <p class="muni-info-item"><strong>Capacité d'accueil</strong>${municipality.shelter_capacity ? Number(municipality.shelter_capacity).toLocaleString('fr-FR') + ' places' : '-'}</p>
       <p class="muni-info-item"><strong>Téléphone</strong>${municipality.phone ? `<a href="tel:${encodeURIComponent(municipality.phone.replace(/\s/g,''))}" style="color:var(--primary)">${escapeHtml(municipality.phone)}</a>` : '-'}</p>
       <p class="muni-info-item"><strong>Email</strong>${municipality.email ? `<a href="mailto:${encodeURIComponent(municipality.email)}" style="color:var(--primary)">${escapeHtml(municipality.email)}</a>` : '-'}</p>
+    </div>
+    ${emergencyMarkup}
+    <div class="muni-public-section">
+      <h5>Services publics utiles de la commune</h5>
+      ${municipalityContactsMarkup}
+    </div>
+    <div class="muni-public-section">
+      <h5>Numéros et contacts importants Isère</h5>
+      ${importantContactsMarkup}
     </div>
     ${municipality.additional_info ? `<p style="margin:.3rem 0"><strong style="font-size:.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Informations complémentaires</strong><br><span style="white-space:pre-wrap;font-size:.88rem">${escapeHtml(municipality.additional_info)}</span></p>` : ''}
     ${crisisActions}
@@ -9082,7 +9119,6 @@ const SVC_CARD_META = {
   anfr_isere:            { statusId: 'anfr-status',            infoId: 'anfr-info',            url: 'https://www.data.gouv.fr/fr/datasets/donnees-sur-les-installations-radioelectriques-de-plus-de-5-watts-1/' },
   arcep_isere:           { statusId: 'arcep-status',           infoId: 'arcep-info',           url: 'https://www.data.gouv.fr/fr/datasets/sites-indisponibles/' },
   isere_opendata:        { statusId: 'opendata-status',        infoId: 'opendata-info',        url: 'https://opendata.isere.fr' },
-  sirene_open_data:      { statusId: 'sirene-status',          infoId: 'sirene-info',          url: 'https://www.data.gouv.fr/dataservices/api-sirene-open-data' },
   finess_isere:          { statusId: 'finess-status',          infoId: 'finess-info',          url: 'https://www.data.gouv.fr/datasets/finess-extraction-du-fichier-des-etablissements' },
   ter_aura:              { statusId: 'ter-aura-status',        infoId: 'ter-aura-info',        url: 'https://www.ter.sncf.com/auvergne-rhone-alpes/se-deplacer/info-trafic' },
   mreseau:               { statusId: 'mreseau-status',         infoId: 'mreseau-info',         url: 'https://www.reso-m.fr/55-infotrafic.htm' },
@@ -9127,7 +9163,6 @@ const SVC_DETAIL_LISTS = {
   feux_foret_isere:      [{ id: 'feux-svc-list',         label: 'Foyers actifs EFFIS (24h)' }],
   copernicus_ems:        [{ id: 'copernicus-svc-list',   label: 'Catastrophes actives — GDACS' }],
   cols_alpins_isere:     [{ id: 'cols-svc-list',         label: 'État des cols alpins Isère' }],
-  sirene_open_data:      [{ id: 'sirene-list',           label: 'Synthèse établissements Isère' }],
 };
 
 function buildAutoroutesIsereService(data = {}) {
@@ -9232,19 +9267,6 @@ function buildAutoroutesIsereService(data = {}) {
 function getFluxPayload(key, data = {}) {
   if (key === 'autoroutes_isere') return buildAutoroutesIsereService(data);
   if (!data || typeof data !== 'object' || !(key in data)) {
-    if (key === 'sirene_open_data') {
-      return {
-        service: 'Sirene open data',
-        status: 'degraded',
-        items: [],
-        items_total: 0,
-        establishments_total: 0,
-        top_communes: [],
-        top_sectors: [],
-        error: 'Service absent du snapshot backend. Redémarre le backend ou configure le jeton Sirene.',
-        source: 'https://www.data.gouv.fr/dataservices/api-sirene-open-data',
-      };
-    }
   }
   return data?.[key] || {};
 }
@@ -9574,7 +9596,6 @@ function renderExternalRisks(data = {}) {
   const avalancheIsere = mergedData?.avalanche_isere || {};
   const feuxForet = mergedData?.feux_foret_isere || {};
   const colsAlpins = mergedData?.cols_alpins_isere || {};
-  const sireneOpenData = mergedData?.sirene_open_data || {};
 
   setRiskText('meteo-status', `${meteo.status || 'inconnu'} · niveau ${normalizeLevel(meteo.level || 'inconnu')}`, meteo.level || 'vert');
   setText('meteo-info', sanitizeMeteoInformation(meteo.info_state) || meteo.bulletin_title || '');
@@ -9604,7 +9625,6 @@ function renderExternalRisks(data = {}) {
   renderFeuxForetWidget(feuxForet);
   renderCopernicusEmsWidget(mergedData?.copernicus_ems || {});
   renderColsAlpinsWidget(colsAlpins);
-  renderSireneOpenData(sireneOpenData);
   // Redessiner couches carte avec nouvelles données
   renderColsAlpinsLayer();
   renderNewsPanel(prefecture, dauphine, franceBleu, placegrenet, grenobleMétropole, arsAura, seismesIsere);

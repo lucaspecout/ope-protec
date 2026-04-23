@@ -696,6 +696,7 @@ _FINESS_ISERE_STABLE_CSV_URL = "https://static.data.gouv.fr/resources/finess-ext
 _ISERE_OPENDATA_CACHE_TTL_SECONDS = 1800
 _MA_SECURITE_CACHE_TTL_SECONDS = 300
 _SIRENE_OPEN_DATA_CACHE_TTL_SECONDS = 1800
+_ANNUAIRE_ADMINISTRATION_CACHE_TTL_SECONDS = 21600
 _ANFR_ISERE_CACHE_TTL_SECONDS = 43200
 _ARCEP_ISERE_CACHE_TTL_SECONDS = 900
 _HUBEAU_GROUNDWATER_CACHE_TTL_SECONDS = 10800
@@ -750,6 +751,8 @@ _ma_securite_cache_lock = Lock()
 _ma_securite_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "ma_securite"}
 _sirene_open_data_cache_lock = Lock()
 _sirene_open_data_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "sirene_open_data"}
+_annuaire_administration_cache_lock = Lock()
+_annuaire_administration_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "annuaire_administration_isere"}
 _finess_isere_communes_lock = Lock()
 _finess_isere_communes_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 
@@ -5376,6 +5379,209 @@ def fetch_sirene_open_data_isere(force_refresh: bool = False, limit: int = 100) 
     )
 
 
+_ANNUAIRE_ADMINISTRATION_BASE_URL = "https://api-lannuaire.service-public.gouv.fr/api/explore/v2.1/catalog/datasets/api-lannuaire-administration/records"
+_ISERE_IMPORTANT_SERVICE_HINTS = (
+    "préfecture",
+    "prefecture",
+    "sous-préfecture",
+    "sous prefecture",
+    "gendarmerie",
+    "commissariat",
+    "police",
+    "incendie",
+    "secours",
+    "sdis",
+    "samu",
+    "urgences",
+)
+
+
+def _annuaire_scalar(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, dict):
+        for key in ("valeur", "value", "numero", "url", "adresse", "nom", "libelle", "mail"):
+            text = _annuaire_scalar(value.get(key))
+            if text:
+                return text
+        return ""
+    if isinstance(value, list):
+        parts = [_annuaire_scalar(item) for item in value]
+        parts = [part for part in parts if part]
+        return " · ".join(parts[:4])
+    return ""
+
+
+def _annuaire_record_label(record: dict[str, Any]) -> str:
+    for key in ("nom", "nom_organisme", "nom_service_public", "nom_service", "intitule"):
+        text = _annuaire_scalar(record.get(key))
+        if text:
+            return text
+    pivot = record.get("pivot")
+    if isinstance(pivot, list):
+        for item in pivot:
+            text = _annuaire_scalar(item)
+            if text:
+                return text
+    return "Service public"
+
+
+def _annuaire_record_type(record: dict[str, Any]) -> str:
+    for key in ("type_organisme", "categorie", "pivot"):
+        text = _annuaire_scalar(record.get(key))
+        if text:
+            return text
+    return "Service public"
+
+
+def _annuaire_record_phone(record: dict[str, Any]) -> str:
+    for key in ("telephone", "telephone_1", "telephone_2", "numero_telephone", "tel"):
+        text = _annuaire_scalar(record.get(key))
+        if text:
+            return text
+    return ""
+
+
+def _annuaire_record_url(record: dict[str, Any]) -> str:
+    for key in ("site_internet", "url", "site_web", "web"):
+        text = _annuaire_scalar(record.get(key))
+        if text:
+            return text
+    return ""
+
+
+def _annuaire_record_email(record: dict[str, Any]) -> str:
+    for key in ("adresse_courriel", "email", "mail"):
+        text = _annuaire_scalar(record.get(key))
+        if text:
+            return text
+    return ""
+
+
+def _annuaire_record_address(record: dict[str, Any]) -> str:
+    for key in ("adresse", "adresse_complete", "adresse_libelle", "adresse_physique"):
+        text = _annuaire_scalar(record.get(key))
+        if text:
+            return text
+    return ""
+
+
+def _fetch_annuaire_administration_records(where_clause: str, limit: int = 50) -> list[dict[str, Any]]:
+    query = urlencode({"where": where_clause, "limit": max(1, min(limit, 100))})
+    payload = _http_get_json(
+        f"{_ANNUAIRE_ADMINISTRATION_BASE_URL}?{query}",
+        timeout=20,
+        headers={"Accept": "application/json", "User-Agent": _BROWSER_UA},
+    )
+    results = payload.get("results") if isinstance(payload, dict) else []
+    return results if isinstance(results, list) else []
+
+
+def _normalize_annuaire_contact(record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": _annuaire_record_label(record),
+        "type": _annuaire_record_type(record),
+        "phone": _annuaire_record_phone(record),
+        "email": _annuaire_record_email(record),
+        "url": _annuaire_record_url(record),
+        "address": _annuaire_record_address(record),
+        "city": _annuaire_scalar(record.get("nom_commune") or record.get("commune")),
+    }
+
+
+def fetch_municipality_public_services(name: str, insee_code: str | None = None, postal_code: str | None = None, force_refresh: bool = False) -> dict[str, Any]:
+    safe_name = str(name or "").strip()
+    safe_insee = str(insee_code or "").strip()
+    safe_postal = str(postal_code or "").strip()
+    cache_key = f"{safe_name.lower()}|{safe_insee}|{safe_postal}"
+
+    def loader() -> dict[str, Any]:
+        commune_records: list[dict[str, Any]] = []
+        grenoble_records: list[dict[str, Any]] = []
+        errors: list[str] = []
+
+        if safe_insee:
+            try:
+                commune_records = _fetch_annuaire_administration_records(f'code_insee_commune LIKE "{safe_insee}"', limit=60)
+            except Exception as exc:
+                errors.append(str(exc))
+
+        if not commune_records and safe_name:
+            try:
+                commune_records = _fetch_annuaire_administration_records(f'nom_commune LIKE "{safe_name}"', limit=60)
+            except Exception as exc:
+                errors.append(str(exc))
+
+        try:
+            grenoble_records = _fetch_annuaire_administration_records('code_insee_commune LIKE "38185"', limit=80)
+        except Exception as exc:
+            errors.append(str(exc))
+
+        municipality_contacts = []
+        for record in commune_records:
+            normalized = _normalize_annuaire_contact(record)
+            blob = " ".join(str(normalized.get(key) or "") for key in ("name", "type", "address", "city")).lower()
+            if any(token in blob for token in ("mairie", "gendarmerie", "commissariat", "police", "trésorerie", "france services", "préfecture", "prefecture", "pompi", "secours")):
+                municipality_contacts.append(normalized)
+
+        if not municipality_contacts:
+            municipality_contacts = [_normalize_annuaire_contact(record) for record in commune_records[:8]]
+
+        important_contacts = []
+        for record in grenoble_records:
+            normalized = _normalize_annuaire_contact(record)
+            blob = " ".join(str(normalized.get(key) or "") for key in ("name", "type", "address")).lower()
+            if any(token in blob for token in _ISERE_IMPORTANT_SERVICE_HINTS):
+                important_contacts.append(normalized)
+
+        deduped_important: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in important_contacts:
+            key = f"{item.get('name')}|{item.get('phone')}|{item.get('type')}"
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped_important.append(item)
+
+        return {
+            "status": "online" if (municipality_contacts or deduped_important) else "degraded",
+            "source": _ANNUAIRE_ADMINISTRATION_BASE_URL,
+            "municipality_name": safe_name,
+            "municipality_contacts": municipality_contacts[:8],
+            "important_contacts": deduped_important[:8],
+            "emergency_numbers": [
+                {"label": "Urgences européennes", "phone": "112"},
+                {"label": "Sapeurs-pompiers", "phone": "18"},
+                {"label": "SAMU", "phone": "15"},
+                {"label": "Police secours", "phone": "17"},
+                {"label": "SMS d'urgence", "phone": "114"},
+            ],
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+            "error": " | ".join(errors) if errors and not (municipality_contacts or deduped_important) else "",
+            "cache_key": cache_key,
+        }
+
+    local_cache: dict[str, Any] = _annuaire_administration_cache.setdefault("by_commune", {})
+    local_lock = _annuaire_administration_cache_lock
+    with local_lock:
+        cached = local_cache.get(cache_key) if isinstance(local_cache, dict) else None
+        expires_at = _annuaire_administration_cache.get("expires_at") or datetime.min
+        if not force_refresh and isinstance(cached, dict) and datetime.utcnow() < expires_at:
+            return deepcopy(cached)
+
+    payload = loader()
+    with local_lock:
+        if not isinstance(_annuaire_administration_cache.get("by_commune"), dict):
+            _annuaire_administration_cache["by_commune"] = {}
+        _annuaire_administration_cache["by_commune"][cache_key] = deepcopy(payload)
+        _annuaire_administration_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_ANNUAIRE_ADMINISTRATION_CACHE_TTL_SECONDS)
+    return payload
+
+
 # ── Massifs avalanche Isère (BRA Météo-France via GDSS) ─────────────────────
 
 # OPP IDs depuis mf_map_layers_v2_sub_zone sur la page risques-avalanche Alpes du Nord
@@ -9790,7 +9996,6 @@ def flush_service_memory_cache(service_key: str) -> dict[str, str]:
         "anfr_isere":          (_anfr_isere_cache,            _anfr_isere_cache_lock),
         "arcep_isere":         (_arcep_isere_cache,           _arcep_isere_cache_lock),
         "ma_securite":         (_ma_securite_cache,           _ma_securite_cache_lock),
-        "sirene_open_data":    (_sirene_open_data_cache,      _sirene_open_data_cache_lock),
         "groundwater_isere":   (_hubeau_groundwater_cache,    _hubeau_groundwater_cache_lock),
         "apic_isere":          (_apic_isere_cache,            _apic_isere_cache_lock),
         "isere_opendata":      (_isere_opendata_cache,        _isere_opendata_cache_lock),

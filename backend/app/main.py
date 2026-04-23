@@ -97,7 +97,7 @@ from .services import (
     fetch_barrages_isere,
     fetch_montagne_isere,
     fetch_helipads_isere,
-    fetch_sirene_open_data_isere,
+    fetch_municipality_public_services,
     fetch_pr_autoroutes,
     get_static_data_status,
     collect_all_static_data,
@@ -1278,7 +1278,6 @@ def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str])
         "atmo_aura": (lambda: fetch_atmo_aura_isere_air_quality(force_refresh=refresh), {"status": "pending", "today": {}, "tomorrow": {}}),
         "anfr_isere": (lambda: fetch_anfr_isere_antennas(force_refresh=refresh), {"status": "pending", "supports_total": 0}),
         "arcep_isere": (lambda: fetch_arcep_isere_mobile_outages(force_refresh=refresh), {"status": "pending", "outages_total": 0, "communes": []}),
-        "sirene_open_data": (lambda: fetch_sirene_open_data_isere(force_refresh=refresh), {"status": "pending", "items": [], "items_total": 0, "establishments_total": 0, "top_communes": [], "top_sectors": []}),
         "apic_isere": (lambda: fetch_apic_isere_alerts(force_refresh=refresh), {"status": "pending", "level": "vert", "alerts_total": 0, "alerts": []}),
         "vigicrues_flash_isere": (lambda: fetch_vigicrues_flash_isere_alerts(force_refresh=refresh), {"status": "pending", "level": "vert", "alerts_total": 0, "alerts": []}),
         "finess_isere": (lambda: fetch_finess_isere_resources(force_refresh=refresh), {"status": "pending", "resources": [], "resources_total": 0}),
@@ -1838,6 +1837,28 @@ def municipality_georisques_risks(
         "danger_level": entry.get("danger_level", "Faible"),
         "updated_at": payload.get("updated_at"),
     }
+
+
+@app.get("/municipalities/{municipality_id}/public-services")
+def municipality_public_services(
+    municipality_id: int,
+    force_refresh: bool = Query(False),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*READ_ROLES)),
+):
+    municipality = ensure_municipality_scope(user, db, municipality_id)
+    insee_code = (municipality.insee_code or "").strip()
+    if not insee_code:
+        insee_code = resolve_commune_insee_code(municipality.name, municipality.postal_code)
+        if insee_code:
+            municipality.insee_code = insee_code
+            db.commit()
+    return fetch_municipality_public_services(
+        municipality.name,
+        insee_code=insee_code,
+        postal_code=municipality.postal_code,
+        force_refresh=force_refresh,
+    )
 
 
 @app.post("/municipalities/{municipality_id}/documents")
