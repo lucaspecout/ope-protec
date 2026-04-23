@@ -10275,7 +10275,7 @@ def fetch_feux_foret_isere(force_refresh: bool = False) -> dict[str, Any]:
 # ══════════════════════════════════════════════════════════════════════════════
 _COLS_CACHE_TTL_SECONDS = 1800
 _cols_cache_lock = Lock()
-_cols_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "cols_alpins_isere"}
+_cols_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "cols_alpins_isere_v2"}
 _ITINISERE_COLS_LAYER_URL = "https://itinisere.fr/mod_turbolead/mod/inforoute/index.php?action=367&layer=Layer-repere_cols"
 
 _COLS_ALPINS: list[dict[str, Any]] = [

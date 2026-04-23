@@ -380,6 +380,40 @@ function isUnknownStatusValue(value) {
   return !text || text === '-' || text === 'inconnu' || text === 'inconnue' || text === 'unknown';
 }
 
+function isOfficialColsSource(payload = {}) {
+  return String(payload?.source || '').includes('Layer-repere_cols');
+}
+
+function isLegacyUnknownColsPayload(payload = {}) {
+  if (isOfficialColsSource(payload)) return false;
+  const cols = Array.isArray(payload?.cols) ? payload.cols : [];
+  if (!cols.length) return false;
+  return cols.every((col) => {
+    const statut = String(col?.statut || '').trim().toLowerCase();
+    const detail = String(col?.detail || '').trim().toLowerCase();
+    return (!statut || statut === 'inconnu' || statut === 'unknown') && detail.includes('météo indisponible');
+  });
+}
+
+function mergeColsAlpinsSlot(prev = {}, next = {}) {
+  const discardLegacyPrevious = isLegacyUnknownColsPayload(prev) && Object.keys(next || {}).length > 0;
+  if (discardLegacyPrevious) {
+    const nextCols = Array.isArray(next?.cols) ? next.cols : [];
+    return {
+      ...prev,
+      ...next,
+      cols: nextCols,
+      cols_total: next.cols_total ?? nextCols.length ?? 0,
+      dangereux_total: next.dangereux_total ?? 0,
+    };
+  }
+  return mergeServiceSlot(prev, next, (p, n) => ({
+    ...p, ...n,
+    cols: keepPreviousArray(p.cols, n.cols),
+    dangereux_total: keepPreviousValue(p.dangereux_total, n.dangereux_total),
+  }));
+}
+
 function readStatusHistory() {
   const history = readSnapshot(STORAGE_KEYS.serviceStatusHistory);
   return history && typeof history === 'object' ? history : {};
@@ -705,11 +739,7 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
       fires: keepPreviousArray(p.fires, n.fires),
       fires_total: keepPreviousValue(p.fires_total, n.fires_total),
     })),
-    cols_alpins_isere: mergeServiceSlot(previous.cols_alpins_isere || {}, next.cols_alpins_isere || {}, (p, n) => ({
-      ...p, ...n,
-      cols: keepPreviousArray(p.cols, n.cols),
-      dangereux_total: keepPreviousValue(p.dangereux_total, n.dangereux_total),
-    })),
+    cols_alpins_isere: mergeColsAlpinsSlot(previous.cols_alpins_isere || {}, next.cols_alpins_isere || {}),
     copernicus_ems: mergeServiceSlot(previous.copernicus_ems || {}, next.copernicus_ems || {}, (p, n) => ({
       ...p, ...n,
       activations: keepPreviousArray(p.activations, n.activations),
@@ -8153,16 +8183,19 @@ function buildSituationKpiModalContent(key, externalRisks = {}) {
     case 'cols': {
       const colsData = externalRisks?.cols_alpins_isere || {};
       const cols = Array.isArray(colsData.cols) ? colsData.cols : [];
-      const colorMap = { vert: '#2b8a3e', jaune: '#e9a800', orange: '#e67700', rouge: '#c92a2a', gris: '#868e96' };
-      const items = cols.map((c) => {
-        const color = colorMap[c.couleur] || '#868e96';
-        const tempStr = c.temperature != null ? `${c.temperature}°C` : '–';
-        const snowStr = c.enneigement_cm != null ? `${c.enneigement_cm} cm neige` : '';
-        const windStr = c.vent_kmh != null ? `vent ${Math.round(c.vent_kmh)} km/h` : '';
-        const details = [tempStr, snowStr, windStr].filter(Boolean).join(' · ');
-        return `<li style="padding:4px 0;border-bottom:1px solid #eee"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:6px"></span><strong>${escapeHtml(c.nom)}</strong> <span class="muted">(${c.alt} m · ${escapeHtml(c.route || '')})</span><br><span style="color:${color};font-weight:600">${escapeHtml(c.statut || '?')}</span>${details ? ` · <span class="muted">${escapeHtml(details)}</span>` : ''}</li>`;
+      const colorMapOfficial = { vert: '#2b8a3e', jaune: '#e9a800', orange: '#e67700', rouge: '#c92a2a', gris: '#868e96' };
+      const itemsOfficial = cols.map((c) => {
+        const color = colorMapOfficial[c.couleur] || '#868e96';
+        const tempStrOfficial = c.temperature != null ? `${c.temperature}°C` : '';
+        const snowStrOfficial = c.enneigement_cm != null ? `${c.enneigement_cm} cm neige` : '';
+        const windStrOfficial = c.vent_kmh != null ? `vent ${Math.round(c.vent_kmh)} km/h` : '';
+        const metricsOfficial = [tempStrOfficial, snowStrOfficial, windStrOfficial].filter(Boolean).join(' · ');
+        const operationalDetail = escapeHtml(c.detail || '');
+        return `<li style="padding:4px 0;border-bottom:1px solid #eee"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:6px"></span><strong>${escapeHtml(c.nom)}</strong> <span class="muted">(${c.alt} m · ${escapeHtml(c.route || '')})</span><br><span style="color:${color};font-weight:600">${escapeHtml(c.statut || '?')}</span>${operationalDetail ? ` · <span class="muted">${operationalDetail}</span>` : ''}${metricsOfficial ? `<br><span class="muted">${escapeHtml(metricsOfficial)}</span>` : ''}</li>`;
       }).join('');
-      return `<p><strong>Cols surveillés :</strong> ${colsData.cols_total ?? 0} · <strong>À surveiller :</strong> ${colsData.dangereux_total ?? 0}</p><p><strong>Source :</strong> Open-Meteo · données météo temps réel</p><ul class="situation-kpi-modal__list">${items || '<li>Aucune donnée cols disponible.</li>'}</ul>`;
+      const colsSourceLineOfficial = isOfficialColsSource(colsData) ? 'Itinisère · couche officielle des cols' : 'Itinisère + fallback météo';
+      const colsEmptyLabelOfficial = colsData.status === 'pending' ? 'Actualisation Itinisère en cours…' : 'Aucune donnée cols disponible.';
+      return `<p><strong>Cols surveillés :</strong> ${colsData.cols_total ?? 0} · <strong>À surveiller :</strong> ${colsData.dangereux_total ?? 0}</p><p><strong>Source :</strong> ${colsSourceLineOfficial}</p><ul class="situation-kpi-modal__list">${itemsOfficial || `<li>${colsEmptyLabelOfficial}</li>`}</ul>`;
     }
     default:
       return '<p>Aucun détail supplémentaire disponible pour ce KPI.</p>';
@@ -8910,11 +8943,13 @@ function renderColsAlpinsWidget(data = {}) {
   const cols = Array.isArray(data.cols) ? data.cols : [];
   const dangereux = cols.filter((c) => c.couleur !== 'vert' && c.couleur !== 'gris');
   const braColors = { vert: '#2b8a3e', jaune: '#e9a800', orange: '#e67700', rouge: '#c92a2a', gris: '#868e96' };
-  setRiskText('cols-svc-status', `${data.status || 'inconnu'} · ${data.dangereux_total ?? 0} à surveiller / ${data.cols_total ?? 0} cols`, (data.dangereux_total ?? 0) > 0 ? 'jaune' : 'vert');
+  const sourceIsOfficial = isOfficialColsSource(data);
+  const colorLevel = (data.dangereux_total ?? 0) > 0 ? 'jaune' : (sourceIsOfficial ? 'vert' : (data.status === 'pending' ? 'jaune' : 'gris'));
+  setRiskText('cols-svc-status', `${data.status || 'inconnu'} · ${data.dangereux_total ?? 0} à surveiller / ${data.cols_total ?? 0} cols`, colorLevel);
   setHtml('cols-svc-list', cols.map((c) => {
     const color = braColors[c.couleur] || '#868e96';
     return `<li><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:4px"></span><strong>${escapeHtml(c.nom)}</strong> <span style="color:${color};font-weight:600">${escapeHtml(c.statut || '?')}</span> <span class="muted">· ${c.alt} m · ${escapeHtml(c.detail || '')}</span></li>`;
-  }).join('') || '<li class="muted">Aucune donnée cols disponible.</li>');
+  }).join('') || `<li class="muted">${data.status === 'pending' ? 'Actualisation Itinisère en cours…' : 'Aucune donnée cols disponible.'}</li>`);
 }
 
 function setServiceInfoWithSource(targetId, label, sourceCandidate) {

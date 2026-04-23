@@ -348,6 +348,23 @@ SERVICE_REFRESH_INTERVALS: dict[str, int] = {
 
 _external_risks_snapshot_lock = Lock()
 _external_risks_snapshot: dict = {"updated_at": None, "payload": {}}
+
+
+def _is_legacy_cols_snapshot(slot: dict | None) -> bool:
+    if not isinstance(slot, dict):
+        return False
+    source = str(slot.get("source") or "")
+    if "Layer-repere_cols" in source:
+        return False
+    cols = slot.get("cols")
+    if not isinstance(cols, list) or not cols:
+        return False
+    return all(
+        str((col or {}).get("statut") or "").strip().lower() in {"", "inconnu", "unknown"}
+        and "météo indisponible" in str((col or {}).get("detail") or "").strip().lower()
+        for col in cols
+        if isinstance(col, dict)
+    )
 _external_risks_refresh_lock = Lock()
 _external_risks_refresh_in_progress = False
 
@@ -762,6 +779,8 @@ def startup_warmup_external_sources() -> None:
         # sont présents (y compris les nouveaux services ajoutés après la dernière sauvegarde).
         fallback_payload: dict = {key: dict(fb) for key, (_, fb) in initial_jobs.items()}
         fallback_payload.update(persisted_snapshot)
+        if _is_legacy_cols_snapshot(fallback_payload.get("cols_alpins_isere")):
+            fallback_payload["cols_alpins_isere"] = dict(initial_jobs["cols_alpins_isere"][1])
         fallback_payload["updated_at"] = persisted_snapshot.get("updated_at") or utc_timestamp()
         _set_external_risks_snapshot(fallback_payload)
     else:
