@@ -8461,27 +8461,33 @@ function renderSituationOverview() {
 
   const vigilance = normalizeLevel(dashboard.vigilance || externalRisks?.meteo_france?.level || 'vert');
 
-  // ── Niveau crues : tronçons AN11/12/20/30/31 + règle 5 stations orange/rouge ──
+  // ── Niveau crues : niveau max réellement observé sur tronçons AN et stations ──
   const vigicruesTroncons = Array.isArray(externalRisks?.vigicrues?.troncons)
     ? externalRisks.vigicrues.troncons : [];
   const mainTronconCodes = new Set(['AN11', 'AN12', 'AN20', 'AN30', 'AN31']);
-  const mainTronconLevels = vigicruesTroncons
+  const mainTroncons = vigicruesTroncons
     .filter((t) => mainTronconCodes.has(String(t.code || '')))
-    .map((t) => normalizeLevel(t.level || 'vert'));
+    .map((troncon) => ({ ...troncon, normalizedLevel: normalizeLevel(troncon.level || 'vert') }));
+  const mainTronconLevel = mainTroncons.reduce(
+    (max, troncon) => riskRank(troncon.normalizedLevel) > riskRank(max) ? troncon.normalizedLevel : max,
+    'vert',
+  );
+  const topTroncons = mainTroncons.filter((troncon) => troncon.normalizedLevel === mainTronconLevel);
 
   const vigicruesStations = Array.isArray(externalRisks?.vigicrues?.stations)
     ? externalRisks.vigicrues.stations : [];
-  const alertStations = vigicruesStations
-    .filter((s) => ['orange', 'rouge'].includes(normalizeLevel(s.level || 'vert')))
-    .sort((a, b) => riskRank(b.level) - riskRank(a.level));
-  const alertCount = alertStations.length;
-  const stationsRuleLevel = alertCount >= 5
-    ? (alertStations.some((s) => normalizeLevel(s.level) === 'rouge') ? 'rouge' : 'orange')
-    : 'vert';
+  const stationsWithLevel = vigicruesStations
+    .map((station) => ({ ...station, normalizedLevel: normalizeLevel(station.level || 'vert') }))
+    .sort((a, b) => riskRank(b.normalizedLevel) - riskRank(a.normalizedLevel));
+  const stationsLevel = stationsWithLevel.reduce(
+    (max, station) => riskRank(station.normalizedLevel) > riskRank(max) ? station.normalizedLevel : max,
+    'vert',
+  );
+  const topStations = stationsWithLevel.filter((station) => station.normalizedLevel === stationsLevel);
 
   const crues = [
-    ...mainTronconLevels,
-    stationsRuleLevel,
+    mainTronconLevel,
+    stationsLevel,
     normalizeLevel(dashboard.crues || externalRisks?.vigicrues?.water_alert_level || 'vert'),
   ].reduce((max, lvl) => riskRank(lvl) > riskRank(max) ? lvl : max, 'vert');
 
@@ -8505,18 +8511,25 @@ function renderSituationOverview() {
   const prefectureItems = Array.isArray(externalRisks?.prefecture_isere?.items)
     ? sortPrefectureItemsByRecency(externalRisks.prefecture_isere.items).slice(0, 4)
     : [];
-  const cruesAlertHtml = alertCount > 0
-    ? `<ul class="list compact" style="margin-top:6px;font-size:0.82em">${
-        alertStations.slice(0, 6).map((s) => {
-          const lvl = normalizeLevel(s.level || 'vert');
-          return `<li><span style="color:${levelColor(lvl)};font-weight:600">${escapeHtml(s.station || s.code)}</span>${s.river ? ` · <span class="muted">${escapeHtml(s.river)}</span>` : ''} · ${escapeHtml(lvl)}</li>`;
-        }).join('')
-      }${alertCount > 6 ? `<li class="muted">… et ${alertCount - 6} autre(s)</li>` : ''}</ul>`
-    : `<p class="muted" style="font-size:0.82em;margin-top:4px">Aucune station en alerte</p>`;
+  const cruesTopLevel = riskRank(mainTronconLevel) >= riskRank(stationsLevel) ? mainTronconLevel : stationsLevel;
+  const cruesAlertHtml = `
+    <div style="margin-top:6px;font-size:0.82em">
+      <p style="margin:.2rem 0"><strong>Tronçons au plus haut niveau</strong> · <span style="color:${levelColor(mainTronconLevel)}">${escapeHtml(mainTronconLevel)}</span></p>
+      ${topTroncons.length
+        ? `<ul class="list compact">${topTroncons.slice(0, 5).map((troncon) => `<li><span style="color:${levelColor(troncon.normalizedLevel)};font-weight:600">${escapeHtml(troncon.name || troncon.code || 'Tronçon')}</span> · ${escapeHtml(troncon.normalizedLevel)}</li>`).join('')}${topTroncons.length > 5 ? `<li class="muted">… et ${topTroncons.length - 5} autre(s)</li>` : ''}</ul>`
+        : `<p class="muted" style="margin:.15rem 0 .45rem">Aucun tronçon principal disponible</p>`
+      }
+      <p style="margin:.55rem 0 .2rem"><strong>Stations au plus haut niveau</strong> · <span style="color:${levelColor(stationsLevel)}">${escapeHtml(stationsLevel)}</span></p>
+      ${topStations.length
+        ? `<ul class="list compact">${topStations.slice(0, 6).map((station) => `<li><span style="color:${levelColor(station.normalizedLevel)};font-weight:600">${escapeHtml(station.station || station.code || 'Station')}</span>${station.river ? ` · <span class="muted">${escapeHtml(station.river)}</span>` : ''} · ${escapeHtml(station.normalizedLevel)}</li>`).join('')}${topStations.length > 6 ? `<li class="muted">… et ${topStations.length - 6} autre(s)</li>` : ''}</ul>`
+        : `<p class="muted" style="margin:.15rem 0">Aucune station disponible</p>`
+      }
+    </div>
+  `;
 
   const kpiCards = [
     { key: 'meteo', label: 'Vigilance météo', value: vigilance, info: 'Source Météo-France', css: normalizeLevel(vigilance) },
-    { key: 'crues', label: 'Niveau crues', value: crues, info: `Tronçons AN11/12/20/30/31 · ${alertCount} station(s) en alerte`, css: normalizeLevel(crues), detail: cruesAlertHtml },
+    { key: 'crues', label: 'Niveau crues', value: crues, info: `Tronçons AN11/12/20/30/31 max ${mainTronconLevel} · stations max ${stationsLevel}`, css: normalizeLevel(crues), detail: cruesAlertHtml },
     { key: 'global-risk', label: 'Risque global', value: globalRisk, info: 'Calcul consolidé', css: normalizeLevel(globalRisk) },
     { key: 'communes-crise', label: 'Communes en crise', value: String(crisisCount), info: 'PCS actif', css: crisisCount > 0 ? 'rouge' : 'vert' },
   ];
