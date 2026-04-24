@@ -75,6 +75,7 @@ from .services import (
     fetch_hubeau_isere_groundwater,
     fetch_hubeau_water_quality,
     fetch_hubeau_water_services,
+    fetch_rnb_isere_summary,
     fetch_sncf_isere_alerts,
     fetch_atmo_aura_isere_air_quality,
     fetch_anfr_isere_antennas,
@@ -334,6 +335,7 @@ SERVICE_REFRESH_INTERVALS: dict[str, int] = {
     "atmo_aura":              600,
     "arcep_isere":            600,
     "georisques":             600,
+    "rnb_isere":             1800,
     "isere_opendata":        1800,
     "groundwater_isere":     3600,
     "anfr_isere":           21600,   # Données quasi-statiques
@@ -1271,6 +1273,7 @@ def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str])
         "itinisere": (lambda: fetch_itinisere_disruptions(force_refresh=refresh), {"status": "pending", "events": [], "events_total": 0}),
         "bison_fute": (lambda: fetch_bison_fute_traffic(force_refresh=refresh), {"status": "pending", "alerts": []}),
         "georisques": (lambda: fetch_georisques_isere_summary(force_refresh=refresh, commune_names=pcs_commune_names), {"status": "pending", "details": []}),
+        "rnb_isere": (lambda: fetch_rnb_isere_summary(force_refresh=refresh), {"status": "pending", "buildings_total": 0, "sample": []}),
         "prefecture_isere": (lambda: fetch_prefecture_isere_news(force_refresh=refresh), {"status": "pending", "articles": []}),
         "dauphine_isere": (lambda: fetch_dauphine_isere_news(force_refresh=refresh), {"status": "pending", "articles": []}),
         "france_bleu_isere": (lambda: fetch_france_bleu_isere_news(force_refresh=refresh), {"status": "pending", "items": []}),

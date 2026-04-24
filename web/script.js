@@ -48,6 +48,7 @@ const FLUX_SERVICES = [
   { key: 'vigicrues_flash_isere',  label: 'Vigicrues Flash',           icon: '⚡', category: 'Eau',           interval: 180,   metric: (d) => `${d.alerts_total ?? 0} alerte(s) crues rapides` },
   { key: 'vigieau',                label: 'Vigieau · Restrictions eau', icon: '💧', category: 'Eau',          interval: 600,   metric: (d) => `${(d.alerts || []).length} restriction(s)` },
   { key: 'groundwater_isere',      label: "Hub'Eau · Nappes phréatiques", icon: '🏔️', category: 'Eau',        interval: 3600,  metric: (d) => `${d.stations_total ?? 0} station(s) · ↑${d.trend_summary?.hausse ?? 0} ↓${d.trend_summary?.baisse ?? 0} =${d.trend_summary?.stable ?? 0}` },
+  { key: 'rnb_isere',              label: 'RNB · Bâtiments Isère',        icon: '🏢', category: 'Données',     interval: 1800,  metric: (d) => `${d.buildings_total ?? 0} bâtiment(s) détecté(s)` },
   { key: 'atmo_aura',              label: "Atmo AURA · Qualité de l'air", icon: '🌫️', category: 'Environnement', interval: 600, metric: (d) => d.today?.index ? `Indice ${d.today.index}${d.today.label ? ' — ' + d.today.label : ''}` : 'Indice non disponible' },
   { key: 'georisques',             label: 'Géorisques',                icon: '🌋', category: 'Risques',       interval: 600,   metric: (d) => `${d.flood_documents_total ?? 0} doc(s) inondation · zone sismique ${d.highest_seismic_zone_label || '?'}` },
   { key: 'itinisere',              label: 'Itinisère · Transports',    icon: '🚌', category: 'Transport',     interval: 120,   metric: (d) => `${d.events_total ?? (d.events || []).length} perturbation(s)` },
@@ -9565,6 +9566,7 @@ const SVC_CARD_META = {
   vigicrues_flash_isere: { statusId: 'vigicrues-flash-status', infoId: 'vigicrues-flash-info', url: 'https://apic.meteofrance.fr/?mode=vf&area=fr' },
   vigieau:               { statusId: 'vigieau-status',         infoId: 'vigieau-info',         url: 'https://www.vigieau.gouv.fr' },
   groundwater_isere:     { statusId: 'groundwater-status',     infoId: 'groundwater-info',     url: 'https://hubeau.eaufrance.fr' },
+  rnb_isere:             { statusId: 'rnb-status',             infoId: 'rnb-info',             url: 'https://rnb-fr.gitbook.io/documentation/api-et-outils/api-batiments/lister-des-batiments' },
   atmo_aura:             { statusId: 'atmo-status',            infoId: 'atmo-info',            url: 'https://www.atmo-auvergnerhonealpes.fr' },
   georisques:            { statusId: 'georisques-status',      infoId: 'georisques-info',      url: 'https://www.georisques.gouv.fr' },
   itinisere:             { statusId: 'itinisere-status',       infoId: null,                   url: 'https://www.itinisere.fr' },
@@ -10123,6 +10125,7 @@ function renderExternalRisks(data = {}) {
   const franceBleu = mergedData?.france_bleu_isere || {};
   const sncf = mergedData?.sncf_isere || {};
   const vigieau = mergedData?.vigieau || {};
+  const rnb = mergedData?.rnb_isere || {};
   const atmo = mergedData?.atmo_aura || {};
   const anfr = mergedData?.anfr_isere || {};
   const arcep = mergedData?.arcep_isere || {};
@@ -10196,6 +10199,8 @@ function renderExternalRisks(data = {}) {
   setHtml('arcep-list', (arcep.top_operators || []).map((item) => `<li><strong>${escapeHtml(item.operator || 'Opérateur')}</strong> · ${Number(item.outages ?? 0)} site(s)</li>`).join('') || '<li>Aucune indisponibilité signalée en Isère.</li>');
   setRiskText('georisques-status', `${georisques.status || 'inconnu'} · sismicité ${georisques.highest_seismic_zone_label || 'inconnue'}`, georisques.status === 'online' ? 'vert' : 'jaune');
   setText('georisques-info', `${georisques.flood_documents_total ?? 0} AZI · ${georisques.ppr_total ?? 0} PPR · ${georisques.ground_movements_total ?? 0} mouvements`);
+  setRiskText('rnb-status', `${rnb.status || 'inconnu'} · ${rnb.buildings_total ?? 0} bâtiment(s)`, rnb.status === 'online' ? 'vert' : 'jaune');
+  setText('rnb-info', `${rnb.coverage_note || 'Référentiel national des bâtiments'}${rnb.error ? ` · ${rnb.error}` : ''}`);
   renderGeorisquesDetails(georisques);
   renderMeteoAlerts(meteo);
   renderWeeklyWeatherPanel(mergedData).catch(() => {});

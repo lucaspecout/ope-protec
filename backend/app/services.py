@@ -10194,6 +10194,7 @@ def flush_service_memory_cache(service_key: str) -> dict[str, str]:
         "groundwater_isere":   (_hubeau_groundwater_cache,    _hubeau_groundwater_cache_lock),
         "water_quality":       (_hubeau_water_quality_cache,  _hubeau_water_quality_cache_lock),
         "water_services":      (_hubeau_water_services_cache, _hubeau_water_services_cache_lock),
+        "rnb_isere":           (_rnb_buildings_cache,         _rnb_buildings_cache_lock),
         "apic_isere":          (_apic_isere_cache,            _apic_isere_cache_lock),
         "isere_opendata":      (_isere_opendata_cache,        _isere_opendata_cache_lock),
         "finess_isere":        (_finess_isere_cache,          _finess_isere_cache_lock),
@@ -10640,6 +10641,28 @@ def fetch_rnb_buildings_bbox(
         _rnb_buildings_cache["by_bbox"][cache_key] = deepcopy(result)
         _rnb_buildings_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_RNB_BUILDINGS_CACHE_TTL_SECONDS)
     return result
+
+
+def fetch_rnb_isere_summary(force_refresh: bool = False, limit: int = 500) -> dict[str, Any]:
+    payload = fetch_rnb_buildings_bbox(
+        min_lat=44.4,
+        min_lon=4.9,
+        max_lat=45.7,
+        max_lon=6.4,
+        force_refresh=force_refresh,
+        limit=limit,
+    )
+    buildings = payload.get("buildings") if isinstance(payload, dict) else []
+    sample = buildings[:8] if isinstance(buildings, list) else []
+    return {
+        "status": payload.get("status") if isinstance(payload, dict) else "error",
+        "source": payload.get("source") if isinstance(payload, dict) else "https://rnb-fr.gitbook.io/documentation/api-et-outils/api-batiments/lister-des-batiments",
+        "buildings_total": payload.get("buildings_total", 0) if isinstance(payload, dict) else 0,
+        "sample": sample,
+        "coverage_note": "Aperçu Isère borné par bbox RNB, utilisé aussi pour le calculateur de zone.",
+        "updated_at": payload.get("updated_at") if isinstance(payload, dict) else datetime.utcnow().isoformat() + "Z",
+        "error": payload.get("error", "") if isinstance(payload, dict) else "",
+    }
 
 
 def _fetch_feux_foret_live() -> dict[str, Any]:
