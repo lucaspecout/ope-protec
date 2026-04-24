@@ -288,6 +288,9 @@ let mapZoneImpactReportData = null; // stocke les données brutes pour l'export
 let mapEvacuationCircleLayer = null;
 let mapEvacuationCircleMode = false;
 let mapEvacuationCircle = null;
+let mapMeasureLayer = null;
+let mapMeasureMode = false;
+let mapMeasurePoints = [];
 const mapPointVisibilityOverrides = new Map();
 const resourceVisibilityOverrides = new Map();
 let pendingMapPointCoords = null;
@@ -3359,6 +3362,7 @@ function initMap() {
   mapAnnotationFeatureGroup = window.L.featureGroup().addTo(leafletMap);
   mapZoneImpactLayer = window.L.layerGroup().addTo(leafletMap);
   mapEvacuationCircleLayer = window.L.layerGroup().addTo(leafletMap);
+  mapMeasureLayer = window.L.layerGroup().addTo(leafletMap);
   initMapAnnotationModule();
   itinisereLayer = window.L.layerGroup().addTo(leafletMap);
   bisonLayer = window.L.layerGroup().addTo(leafletMap);
@@ -3375,6 +3379,7 @@ function initMap() {
   feuxForetLayer = window.L.layerGroup();
   colsAlpinsLayer = window.L.layerGroup();
   leafletMap.on('click', onMapClickEvacuationCircle);
+  leafletMap.on('click', onMapClickMeasure);
   leafletMap.on('click', onMapClickAddPoint);
   leafletMap.on('click', handleOsmDetailsClick);
   leafletMap.on('zoomend', updateTrafficZoomClass);
@@ -3413,7 +3418,7 @@ function formatOsmDetailsPopup(payload = {}) {
 }
 
 async function handleOsmDetailsClick(event) {
-  if (!leafletMap || mapAddPointMode || mapEvacuationCircleMode || typeof fetch !== 'function') return;
+  if (!leafletMap || mapAddPointMode || mapEvacuationCircleMode || mapMeasureMode || typeof fetch !== 'function') return;
   if (leafletMap.getZoom() < OSM_DETAILS_MIN_ZOOM) return;
   const lat = Number(event?.latlng?.lat);
   const lon = Number(event?.latlng?.lng);
@@ -3549,6 +3554,7 @@ async function resetMapFilters() {
   renderMapChecks([]);
   clearZoneImpactSelection();
   clearEvacuationCircle(false);
+  clearMapMeasure(false);
   setMapFeedback('Filtres carte réinitialisés.');
 }
 
@@ -6585,6 +6591,97 @@ function updateEvacuationCircleButtons() {
   }
 }
 
+function updateMeasureButtons() {
+  const startBtn = document.getElementById('map-measure-start');
+  if (startBtn) {
+    startBtn.classList.toggle('active', mapMeasureMode);
+    startBtn.setAttribute('aria-pressed', String(mapMeasureMode));
+  }
+}
+
+function clearMapMeasure(showFeedback = true) {
+  mapMeasureMode = false;
+  mapMeasurePoints = [];
+  updateMeasureButtons();
+  if (mapMeasureLayer) mapMeasureLayer.clearLayers();
+  if (showFeedback) setMapFeedback('Mesure effacée.');
+}
+
+function formatDistanceMeters(distanceMeters = 0) {
+  const distance = Number(distanceMeters);
+  if (!Number.isFinite(distance) || distance <= 0) return '0 m';
+  if (distance >= 1000) return `${(distance / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} km`;
+  return `${Math.round(distance).toLocaleString('fr-FR')} m`;
+}
+
+function startMapMeasureMode() {
+  if (mapAddPointMode) {
+    mapAddPointMode = false;
+    pendingMapPointCoords = null;
+    document.getElementById('map-add-point-btn')?.classList.remove('active');
+    document.getElementById('map-add-point-btn')?.setAttribute('aria-pressed', 'false');
+  }
+  if (mapEvacuationCircleMode) {
+    mapEvacuationCircleMode = false;
+    updateEvacuationCircleButtons();
+  }
+  mapMeasureMode = !mapMeasureMode;
+  mapMeasurePoints = [];
+  if (mapMeasureLayer) mapMeasureLayer.clearLayers();
+  updateMeasureButtons();
+  setMapFeedback(
+    mapMeasureMode
+      ? 'Mode mètre actif: cliquez deux points sur la carte pour mesurer la distance.'
+      : 'Mode mètre désactivé.',
+  );
+}
+
+function onMapClickMeasure(event) {
+  if (!mapMeasureMode || !leafletMap || typeof window.L === 'undefined') return;
+  const lat = Number(event?.latlng?.lat);
+  const lon = Number(event?.latlng?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+
+  mapMeasurePoints.push([lat, lon]);
+  if (mapMeasureLayer) {
+    window.L.circleMarker([lat, lon], {
+      radius: 5,
+      color: '#0b7285',
+      weight: 2,
+      fillColor: '#99e9f2',
+      fillOpacity: 0.95,
+    }).addTo(mapMeasureLayer);
+  }
+
+  if (mapMeasurePoints.length < 2) {
+    setMapFeedback('Premier point de mesure posé. Cliquez le second point.');
+    return;
+  }
+
+  const [start, end] = mapMeasurePoints.slice(-2);
+  const distanceMeters = leafletMap.distance(start, end);
+  if (mapMeasureLayer) {
+    window.L.polyline([start, end], {
+      color: '#0b7285',
+      weight: 3,
+      dashArray: '8 6',
+    }).addTo(mapMeasureLayer);
+    const midpoint = [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2];
+    window.L.marker(midpoint, {
+      icon: window.L.divIcon({
+        className: 'map-measure-label',
+        html: `<span>${escapeHtml(formatDistanceMeters(distanceMeters))}</span>`,
+        iconSize: null,
+      }),
+    }).addTo(mapMeasureLayer);
+  }
+
+  mapMeasureMode = false;
+  mapMeasurePoints = [];
+  updateMeasureButtons();
+  setMapFeedback(`Distance mesurée: ${formatDistanceMeters(distanceMeters)}.`);
+}
+
 function clearEvacuationCircle(showFeedback = true) {
   mapEvacuationCircleMode = false;
   updateEvacuationCircleButtons();
@@ -6605,6 +6702,7 @@ function startEvacuationCircleMode() {
     document.getElementById('map-add-point-btn')?.classList.remove('active');
     document.getElementById('map-add-point-btn')?.setAttribute('aria-pressed', 'false');
   }
+  if (mapMeasureMode) clearMapMeasure(false);
   mapEvacuationCircleMode = !mapEvacuationCircleMode;
   updateEvacuationCircleButtons();
   setMapFeedback(
@@ -11300,6 +11398,8 @@ function bindAppInteractions() {
   document.getElementById('map-zone-impact-clear')?.addEventListener('click', clearZoneImpactSelection);
   document.getElementById('map-evacuation-circle-start')?.addEventListener('click', startEvacuationCircleMode);
   document.getElementById('map-evacuation-circle-clear')?.addEventListener('click', () => clearEvacuationCircle(true));
+  document.getElementById('map-measure-start')?.addEventListener('click', startMapMeasureMode);
+  document.getElementById('map-measure-clear')?.addEventListener('click', () => clearMapMeasure(true));
   document.getElementById('map-add-point-btn')?.addEventListener('click', () => {
     if (!canEdit()) {
       setMapFeedback('Vous n\'avez pas le droit de créer un POI.', true);
@@ -11309,6 +11409,7 @@ function bindAppInteractions() {
       mapEvacuationCircleMode = false;
       updateEvacuationCircleButtons();
     }
+    if (mapMeasureMode) clearMapMeasure(false);
     mapAddPointMode = !mapAddPointMode;
     pendingMapPointCoords = null;
     const button = document.getElementById('map-add-point-btn');

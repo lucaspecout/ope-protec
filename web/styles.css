@@ -1055,6 +1055,17 @@ details[open] > .filter-group__title::after { transform: rotate(90deg); }
 .map-zone-impact h4 { margin: 0 0 .35rem; font-size: .88rem; }
 .map-zone-impact .list { margin: 0; }
 .map-zone-impact li { font-size: .78rem; }
+.map-measure-label span {
+  display: inline-block;
+  padding: .18rem .46rem;
+  border-radius: 999px;
+  background: rgba(11, 114, 133, 0.95);
+  color: #fff;
+  font-size: .75rem;
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, .15);
+}
 .map-checks-list { margin-top: .45rem; max-height: 150px; overflow: auto; }
 .map-checks-list li { font-size: .82rem; }
 .map-checks-list .ok { color: var(--ok); font-weight: 700; }
