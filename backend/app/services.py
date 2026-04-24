@@ -5551,8 +5551,17 @@ def _annuaire_record_address(record: dict[str, Any]) -> str:
     return ""
 
 
-def _fetch_annuaire_administration_records(where_clause: str, limit: int = 50) -> list[dict[str, Any]]:
-    query = urlencode({"where": where_clause, "limit": max(1, min(limit, 100))})
+def _fetch_annuaire_administration_records(
+    where_clause: str | None = None,
+    limit: int = 50,
+    refinements: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    params: dict[str, Any] = {"limit": max(1, min(limit, 100))}
+    if where_clause:
+        params["where"] = where_clause
+    if refinements:
+        params["refine"] = refinements
+    query = urlencode(params, doseq=True)
     payload = _http_get_json(
         f"{_ANNUAIRE_ADMINISTRATION_BASE_URL}?{query}",
         timeout=20,
@@ -5566,6 +5575,10 @@ def _annuaire_where_equals(field: str, value: Any) -> str:
     safe_field = str(field or "").strip()
     literal = _annuaire_scalar(value).replace("\\", "\\\\").replace("'", "\\'")
     return f"{safe_field} = '{literal}'"
+
+
+def _annuaire_refine(field: str, value: Any) -> str:
+    return f"{str(field or '').strip()}:{_annuaire_scalar(value)}"
 
 
 def _normalize_annuaire_contact(record: dict[str, Any]) -> dict[str, Any]:
@@ -5593,18 +5606,18 @@ def fetch_municipality_public_services(name: str, insee_code: str | None = None,
 
         if safe_insee:
             try:
-                commune_records = _fetch_annuaire_administration_records(_annuaire_where_equals("code_insee_commune", safe_insee), limit=60)
+                commune_records = _fetch_annuaire_administration_records(limit=60, refinements=[_annuaire_refine("code_insee_commune", safe_insee)])
             except Exception as exc:
                 errors.append(str(exc))
 
         if not commune_records and safe_name:
             try:
-                commune_records = _fetch_annuaire_administration_records(_annuaire_where_equals("nom_commune", safe_name), limit=60)
+                commune_records = _fetch_annuaire_administration_records(limit=60, refinements=[_annuaire_refine("nom_commune", safe_name)])
             except Exception as exc:
                 errors.append(str(exc))
 
         try:
-            grenoble_records = _fetch_annuaire_administration_records(_annuaire_where_equals("code_insee_commune", "38185"), limit=80)
+            grenoble_records = _fetch_annuaire_administration_records(limit=80, refinements=[_annuaire_refine("code_insee_commune", "38185")])
         except Exception as exc:
             errors.append(str(exc))
 
@@ -5708,7 +5721,7 @@ def fetch_isere_public_services_by_city(city: str, force_refresh: bool = False) 
         errors: list[str] = []
         commune_records: list[dict[str, Any]] = []
         try:
-            commune_records = _fetch_annuaire_administration_records(_annuaire_where_equals("nom_commune", safe_city), limit=80)
+            commune_records = _fetch_annuaire_administration_records(limit=80, refinements=[_annuaire_refine("nom_commune", safe_city)])
         except Exception as exc:
             errors.append(str(exc))
 
