@@ -285,6 +285,9 @@ let mapZoneImpactSelection = null;
 let mapZoneImpactDrawHandler = null;
 let mapZoneImpactComputationSeq = 0;
 let mapZoneImpactReportData = null; // stocke les données brutes pour l'export
+let mapEvacuationCircleLayer = null;
+let mapEvacuationCircleMode = false;
+let mapEvacuationCircle = null;
 const mapPointVisibilityOverrides = new Map();
 const resourceVisibilityOverrides = new Map();
 let pendingMapPointCoords = null;
@@ -3355,6 +3358,7 @@ function initMap() {
   mapPointsLayer = window.L.layerGroup().addTo(leafletMap);
   mapAnnotationFeatureGroup = window.L.featureGroup().addTo(leafletMap);
   mapZoneImpactLayer = window.L.layerGroup().addTo(leafletMap);
+  mapEvacuationCircleLayer = window.L.layerGroup().addTo(leafletMap);
   initMapAnnotationModule();
   itinisereLayer = window.L.layerGroup().addTo(leafletMap);
   bisonLayer = window.L.layerGroup().addTo(leafletMap);
@@ -3370,6 +3374,7 @@ function initMap() {
   groundwaterLayer = window.L.layerGroup();
   feuxForetLayer = window.L.layerGroup();
   colsAlpinsLayer = window.L.layerGroup();
+  leafletMap.on('click', onMapClickEvacuationCircle);
   leafletMap.on('click', onMapClickAddPoint);
   leafletMap.on('click', handleOsmDetailsClick);
   leafletMap.on('zoomend', updateTrafficZoomClass);
@@ -3408,7 +3413,7 @@ function formatOsmDetailsPopup(payload = {}) {
 }
 
 async function handleOsmDetailsClick(event) {
-  if (!leafletMap || mapAddPointMode || typeof fetch !== 'function') return;
+  if (!leafletMap || mapAddPointMode || mapEvacuationCircleMode || typeof fetch !== 'function') return;
   if (leafletMap.getZoom() < OSM_DETAILS_MIN_ZOOM) return;
   const lat = Number(event?.latlng?.lat);
   const lon = Number(event?.latlng?.lng);
@@ -3543,6 +3548,7 @@ async function resetMapFilters() {
   await renderTrafficOnMap();
   renderMapChecks([]);
   clearZoneImpactSelection();
+  clearEvacuationCircle(false);
   setMapFeedback('Filtres carte réinitialisés.');
 }
 
@@ -6563,6 +6569,74 @@ function onMapClickAddPoint(event) {
   if (!mapAddPointMode) return;
   pendingMapPointCoords = event.latlng;
   openMapPointModal('poi');
+}
+
+function currentEvacuationRadiusMeters() {
+  const raw = Number(document.getElementById('map-evacuation-radius-km')?.value || 0);
+  if (!Number.isFinite(raw) || raw <= 0) return 0;
+  return raw * 1000;
+}
+
+function updateEvacuationCircleButtons() {
+  const startBtn = document.getElementById('map-evacuation-circle-start');
+  if (startBtn) {
+    startBtn.classList.toggle('active', mapEvacuationCircleMode);
+    startBtn.setAttribute('aria-pressed', String(mapEvacuationCircleMode));
+  }
+}
+
+function clearEvacuationCircle(showFeedback = true) {
+  mapEvacuationCircleMode = false;
+  updateEvacuationCircleButtons();
+  if (mapEvacuationCircleLayer) mapEvacuationCircleLayer.clearLayers();
+  mapEvacuationCircle = null;
+  if (showFeedback) setMapFeedback("Zone d'évacuation effacée.");
+}
+
+function startEvacuationCircleMode() {
+  const radiusMeters = currentEvacuationRadiusMeters();
+  if (!radiusMeters) {
+    setMapFeedback("Saisissez d'abord un rayon d'évacuation en kilomètres.", true);
+    return;
+  }
+  if (mapAddPointMode) {
+    mapAddPointMode = false;
+    pendingMapPointCoords = null;
+    document.getElementById('map-add-point-btn')?.classList.remove('active');
+    document.getElementById('map-add-point-btn')?.setAttribute('aria-pressed', 'false');
+  }
+  mapEvacuationCircleMode = !mapEvacuationCircleMode;
+  updateEvacuationCircleButtons();
+  setMapFeedback(
+    mapEvacuationCircleMode
+      ? `Cliquez sur la carte pour poser le centre du rond d'évacuation (${(radiusMeters / 1000).toLocaleString('fr-FR')} km).`
+      : "Mode rond d'évacuation désactivé.",
+  );
+}
+
+function onMapClickEvacuationCircle(event) {
+  if (!mapEvacuationCircleMode || !leafletMap || typeof window.L === 'undefined') return;
+  const radiusMeters = currentEvacuationRadiusMeters();
+  if (!radiusMeters) {
+    setMapFeedback("Rayon d'évacuation invalide.", true);
+    mapEvacuationCircleMode = false;
+    updateEvacuationCircleButtons();
+    return;
+  }
+  if (mapEvacuationCircleLayer) mapEvacuationCircleLayer.clearLayers();
+  mapEvacuationCircle = window.L.circle([event.latlng.lat, event.latlng.lng], {
+    radius: radiusMeters,
+    color: '#c92a2a',
+    weight: 2,
+    fillColor: '#ff8787',
+    fillOpacity: 0.16,
+  }).addTo(mapEvacuationCircleLayer || leafletMap);
+  mapEvacuationCircle.bindPopup(
+    `<strong>Zone d'évacuation</strong><br>Rayon: ${(radiusMeters / 1000).toLocaleString('fr-FR')} km<br>Centre: ${escapeHtml(formatCoordinates(event.latlng.lat, event.latlng.lng))}`,
+  ).openPopup();
+  mapEvacuationCircleMode = false;
+  updateEvacuationCircleButtons();
+  setMapFeedback(`Rond d'évacuation affiché (${(radiusMeters / 1000).toLocaleString('fr-FR')} km).`);
 }
 
 function openMapPointModal(defaultCategory = 'autre') {
@@ -11224,10 +11298,16 @@ function bindAppInteractions() {
   document.getElementById('map-locate-btn')?.addEventListener('click', locateUserOnMap);
   document.getElementById('map-zone-impact-start')?.addEventListener('click', startZoneImpactSelection);
   document.getElementById('map-zone-impact-clear')?.addEventListener('click', clearZoneImpactSelection);
+  document.getElementById('map-evacuation-circle-start')?.addEventListener('click', startEvacuationCircleMode);
+  document.getElementById('map-evacuation-circle-clear')?.addEventListener('click', () => clearEvacuationCircle(true));
   document.getElementById('map-add-point-btn')?.addEventListener('click', () => {
     if (!canEdit()) {
       setMapFeedback('Vous n\'avez pas le droit de créer un POI.', true);
       return;
+    }
+    if (mapEvacuationCircleMode) {
+      mapEvacuationCircleMode = false;
+      updateEvacuationCircleButtons();
     }
     mapAddPointMode = !mapAddPointMode;
     pendingMapPointCoords = null;
