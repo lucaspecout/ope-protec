@@ -3163,16 +3163,17 @@ function applyFloodZoneLayer() {
     pane.style.zIndex = 450;
     pane.style.pointerEvents = 'none';
   }
-  // Couches WMS Géorisques : PPRI approuvés + prescrits (colorés par niveau d'aléa côté serveur)
-  // Rouge = aléa fort · Orange = aléa moyen · Bleu = aléa faible
+  // Couches WMS Géorisques plus précises :
+  // on privilégie les zones PPR inondation détaillées plutôt que les simples emprises communales.
+  // Cela améliore nettement la lecture opérationnelle sur la carte.
   floodZoneWmsLayer = window.L.tileLayer.wms('https://georisques.gouv.fr/services', {
-    layers: 'PPRN_COMMUNE_RISQINOND_APPROUV,PPRN_COMMUNE_RISQINOND_PRESCRIT',
+    layers: 'PPRN_ZONE_RISQINOND_APPROUV,PPRN_ZONE_RISQINOND_PRESCRIT',
     format: 'image/png',
     transparent: true,
     version: '1.3.0',
-    opacity: 0.65,
+    opacity: 0.72,
     pane: 'floodZonePane',
-    attribution: '&copy; État / Géorisques — Zones inondables PPRI Isère',
+    attribution: '&copy; État / Géorisques — Zones inondables PPR détaillées',
   }).addTo(leafletMap);
 }
 
