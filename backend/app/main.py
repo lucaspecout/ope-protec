@@ -1896,7 +1896,15 @@ def search_public_contacts(
     force_refresh: bool = Query(False),
     _: User = Depends(require_roles(*READ_ROLES)),
 ):
-    return fetch_isere_public_services_by_city(city, force_refresh=force_refresh)
+    safe_city = str(city or "").strip()
+    insee_code = resolve_commune_insee_code(safe_city, departement="38")
+    if insee_code:
+        return fetch_municipality_public_services(
+            safe_city,
+            insee_code=insee_code,
+            force_refresh=force_refresh,
+        )
+    return fetch_isere_public_services_by_city(safe_city, force_refresh=force_refresh)
 
 
 @app.get("/municipalities/{municipality_id}/water-quality")
