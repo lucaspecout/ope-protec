@@ -9928,17 +9928,21 @@ async function loadAndRenderContactsPanel(city = '', forceRefresh = false) {
     if (seq !== contactsPanelLoadSeq) return;
     contactsPanelCache.set(cacheKey, payload);
 
-    const contacts = Array.isArray(payload?.contacts) ? payload.contacts : [];
+    const contacts = Array.isArray(payload?.contacts)
+      ? payload.contacts
+      : (Array.isArray(payload?.municipality_contacts) ? payload.municipality_contacts : []);
     const cards = contacts.map((item) => renderPublicServiceCard(item, 'Contact public')).filter(Boolean);
+    const importantContacts = Array.isArray(payload?.important_contacts) ? payload.important_contacts : [];
+    const importantCards = importantContacts.map((item) => renderPublicServiceCard(item, 'Contact Isère')).filter(Boolean);
     renderContactsEmergencyNumbers(payload?.emergency_numbers || []);
-    setText('contacts-results-title', payload?.city || normalizedCity);
+    setText('contacts-results-title', payload?.city || payload?.municipality_name || normalizedCity);
     setText('contacts-results-meta', `${Number(payload?.contacts_total ?? contacts.length)} contact(s) utile(s) · source Annuaire administration`);
     setText('contacts-results-error', payload?.error ? sanitizeErrorMessage(payload.error) : '');
-    document.getElementById('panel-title').textContent = payload?.city
-      ? `Contacts utiles · ${payload.city}`
+    document.getElementById('panel-title').textContent = (payload?.city || payload?.municipality_name)
+      ? `Contacts utiles · ${payload.city || payload.municipality_name}`
       : PANEL_TITLES['contacts-panel'];
     setHtml('contacts-results-list', cards.length
-      ? cards.join('')
+      ? `${cards.join('')}${importantCards.length ? `<div class="contacts-results-divider"><h5>Contacts importants Isère</h5>${importantCards.join('')}</div>` : ''}`
       : '<p class="muted">Aucun contact public exploitable trouvé pour cette ville iséroise.</p>');
   } catch (error) {
     if (seq !== contactsPanelLoadSeq) return;
