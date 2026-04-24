@@ -59,6 +59,7 @@
           <button class="menu-btn" data-target="situation-panel" data-icon="📊"><span class="menu-label">Situation</span></button>
           <button class="menu-btn" data-target="services-panel" data-icon="🔌"><span class="menu-label">Services connectés</span></button>
           <button class="menu-btn" data-target="meteo-panel" data-icon="🌤️"><span class="menu-label">Météo semaine</span></button>
+          <button class="menu-btn" data-target="water-panel" data-icon="🚰"><span class="menu-label">Eau potable</span></button>
           <button class="menu-btn" data-target="georisques-panel" data-icon="🌍"><span class="menu-label">Page Géorisques</span></button>
           <button class="menu-btn" data-target="news-panel" data-icon="📰"><span class="menu-label">Actualités</span></button>
           <button class="menu-btn" data-target="municipalities-panel" data-icon="🏛️"><span class="menu-label">Communes</span></button>
@@ -151,6 +152,42 @@
           <h4>Vue semaine (emoji)</h4>
           <div id="meteo-week-list" class="meteo-week-list"></div>
           <p id="meteo-week-updated" class="muted"></p>
+        </section>
+
+        <section id="water-panel" class="panel view hidden" hidden>
+          <div class="water-hero tile">
+            <div>
+              <p class="tag">Hub'Eau</p>
+              <h3>Eau potable et assainissement</h3>
+              <p class="muted">Sélectionnez d'abord une commune PCS pour afficher la qualité de l'eau potable et les indicateurs réglementaires eau/assainissement.</p>
+            </div>
+            <div class="water-hero__meta">
+              <label for="water-municipality-select">Commune PCS</label>
+              <select id="water-municipality-select" aria-label="Sélectionner une commune PCS">
+                <option value="">Sélectionnez une commune PCS</option>
+              </select>
+            </div>
+          </div>
+
+          <div id="water-panel-empty" class="tile">
+            <h4>Choisir une commune</h4>
+            <p class="muted">Aucune donnée n'est affichée tant qu'une commune PCS n'est pas sélectionnée.</p>
+          </div>
+
+          <div id="water-panel-content" class="hidden" hidden>
+            <div id="water-quality-summary" class="water-summary-grid"></div>
+            <div class="water-layout">
+              <article class="tile">
+                <h4>Qualité de l'eau potable</h4>
+                <div id="water-quality-list" class="water-cards"></div>
+              </article>
+              <article class="tile">
+                <h4>Indicateurs eau et assainissement</h4>
+                <div id="water-services-summary" class="water-kpi-grid"></div>
+                <div id="water-services-list" class="water-cards"></div>
+              </article>
+            </div>
+          </div>
         </section>
 
         <section id="georisques-panel" class="panel view hidden" hidden>

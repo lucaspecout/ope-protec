@@ -700,6 +700,9 @@ _ANNUAIRE_ADMINISTRATION_CACHE_TTL_SECONDS = 21600
 _ANFR_ISERE_CACHE_TTL_SECONDS = 43200
 _ARCEP_ISERE_CACHE_TTL_SECONDS = 900
 _HUBEAU_GROUNDWATER_CACHE_TTL_SECONDS = 10800
+_HUBEAU_WATER_QUALITY_CACHE_TTL_SECONDS = 21600
+_HUBEAU_WATER_SERVICES_CACHE_TTL_SECONDS = 43200
+_RNB_BUILDINGS_CACHE_TTL_SECONDS = 21600
 _APIC_ISERE_CACHE_TTL_SECONDS = 300
 _VIGICRUES_FLASH_ISERE_CACHE_TTL_SECONDS = 300
 _ISERE_BOUNDARY_CACHE_TTL_SECONDS = 21600
@@ -1240,6 +1243,12 @@ _arcep_isere_cache_lock = Lock()
 _arcep_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "arcep_isere"}
 _hubeau_groundwater_cache_lock = Lock()
 _hubeau_groundwater_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "hubeau_groundwater"}
+_hubeau_water_quality_cache_lock = Lock()
+_hubeau_water_quality_cache: dict[str, Any] = {"by_commune": {}, "expires_at": datetime.min}
+_hubeau_water_services_cache_lock = Lock()
+_hubeau_water_services_cache: dict[str, Any] = {"by_commune": {}, "expires_at": datetime.min}
+_rnb_buildings_cache_lock = Lock()
+_rnb_buildings_cache: dict[str, Any] = {"by_bbox": {}, "expires_at": datetime.min}
 _AVALANCHE_ISERE_CACHE_TTL_SECONDS = 1800
 _avalanche_isere_cache_lock = Lock()
 _avalanche_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "avalanche_isere"}
@@ -10183,6 +10192,8 @@ def flush_service_memory_cache(service_key: str) -> dict[str, str]:
         "arcep_isere":         (_arcep_isere_cache,           _arcep_isere_cache_lock),
         "ma_securite":         (_ma_securite_cache,           _ma_securite_cache_lock),
         "groundwater_isere":   (_hubeau_groundwater_cache,    _hubeau_groundwater_cache_lock),
+        "water_quality":       (_hubeau_water_quality_cache,  _hubeau_water_quality_cache_lock),
+        "water_services":      (_hubeau_water_services_cache, _hubeau_water_services_cache_lock),
         "apic_isere":          (_apic_isere_cache,            _apic_isere_cache_lock),
         "isere_opendata":      (_isere_opendata_cache,        _isere_opendata_cache_lock),
         "finess_isere":        (_finess_isere_cache,          _finess_isere_cache_lock),
@@ -10293,6 +10304,342 @@ def _safe_float(v: Any) -> float | None:
         return float(v) if v not in (None, "", "nan") else None
     except (ValueError, TypeError):
         return None
+
+
+def _safe_int(v: Any) -> int | None:
+    try:
+        if v in (None, "", "nan"):
+            return None
+        return int(float(v))
+    except (ValueError, TypeError):
+        return None
+
+
+def _hubeau_quality_cache_key(code_commune: str, limit: int) -> str:
+    return f"{str(code_commune or '').strip()}|{max(10, min(limit, 200))}"
+
+
+def _hubeau_services_cache_key(code_commune: str, limit: int) -> str:
+    return f"{str(code_commune or '').strip()}|{max(10, min(limit, 200))}"
+
+
+def _rnb_bbox_cache_key(min_lat: float, min_lon: float, max_lat: float, max_lon: float, limit: int) -> str:
+    return f"{min_lat:.5f}|{min_lon:.5f}|{max_lat:.5f}|{max_lon:.5f}|{max(20, min(limit, 500))}"
+
+
+def _normalize_hubeau_quality_item(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "date_prelevement": item.get("date_prelevement"),
+        "libelle_parametre": item.get("libelle_parametre") or item.get("libelle_parametre_maj") or "",
+        "resultat_numerique": item.get("resultat_numerique"),
+        "resultat_alphanumerique": item.get("resultat_alphanumerique"),
+        "libelle_unite": item.get("libelle_unite") or "",
+        "limite_qualite_parametre": item.get("limite_qualite_parametre") or "",
+        "reference_qualite_parametre": item.get("reference_qualite_parametre") or "",
+        "conclusion_conformite_prelevement": item.get("conclusion_conformite_prelevement") or "",
+        "nom_uge": item.get("nom_uge") or "",
+        "nom_distributeur": item.get("nom_distributeur") or "",
+        "nom_installation_amont": item.get("nom_installation_amont") or "",
+        "reference_analyse": item.get("reference_analyse") or "",
+        "conformite_limites_pc_prelevement": item.get("conformite_limites_pc_prelevement") or "",
+        "conformite_references_pc_prelevement": item.get("conformite_references_pc_prelevement") or "",
+    }
+
+
+def fetch_hubeau_water_quality(
+    code_commune: str,
+    commune_name: str = "",
+    force_refresh: bool = False,
+    limit: int = 60,
+) -> dict[str, Any]:
+    safe_code = str(code_commune or "").strip()
+    safe_name = str(commune_name or "").strip()
+    safe_limit = max(10, min(limit, 200))
+    if not safe_code:
+        return {
+            "status": "degraded",
+            "source": "https://hubeau.eaufrance.fr/page/api-qualite-eau-potable",
+            "commune_name": safe_name,
+            "code_commune": safe_code or None,
+            "items": [],
+            "items_total": 0,
+            "summary": {},
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+            "error": "Code INSEE de commune manquant",
+        }
+
+    cache_key = _hubeau_quality_cache_key(safe_code, safe_limit)
+    with _hubeau_water_quality_cache_lock:
+        cached = _hubeau_water_quality_cache.get("by_commune", {}).get(cache_key)
+        expires_at = _hubeau_water_quality_cache.get("expires_at") or datetime.min
+        if not force_refresh and isinstance(cached, dict) and datetime.utcnow() < expires_at:
+            return deepcopy(cached)
+
+    def loader() -> dict[str, Any]:
+        params = urlencode({
+            "code_commune": safe_code,
+            "size": safe_limit,
+        })
+        url = f"https://hubeau.eaufrance.fr/api/v1/qualite_eau_potable/resultats_dis?{params}"
+        payload = _http_get_json(url, timeout=20, headers={"Accept": "application/json"})
+        data = payload.get("data") if isinstance(payload, dict) else []
+        items_raw = data if isinstance(data, list) else []
+        items = [_normalize_hubeau_quality_item(item) for item in items_raw if isinstance(item, dict)]
+        items.sort(key=lambda item: str(item.get("date_prelevement") or ""), reverse=True)
+        items = items[:safe_limit]
+        latest = items[0] if items else {}
+        non_conforming = [
+            item for item in items
+            if str(item.get("conformite_limites_pc_prelevement") or "").upper() not in {"", "C"}
+            or str(item.get("conformite_references_pc_prelevement") or "").upper() not in {"", "C"}
+        ]
+        summary = {
+            "last_sample_at": latest.get("date_prelevement"),
+            "latest_parameter": latest.get("libelle_parametre") or "Analyse récente",
+            "latest_result": latest.get("resultat_alphanumerique") or latest.get("resultat_numerique"),
+            "latest_unit": latest.get("libelle_unite") or "",
+            "uge_name": latest.get("nom_uge") or "",
+            "distributor_name": latest.get("nom_distributeur") or "",
+            "installation_name": latest.get("nom_installation_amont") or "",
+            "latest_conclusion": latest.get("conclusion_conformite_prelevement") or "",
+            "non_conforming_total": len(non_conforming),
+        }
+        return {
+            "status": "online" if items else "degraded",
+            "source": "https://hubeau.eaufrance.fr/page/api-qualite-eau-potable",
+            "commune_name": safe_name or (items_raw[0].get("nom_commune") if items_raw and isinstance(items_raw[0], dict) else ""),
+            "code_commune": safe_code,
+            "items": items,
+            "items_total": len(items),
+            "summary": summary,
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+            "warning": "Les données Hub'Eau qualité eau potable sont signalées avec une anomalie source par le producteur.",
+        }
+
+    try:
+        result = loader()
+    except Exception as exc:
+        result = {
+            "status": "error",
+            "source": "https://hubeau.eaufrance.fr/page/api-qualite-eau-potable",
+            "commune_name": safe_name,
+            "code_commune": safe_code,
+            "items": [],
+            "items_total": 0,
+            "summary": {},
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+            "error": str(exc),
+        }
+
+    with _hubeau_water_quality_cache_lock:
+        if not isinstance(_hubeau_water_quality_cache.get("by_commune"), dict):
+            _hubeau_water_quality_cache["by_commune"] = {}
+        _hubeau_water_quality_cache["by_commune"][cache_key] = deepcopy(result)
+        _hubeau_water_quality_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_HUBEAU_WATER_QUALITY_CACHE_TTL_SECONDS)
+    return result
+
+
+def _normalize_hubeau_indicator_item(item: dict[str, Any]) -> dict[str, Any]:
+    service_type = str(
+        item.get("type_service")
+        or item.get("libelle_type_service")
+        or item.get("type_service_libelle")
+        or ""
+    ).strip()
+    return {
+        "annee": _safe_int(item.get("annee")),
+        "type_service": service_type,
+        "nom_service": item.get("nom_service") or item.get("libelle_service") or "",
+        "population_desservie": _safe_int(item.get("nb_habitants_desservis") or item.get("habitants_desservis")),
+        "prix_ttc_m3": _safe_float(item.get("prix_ttc_m3") or item.get("prix_ttc_service_m3")),
+        "rendement_reseau": _safe_float(item.get("rendement_reseau") or item.get("taux_rendement_reseau_distribution")),
+        "indice_pertes_reseau": _safe_float(item.get("indice_lineaire_pertes_reseau")),
+        "taux_conformite_microbio": _safe_float(item.get("taux_conformite_microbiologie") or item.get("taux_conformite_eaux_microbiologie")),
+        "taux_conformite_physicochimie": _safe_float(item.get("taux_conformite_physicochimie") or item.get("taux_conformite_eaux_physicochimie")),
+        "taux_desserte_assainissement": _safe_float(item.get("taux_desserte_assainissement_collectif")),
+        "conformite_eru": _safe_float(item.get("conformite_performance_eru")),
+        "taux_conformite_anc": _safe_float(item.get("taux_conformite_dispositifs_anc")),
+    }
+
+
+def fetch_hubeau_water_services(
+    code_commune: str,
+    commune_name: str = "",
+    force_refresh: bool = False,
+    limit: int = 80,
+) -> dict[str, Any]:
+    safe_code = str(code_commune or "").strip()
+    safe_name = str(commune_name or "").strip()
+    safe_limit = max(10, min(limit, 200))
+    if not safe_code:
+        return {
+            "status": "degraded",
+            "source": "https://hubeau.eaufrance.fr/page/api-indicateurs-services",
+            "commune_name": safe_name,
+            "code_commune": safe_code or None,
+            "items": [],
+            "items_total": 0,
+            "summary": {},
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+            "error": "Code INSEE de commune manquant",
+        }
+
+    cache_key = _hubeau_services_cache_key(safe_code, safe_limit)
+    with _hubeau_water_services_cache_lock:
+        cached = _hubeau_water_services_cache.get("by_commune", {}).get(cache_key)
+        expires_at = _hubeau_water_services_cache.get("expires_at") or datetime.min
+        if not force_refresh and isinstance(cached, dict) and datetime.utcnow() < expires_at:
+            return deepcopy(cached)
+
+    def loader() -> dict[str, Any]:
+        params = urlencode({
+            "code_commune": safe_code,
+            "size": safe_limit,
+            "format": "json",
+        })
+        url = f"https://hubeau.eaufrance.fr/api/v0/indicateurs_services/communes?{params}"
+        payload = _http_get_json(url, timeout=20, headers={"Accept": "application/json"})
+        data = payload.get("data") if isinstance(payload, dict) else []
+        items_raw = data if isinstance(data, list) else []
+        items = [_normalize_hubeau_indicator_item(item) for item in items_raw if isinstance(item, dict)]
+        items.sort(key=lambda item: (item.get("annee") or 0, str(item.get("type_service") or "")), reverse=True)
+        items = items[:safe_limit]
+        latest_year = max((item.get("annee") or 0) for item in items) if items else None
+        latest_items = [item for item in items if item.get("annee") == latest_year] if latest_year else []
+        by_type = {
+            "AEP": next((item for item in latest_items if "AEP" in str(item.get("type_service") or "").upper()), None),
+            "AC": next((item for item in latest_items if str(item.get("type_service") or "").upper() == "AC"), None),
+            "ANC": next((item for item in latest_items if str(item.get("type_service") or "").upper() == "ANC"), None),
+        }
+        summary = {
+            "latest_year": latest_year,
+            "aep": by_type["AEP"],
+            "ac": by_type["AC"],
+            "anc": by_type["ANC"],
+        }
+        return {
+            "status": "online" if items else "degraded",
+            "source": "https://hubeau.eaufrance.fr/page/api-indicateurs-services",
+            "commune_name": safe_name,
+            "code_commune": safe_code,
+            "items": items,
+            "items_total": len(items),
+            "summary": summary,
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+
+    try:
+        result = loader()
+    except Exception as exc:
+        result = {
+            "status": "error",
+            "source": "https://hubeau.eaufrance.fr/page/api-indicateurs-services",
+            "commune_name": safe_name,
+            "code_commune": safe_code,
+            "items": [],
+            "items_total": 0,
+            "summary": {},
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+            "error": str(exc),
+        }
+
+    with _hubeau_water_services_cache_lock:
+        if not isinstance(_hubeau_water_services_cache.get("by_commune"), dict):
+            _hubeau_water_services_cache["by_commune"] = {}
+        _hubeau_water_services_cache["by_commune"][cache_key] = deepcopy(result)
+        _hubeau_water_services_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_HUBEAU_WATER_SERVICES_CACHE_TTL_SECONDS)
+    return result
+
+
+def fetch_rnb_buildings_bbox(
+    min_lat: float,
+    min_lon: float,
+    max_lat: float,
+    max_lon: float,
+    force_refresh: bool = False,
+    limit: int = 200,
+) -> dict[str, Any]:
+    safe_limit = max(20, min(limit, 500))
+    safe_min_lat = min(float(min_lat), float(max_lat))
+    safe_max_lat = max(float(min_lat), float(max_lat))
+    safe_min_lon = min(float(min_lon), float(max_lon))
+    safe_max_lon = max(float(min_lon), float(max_lon))
+    cache_key = _rnb_bbox_cache_key(safe_min_lat, safe_min_lon, safe_max_lat, safe_max_lon, safe_limit)
+
+    with _rnb_buildings_cache_lock:
+        cached = _rnb_buildings_cache.get("by_bbox", {}).get(cache_key)
+        expires_at = _rnb_buildings_cache.get("expires_at") or datetime.min
+        if not force_refresh and isinstance(cached, dict) and datetime.utcnow() < expires_at:
+            return deepcopy(cached)
+
+    def loader() -> dict[str, Any]:
+        bbox = f"{safe_min_lon},{safe_min_lat},{safe_max_lon},{safe_max_lat}"
+        next_url = (
+            "https://rnb-api.beta.gouv.fr/api/alpha/buildings/"
+            f"?bbox={quote_plus(bbox)}&status=constructed&limit={safe_limit}&from=ope-protec@local.invalid"
+        )
+        buildings: list[dict[str, Any]] = []
+        pages = 0
+        while next_url and len(buildings) < safe_limit and pages < 5:
+            payload = _http_get_json(next_url, timeout=20, headers={"Accept": "application/json"})
+            results = payload.get("results") if isinstance(payload, dict) else []
+            for item in results if isinstance(results, list) else []:
+                if not isinstance(item, dict):
+                    continue
+                coords = (((item.get("point") or {}).get("coordinates")) if isinstance(item.get("point"), dict) else None) or []
+                lon = _safe_float(coords[0] if len(coords) > 0 else None)
+                lat = _safe_float(coords[1] if len(coords) > 1 else None)
+                if lat is None or lon is None:
+                    continue
+                buildings.append({
+                    "rnb_id": item.get("rnb_id"),
+                    "status": item.get("status"),
+                    "is_active": bool(item.get("is_active", True)),
+                    "lat": lat,
+                    "lon": lon,
+                })
+                if len(buildings) >= safe_limit:
+                    break
+            next_url = payload.get("next") if isinstance(payload, dict) else None
+            pages += 1
+        return {
+            "status": "online",
+            "source": "https://rnb-fr.gitbook.io/documentation/api-et-outils/api-batiments/lister-des-batiments",
+            "bbox": {
+                "min_lat": safe_min_lat,
+                "min_lon": safe_min_lon,
+                "max_lat": safe_max_lat,
+                "max_lon": safe_max_lon,
+            },
+            "buildings": buildings,
+            "buildings_total": len(buildings),
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+
+    try:
+        result = loader()
+    except Exception as exc:
+        result = {
+            "status": "error",
+            "source": "https://rnb-fr.gitbook.io/documentation/api-et-outils/api-batiments/lister-des-batiments",
+            "bbox": {
+                "min_lat": safe_min_lat,
+                "min_lon": safe_min_lon,
+                "max_lat": safe_max_lat,
+                "max_lon": safe_max_lon,
+            },
+            "buildings": [],
+            "buildings_total": 0,
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+            "error": str(exc),
+        }
+
+    with _rnb_buildings_cache_lock:
+        if not isinstance(_rnb_buildings_cache.get("by_bbox"), dict):
+            _rnb_buildings_cache["by_bbox"] = {}
+        _rnb_buildings_cache["by_bbox"][cache_key] = deepcopy(result)
+        _rnb_buildings_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_RNB_BUILDINGS_CACHE_TTL_SECONDS)
+    return result
 
 
 def _fetch_feux_foret_live() -> dict[str, Any]:

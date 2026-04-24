@@ -79,6 +79,7 @@ const PANEL_TITLES = {
   'situation-panel': 'Situation opérationnelle',
   'services-panel': 'Services connectés',
   'meteo-panel': 'Météo hebdomadaire Isère',
+  'water-panel': 'Eau potable et assainissement',
   'georisques-panel': 'Page Géorisques',
   'news-panel': 'Actualités Isère',
   'api-panel': 'Interconnexions API',
@@ -200,6 +201,7 @@ const MAIRIE_ALLOWED_PANELS = new Set([
   'situation-panel',
   'services-panel',
   'meteo-panel',
+  'water-panel',
   'georisques-panel',
   'municipalities-panel',
   'logs-panel',
@@ -309,6 +311,9 @@ let cachedExternalRisksSnapshot = {};
 let cachedWeeklyMeteo = null;
 let weeklyMeteoInFlight = null;
 let selectedMeteoCityKey = ISERE_MAJOR_CITIES[0]?.key || 'grenoble';
+let selectedWaterMunicipalityId = '';
+let waterPanelLoadSeq = 0;
+const waterPanelCache = new Map();
 let isereBoundaryGeometry = null;
 let trafficRenderSequence = 0;
 let mapSearchController = null;
@@ -2335,6 +2340,11 @@ function setActivePanel(panelId) {
   }
   if (panelId === 'logs-panel') ensureLogMunicipalitiesLoaded();
   if (panelId === 'news-panel') ensureSocialFeedsRendered();
+  if (panelId === 'water-panel' && token) {
+    loadAndRenderWaterPanel(false).catch((error) => {
+      waterPanelEmptyState(sanitizeErrorMessage(error.message));
+    });
+  }
   if (panelId === 'api-panel' && token) {
     loadApiInterconnections(false).catch((error) => {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
@@ -2432,6 +2442,35 @@ function zoneImpactGeometryCoordinates(geometry) {
     return Array.isArray(largest) ? largest : [];
   }
   return [];
+}
+
+function zoneImpactBoundingBox(geometry) {
+  const coords = zoneImpactGeometryCoordinates(geometry);
+  const lons = coords.map((coord) => Number(coord?.[0])).filter(Number.isFinite);
+  const lats = coords.map((coord) => Number(coord?.[1])).filter(Number.isFinite);
+  if (!lons.length || !lats.length) return null;
+  return {
+    minLat: Math.min(...lats),
+    minLon: Math.min(...lons),
+    maxLat: Math.max(...lats),
+    maxLon: Math.max(...lons),
+  };
+}
+
+async function fetchZoneRnbBuildings(geometry) {
+  const bbox = zoneImpactBoundingBox(geometry);
+  if (!bbox) return { buildings: [], buildings_total: 0 };
+  const params = new URLSearchParams({
+    min_lat: String(bbox.minLat),
+    min_lon: String(bbox.minLon),
+    max_lat: String(bbox.maxLat),
+    max_lon: String(bbox.maxLon),
+    limit: '400',
+  });
+  const payload = await api(`/api/rnb/buildings?${params.toString()}`, {
+    cacheTtlMs: 5 * 60 * 1000,
+  });
+  return payload && typeof payload === 'object' ? payload : { buildings: [], buildings_total: 0 };
 }
 
 function zoneImpactOverpassPoly(geometry) {
@@ -2573,7 +2612,7 @@ async function computeZoneImpact() {
   renderZoneImpactPanel('<li>⏳ Analyse en cours…</li>');
 
   // ─── Chargements parallèles ────────────────────────────────────────────────
-  const [inseePopulationMap, zonePopulationMetrics, streetInsights, geoCtx] = await Promise.all([
+  const [inseePopulationMap, zonePopulationMetrics, streetInsights, geoCtx, rnbPayload] = await Promise.all([
     loadIserePopulationByInsee(),
     (async () => {
       const muns = zoneImpactDepartmentCommunesInZone(geometry);
@@ -2581,6 +2620,7 @@ async function computeZoneImpact() {
     })(),
     fetchZoneStreetInsights(geometry),
     fetchZoneGeographicContext(geometry),
+    fetchZoneRnbBuildings(geometry).catch(() => ({ buildings: [], buildings_total: 0 })),
   ]);
   if (runSeq !== mapZoneImpactComputationSeq) return;
 
@@ -2590,6 +2630,11 @@ async function computeZoneImpact() {
     const c = normalizeMapCoordinates(r.lat, r.lon);
     return c ? isPointInsideGeometry(c, geometry) : false;
   });
+  const rnbBuildings = (Array.isArray(rnbPayload?.buildings) ? rnbPayload.buildings : []).filter((building) => {
+    const c = normalizeMapCoordinates(building.lat, building.lon);
+    return c ? isPointInsideGeometry(c, geometry) : false;
+  });
+  const buildingCount = rnbBuildings.length;
 
   // ─── Population ───────────────────────────────────────────────────────────
   const areaBasedPop = Number(zonePopulationMetrics.estimatedPopulation || 0);
@@ -2666,6 +2711,10 @@ async function computeZoneImpact() {
     ${childrenEstimate > 0 ? `👶 ~${childrenEstimate.toLocaleString('fr-FR')} enfants scolarisés estimés · ` : ''}
     ${ehpadResidents > 0 ? `🧓 ~${ehpadResidents.toLocaleString('fr-FR')} résidents EHPAD (personnes à mobilité réduite)` : ''}
   </li>`);
+  parts.push(`<li style="margin-bottom:.6em;padding:.4em;background:#eef7ff;border-radius:6px">
+    <strong>🏢 Bâtiments sélectionnés : <span style="font-size:1.15em;color:#0b4daa">${buildingCount.toLocaleString('fr-FR')}</span></strong><br>
+    <span class="muted">Calculé à partir du Référentiel National des Bâtiments dans l'emprise tracée.</span>
+  </li>`);
 
   // 3. Dangers dans la zone
   if (dangers.length) {
@@ -2719,8 +2768,10 @@ async function computeZoneImpact() {
   mapZoneImpactReportData = {
     generatedAt: new Date(),
     scale, geoLabel, geoCtx, zoneAreaM2, population, popSource,
+    buildingCount,
     childrenEstimate, ehpadResidents,
     municipalitiesInZone, resourcesInZone,
+    rnbBuildings,
     schools, ehpads, hospitals, fireStations, police, hostings, dangers, transports,
     allDistricts, streetInsights,
   };
@@ -2829,6 +2880,7 @@ function exportZoneImpactReport() {
 <div class="pop-block">
   <div class="pop-num">${d.population > 0 ? d.population.toLocaleString('fr-FR') : '?'} habitants</div>
   <div style="font-size:9.5pt;color:#666;margin-top:.2em">${toText(d.popSource)}</div>
+  <div style="margin-top:.4em">🏢 Bâtiments RNB dans la zone : <strong>${Number(d.buildingCount || 0).toLocaleString('fr-FR')}</strong></div>
   ${d.childrenEstimate > 0 ? `<div style="margin-top:.4em">👶 Enfants scolarisés estimés : <strong>~${d.childrenEstimate.toLocaleString('fr-FR')}</strong></div>` : ''}
   ${d.ehpadResidents > 0 ? `<div>🧓 Résidents EHPAD (mobilité réduite) : <strong>~${d.ehpadResidents.toLocaleString('fr-FR')}</strong></div>` : ''}
 </div>
@@ -9286,6 +9338,202 @@ async function renderWeeklyWeatherPanel(externalRisks = {}) {
   setText('meteo-week-updated', label);
 }
 
+function getWaterMunicipalityOptions() {
+  return (Array.isArray(cachedMunicipalities) ? cachedMunicipalities : [])
+    .filter((municipality) => municipality?.pcs_active)
+    .filter((municipality) => {
+      if (currentUser?.role !== 'mairie') return true;
+      return String(municipality?.name || '').trim().toLowerCase() === String(currentUser?.municipality_name || '').trim().toLowerCase();
+    })
+    .sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || ''), 'fr'));
+}
+
+function renderWaterMunicipalitySelector() {
+  const select = document.getElementById('water-municipality-select');
+  if (!select) return [];
+  const municipalities = getWaterMunicipalityOptions();
+  if (currentUser?.role === 'mairie' && municipalities.length === 1) {
+    selectedWaterMunicipalityId = String(municipalities[0].id);
+  } else if (selectedWaterMunicipalityId && !municipalities.some((item) => String(item.id) === String(selectedWaterMunicipalityId))) {
+    selectedWaterMunicipalityId = '';
+  }
+  const placeholder = currentUser?.role === 'mairie' ? '' : '<option value="">Sélectionnez une commune PCS</option>';
+  const options = municipalities.map((municipality) => (
+    `<option value="${escapeHtml(String(municipality.id))}">${escapeHtml(municipality.name || 'Commune')}</option>`
+  )).join('');
+  setHtml('water-municipality-select', `${placeholder}${options}`);
+  select.disabled = currentUser?.role === 'mairie';
+  select.value = selectedWaterMunicipalityId || '';
+  return municipalities;
+}
+
+function waterPanelEmptyState(message = 'Sélectionnez une commune PCS pour afficher les données eau potable et assainissement.') {
+  setVisibility(document.getElementById('water-panel-empty'), true);
+  setVisibility(document.getElementById('water-panel-content'), false);
+  setHtml('water-panel-empty', `<h4>Choisir une commune</h4><p class="muted">${escapeHtml(message)}</p>`);
+  setHtml('water-quality-summary', '');
+  setHtml('water-quality-list', '');
+  setHtml('water-services-summary', '');
+  setHtml('water-services-list', '');
+}
+
+function formatWaterDate(value) {
+  if (!value) return 'Date inconnue';
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) ? parsed.toLocaleString('fr-FR') : String(value);
+}
+
+function formatWaterMetric(value, unit = '') {
+  if (value == null || value === '') return 'n/d';
+  if (typeof value === 'number') {
+    return `${value.toLocaleString('fr-FR', { maximumFractionDigits: 2 })}${unit ? ` ${unit}` : ''}`;
+  }
+  return `${String(value)}${unit ? ` ${unit}` : ''}`;
+}
+
+function renderWaterQualityPanel(payload = {}) {
+  const summary = payload?.summary || {};
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  const cards = [
+    { label: 'Dernier prélèvement', value: summary.last_sample_at ? formatWaterDate(summary.last_sample_at) : 'n/d' },
+    { label: 'Paramètre récent', value: summary.latest_parameter || 'n/d' },
+    { label: 'Résultat', value: summary.latest_result != null ? formatWaterMetric(summary.latest_result, summary.latest_unit || '') : 'n/d' },
+    { label: 'Non conformités', value: String(summary.non_conforming_total ?? 0) },
+  ];
+  setHtml('water-quality-summary', cards.map((card) => (
+    `<article class="water-summary-card"><span>${escapeHtml(card.label)}</span><strong>${escapeHtml(String(card.value))}</strong></article>`
+  )).join(''));
+
+  if (!items.length) {
+    setHtml('water-quality-list', `<p class="muted">Aucune analyse disponible pour cette commune.</p>${payload?.error ? `<p class="error">${escapeHtml(payload.error)}</p>` : ''}`);
+    return;
+  }
+
+  const markup = items.slice(0, 8).map((item) => `
+    <article class="water-card">
+      <div class="water-card__head">
+        <strong>${escapeHtml(item.libelle_parametre || 'Analyse')}</strong>
+        <span>${escapeHtml(formatWaterDate(item.date_prelevement))}</span>
+      </div>
+      <p><strong>Résultat:</strong> ${escapeHtml(item.resultat_alphanumerique || formatWaterMetric(item.resultat_numerique, item.libelle_unite || ''))}</p>
+      ${item.limite_qualite_parametre ? `<p><strong>Limite qualité:</strong> ${escapeHtml(item.limite_qualite_parametre)}</p>` : ''}
+      ${item.nom_installation_amont ? `<p><strong>Installation:</strong> ${escapeHtml(item.nom_installation_amont)}</p>` : ''}
+      ${item.nom_distributeur ? `<p><strong>Distributeur:</strong> ${escapeHtml(item.nom_distributeur)}</p>` : ''}
+      ${item.conclusion_conformite_prelevement ? `<p class="muted">${escapeHtml(item.conclusion_conformite_prelevement)}</p>` : ''}
+    </article>
+  `).join('');
+
+  setHtml('water-quality-list', `
+    ${summary.latest_conclusion ? `<div class="water-banner">${escapeHtml(summary.latest_conclusion)}</div>` : ''}
+    ${payload?.warning ? `<p class="muted">${escapeHtml(payload.warning)}</p>` : ''}
+    ${markup}
+  `);
+}
+
+function renderWaterServicesPanel(payload = {}) {
+  const summary = payload?.summary || {};
+  const aep = summary?.aep || {};
+  const ac = summary?.ac || {};
+  const anc = summary?.anc || {};
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+
+  const kpis = [
+    { label: 'Année de référence', value: summary.latest_year || 'n/d' },
+    { label: 'Rendement réseau AEP', value: aep.rendement_reseau != null ? formatWaterMetric(aep.rendement_reseau, '%') : 'n/d' },
+    { label: 'Prix eau', value: aep.prix_ttc_m3 != null ? formatWaterMetric(aep.prix_ttc_m3, '€/m³') : 'n/d' },
+    { label: 'Desservi AEP', value: aep.population_desservie != null ? formatWaterMetric(aep.population_desservie) : 'n/d' },
+  ];
+  setHtml('water-services-summary', kpis.map((kpi) => (
+    `<article class="water-kpi"><span>${escapeHtml(kpi.label)}</span><strong>${escapeHtml(String(kpi.value))}</strong></article>`
+  )).join(''));
+
+  if (!items.length) {
+    setHtml('water-services-list', `<p class="muted">Aucun indicateur SISPEA disponible pour cette commune.</p>${payload?.error ? `<p class="error">${escapeHtml(payload.error)}</p>` : ''}`);
+    return;
+  }
+
+  const sections = [
+    {
+      title: 'Eau potable (AEP)',
+      item: aep,
+      rows: [
+        ['Population desservie', aep.population_desservie != null ? formatWaterMetric(aep.population_desservie) : 'n/d'],
+        ['Prix TTC', aep.prix_ttc_m3 != null ? formatWaterMetric(aep.prix_ttc_m3, '€/m³') : 'n/d'],
+        ['Rendement réseau', aep.rendement_reseau != null ? formatWaterMetric(aep.rendement_reseau, '%') : 'n/d'],
+        ['Indice pertes', aep.indice_pertes_reseau != null ? formatWaterMetric(aep.indice_pertes_reseau) : 'n/d'],
+        ['Conformité microbio', aep.taux_conformite_microbio != null ? formatWaterMetric(aep.taux_conformite_microbio, '%') : 'n/d'],
+        ['Conformité physicochimie', aep.taux_conformite_physicochimie != null ? formatWaterMetric(aep.taux_conformite_physicochimie, '%') : 'n/d'],
+      ],
+    },
+    {
+      title: 'Assainissement collectif (AC)',
+      item: ac,
+      rows: [
+        ['Population desservie', ac.population_desservie != null ? formatWaterMetric(ac.population_desservie) : 'n/d'],
+        ['Taux desserte', ac.taux_desserte_assainissement != null ? formatWaterMetric(ac.taux_desserte_assainissement, '%') : 'n/d'],
+        ['Conformité ERU', ac.conformite_eru != null ? formatWaterMetric(ac.conformite_eru, '%') : 'n/d'],
+      ],
+    },
+    {
+      title: 'Assainissement non collectif (ANC)',
+      item: anc,
+      rows: [
+        ['Population desservie', anc.population_desservie != null ? formatWaterMetric(anc.population_desservie) : 'n/d'],
+        ['Conformité ANC', anc.taux_conformite_anc != null ? formatWaterMetric(anc.taux_conformite_anc, '%') : 'n/d'],
+      ],
+    },
+  ].filter((section) => section.item && Object.keys(section.item).length);
+
+  setHtml('water-services-list', sections.map((section) => `
+    <article class="water-card">
+      <div class="water-card__head">
+        <strong>${escapeHtml(section.title)}</strong>
+        <span>${escapeHtml(String(summary.latest_year || 'n/d'))}</span>
+      </div>
+      ${section.rows.map(([labelText, value]) => `<p><strong>${escapeHtml(labelText)}:</strong> ${escapeHtml(String(value))}</p>`).join('')}
+    </article>
+  `).join(''));
+}
+
+async function loadAndRenderWaterPanel(forceRefresh = false) {
+  renderWaterMunicipalitySelector();
+  if (!selectedWaterMunicipalityId) {
+    waterPanelEmptyState('Sélectionnez une commune PCS pour afficher les données eau potable et assainissement.');
+    return;
+  }
+
+  const seq = ++waterPanelLoadSeq;
+  const municipality = (Array.isArray(cachedMunicipalities) ? cachedMunicipalities : []).find((item) => String(item.id) === String(selectedWaterMunicipalityId));
+  const cacheKey = String(selectedWaterMunicipalityId);
+
+  setVisibility(document.getElementById('water-panel-empty'), false);
+  setVisibility(document.getElementById('water-panel-content'), true);
+  setHtml('water-quality-summary', '<article class="water-summary-card"><span>Chargement</span><strong>…</strong></article>');
+  setHtml('water-quality-list', '<p class="muted">Chargement des analyses eau potable…</p>');
+  setHtml('water-services-summary', '<article class="water-kpi"><span>Chargement</span><strong>…</strong></article>');
+  setHtml('water-services-list', '<p class="muted">Chargement des indicateurs eau et assainissement…</p>');
+
+  try {
+    const payload = !forceRefresh && waterPanelCache.has(cacheKey)
+      ? waterPanelCache.get(cacheKey)
+      : await Promise.all([
+        api(`/municipalities/${encodeURIComponent(selectedWaterMunicipalityId)}/water-quality${forceRefresh ? '?force_refresh=true' : ''}`, { bypassCache: forceRefresh, cacheTtlMs: forceRefresh ? 0 : API_CACHE_TTL_MS }),
+        api(`/municipalities/${encodeURIComponent(selectedWaterMunicipalityId)}/water-services${forceRefresh ? '?force_refresh=true' : ''}`, { bypassCache: forceRefresh, cacheTtlMs: forceRefresh ? 0 : API_CACHE_TTL_MS }),
+      ]).then(([quality, services]) => ({ quality, services }));
+
+    if (seq !== waterPanelLoadSeq) return;
+    waterPanelCache.set(cacheKey, payload);
+    renderWaterQualityPanel(payload?.quality || {});
+    renderWaterServicesPanel(payload?.services || {});
+    document.getElementById('panel-title').textContent = municipality?.name
+      ? `Eau potable et assainissement · ${municipality.name}`
+      : PANEL_TITLES['water-panel'];
+  } catch (error) {
+    if (seq !== waterPanelLoadSeq) return;
+    waterPanelEmptyState(`Impossible de charger les données eau pour ${municipality?.name || 'la commune sélectionnée'} : ${sanitizeErrorMessage(error.message)}`);
+  }
+}
+
 async function loadDashboard(forceRefresh = false) {
   const cached = readSnapshot(STORAGE_KEYS.dashboardSnapshot);
   if (cached) renderDashboard(cached);
@@ -10696,6 +10944,9 @@ async function refreshAll(forceRefresh = false) {
     }));
 
     renderResources();
+    if ((localStorage.getItem(STORAGE_KEYS.activePanel) || '') === 'water-panel') {
+      await loadAndRenderWaterPanel(forceRefresh);
+    }
     _ensureStaticDataLoaded();
 
     // N'afficher "Chargement dégradé" que si le fallback a aussi échoué (≥3 sources en erreur).
@@ -10933,6 +11184,10 @@ function bindAppInteractions() {
       ? { ...georisquesPayload.data, ...georisquesPayload }
       : georisquesPayload;
     renderGeorisquesPcsRisks(georisquesData.monitored_communes || georisquesData.monitored_municipalities || georisquesData.communes || []);
+  });
+  document.getElementById('water-municipality-select')?.addEventListener('change', async (event) => {
+    selectedWaterMunicipalityId = String(event.target?.value || '').trim();
+    await loadAndRenderWaterPanel(false);
   });
   appMenuButton?.addEventListener('click', () => {
     const isOpen = !appSidebar?.classList.contains('open');

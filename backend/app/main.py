@@ -73,6 +73,8 @@ from .services import (
     fetch_finess_isere_resources,
     fetch_isere_opendata_resilience,
     fetch_hubeau_isere_groundwater,
+    fetch_hubeau_water_quality,
+    fetch_hubeau_water_services,
     fetch_sncf_isere_alerts,
     fetch_atmo_aura_isere_air_quality,
     fetch_anfr_isere_antennas,
@@ -98,6 +100,7 @@ from .services import (
     fetch_montagne_isere,
     fetch_helipads_isere,
     fetch_municipality_public_services,
+    fetch_rnb_buildings_bbox,
     fetch_pr_autoroutes,
     get_static_data_status,
     collect_all_static_data,
@@ -1690,6 +1693,26 @@ def interactive_map_hubeau_groundwater(
     return fetch_hubeau_isere_groundwater(force_refresh=refresh, station_limit=safe_limit)
 
 
+@app.get("/api/rnb/buildings")
+def api_rnb_buildings(
+    min_lat: float = Query(...),
+    min_lon: float = Query(...),
+    max_lat: float = Query(...),
+    max_lon: float = Query(...),
+    refresh: bool = Query(False),
+    limit: int = Query(200, ge=20, le=500),
+    _: User = Depends(require_roles(*READ_ROLES)),
+):
+    return fetch_rnb_buildings_bbox(
+        min_lat=min_lat,
+        min_lon=min_lon,
+        max_lat=max_lat,
+        max_lon=max_lon,
+        force_refresh=refresh,
+        limit=limit,
+    )
+
+
 @app.get("/api/opendata/isere/resilience")
 def opendata_isere_resilience(
     refresh: bool = Query(False),
@@ -1860,6 +1883,52 @@ def municipality_public_services(
         insee_code=insee_code,
         postal_code=municipality.postal_code,
         force_refresh=force_refresh,
+    )
+
+
+@app.get("/municipalities/{municipality_id}/water-quality")
+def municipality_water_quality(
+    municipality_id: int,
+    force_refresh: bool = Query(False),
+    limit: int = Query(40, ge=10, le=200),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*READ_ROLES)),
+):
+    municipality = ensure_municipality_scope(user, db, municipality_id)
+    insee_code = (municipality.insee_code or "").strip()
+    if not insee_code:
+        insee_code = resolve_commune_insee_code(municipality.name, municipality.postal_code)
+        if insee_code:
+            municipality.insee_code = insee_code
+            db.commit()
+    return fetch_hubeau_water_quality(
+        insee_code,
+        commune_name=municipality.name,
+        force_refresh=force_refresh,
+        limit=limit,
+    )
+
+
+@app.get("/municipalities/{municipality_id}/water-services")
+def municipality_water_services(
+    municipality_id: int,
+    force_refresh: bool = Query(False),
+    limit: int = Query(60, ge=10, le=200),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*READ_ROLES)),
+):
+    municipality = ensure_municipality_scope(user, db, municipality_id)
+    insee_code = (municipality.insee_code or "").strip()
+    if not insee_code:
+        insee_code = resolve_commune_insee_code(municipality.name, municipality.postal_code)
+        if insee_code:
+            municipality.insee_code = insee_code
+            db.commit()
+    return fetch_hubeau_water_services(
+        insee_code,
+        commune_name=municipality.name,
+        force_refresh=force_refresh,
+        limit=limit,
     )
 
 
