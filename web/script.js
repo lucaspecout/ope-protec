@@ -9832,6 +9832,26 @@ function getContactsCitySuggestions() {
   return Array.from(names).sort((a, b) => a.localeCompare(b, 'fr'));
 }
 
+function normalizeLooseCityKey(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/['’]/g, ' ')
+    .replace(/[^a-zA-Z0-9\s-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function findMunicipalityByLooseName(city) {
+  const target = normalizeLooseCityKey(city);
+  if (!target) return null;
+  return (Array.isArray(cachedMunicipalities) ? cachedMunicipalities : []).find((municipality) => {
+    const name = normalizeLooseCityKey(municipality?.name);
+    return name === target;
+  }) || null;
+}
+
 function renderContactsCitySuggestions() {
   const datalist = document.getElementById('contacts-city-suggestions');
   if (!datalist) return;
@@ -9887,12 +9907,24 @@ async function loadAndRenderContactsPanel(city = '', forceRefresh = false) {
   setHtml('contacts-results-list', '<p class="muted">Recherche en cours…</p>');
 
   try {
+    const matchedMunicipality = findMunicipalityByLooseName(normalizedCity);
     const payload = !forceRefresh && contactsPanelCache.has(cacheKey)
       ? contactsPanelCache.get(cacheKey)
-      : await api(`/contacts/search?city=${encodeURIComponent(normalizedCity)}${forceRefresh ? '&force_refresh=true' : ''}`, {
-        bypassCache: forceRefresh,
-        cacheTtlMs: forceRefresh ? 0 : API_CACHE_TTL_MS,
-      });
+      : matchedMunicipality
+        ? await api(`/municipalities/${encodeURIComponent(matchedMunicipality.id)}/public-services${forceRefresh ? '?force_refresh=true' : ''}`, {
+          bypassCache: forceRefresh,
+          cacheTtlMs: forceRefresh ? 0 : API_CACHE_TTL_MS,
+        }).then((data) => ({
+          ...data,
+          city: matchedMunicipality.name,
+          contacts: Array.isArray(data?.municipality_contacts) ? data.municipality_contacts : [],
+          contacts_total: Array.isArray(data?.municipality_contacts) ? data.municipality_contacts.length : 0,
+          emergency_numbers: Array.isArray(data?.emergency_numbers) ? data.emergency_numbers : [],
+        }))
+        : await api(`/contacts/search?city=${encodeURIComponent(normalizedCity)}${forceRefresh ? '&force_refresh=true' : ''}`, {
+          bypassCache: forceRefresh,
+          cacheTtlMs: forceRefresh ? 0 : API_CACHE_TTL_MS,
+        });
     if (seq !== contactsPanelLoadSeq) return;
     contactsPanelCache.set(cacheKey, payload);
 
