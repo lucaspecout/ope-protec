@@ -596,9 +596,70 @@ label { display: block; margin-bottom: .8rem; }
   margin-bottom: .7rem;
   font-weight: 600;
 }
+.contacts-hero {
+  display: grid;
+  grid-template-columns: 1.15fr .85fr;
+  gap: .8rem;
+  margin-bottom: .8rem;
+  background: linear-gradient(145deg, #fff7eb, #ffffff);
+}
+.contacts-search-form {
+  border: 1px solid #f1d7b4;
+  border-radius: 12px;
+  background: #fffdfa;
+  padding: .8rem;
+}
+.contacts-search-form label { font-weight: 700; }
+.contacts-search-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: .55rem;
+  align-items: end;
+}
+.contacts-layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: .8rem;
+}
+.contacts-side-tile,
+.contacts-main-tile {
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+}
+.contacts-results-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: .7rem;
+  margin-bottom: .8rem;
+}
+.contacts-results-grid,
+.contacts-emergency-list {
+  display: grid;
+  gap: .6rem;
+}
+.contacts-emergency-card {
+  border: 1px solid #d7e3f8;
+  border-radius: 14px;
+  background: #f7fbff;
+  padding: .75rem .85rem;
+}
+.contacts-emergency-card span {
+  display: block;
+  font-size: .74rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  margin-bottom: .18rem;
+}
+.contacts-emergency-card strong {
+  color: #123b80;
+  font-size: 1.2rem;
+}
 
 @media (max-width: 980px) {
   .water-hero,
+  .contacts-hero,
+  .contacts-layout,
   .water-layout,
   .georisques-focus-layout,
   .georisques-isere-layout,

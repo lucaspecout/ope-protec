@@ -81,6 +81,7 @@ const PANEL_TITLES = {
   'services-panel': 'Services connectés',
   'meteo-panel': 'Météo hebdomadaire Isère',
   'water-panel': 'Eau potable et assainissement',
+  'contacts-panel': 'Contacts utiles Isère',
   'georisques-panel': 'Page Géorisques',
   'news-panel': 'Actualités Isère',
   'api-panel': 'Interconnexions API',
@@ -203,6 +204,7 @@ const MAIRIE_ALLOWED_PANELS = new Set([
   'services-panel',
   'meteo-panel',
   'water-panel',
+  'contacts-panel',
   'georisques-panel',
   'municipalities-panel',
   'logs-panel',
@@ -319,8 +321,11 @@ let cachedWeeklyMeteo = null;
 let weeklyMeteoInFlight = null;
 let selectedMeteoCityKey = ISERE_MAJOR_CITIES[0]?.key || 'grenoble';
 let selectedWaterMunicipalityId = '';
+let selectedContactsCity = '';
 let waterPanelLoadSeq = 0;
 const waterPanelCache = new Map();
+let contactsPanelLoadSeq = 0;
+const contactsPanelCache = new Map();
 let isereBoundaryGeometry = null;
 let trafficRenderSequence = 0;
 let mapSearchController = null;
@@ -2357,6 +2362,14 @@ function setActivePanel(panelId) {
   if (panelId === 'water-panel' && token) {
     loadAndRenderWaterPanel(false).catch((error) => {
       waterPanelEmptyState(sanitizeErrorMessage(error.message));
+    });
+  }
+  if (panelId === 'contacts-panel' && token) {
+    const city = currentUser?.role === 'mairie'
+      ? String(currentUser?.municipality_name || selectedContactsCity || '').trim()
+      : String(selectedContactsCity || '').trim();
+    loadAndRenderContactsPanel(city, false).catch((error) => {
+      contactsPanelEmptyState(sanitizeErrorMessage(error.message));
     });
   }
   if (panelId === 'api-panel' && token) {
@@ -7911,6 +7924,95 @@ function openMunicipalityDetailsInlineFallback(municipality) {
   return openMunicipalityDetailsModal(municipality);
 }
 
+function parseAnnuaireValue(value) {
+  if (value == null) return null;
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (!text) return '';
+    if ((text.startsWith('{') && text.endsWith('}')) || (text.startsWith('[') && text.endsWith(']'))) {
+      try {
+        return JSON.parse(text);
+      } catch (_) {
+        return text;
+      }
+    }
+    return text;
+  }
+  return value;
+}
+
+function collectAnnuaireStrings(value) {
+  const parsed = parseAnnuaireValue(value);
+  if (parsed == null) return [];
+  if (typeof parsed === 'string') return parsed.trim() ? [parsed.trim()] : [];
+  if (typeof parsed === 'number') return [String(parsed)];
+  if (Array.isArray(parsed)) return parsed.flatMap((item) => collectAnnuaireStrings(item));
+  if (typeof parsed === 'object') return Object.values(parsed).flatMap((item) => collectAnnuaireStrings(item));
+  return [];
+}
+
+function normalizeDisplayPhone(value) {
+  const candidates = collectAnnuaireStrings(value);
+  for (const candidate of candidates) {
+    const compact = candidate.replace(/[^\d+]/g, '');
+    if ((compact.match(/\d/g) || []).length >= 10) return candidate.replace(/\s+/g, ' ').trim();
+  }
+  return '';
+}
+
+function normalizeDisplayMail(value) {
+  const candidates = collectAnnuaireStrings(value);
+  for (const candidate of candidates) {
+    const match = candidate.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+    if (match) return match[0];
+  }
+  return '';
+}
+
+function normalizeDisplayAddress(value) {
+  const parsed = parseAnnuaireValue(value);
+  if (Array.isArray(parsed)) {
+    for (const item of parsed) {
+      const text = normalizeDisplayAddress(item);
+      if (text) return text;
+    }
+    return '';
+  }
+  if (parsed && typeof parsed === 'object') {
+    const parts = [
+      String(parsed.complement1 || '').trim(),
+      String(parsed.complement2 || '').trim(),
+      [parsed.numero_voie, parsed.nom_voie].filter(Boolean).map((part) => String(part).trim()).join(' ').trim(),
+      String(parsed.service_distribution || '').trim(),
+      [parsed.code_postal, parsed.nom_commune || parsed.commune].filter(Boolean).map((part) => String(part).trim()).join(' ').trim(),
+      String(parsed.pays || '').trim(),
+    ].filter(Boolean);
+    return parts.join(', ');
+  }
+  return String(parsed || '').replace(/\s+/g, ' ').trim();
+}
+
+function renderPublicServiceCard(item, emptyLabel = 'Service public') {
+  const phoneValue = normalizeDisplayPhone(item?.phone);
+  const emailValue = normalizeDisplayMail(item?.email);
+  const addressValue = normalizeDisplayAddress(item?.address);
+  if (!phoneValue && !emailValue && !addressValue) return '';
+  const phoneHref = phoneValue ? phoneValue.replace(/[^\d+]/g, '') : '';
+  const phone = phoneValue ? `<a href="tel:${escapeHtml(phoneHref)}" style="color:var(--primary)">${escapeHtml(phoneValue)}</a>` : '';
+  const email = emailValue ? `<a href="mailto:${escapeHtml(emailValue)}" style="color:var(--primary)">${escapeHtml(emailValue)}</a>` : '';
+  return `<div class="muni-public-card">
+    <div class="muni-public-card__head">
+      <strong>${escapeHtml(item?.name || emptyLabel)}</strong>
+      <span class="badge neutral">${escapeHtml(item?.type || 'Service')}</span>
+    </div>
+    <div class="muni-public-card__body">
+      ${phone ? `<div class="muni-public-row"><span class="muni-public-label">Téléphone</span><span>${phone}</span></div>` : ''}
+      ${addressValue ? `<div class="muni-public-row"><span class="muni-public-label">Adresse</span><span>${escapeHtml(addressValue)}</span></div>` : ''}
+      ${email ? `<div class="muni-public-row"><span class="muni-public-label">Email</span><span>${email}</span></div>` : ''}
+    </div>
+  </div>`;
+}
+
 if (typeof window !== 'undefined') {
   window.openMunicipalityDetailsInlineFallback = openMunicipalityDetailsInlineFallback;
   window.closeMunicipalityDetailsModal = closeMunicipalityDetailsModal;
@@ -7938,88 +8040,6 @@ async function openMunicipalityDetailsModal(municipality) {
   const municipalityContacts = Array.isArray(publicServices?.municipality_contacts) ? publicServices.municipality_contacts : [];
   const importantContacts = Array.isArray(publicServices?.important_contacts) ? publicServices.important_contacts : [];
   const emergencyNumbers = Array.isArray(publicServices?.emergency_numbers) ? publicServices.emergency_numbers : [];
-  const parseAnnuaireValue = (value) => {
-    if (value == null) return null;
-    if (typeof value === 'string') {
-      const text = value.trim();
-      if (!text) return '';
-      if ((text.startsWith('{') && text.endsWith('}')) || (text.startsWith('[') && text.endsWith(']'))) {
-        try {
-          return JSON.parse(text);
-        } catch (_) {
-          return text;
-        }
-      }
-      return text;
-    }
-    return value;
-  };
-  const collectAnnuaireStrings = (value) => {
-    const parsed = parseAnnuaireValue(value);
-    if (parsed == null) return [];
-    if (typeof parsed === 'string') return parsed.trim() ? [parsed.trim()] : [];
-    if (typeof parsed === 'number') return [String(parsed)];
-    if (Array.isArray(parsed)) return parsed.flatMap((item) => collectAnnuaireStrings(item));
-    if (typeof parsed === 'object') return Object.values(parsed).flatMap((item) => collectAnnuaireStrings(item));
-    return [];
-  };
-  const normalizeDisplayPhone = (value) => {
-    const candidates = collectAnnuaireStrings(value);
-    for (const candidate of candidates) {
-      const compact = candidate.replace(/[^\d+]/g, '');
-      if ((compact.match(/\d/g) || []).length >= 10) return candidate.replace(/\s+/g, ' ').trim();
-    }
-    return '';
-  };
-  const normalizeDisplayMail = (value) => {
-    const candidates = collectAnnuaireStrings(value);
-    for (const candidate of candidates) {
-      const match = candidate.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
-      if (match) return match[0];
-    }
-    return '';
-  };
-  const normalizeDisplayAddress = (value) => {
-    const parsed = parseAnnuaireValue(value);
-    if (Array.isArray(parsed)) {
-      for (const item of parsed) {
-        const text = normalizeDisplayAddress(item);
-        if (text) return text;
-      }
-      return '';
-    }
-    if (parsed && typeof parsed === 'object') {
-      const parts = [
-        String(parsed.complement1 || '').trim(),
-        String(parsed.complement2 || '').trim(),
-        [parsed.numero_voie, parsed.nom_voie].filter(Boolean).map((part) => String(part).trim()).join(' ').trim(),
-        String(parsed.service_distribution || '').trim(),
-        [parsed.code_postal, parsed.nom_commune || parsed.commune].filter(Boolean).map((part) => String(part).trim()).join(' ').trim(),
-        String(parsed.pays || '').trim(),
-      ].filter(Boolean);
-      return parts.join(', ');
-    }
-    return String(parsed || '').replace(/\s+/g, ' ').trim();
-  };
-  const publicServiceCard = (item) => {
-    const phoneValue = normalizeDisplayPhone(item?.phone);
-    const emailValue = normalizeDisplayMail(item?.email);
-    const addressValue = normalizeDisplayAddress(item?.address);
-    if (!phoneValue && !emailValue && !addressValue) return '';
-    const phone = phoneValue ? `<a href="tel:${encodeURIComponent(phoneValue.replace(/\s/g, ''))}" style="color:var(--primary)">${escapeHtml(phoneValue)}</a>` : '';
-    const email = emailValue ? `<a href="mailto:${encodeURIComponent(emailValue)}" style="color:var(--primary)">${escapeHtml(emailValue)}</a>` : '';
-    return `<div class="muni-public-card">
-      <div class="muni-public-card__head">
-        <strong>${escapeHtml(item?.name || 'Service public')}</strong>
-        <span class="badge neutral">${escapeHtml(item?.type || 'Service')}</span>
-      </div>
-      <div class="muni-public-card__body">
-        ${phone ? `<div class="muni-public-row"><span class="muni-public-label">Téléphone</span><span>${phone}</span></div>` : ''}
-        ${addressValue ? `<div class="muni-public-row"><span class="muni-public-label">Adresse</span><span>${escapeHtml(addressValue)}</span></div>` : ''}
-        ${email ? `<div class="muni-public-row"><span class="muni-public-label">Email</span><span>${email}</span></div>` : ''}
-      </div>
-    </div>`;
-  };
   const filteredMunicipalityContacts = municipalityContacts.filter((item) => {
     const phoneValue = normalizeDisplayPhone(item?.phone);
     const emailValue = normalizeDisplayMail(item?.email);
@@ -8036,10 +8056,10 @@ async function openMunicipalityDetailsModal(municipality) {
     ? `<div class="muni-emergency-strip">${emergencyNumbers.map((item) => `<span class="muni-emergency-pill"><strong>${escapeHtml(item.label || '')}</strong> · ${escapeHtml(item.phone || '')}</span>`).join('')}</div>`
     : '';
   const municipalityContactsMarkup = filteredMunicipalityContacts.length
-    ? `<div class="muni-public-grid">${filteredMunicipalityContacts.map(publicServiceCard).join('')}</div>`
+    ? `<div class="muni-public-grid">${filteredMunicipalityContacts.map((item) => renderPublicServiceCard(item)).join('')}</div>`
     : '<p class="muted">Aucun contact public complémentaire trouvé pour cette commune.</p>';
   const importantContactsMarkup = filteredImportantContacts.length
-    ? `<div class="muni-public-grid">${filteredImportantContacts.map(publicServiceCard).join('')}</div>`
+    ? `<div class="muni-public-grid">${filteredImportantContacts.map((item) => renderPublicServiceCard(item)).join('')}</div>`
     : '<p class="muted">Aucun contact départemental clé récupéré pour le moment.</p>';
 
   // ── Tab: Fiche ────────────────────────────────────────────
@@ -9798,6 +9818,106 @@ async function loadAndRenderWaterPanel(forceRefresh = false) {
   }
 }
 
+function getContactsCitySuggestions() {
+  const names = new Set();
+  (Array.isArray(cachedMunicipalities) ? cachedMunicipalities : []).forEach((municipality) => {
+    const name = String(municipality?.name || '').trim();
+    if (name) names.add(name);
+  });
+  ISERE_MAJOR_CITIES.forEach((city) => {
+    const name = String(city?.name || '').trim();
+    if (name) names.add(name);
+  });
+  if (currentUser?.municipality_name) names.add(String(currentUser.municipality_name).trim());
+  return Array.from(names).sort((a, b) => a.localeCompare(b, 'fr'));
+}
+
+function renderContactsCitySuggestions() {
+  const datalist = document.getElementById('contacts-city-suggestions');
+  if (!datalist) return;
+  const options = getContactsCitySuggestions().map((city) => `<option value="${escapeHtml(city)}"></option>`).join('');
+  setHtml('contacts-city-suggestions', options);
+}
+
+function renderContactsEmergencyNumbers(items = []) {
+  const emergencyNumbers = Array.isArray(items) ? items : [];
+  if (!emergencyNumbers.length) {
+    setHtml('contacts-emergency-list', '<p class="muted">Aucun numéro d\'urgence disponible.</p>');
+    return;
+  }
+  setHtml('contacts-emergency-list', emergencyNumbers.map((item) => `
+    <article class="contacts-emergency-card">
+      <span>${escapeHtml(item?.label || 'Urgence')}</span>
+      <strong>${escapeHtml(item?.phone || '-')}</strong>
+    </article>
+  `).join(''));
+}
+
+function contactsPanelEmptyState(message = 'Saisissez une ville de l\'Isère pour afficher les contacts publics utiles.') {
+  setText('contacts-results-title', 'Choisir une ville');
+  setText('contacts-results-meta', 'Aucune recherche lancée.');
+  setText('contacts-results-error', '');
+  setHtml('contacts-results-list', `<p class="muted">${escapeHtml(message)}</p>`);
+  renderContactsEmergencyNumbers([
+    { label: 'Urgences européennes', phone: '112' },
+    { label: 'Sapeurs-pompiers', phone: '18' },
+    { label: 'SAMU', phone: '15' },
+    { label: 'Police secours', phone: '17' },
+    { label: "SMS d'urgence", phone: '114' },
+  ]);
+}
+
+async function loadAndRenderContactsPanel(city = '', forceRefresh = false) {
+  renderContactsCitySuggestions();
+  const input = document.getElementById('contacts-city-search');
+  const normalizedCity = String(city || input?.value || selectedContactsCity || '').trim();
+  if (!normalizedCity) {
+    contactsPanelEmptyState();
+    return;
+  }
+
+  if (input) input.value = normalizedCity;
+  selectedContactsCity = normalizedCity;
+  const cacheKey = normalizedCity.toLowerCase();
+  const seq = ++contactsPanelLoadSeq;
+
+  setText('contacts-results-title', normalizedCity);
+  setText('contacts-results-meta', 'Chargement des contacts publics utiles…');
+  setText('contacts-results-error', '');
+  setHtml('contacts-results-list', '<p class="muted">Recherche en cours…</p>');
+
+  try {
+    const payload = !forceRefresh && contactsPanelCache.has(cacheKey)
+      ? contactsPanelCache.get(cacheKey)
+      : await api(`/contacts/search?city=${encodeURIComponent(normalizedCity)}${forceRefresh ? '&force_refresh=true' : ''}`, {
+        bypassCache: forceRefresh,
+        cacheTtlMs: forceRefresh ? 0 : API_CACHE_TTL_MS,
+      });
+    if (seq !== contactsPanelLoadSeq) return;
+    contactsPanelCache.set(cacheKey, payload);
+
+    const contacts = Array.isArray(payload?.contacts) ? payload.contacts : [];
+    const cards = contacts.map((item) => renderPublicServiceCard(item, 'Contact public')).filter(Boolean);
+    renderContactsEmergencyNumbers(payload?.emergency_numbers || []);
+    setText('contacts-results-title', payload?.city || normalizedCity);
+    setText('contacts-results-meta', `${Number(payload?.contacts_total ?? contacts.length)} contact(s) utile(s) · source Annuaire administration`);
+    setText('contacts-results-error', payload?.error ? sanitizeErrorMessage(payload.error) : '');
+    document.getElementById('panel-title').textContent = payload?.city
+      ? `Contacts utiles · ${payload.city}`
+      : PANEL_TITLES['contacts-panel'];
+    setHtml('contacts-results-list', cards.length
+      ? cards.join('')
+      : '<p class="muted">Aucun contact public exploitable trouvé pour cette ville iséroise.</p>');
+  } catch (error) {
+    if (seq !== contactsPanelLoadSeq) return;
+    renderContactsEmergencyNumbers([]);
+    setText('contacts-results-title', normalizedCity);
+    setText('contacts-results-meta', 'Recherche impossible.');
+    setText('contacts-results-error', sanitizeErrorMessage(error.message));
+    setHtml('contacts-results-list', '<p class="muted">Impossible de charger les contacts pour cette ville.</p>');
+  }
+}
+
 async function loadDashboard(forceRefresh = false) {
   const cached = readSnapshot(STORAGE_KEYS.dashboardSnapshot);
   if (cached) renderDashboard(cached);
@@ -10787,6 +10907,7 @@ async function loadMunicipalities(preloaded = null) {
   cachedMunicipalityRecords = municipalities;
   cachedMunicipalities = municipalities;
   populateUserMunicipalityOptions();
+  renderContactsCitySuggestions();
   const georisquesPayload = cachedExternalRisksSnapshot?.georisques || {};
   const georisquesData = georisquesPayload?.data && typeof georisquesPayload.data === 'object'
     ? { ...georisquesPayload.data, ...georisquesPayload }
@@ -11458,6 +11579,19 @@ function bindAppInteractions() {
     selectedWaterMunicipalityId = String(event.target?.value || '').trim();
     await loadAndRenderWaterPanel(false);
   });
+  document.getElementById('contacts-search-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const city = String(new FormData(form).get('city') || '').trim();
+    await loadAndRenderContactsPanel(city, true);
+  });
+  const contactsInput = document.getElementById('contacts-city-search');
+  if (contactsInput && currentUser?.role === 'mairie' && currentUser?.municipality_name) {
+    contactsInput.value = currentUser.municipality_name;
+    selectedContactsCity = currentUser.municipality_name;
+  }
+  renderContactsCitySuggestions();
+  contactsPanelEmptyState();
   appMenuButton?.addEventListener('click', () => {
     const isOpen = !appSidebar?.classList.contains('open');
     if (isOpen) openMobileSidebar(); else closeMobileSidebar();

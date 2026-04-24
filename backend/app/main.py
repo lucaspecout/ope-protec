@@ -101,6 +101,7 @@ from .services import (
     fetch_montagne_isere,
     fetch_helipads_isere,
     fetch_municipality_public_services,
+    fetch_isere_public_services_by_city,
     fetch_rnb_buildings_bbox,
     fetch_pr_autoroutes,
     get_static_data_status,
@@ -1887,6 +1888,15 @@ def municipality_public_services(
         postal_code=municipality.postal_code,
         force_refresh=force_refresh,
     )
+
+
+@app.get("/contacts/search")
+def search_public_contacts(
+    city: str = Query(..., min_length=2, max_length=120),
+    force_refresh: bool = Query(False),
+    _: User = Depends(require_roles(*READ_ROLES)),
+):
+    return fetch_isere_public_services_by_city(city, force_refresh=force_refresh)
 
 
 @app.get("/municipalities/{municipality_id}/water-quality")

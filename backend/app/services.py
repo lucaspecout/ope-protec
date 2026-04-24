@@ -5663,6 +5663,108 @@ def fetch_municipality_public_services(name: str, insee_code: str | None = None,
     return payload
 
 
+def _annuaire_record_isere(record: dict[str, Any]) -> bool:
+    insee = _annuaire_scalar(record.get("code_insee_commune"))
+    if insee.startswith("38"):
+        return True
+    postal_code = _annuaire_scalar(record.get("code_postal"))
+    if postal_code.startswith("38"):
+        return True
+    department = _annuaire_scalar(record.get("code_departement") or record.get("departement"))
+    if department == "38":
+        return True
+    return False
+
+
+def fetch_isere_public_services_by_city(city: str, force_refresh: bool = False) -> dict[str, Any]:
+    safe_city = str(city or "").strip()
+    cache_key = f"search|{safe_city.lower()}"
+
+    if not safe_city:
+        return {
+            "status": "degraded",
+            "source": _ANNUAIRE_ADMINISTRATION_BASE_URL,
+            "city": "",
+            "contacts": [],
+            "emergency_numbers": [
+                {"label": "Urgences européennes", "phone": "112"},
+                {"label": "Sapeurs-pompiers", "phone": "18"},
+                {"label": "SAMU", "phone": "15"},
+                {"label": "Police secours", "phone": "17"},
+                {"label": "SMS d'urgence", "phone": "114"},
+            ],
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+            "error": "Commune non renseignée.",
+            "cache_key": cache_key,
+        }
+
+    def loader() -> dict[str, Any]:
+        errors: list[str] = []
+        commune_records: list[dict[str, Any]] = []
+        try:
+            commune_records = _fetch_annuaire_administration_records(f'nom_commune LIKE "{safe_city}"', limit=80)
+        except Exception as exc:
+            errors.append(str(exc))
+
+        isere_records = [record for record in commune_records if _annuaire_record_isere(record)]
+        normalized = [_normalize_annuaire_contact(record) for record in isere_records]
+        filtered: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in normalized:
+            blob = " ".join(str(item.get(key) or "") for key in ("name", "type", "address", "city")).lower()
+            if not any(token in blob for token in ("mairie", "gendarmerie", "commissariat", "police", "trésorerie", "france services", "préfecture", "prefecture", "pompi", "secours")):
+                continue
+            dedupe_key = f"{item.get('name')}|{item.get('phone')}|{item.get('email')}|{item.get('address')}"
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            filtered.append(item)
+
+        if not filtered:
+            for item in normalized:
+                dedupe_key = f"{item.get('name')}|{item.get('phone')}|{item.get('email')}|{item.get('address')}"
+                if dedupe_key in seen:
+                    continue
+                seen.add(dedupe_key)
+                filtered.append(item)
+                if len(filtered) >= 12:
+                    break
+
+        return {
+            "status": "online" if filtered else "degraded",
+            "source": _ANNUAIRE_ADMINISTRATION_BASE_URL,
+            "city": safe_city,
+            "contacts": filtered[:12],
+            "contacts_total": len(filtered),
+            "emergency_numbers": [
+                {"label": "Urgences européennes", "phone": "112"},
+                {"label": "Sapeurs-pompiers", "phone": "18"},
+                {"label": "SAMU", "phone": "15"},
+                {"label": "Police secours", "phone": "17"},
+                {"label": "SMS d'urgence", "phone": "114"},
+            ],
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+            "error": " | ".join(errors) if errors and not filtered else "",
+            "cache_key": cache_key,
+        }
+
+    local_cache: dict[str, Any] = _annuaire_administration_cache.setdefault("by_commune", {})
+    local_lock = _annuaire_administration_cache_lock
+    with local_lock:
+        cached = local_cache.get(cache_key) if isinstance(local_cache, dict) else None
+        expires_at = _annuaire_administration_cache.get("expires_at") or datetime.min
+        if not force_refresh and isinstance(cached, dict) and datetime.utcnow() < expires_at:
+            return deepcopy(cached)
+
+    payload = loader()
+    with local_lock:
+        if not isinstance(_annuaire_administration_cache.get("by_commune"), dict):
+            _annuaire_administration_cache["by_commune"] = {}
+        _annuaire_administration_cache["by_commune"][cache_key] = deepcopy(payload)
+        _annuaire_administration_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_ANNUAIRE_ADMINISTRATION_CACHE_TTL_SECONDS)
+    return payload
+
+
 # ── Massifs avalanche Isère (BRA Météo-France via GDSS) ─────────────────────
 
 # OPP IDs depuis mf_map_layers_v2_sub_zone sur la page risques-avalanche Alpes du Nord

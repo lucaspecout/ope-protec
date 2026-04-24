@@ -60,6 +60,7 @@
           <button class="menu-btn" data-target="services-panel" data-icon="🔌"><span class="menu-label">Services connectés</span></button>
           <button class="menu-btn" data-target="meteo-panel" data-icon="🌤️"><span class="menu-label">Météo semaine</span></button>
           <button class="menu-btn" data-target="water-panel" data-icon="🚰"><span class="menu-label">Eau potable</span></button>
+          <button class="menu-btn" data-target="contacts-panel" data-icon="☎️"><span class="menu-label">Contacts Isère</span></button>
           <button class="menu-btn" data-target="georisques-panel" data-icon="🌍"><span class="menu-label">Page Géorisques</span></button>
           <button class="menu-btn" data-target="news-panel" data-icon="📰"><span class="menu-label">Actualités</span></button>
           <button class="menu-btn" data-target="municipalities-panel" data-icon="🏛️"><span class="menu-label">Communes</span></button>
@@ -187,6 +188,43 @@
                 <div id="water-services-list" class="water-cards"></div>
               </article>
             </div>
+          </div>
+        </section>
+
+        <section id="contacts-panel" class="panel view hidden" hidden>
+          <div class="contacts-hero tile">
+            <div>
+              <p class="tag">Annuaire public</p>
+              <h3>Contacts utiles par ville de l'Isère</h3>
+              <p class="muted">Recherchez une commune iséroise pour obtenir directement les contacts utiles: téléphone, adresse et mail.</p>
+            </div>
+            <form id="contacts-search-form" class="contacts-search-form">
+              <label for="contacts-city-search">Ville de l'Isère</label>
+              <div class="contacts-search-row">
+                <input id="contacts-city-search" name="city" type="search" list="contacts-city-suggestions" placeholder="Ex. Voiron, Vienne, La Tour-du-Pin" autocomplete="off" />
+                <button type="submit">Rechercher</button>
+              </div>
+              <datalist id="contacts-city-suggestions"></datalist>
+            </form>
+          </div>
+
+          <div class="contacts-layout">
+            <article class="tile contacts-side-tile">
+              <h4>Numéros d'urgence</h4>
+              <div id="contacts-emergency-list" class="contacts-emergency-list"></div>
+            </article>
+            <article class="tile contacts-main-tile">
+              <div class="contacts-results-head">
+                <div>
+                  <h4 id="contacts-results-title">Choisir une ville</h4>
+                  <p id="contacts-results-meta" class="muted">Aucune recherche lancée.</p>
+                </div>
+                <p id="contacts-results-error" class="error"></p>
+              </div>
+              <div id="contacts-results-list" class="contacts-results-grid">
+                <p class="muted">Saisissez une ville de l'Isère pour afficher les contacts publics utiles.</p>
+              </div>
+            </article>
           </div>
         </section>
 
