@@ -10561,6 +10561,7 @@ def fetch_rnb_buildings_bbox(
     limit: int = 200,
 ) -> dict[str, Any]:
     safe_limit = max(20, min(limit, 500))
+    page_limit = min(safe_limit, 100)
     safe_min_lat = min(float(min_lat), float(max_lat))
     safe_max_lat = max(float(min_lat), float(max_lat))
     safe_min_lon = min(float(min_lon), float(max_lon))
@@ -10577,7 +10578,7 @@ def fetch_rnb_buildings_bbox(
         bbox = f"{safe_min_lon},{safe_min_lat},{safe_max_lon},{safe_max_lat}"
         next_url = (
             "https://rnb-api.beta.gouv.fr/api/alpha/buildings/"
-            f"?bbox={quote_plus(bbox)}&status=constructed&limit={safe_limit}&from=ope-protec@local.invalid"
+            f"?bbox={quote_plus(bbox)}&status=constructed&limit={page_limit}"
         )
         buildings: list[dict[str, Any]] = []
         pages = 0
