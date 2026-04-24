@@ -3418,7 +3418,7 @@ function formatOsmDetailsPopup(payload = {}) {
 }
 
 async function handleOsmDetailsClick(event) {
-  if (!leafletMap || mapAddPointMode || mapEvacuationCircleMode || mapMeasureMode || typeof fetch !== 'function') return;
+  if (!leafletMap || isMapToolActive() || typeof fetch !== 'function') return;
   if (leafletMap.getZoom() < OSM_DETAILS_MIN_ZOOM) return;
   const lat = Number(event?.latlng?.lat);
   const lon = Number(event?.latlng?.lng);
@@ -3457,6 +3457,23 @@ async function handleOsmDetailsClick(event) {
     osmDetailsMarker.bindPopup('Impossible de récupérer les détails OSM pour ce point.').openPopup();
     setMapFeedback('Impossible de récupérer les détails OSM pour ce point.', true);
   }
+}
+
+function isMapToolActive() {
+  if (mapAddPointMode || mapEvacuationCircleMode || mapMeasureMode) return true;
+  if (mapZoneImpactDrawHandler?.enabled && mapZoneImpactDrawHandler.enabled()) return true;
+  const drawToolbarModes = mapDrawControl?._toolbars?.draw?._modes;
+  if (drawToolbarModes && typeof drawToolbarModes === 'object') {
+    const hasActiveLeafletDrawTool = Object.values(drawToolbarModes).some((mode) => {
+      try {
+        return Boolean(mode?.handler?.enabled && mode.handler.enabled());
+      } catch {
+        return false;
+      }
+    });
+    if (hasActiveLeafletDrawTool) return true;
+  }
+  return false;
 }
 
 function setMapFeedback(message = '', isError = false) {
