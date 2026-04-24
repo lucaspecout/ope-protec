@@ -326,6 +326,13 @@ let trafficRenderSequence = 0;
 let mapSearchController = null;
 let osmDetailsController = null;
 let osmDetailsMarker = null;
+const AVALANCHE_MASSIF_ZONES = Object.freeze([
+  { nom: 'Chartreuse', lat: 45.364, lon: 5.815, radiusKm: 18 },
+  { nom: 'Belledonne', lat: 45.215, lon: 6.015, radiusKm: 22 },
+  { nom: 'Grandes-Rousses', lat: 45.166, lon: 6.102, radiusKm: 18 },
+  { nom: 'Vercors', lat: 45.044, lon: 5.566, radiusKm: 24 },
+  { nom: 'Oisans', lat: 44.975, lon: 6.128, radiusKm: 27 },
+]);
 
 function trafficIconZoomClass(zoom = 9) {
   if (zoom <= 7) return 'traffic-zoom-xs';
@@ -3173,27 +3180,55 @@ function applyAvalancheZoneLayer() {
   if (!leafletMap || typeof window.L === 'undefined') return;
   const enabled = document.getElementById('filter-avalanche-zones')?.checked ?? false;
   if (!enabled) {
-    if (avalancheZoneWmsLayer) { leafletMap.removeLayer(avalancheZoneWmsLayer); avalancheZoneWmsLayer = null; }
+    if (avalancheZoneWmsLayer) {
+      if (leafletMap.hasLayer(avalancheZoneWmsLayer)) leafletMap.removeLayer(avalancheZoneWmsLayer);
+      avalancheZoneWmsLayer = null;
+    }
     return;
   }
-  if (avalancheZoneWmsLayer) { avalancheZoneWmsLayer.bringToFront(); return; }
-  if (!leafletMap.getPane('avalanchePane')) {
-    const pane = leafletMap.createPane('avalanchePane');
-    pane.style.zIndex = 440;
-    pane.style.pointerEvents = 'none';
-  }
-  // Communes avec PPRN Avalanche approuvé/prescrit — couches communales Géorisques WMS
-  // PPRN_COMMUNE_AVALANCHE_APPROUV : communes couvertes par un PPR avalanche approuvé (orange vif)
-  // PPRN_ZONE_AVALANCHE : zones d'aléa détaillées (visibles au zoom 12+, complément)
-  avalancheZoneWmsLayer = window.L.tileLayer.wms('https://georisques.gouv.fr/services', {
-    layers: 'PPRN_COMMUNE_AVALANCHE_APPROUV,PPRN_COMMUNE_AVALANCHE_PRESCRIT,PPRN_ZONE_AVALANCHE',
-    format: 'image/png',
-    transparent: true,
-    version: '1.3.0',
-    opacity: 0.65,
-    pane: 'avalanchePane',
-    attribution: '&copy; État / Géorisques — Zones PPR avalanche',
-  }).addTo(leafletMap);
+  if (!avalancheZoneWmsLayer) avalancheZoneWmsLayer = window.L.layerGroup().addTo(leafletMap);
+  if (!leafletMap.hasLayer(avalancheZoneWmsLayer)) avalancheZoneWmsLayer.addTo(leafletMap);
+  avalancheZoneWmsLayer.clearLayers();
+
+  const avalanche = cachedExternalRisksSnapshot?.avalanche_isere || {};
+  const massifs = Array.isArray(avalanche.massifs) ? avalanche.massifs : [];
+  const massifByName = new Map(massifs.map((massif) => [String(massif.nom || massif.massif || '').trim().toLowerCase(), massif]));
+  const colorByLevel = { 1: '#2b8a3e', 2: '#e9a800', 3: '#e67700', 4: '#c92a2a', 5: '#6741d9' };
+  const labelByLevel = { 1: 'Faible', 2: 'Limité', 3: 'Marqué', 4: 'Fort', 5: 'Très fort' };
+
+  AVALANCHE_MASSIF_ZONES.forEach((zone) => {
+    const massif = massifByName.get(String(zone.nom || '').trim().toLowerCase()) || {};
+    const level = Number(massif.niveau_bra || 0);
+    const color = colorByLevel[level] || '#868e96';
+    const label = labelByLevel[level] || 'Indisponible';
+    const secteurs = Array.isArray(massif.secteurs) ? massif.secteurs : [];
+    const dateLabel = massif.date_echeance || massif.date_bulletin || '';
+    const commentaire = String(massif.commentaire || '').trim();
+    const circle = window.L.circle([zone.lat, zone.lon], {
+      radius: zone.radiusKm * 1000,
+      color,
+      weight: 2,
+      fillColor: color,
+      fillOpacity: level ? 0.18 : 0.08,
+    });
+    circle.bindPopup(`
+      <strong>🏔️ ${escapeHtml(zone.nom)}</strong><br>
+      Niveau actuel : <strong style="color:${color}">${level ? `${level}/5 — ${escapeHtml(label)}` : 'Indisponible'}</strong><br>
+      ${dateLabel ? `<span class="muted">Échéance : ${escapeHtml(dateLabel)}</span><br>` : ''}
+      ${commentaire ? `${escapeHtml(commentaire)}<br>` : ''}
+      ${secteurs.length ? `<span class="muted">Secteurs : ${escapeHtml(secteurs.join(', '))}</span>` : ''}
+    `);
+    circle.addTo(avalancheZoneWmsLayer);
+
+    window.L.marker([zone.lat, zone.lon], {
+      icon: window.L.divIcon({
+        className: '',
+        html: `<div style="background:${color};color:#fff;padding:2px 6px;border-radius:999px;font-size:11px;font-weight:700;border:1px solid rgba(255,255,255,.9);box-shadow:0 1px 4px rgba(0,0,0,.25);white-space:nowrap">${escapeHtml(zone.nom)} · ${level || '?'}/5</div>`,
+        iconSize: null,
+      }),
+      interactive: false,
+    }).addTo(avalancheZoneWmsLayer);
+  });
 }
 
 // ── Feature 15 : Séismes récents sur la carte ────────────────────────────────
@@ -10401,6 +10436,7 @@ function renderExternalRisks(data = {}) {
   renderOfficialColsAlpinsWidget(colsAlpins);
   // Redessiner couches carte avec nouvelles données
   renderColsAlpinsLayer();
+  applyAvalancheZoneLayer();
   renderNewsPanel(prefecture, dauphine, franceBleu, placegrenet, grenobleMétropole, arsAura, seismesIsere);
   renderSncfAlerts(sncf);
   renderApicAlerts(apic);
