@@ -327,11 +327,11 @@ let mapSearchController = null;
 let osmDetailsController = null;
 let osmDetailsMarker = null;
 const AVALANCHE_MASSIF_ZONES = Object.freeze([
-  { nom: 'Chartreuse', lat: 45.364, lon: 5.815, radiusKm: 18 },
-  { nom: 'Belledonne', lat: 45.215, lon: 6.015, radiusKm: 22 },
-  { nom: 'Grandes-Rousses', lat: 45.166, lon: 6.102, radiusKm: 18 },
-  { nom: 'Vercors', lat: 45.044, lon: 5.566, radiusKm: 24 },
-  { nom: 'Oisans', lat: 44.975, lon: 6.128, radiusKm: 27 },
+  { nom: 'Chartreuse', lat: 45.364, lon: 5.815, radiusKm: 12 },
+  { nom: 'Belledonne', lat: 45.215, lon: 6.015, radiusKm: 15 },
+  { nom: 'Grandes-Rousses', lat: 45.166, lon: 6.102, radiusKm: 12 },
+  { nom: 'Vercors', lat: 45.044, lon: 5.566, radiusKm: 16 },
+  { nom: 'Oisans', lat: 44.975, lon: 6.128, radiusKm: 18 },
 ]);
 
 function trafficIconZoomClass(zoom = 9) {
