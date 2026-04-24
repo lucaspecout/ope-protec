@@ -8354,8 +8354,33 @@ function buildSituationKpiModalContent(key, externalRisks = {}) {
   switch (key) {
     case 'meteo':
       return buildMeteoSituationModalContent(meteo);
-    case 'crues':
-      return `<p><strong>Niveau Vigicrues:</strong> ${escapeHtml(normalizeLevel(vigicrues.water_alert_level || 'inconnu'))}</p><p><strong>Stations suivies:</strong> ${Number((vigicrues.stations || []).length || 0)}</p>`;
+    case 'crues': {
+      const mainTronconCodes = new Set(['AN11', 'AN12', 'AN20', 'AN30', 'AN31']);
+      const troncons = (Array.isArray(vigicrues.troncons) ? vigicrues.troncons : [])
+        .filter((troncon) => mainTronconCodes.has(String(troncon.code || '')))
+        .map((troncon) => ({ ...troncon, normalizedLevel: normalizeLevel(troncon.level || 'vert') }))
+        .sort((a, b) => riskRank(b.normalizedLevel) - riskRank(a.normalizedLevel));
+      const stations = (Array.isArray(vigicrues.stations) ? vigicrues.stations : [])
+        .map((station) => ({ ...station, normalizedLevel: normalizeLevel(station.level || 'vert') }))
+        .sort((a, b) => riskRank(b.normalizedLevel) - riskRank(a.normalizedLevel));
+      const tronconMax = troncons.reduce((max, troncon) => riskRank(troncon.normalizedLevel) > riskRank(max) ? troncon.normalizedLevel : max, 'vert');
+      const stationMax = stations.reduce((max, station) => riskRank(station.normalizedLevel) > riskRank(max) ? station.normalizedLevel : max, 'vert');
+      const tronconsHtml = troncons.length
+        ? `<ul class="situation-kpi-modal__list">${troncons.slice(0, 12).map((troncon) => `<li><strong style="color:${levelColor(troncon.normalizedLevel)}">${escapeHtml(troncon.name || troncon.code || 'Tronçon')}</strong> · ${escapeHtml(troncon.normalizedLevel)}</li>`).join('')}</ul>`
+        : '<p class="muted">Aucun tronçon principal disponible.</p>';
+      const stationsHtml = stations.length
+        ? `<ul class="situation-kpi-modal__list">${stations.slice(0, 14).map((station) => `<li><strong style="color:${levelColor(station.normalizedLevel)}">${escapeHtml(station.station || station.code || 'Station')}</strong>${station.river ? ` · <span class="muted">${escapeHtml(station.river)}</span>` : ''} · ${escapeHtml(station.normalizedLevel)}</li>`).join('')}</ul>`
+        : '<p class="muted">Aucune station disponible.</p>';
+      return `
+        <p><strong>Niveau Vigicrues global:</strong> ${escapeHtml(normalizeLevel(vigicrues.water_alert_level || 'inconnu'))}</p>
+        <p><strong>Tronçons AN11/12/20/30/31 max:</strong> <span style="color:${levelColor(tronconMax)}">${escapeHtml(tronconMax)}</span></p>
+        <p><strong>Stations max:</strong> <span style="color:${levelColor(stationMax)}">${escapeHtml(stationMax)}</span> · ${stations.length} station(s) suivie(s)</p>
+        <h5>Tronçons</h5>
+        ${tronconsHtml}
+        <h5>Stations</h5>
+        ${stationsHtml}
+      `;
+    }
     case 'global-risk':
       return `<p><strong>Risque global consolidé:</strong> ${escapeHtml(normalizeLevel(dashboard.global_risk || meteo.level || 'inconnu'))}</p><p class="muted">Consolidation météo + crues + alertes externes.</p>`;
     case 'communes-crise':
@@ -8529,7 +8554,7 @@ function renderSituationOverview() {
 
   const kpiCards = [
     { key: 'meteo', label: 'Vigilance météo', value: vigilance, info: 'Source Météo-France', css: normalizeLevel(vigilance) },
-    { key: 'crues', label: 'Niveau crues', value: crues, info: `Tronçons AN11/12/20/30/31 max ${mainTronconLevel} · stations max ${stationsLevel}`, css: normalizeLevel(crues), detail: cruesAlertHtml },
+    { key: 'crues', label: 'Niveau crues', value: crues, info: `Tronçons AN11/12/20/30/31 max ${mainTronconLevel} · stations max ${stationsLevel}`, css: normalizeLevel(crues) },
     { key: 'global-risk', label: 'Risque global', value: globalRisk, info: 'Calcul consolidé', css: normalizeLevel(globalRisk) },
     { key: 'communes-crise', label: 'Communes en crise', value: String(crisisCount), info: 'PCS actif', css: crisisCount > 0 ? 'rouge' : 'vert' },
   ];
@@ -8585,7 +8610,7 @@ function renderSituationOverview() {
     </div>
 
     <div class="situation-top-grid">
-      ${kpiCards.map((card) => `<article class="tile situation-tile situation-tile--interactive situation-tile--bg-${escapeHtml(card.css)}" role="button" tabindex="0" data-kpi-key="${escapeHtml(card.key)}" data-kpi-label="${escapeHtml(card.label)}"><h3>${card.label}</h3><p class="kpi-value ${card.css}">${escapeHtml(card.value)}</p><p class="muted">${escapeHtml(card.info)}</p>${card.detail || ''}</article>`).join('')}
+      ${kpiCards.map((card) => `<article class="tile situation-tile situation-tile--interactive situation-tile--bg-${escapeHtml(card.css)}" role="button" tabindex="0" data-kpi-key="${escapeHtml(card.key)}" data-kpi-label="${escapeHtml(card.label)}"><h3>${card.label}</h3><p class="kpi-value ${card.css}">${escapeHtml(card.value)}</p><p class="muted">${escapeHtml(card.info)}</p></article>`).join('')}
     </div>
 
     <div class="situation-top-grid">
