@@ -306,6 +306,7 @@ let cachedBisonFute = {};
 let cachedBisonLiveEvents = [];
 let geocodeCache = new Map();
 let municipalityContourCache = new Map();
+let cachedPcsGeometries = [];
 const municipalityDocumentsUiState = new Map();
 let trafficGeocodeCache = new Map();
 let mapStats = { stations: 0, pcs: 0, resources: 0, custom: 0, traffic: 0 };
@@ -3472,6 +3473,7 @@ async function handleOsmDetailsClick(event) {
   const lat = Number(event?.latlng?.lat);
   const lon = Number(event?.latlng?.lng);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+  if (cachedPcsGeometries.some((geometry) => isPointInsideGeometry({ lat, lon }, geometry))) return;
   updateSelectedLocationPanel(lat, lon);
 
   if (osmDetailsController) osmDetailsController.abort();
@@ -3896,14 +3898,43 @@ async function geocodeMunicipality(municipality) {
   const key = `${municipality.name}|${municipality.postal_code || ''}`;
   if (geocodeCache.has(key)) return geocodeCache.get(key);
   try {
-    const queries = municipality.postal_code
+    const cityCodeParam = municipality.insee_code ? `&citycode=${encodeURIComponent(municipality.insee_code)}` : '';
+    const townHallQueries = municipality.postal_code
+      ? [
+          `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(`mairie ${municipality.name}`)}&postcode=${encodeURIComponent(municipality.postal_code)}${cityCodeParam}&limit=5`,
+          `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(`mairie de ${municipality.name}`)}&postcode=${encodeURIComponent(municipality.postal_code)}${cityCodeParam}&limit=5`,
+        ]
+      : [
+          `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(`mairie ${municipality.name}`)}${cityCodeParam}&limit=5`,
+          `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(`mairie de ${municipality.name}`)}${cityCodeParam}&limit=5`,
+        ];
+
+    for (const url of townHallQueries) {
+      const response = await queueApiRequest(() => fetchWithTimeout(url));
+      const payload = await parseJsonResponse(response, url);
+      const features = Array.isArray(payload?.features) ? payload.features : [];
+      const preferred = features.find((feature) => {
+        const props = feature?.properties || {};
+        const label = String(props.label || props.name || '').toLowerCase();
+        const city = String(props.city || '').toLowerCase();
+        return label.includes('mairie') && city.includes(String(municipality.name || '').toLowerCase());
+      }) || features.find((feature) => String(feature?.properties?.label || feature?.properties?.name || '').toLowerCase().includes('mairie')) || features[0];
+      const coords = preferred?.geometry?.coordinates;
+      if (!Array.isArray(coords) || coords.length !== 2) continue;
+      const point = normalizeMapCoordinates(coords[1], coords[0]);
+      if (!point) continue;
+      geocodeCache.set(key, point);
+      return point;
+    }
+
+    const centerQueries = municipality.postal_code
       ? [
           `https://geo.api.gouv.fr/communes?nom=${encodeURIComponent(municipality.name)}&codePostal=${encodeURIComponent(municipality.postal_code)}&fields=centre&limit=1`,
           `https://geo.api.gouv.fr/communes?nom=${encodeURIComponent(municipality.name)}&fields=centre&limit=1`,
         ]
       : [`https://geo.api.gouv.fr/communes?nom=${encodeURIComponent(municipality.name)}&fields=centre&limit=1`];
 
-    for (const url of queries) {
+    for (const url of centerQueries) {
       const response = await queueApiRequest(() => fetchWithTimeout(url));
       const payload = await parseJsonResponse(response, url);
       const center = payload?.[0]?.centre?.coordinates;
@@ -3955,6 +3986,7 @@ async function renderMunicipalitiesOnMap(municipalities = []) {
   if (!pcsLayer) return;
   pcsLayer.clearLayers();
   if (pcsBoundaryLayer) pcsBoundaryLayer.clearLayers();
+  cachedPcsGeometries = [];
   if (!(document.getElementById('filter-pcs')?.checked ?? true)) {
     mapStats.pcs = 0;
     updateMapSummary();
@@ -3969,12 +4001,13 @@ async function renderMunicipalitiesOnMap(municipalities = []) {
   );
   let renderedCount = 0;
   cachedCrisisPoints = [];
+  cachedPcsGeometries = points.map(({ contour }) => contour).filter(Boolean);
   points.forEach(({ municipality, point, contour }) => {
     if (contour && pcsBoundaryLayer) {
       window.L.geoJSON({ type: 'Feature', geometry: contour }, {
         style: ISERE_BOUNDARY_STYLE,
+        interactive: false,
       })
-        .bindPopup(`<strong>${municipality.name}</strong><br>Contour communal PCS`)
         .addTo(pcsBoundaryLayer);
     }
     if (!point) return;
@@ -3997,6 +4030,7 @@ async function renderMunicipalitiesOnMap(municipalities = []) {
         weight: 1.5,
         fillColor: '#e03131',
         fillOpacity: 0.08,
+        interactive: false,
       }).addTo(pcsLayer);
     }
     renderedCount += 1;
