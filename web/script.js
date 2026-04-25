@@ -832,7 +832,7 @@ const RISK_RESOURCE_TYPES = new Set(['lieu_risque', 'centrale_nucleaire', 'energ
 const TRANSPORT_RESOURCE_TYPES = new Set(['transport', 'transport_gare_sncf', 'transport_gare_routiere', 'transport_aeroport']);
 const COMMAND_RESOURCE_TYPES = new Set(['poste_commandement']);
 const PC_RESOURCE_TYPES = new Set(['protection_civile']);
-const HOSTING_RESOURCE_TYPES = new Set(['gymnase', 'complexe_sportif', 'stade', 'salle_omnisports', 'centre_culturel', 'salle_spectacle_public', 'palais_congres', 'salle_fetes']);
+const HOSTING_RESOURCE_TYPES = new Set(['gymnase', 'complexe_sportif', 'salle_omnisports', 'centre_culturel', 'salle_spectacle_public', 'palais_congres', 'salle_fetes']);
 const TELECOM_RESOURCE_TYPES = new Set(['anfr_antenna', 'arcep_mobile_outage']);
 
 const ISERE_BOUNDARY_STYLE = { color: '#163a87', weight: 2, fillColor: '#63c27d', fillOpacity: 0.2 };
@@ -4180,8 +4180,18 @@ function shouldDisplayBaseResourceType(type = '') {
     if (!hostingEnabled) return false;
     return hostingTypeFilter === 'all' || hostingTypeFilter === type;
   }
+  if (type === 'stade') return false;
   if (PC_RESOURCE_TYPES.has(type)) return document.getElementById('filter-resources-protcivile')?.checked ?? true;
   return true;
+}
+
+function formatHostingDetailsHtml(resource = {}) {
+  if (!HOSTING_RESOURCE_TYPES.has(String(resource.type || ''))) return '';
+  const parts = [];
+  if (resource.capacity) parts.push(`Capacité: ${Number(resource.capacity).toLocaleString('fr-FR')} pers.`);
+  if (resource.surface_m2) parts.push(`Surface: ${Number(resource.surface_m2).toLocaleString('fr-FR')} m²`);
+  if (resource.capacity_source) parts.push(String(resource.capacity_source));
+  return parts.length ? `<br><span class="muted">${escapeHtml(parts.join(' · '))}</span>` : '';
 }
 
 async function loadFinessIsereResources() {
@@ -4470,7 +4480,7 @@ async function loadIsereInstitutions() {
   const cached = readFreshSnapshot(STORAGE_KEYS.staticInstitutionsCache, STATIC_POINTS_CACHE_TTL_MS);
   const filteredCached = filterIserePoints(cached);
   const hasCritical = filteredCached.some((p) => ['ecole_primaire', 'caserne_pompier', 'gendarmerie', 'police_municipale', 'commissariat_police_nationale'].includes(p.type));
-  const hasHosting = filteredCached.some((p) => ['gymnase', 'complexe_sportif', 'stade', 'salle_omnisports', 'centre_culturel', 'salle_spectacle_public', 'palais_congres', 'salle_fetes'].includes(p.type));
+  const hasHosting = filteredCached.some((p) => ['gymnase', 'complexe_sportif', 'salle_omnisports', 'centre_culturel', 'salle_spectacle_public', 'palais_congres', 'salle_fetes'].includes(p.type));
   const cacheIsUsable = filteredCached.length >= 20 && hasCritical && hasHosting;
   if (cacheIsUsable) {
     institutionPointsCache = filteredCached;
@@ -4711,6 +4721,7 @@ function _drawResourceMarkers() {
       <strong>${meta.icon} ${r.name}</strong> · ${r.address}<br/>
       <span class="muted">${meta.label} · ${statusLabel} · ${priorityLabel[r.priority] || 'standard'}</span><br/>
       <span class="muted">${escapeHtml(r.info || 'Aucune information complémentaire.')}</span><br/>
+      ${formatHostingDetailsHtml(r)}
       <a href="${escapeHtml(r.source || '#')}" target="_blank" rel="noreferrer">Source</a>
       ${toggleButton}
     </li>`;
@@ -4734,7 +4745,7 @@ function _drawResourceMarkers() {
     window.L.marker([coords.lat, coords.lon], {
       icon: window.L.divIcon({ className: 'map-resource-icon-wrap', html: markerHtml, iconSize: [24, 24], iconAnchor: [12, 12] }),
     })
-      .bindPopup(`<strong>${meta.icon} ${r.name}</strong><br>Type: ${meta.label}<br>Niveau: ${priorityLabel[r.priority] || 'standard'}<br>Adresse: ${r.address}<br>${escapeHtml(r.info || '')}${formatFinessDetailsHtml(r)}<br><a href="${escapeHtml(r.source || '#')}" target="_blank" rel="noreferrer">Source publique</a>`)
+      .bindPopup(`<strong>${meta.icon} ${r.name}</strong><br>Type: ${meta.label}<br>Niveau: ${priorityLabel[r.priority] || 'standard'}<br>Adresse: ${r.address}<br>${escapeHtml(r.info || '')}${formatHostingDetailsHtml(r)}${formatFinessDetailsHtml(r)}<br><a href="${escapeHtml(r.source || '#')}" target="_blank" rel="noreferrer">Source publique</a>`)
       .addTo(resourceLayer);
   });
 

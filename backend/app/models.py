@@ -190,6 +190,9 @@ class InstitutionPoint(Base):
     address: Mapped[str] = mapped_column(String(300), default="")
     priority: Mapped[str] = mapped_column(String(20), default="standard")
     info: Mapped[str] = mapped_column(String(200), default="")
+    capacity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    surface_m2: Mapped[float | None] = mapped_column(Float, nullable=True)
+    capacity_source: Mapped[str | None] = mapped_column(String(80), nullable=True)
     source: Mapped[str] = mapped_column(String(200), default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

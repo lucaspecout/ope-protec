@@ -787,16 +787,25 @@ out center tags;"""
 # Requête Overpass bbox Isère — équipements hébergement/accueil
 _INSTITUTIONS_FACILITIES_QUERY = f"""[out:json][timeout:90];
 (
-  node["amenity"~"community_centre|arts_centre|theatre|cinema|concert_hall|events_venue|convention_centre|conference_centre|social_facility"]({_INSTITUTIONS_ISERE_BBOX});
-  node["leisure"~"sports_hall|sports_centre|stadium|ice_rink|arena"]({_INSTITUTIONS_ISERE_BBOX});
-  node["building"~"gymnasium|sports_hall|civic|hall"]({_INSTITUTIONS_ISERE_BBOX});
+  node["amenity"~"community_centre|arts_centre|theatre|cinema|concert_hall|events_venue|convention_centre|conference_centre|social_facility|public_building"]({_INSTITUTIONS_ISERE_BBOX});
+  node["leisure"~"sports_hall|sports_centre|ice_rink|arena"]({_INSTITUTIONS_ISERE_BBOX});
+  node["building"~"gymnasium|sports_hall|civic|hall|public|community_centre|grandstand|sports_centre"]({_INSTITUTIONS_ISERE_BBOX});
   node["amenity"="gym"]({_INSTITUTIONS_ISERE_BBOX});
-  way["amenity"~"community_centre|theatre|cinema|social_facility|conference_centre|convention_centre"]({_INSTITUTIONS_ISERE_BBOX});
-  way["leisure"~"sports_hall|sports_centre|stadium|ice_rink|arena"]({_INSTITUTIONS_ISERE_BBOX});
-  way["building"~"gymnasium|sports_hall|civic|hall"]({_INSTITUTIONS_ISERE_BBOX});
-  relation["leisure"~"sports_hall|stadium"]({_INSTITUTIONS_ISERE_BBOX});
+  node["name"~"salle des f[eê]tes|salle polyvalente|salle communale|salle municipale|gymnase|palais des sports|halle des sports|salle omnisports|foyer rural|foyer communal|maison des associations|centre culturel|espace culturel|maison du peuple|parc des expositions",i]({_INSTITUTIONS_ISERE_BBOX});
+  way["amenity"~"community_centre|arts_centre|theatre|cinema|concert_hall|events_venue|conference_centre|convention_centre|social_facility|public_building"]({_INSTITUTIONS_ISERE_BBOX});
+  way["leisure"~"sports_hall|sports_centre|ice_rink|arena"]({_INSTITUTIONS_ISERE_BBOX});
+  way["building"~"gymnasium|sports_hall|civic|hall|public|community_centre|grandstand|sports_centre"]({_INSTITUTIONS_ISERE_BBOX});
+  way["name"~"salle des f[eê]tes|salle polyvalente|salle communale|salle municipale|gymnase|palais des sports|halle des sports|salle omnisports|foyer rural|foyer communal|maison des associations|centre culturel|espace culturel|maison du peuple|parc des expositions",i]({_INSTITUTIONS_ISERE_BBOX});
+  relation["amenity"~"community_centre|arts_centre|theatre|cinema|concert_hall|events_venue|conference_centre|convention_centre|social_facility|public_building"]({_INSTITUTIONS_ISERE_BBOX});
+  relation["leisure"~"sports_hall|sports_centre|ice_rink|arena"]({_INSTITUTIONS_ISERE_BBOX});
+  relation["building"~"gymnasium|sports_hall|civic|hall|public|community_centre|sports_centre"]({_INSTITUTIONS_ISERE_BBOX});
 );
 out center tags;"""
+
+_HOSTING_INDOOR_TYPES = {
+    "gymnase", "complexe_sportif", "salle_omnisports", "centre_culturel",
+    "salle_spectacle_public", "palais_congres", "salle_fetes",
+}
 
 
 def _classify_institution_osm(tags: dict) -> str | None:
@@ -841,19 +850,84 @@ def _classify_institution_osm(tags: dict) -> str | None:
         return "palais_congres"
     # Gymnases : plusieurs tags possibles en France
     if (
-        leisure in ("sports_hall", "sports_centre", "arena", "ice_rink")
+        leisure in ("sports_hall", "arena", "ice_rink")
         or building in ("sports_hall", "gymnasium")
         or amenity == "gym"
         or any(kw in name for kw in ("gymnase", "salle sport", "complexe sport", "piscine", "patinoire"))
     ):
         return "gymnase"
-    if leisure == "stadium" or building == "stadium" or "stade" in name:
-        return "stade"
+    if leisure == "sports_centre" or building == "sports_centre" or any(kw in name for kw in ("complexe sportif", "complexe omnisport", "maison des sports")):
+        return "complexe_sportif"
     if amenity in ("community_centre", "arts_centre", "social_facility") or building in ("civic", "hall"):
         if any(token in name for token in ("foyer", "polyvalent", "fête", "fetes", "salle", "maison du peuple", "espace")):
             return "salle_fetes"
         return "centre_culturel"
+    if building in ("public", "community_centre") or amenity == "public_building":
+        if any(token in name for token in ("salle", "foyer", "maison des associations", "maison du peuple", "espace")):
+            return "salle_fetes"
+        return "centre_culturel"
     return None
+
+
+def _parse_first_number(value: Any) -> float | None:
+    text_value = str(value or "").replace(",", ".")
+    match = re.search(r"\d+(?:\.\d+)?", text_value)
+    if not match:
+        return None
+    try:
+        return float(match.group(0))
+    except ValueError:
+        return None
+
+
+def _hosting_capacity_metadata(tags: dict, resource_type: str) -> tuple[int | None, float | None, str | None]:
+    capacity_keys = ("capacity:persons", "capacity", "maxcapacity", "capacity:seated", "seats")
+    explicit_capacity = None
+    explicit_key = None
+    for key in capacity_keys:
+        value = _parse_first_number(tags.get(key))
+        if value:
+            explicit_capacity = int(value)
+            explicit_key = key
+            break
+
+    surface_m2 = None
+    for key in ("building:area", "area", "surface", "floor_area", "gross_floor_area"):
+        value = _parse_first_number(tags.get(key))
+        if value:
+            surface_m2 = float(value)
+            break
+
+    if explicit_capacity:
+        return explicit_capacity, surface_m2, f"OSM {explicit_key}"
+    if surface_m2:
+        return max(1, int(surface_m2 // 4)), surface_m2, "estimation surface/4m2"
+    if resource_type in {"gymnase", "salle_omnisports", "palais_congres", "salle_spectacle_public", "salle_fetes"}:
+        return 50, None, "minimum probable par type, a confirmer"
+    return None, surface_m2, None
+
+
+def _is_public_indoor_hosting(tags: dict, resource_type: str) -> bool:
+    if resource_type not in _HOSTING_INDOOR_TYPES:
+        return False
+    access = str(tags.get("access") or "").lower()
+    if access in {"private", "no", "customers"}:
+        return False
+    name = str(tags.get("name") or "").lower()
+    leisure = str(tags.get("leisure") or "").lower()
+    building = str(tags.get("building") or "").lower()
+    outdoor_tokens = ("stade", "terrain", "boulodrome", "skate", "tennis", "football", "rugby", "city stade")
+    indoor_tokens = ("gymnase", "halle", "salle", "palais", "centre", "foyer", "maison", "espace", "theatre", "cinema")
+    if any(token in name for token in outdoor_tokens) and not any(token in name for token in indoor_tokens):
+        return False
+    if leisure == "sports_centre" and building not in {"yes", "sports_centre", "sports_hall", "gymnasium", "public"} and not any(token in name for token in indoor_tokens):
+        return False
+    capacity, surface_m2, _source = _hosting_capacity_metadata(tags, resource_type)
+    if capacity is not None:
+        return capacity >= 50
+    if surface_m2 is not None:
+        return surface_m2 >= 200
+    return True
 
 
 _OVERPASS_ENDPOINTS = [
@@ -909,6 +983,10 @@ def _fetch_institutions_isere_live() -> dict[str, Any]:
         resource_type = _classify_institution_osm(tags)
         if not resource_type:
             continue
+        is_hosting = resource_type in _HOSTING_INDOOR_TYPES
+        if is_hosting and not _is_public_indoor_hosting(tags, resource_type):
+            continue
+        capacity, surface_m2, capacity_source = _hosting_capacity_metadata(tags, resource_type) if is_hosting else (None, None, None)
 
         lat = element.get("lat") or (element.get("center") or {}).get("lat")
         lon = element.get("lon") or (element.get("center") or {}).get("lon")
@@ -928,11 +1006,22 @@ def _fetch_institutions_isere_live() -> dict[str, Any]:
         name = str(tags.get("name") or "").strip() or "Établissement"
         address_parts = [tags.get("addr:housenumber"), tags.get("addr:street"), tags.get("addr:city")]
         address = " ".join(p for p in address_parts if p) or "Adresse non renseignée"
-        amenity_tag = str(tags.get("amenity") or tags.get("leisure") or tags.get("railway") or tags.get("aeroway") or "-")
+        amenity_tag = str(tags.get("amenity") or tags.get("leisure") or tags.get("building") or tags.get("railway") or tags.get("aeroway") or "-")
         priority = "vital" if resource_type in {
             "caserne_pompier", "gendarmerie", "commissariat_police_nationale",
             "transport_gare_sncf", "transport_aeroport",
-        } else "standard"
+        } or (is_hosting and capacity and capacity >= 200) else "standard"
+        info_parts = [f"Source OSM - {amenity_tag}"]
+        if is_hosting:
+            if capacity:
+                info_parts.append(f"capacite accueil: {capacity} pers.")
+            if surface_m2:
+                info_parts.append(f"surface: {int(surface_m2)} m2")
+            if capacity_source:
+                info_parts.append(capacity_source)
+            if capacity_source and "minimum probable" in capacity_source:
+                info_parts.append("a confirmer par la commune")
+        info = " | ".join(info_parts)
 
         points.append({
             "id": uid,
@@ -943,8 +1032,11 @@ def _fetch_institutions_isere_live() -> dict[str, Any]:
             "active": True,
             "address": address,
             "priority": priority,
-            "info": f"Source OSM · {amenity_tag}",
             "source": f"https://www.openstreetmap.org/{osm_type}/{osm_id}",
+            "info": info[:200],
+            "capacity": capacity,
+            "surface_m2": surface_m2,
+            "capacity_source": capacity_source,
             "dynamic": True,
         })
 
@@ -980,6 +1072,9 @@ def _institutions_save_to_db(points: list[dict[str, Any]]) -> None:
                     existing.address = p["address"]
                     existing.priority = p["priority"]
                     existing.info = p["info"]
+                    existing.capacity = p.get("capacity")
+                    existing.surface_m2 = p.get("surface_m2")
+                    existing.capacity_source = p.get("capacity_source")
                     existing.source = p["source"]
                     existing.updated_at = now
                 else:
@@ -992,6 +1087,9 @@ def _institutions_save_to_db(points: list[dict[str, Any]]) -> None:
                         address=p["address"],
                         priority=p["priority"],
                         info=p["info"],
+                        capacity=p.get("capacity"),
+                        surface_m2=p.get("surface_m2"),
+                        capacity_source=p.get("capacity_source"),
                         source=p["source"],
                         updated_at=now,
                     ))
@@ -1022,6 +1120,9 @@ def _institutions_load_from_db() -> list[dict[str, Any]] | None:
                     "address": r.address,
                     "priority": r.priority,
                     "info": r.info,
+                    "capacity": r.capacity,
+                    "surface_m2": r.surface_m2,
+                    "capacity_source": r.capacity_source,
                     "source": r.source,
                     "dynamic": True,
                     "updated_at": r.updated_at.isoformat() + "Z" if r.updated_at else None,

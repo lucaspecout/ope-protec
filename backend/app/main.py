@@ -215,10 +215,16 @@ with engine.begin() as conn:
             address VARCHAR(300) NOT NULL DEFAULT '',
             priority VARCHAR(20) NOT NULL DEFAULT 'standard',
             info VARCHAR(200) NOT NULL DEFAULT '',
+            capacity INTEGER,
+            surface_m2 DOUBLE PRECISION,
+            capacity_source VARCHAR(80),
             source VARCHAR(200) NOT NULL DEFAULT '',
             updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
         )
     """))
+    conn.execute(text("ALTER TABLE institution_points ADD COLUMN IF NOT EXISTS capacity INTEGER"))
+    conn.execute(text("ALTER TABLE institution_points ADD COLUMN IF NOT EXISTS surface_m2 DOUBLE PRECISION"))
+    conn.execute(text("ALTER TABLE institution_points ADD COLUMN IF NOT EXISTS capacity_source VARCHAR(80)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_institution_points_type ON institution_points(type)"))
     conn.execute(text("""
         CREATE TABLE IF NOT EXISTS alert_history (
