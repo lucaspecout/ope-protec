@@ -14041,7 +14041,7 @@ function _renderLocalWeatherModal(data, lat, lon) {
 // FEATURE 15 — Journal d'audit
 // ════════════════════════════════════════════════════════════════════════════
 
-async function loadAuditLog() {
+async function legacyLoadAuditLog() {
   const userFilter = (document.getElementById('audit-user-filter')?.value || '').trim();
   const typeFilter = document.getElementById('audit-type-filter')?.value || '';
   const el = document.getElementById('audit-list');
@@ -14051,13 +14051,13 @@ async function loadAuditLog() {
   if (typeFilter) url += `&resource_type=${encodeURIComponent(typeFilter)}`;
   try {
     const data = await api(url);
-    renderAuditLog(Array.isArray(data) ? data : []);
+    legacyRenderAuditLog(Array.isArray(data) ? data : []);
   } catch (err) {
     if (el) el.innerHTML = `<p class="error">Erreur : ${escapeHtml(sanitizeErrorMessage(err.message))}</p>`;
   }
 }
 
-function renderAuditLog(logs) {
+function legacyRenderAuditLog(logs) {
   const el = document.getElementById('audit-list');
   if (!el) return;
   if (!logs.length) {
@@ -14082,15 +14082,166 @@ function renderAuditLog(logs) {
   }).join('');
 }
 
+const auditState = { logs: [], selectedId: null, total: 0 };
+
+function auditModuleLabel(type = '') {
+  return {
+    auth: 'Authentification',
+    users: 'Utilisateurs',
+    municipalities: 'Communes',
+    logs: 'Main courante',
+    events: 'Evenements',
+    resources: 'Ressources',
+    reports: 'Rapports',
+    map: 'Carte',
+    interconnections: 'Interconnexions',
+    audit: 'Audit',
+  }[type] || type || 'Autre';
+}
+
+function auditMethodLabel(method = '') {
+  return { POST: 'Action', PATCH: 'Modification', PUT: 'Remplacement', DELETE: 'Suppression', GET: 'Export' }[method] || method || '-';
+}
+
+function auditStatusMeta(statusCode) {
+  const code = Number(statusCode || 0);
+  if (!code) return { label: '-', css: 'neutral' };
+  if (code >= 400) return { label: String(code), css: 'error' };
+  if (code >= 300) return { label: String(code), css: 'warn' };
+  return { label: String(code), css: 'ok' };
+}
+
+function auditDateLabel(value) {
+  const dt = new Date(value);
+  return Number.isNaN(dt.getTime()) ? String(value || '-') : dt.toLocaleString('fr-FR', {
+    day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+}
+
+function syncAuditSelectOptions(selectId, values = [], placeholder = '') {
+  const select = document.getElementById(selectId);
+  if (!select) return;
+  const current = select.value;
+  const options = [...new Set(values.filter(Boolean))];
+  select.innerHTML = `<option value="">${escapeHtml(placeholder)}</option>${options.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(selectId === 'audit-type-filter' ? auditModuleLabel(value) : value)}</option>`).join('')}`;
+  if ([...select.options].some((option) => option.value === current)) select.value = current;
+}
+
+async function loadAuditLog() {
+  const searchFilter = (document.getElementById('audit-search-filter')?.value || '').trim();
+  const userFilter = document.getElementById('audit-user-filter')?.value || '';
+  const typeFilter = document.getElementById('audit-type-filter')?.value || '';
+  const methodFilter = document.getElementById('audit-method-filter')?.value || '';
+  const statusFilter = document.getElementById('audit-status-filter')?.value || '';
+  const limit = document.getElementById('audit-limit-select')?.value || '100';
+  const [sortBy, sortDir] = String(document.getElementById('audit-sort-select')?.value || 'created_at:desc').split(':');
+  const el = document.getElementById('audit-list');
+  if (el) el.innerHTML = '<p class="muted" style="padding:1rem">Chargement...</p>';
+  const params = new URLSearchParams({ limit, sort_by: sortBy || 'created_at', sort_dir: sortDir || 'desc' });
+  if (searchFilter) params.set('search', searchFilter);
+  if (userFilter) params.set('username', userFilter);
+  if (typeFilter) params.set('resource_type', typeFilter);
+  if (methodFilter) params.set('method', methodFilter);
+  if (statusFilter) params.set('status', statusFilter);
+  try {
+    const data = await api(`/api/audit?${params.toString()}`, { bypassCache: true, cacheTtlMs: 0 });
+    const logs = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
+    auditState.logs = logs;
+    auditState.total = Number(data?.total ?? logs.length);
+    if (!logs.some((log) => String(log.id) === String(auditState.selectedId))) auditState.selectedId = logs[0]?.id || null;
+    syncAuditSelectOptions('audit-user-filter', data?.users || logs.map((log) => log.username), 'Tous les utilisateurs');
+    syncAuditSelectOptions('audit-type-filter', data?.resource_types || logs.map((log) => log.resource_type), 'Tous les modules');
+    renderAuditLog(logs, auditState.total);
+    renderAuditDetails(logs.find((log) => String(log.id) === String(auditState.selectedId)) || null);
+  } catch (err) {
+    if (el) el.innerHTML = `<p class="error" style="padding:1rem">Erreur : ${escapeHtml(sanitizeErrorMessage(err.message))}</p>`;
+  }
+}
+
+function renderAuditLog(logs, total = logs.length) {
+  const el = document.getElementById('audit-list');
+  const summary = document.getElementById('audit-summary');
+  if (!el) return;
+  const errors = logs.filter((log) => Number(log.status_code || 0) >= 400).length;
+  const users = new Set(logs.map((log) => log.username).filter(Boolean)).size;
+  const modules = new Set(logs.map((log) => log.resource_type).filter(Boolean)).size;
+  if (summary) summary.innerHTML = `<span>${logs.length}/${total} ligne(s)</span><span>${users} utilisateur(s)</span><span>${modules} module(s)</span><span>${errors} erreur(s)</span>`;
+  if (!logs.length) {
+    el.innerHTML = '<p class="muted" style="padding:1rem">Aucune action enregistrée pour cette recherche.</p>';
+    return;
+  }
+  el.innerHTML = `<table class="audit-table">
+    <thead><tr><th>Heure</th><th>Utilisateur</th><th>Module</th><th>Action</th><th>Chemin</th><th>Statut</th><th>IP</th></tr></thead>
+    <tbody>${logs.map((a) => {
+      const status = auditStatusMeta(a.status_code);
+      const selected = String(a.id) === String(auditState.selectedId) ? ' class="is-selected"' : '';
+      const userMeta = [a.user_role ? roleLabel(a.user_role) : '', a.user_municipality || ''].filter(Boolean).join(' · ');
+      return `<tr${selected} data-audit-id="${escapeHtml(String(a.id))}">
+        <td>${escapeHtml(auditDateLabel(a.created_at))}</td>
+        <td><strong>${escapeHtml(a.username || 'inconnu')}</strong>${userMeta ? `<br><span class="muted">${escapeHtml(userMeta)}</span>` : ''}</td>
+        <td>${escapeHtml(auditModuleLabel(a.resource_type))}</td>
+        <td><span class="audit-chip audit-chip--neutral">${escapeHtml(auditMethodLabel(a.method))}</span></td>
+        <td class="audit-path" title="${escapeHtml(a.path || a.action || '')}">${escapeHtml(a.path || a.action || '-')}</td>
+        <td><span class="audit-chip audit-chip--${status.css}">${escapeHtml(status.label)}</span></td>
+        <td>${escapeHtml(a.ip_address || '-')}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
+}
+
+function renderAuditDetails(log) {
+  const el = document.getElementById('audit-details');
+  if (!el) return;
+  if (!log) {
+    el.classList.add('muted');
+    el.innerHTML = 'Sélectionnez une ligne pour afficher le détail.';
+    return;
+  }
+  const status = auditStatusMeta(log.status_code);
+  el.classList.remove('muted');
+  el.innerHTML = `<h4>${escapeHtml(auditModuleLabel(log.resource_type))}</h4>
+    <span class="audit-chip audit-chip--${status.css}">HTTP ${escapeHtml(status.label)}</span>
+    <dl>
+      <dt>Heure</dt><dd>${escapeHtml(auditDateLabel(log.created_at))}</dd>
+      <dt>Utilisateur</dt><dd>${escapeHtml(log.username || 'inconnu')}</dd>
+      <dt>Rôle</dt><dd>${escapeHtml(log.user_role ? roleLabel(log.user_role) : '-')}</dd>
+      <dt>Commune</dt><dd>${escapeHtml(log.user_municipality || '-')}</dd>
+      <dt>Méthode</dt><dd>${escapeHtml(log.method || '-')}</dd>
+      <dt>Action</dt><dd>${escapeHtml(log.action || '-')}</dd>
+      <dt>Chemin</dt><dd>${escapeHtml(log.path || '-')}</dd>
+      <dt>IP</dt><dd>${escapeHtml(log.ip_address || '-')}</dd>
+      <dt>Détail</dt><dd>${escapeHtml(log.details || '-')}</dd>
+    </dl>`;
+}
+
 (function initAuditPanel() {
   const btn = document.getElementById('audit-refresh-btn');
   if (btn) btn.addEventListener('click', loadAuditLog);
 
   const userFilter = document.getElementById('audit-user-filter');
-  if (userFilter) userFilter.addEventListener('keydown', (e) => { if (e.key === 'Enter') loadAuditLog(); });
+  if (userFilter) userFilter.addEventListener('change', loadAuditLog);
 
-  const typeFilter = document.getElementById('audit-type-filter');
-  if (typeFilter) typeFilter.addEventListener('change', loadAuditLog);
+  ['audit-type-filter', 'audit-method-filter', 'audit-status-filter', 'audit-sort-select', 'audit-limit-select'].forEach((id) => {
+    document.getElementById(id)?.addEventListener('change', loadAuditLog);
+  });
+
+  let auditSearchTimer = 0;
+  const searchFilter = document.getElementById('audit-search-filter');
+  if (searchFilter) {
+    searchFilter.addEventListener('input', () => {
+      clearTimeout(auditSearchTimer);
+      auditSearchTimer = setTimeout(loadAuditLog, 250);
+    });
+    searchFilter.addEventListener('keydown', (e) => { if (e.key === 'Enter') loadAuditLog(); });
+  }
+
+  document.getElementById('audit-list')?.addEventListener('click', (event) => {
+    const row = event.target.closest('[data-audit-id]');
+    if (!row) return;
+    auditState.selectedId = row.getAttribute('data-audit-id');
+    renderAuditLog(auditState.logs, auditState.total);
+    renderAuditDetails(auditState.logs.find((log) => String(log.id) === String(auditState.selectedId)) || null);
+  });
 
   document.querySelectorAll('.menu-btn[data-target="audit-panel"]').forEach((b) => {
     b.addEventListener('click', () => loadAuditLog());
@@ -14111,16 +14262,24 @@ function renderAuditLog(logs) {
   // Update export link with auth token
   const exportLink = document.getElementById('audit-export-link');
   if (exportLink && typeof token !== 'undefined') {
-    exportLink.addEventListener('click', (e) => {
+    exportLink.addEventListener('click', async (e) => {
       e.preventDefault();
-      const days = 30;
-      const url = `/api/audit/export/csv?days=${days}`;
+      const url = '/api/audit/export/csv?days=30';
+      const response = await queueApiRequest(() => fetchWithTimeout(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} }));
+      if (!response.ok) {
+        const summary = document.getElementById('audit-summary');
+        if (summary) summary.innerHTML = `<span class="error">Export impossible (${response.status})</span>`;
+        return;
+      }
+      const blob = await response.blob();
+      const objectUrl = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url;
+      a.href = objectUrl;
       a.download = `audit_${new Date().toISOString().slice(0,10)}.csv`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
+      window.URL.revokeObjectURL(objectUrl);
     });
   }
 })();

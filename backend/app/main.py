@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
-from sqlalchemy import func, text
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 
 from .config import settings
@@ -287,6 +287,11 @@ async def audit_log_middleware(request: Request, call_next):
         action = f"{method} {path}"
         resource_type = _path_resource_type(path)
         status_code = response.status_code
+        details = json.dumps({
+            "query": str(request.url.query or ""),
+            "user_agent": str(request.headers.get("user-agent") or "")[:220],
+            "referer": str(request.headers.get("referer") or "")[:220],
+        }, ensure_ascii=False)
 
         def _write():
             db = None
@@ -296,6 +301,7 @@ async def audit_log_middleware(request: Request, call_next):
                     username=username,
                     action=action,
                     resource_type=resource_type,
+                    details=details,
                     ip_address=ip,
                     status_code=status_code,
                 ))
@@ -3317,28 +3323,81 @@ def delete_resource(
 @app.get("/api/audit")
 def get_audit_log(
     limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0, le=5000),
+    search: str | None = Query(None),
     username: str | None = Query(None),
     resource_type: str | None = Query(None),
+    method: str | None = Query(None),
+    status: str | None = Query(None),
+    sort_by: str = Query("created_at"),
+    sort_dir: str = Query("desc"),
     db: Session = Depends(get_db),
     _: User = Depends(require_roles("admin")),
 ):
-    q = db.query(AuditLog).order_by(AuditLog.created_at.desc())
+    q = db.query(AuditLog, User.role, User.municipality_name).outerjoin(User, User.username == AuditLog.username)
     if username:
         q = q.filter(AuditLog.username == username)
     if resource_type:
         q = q.filter(AuditLog.resource_type == resource_type)
-    return [
+    if method:
+        normalized_method = method.upper().strip()
+        q = q.filter(AuditLog.action.ilike(f"{normalized_method} %"))
+    if status == "success":
+        q = q.filter(AuditLog.status_code >= 200, AuditLog.status_code < 400)
+    elif status == "error":
+        q = q.filter(AuditLog.status_code >= 400)
+    elif status == "warning":
+        q = q.filter(AuditLog.status_code >= 300, AuditLog.status_code < 400)
+    if search:
+        term = f"%{search.strip()}%"
+        q = q.filter(or_(
+            AuditLog.username.ilike(term),
+            AuditLog.action.ilike(term),
+            AuditLog.resource_type.ilike(term),
+            AuditLog.details.ilike(term),
+            AuditLog.ip_address.ilike(term),
+        ))
+
+    sort_columns = {
+        "created_at": AuditLog.created_at,
+        "username": AuditLog.username,
+        "resource_type": AuditLog.resource_type,
+        "status_code": AuditLog.status_code,
+        "action": AuditLog.action,
+    }
+    sort_column = sort_columns.get(sort_by, AuditLog.created_at)
+    q = q.order_by(sort_column.asc() if sort_dir == "asc" else sort_column.desc())
+    total = q.count()
+    rows = q.offset(offset).limit(limit).all()
+    users = [
+        username
+        for (username,) in db.query(AuditLog.username).distinct().order_by(AuditLog.username.asc()).limit(300).all()
+        if username
+    ]
+    resource_types = [
+        resource
+        for (resource,) in db.query(AuditLog.resource_type).filter(AuditLog.resource_type.isnot(None)).distinct().order_by(AuditLog.resource_type.asc()).all()
+        if resource
+    ]
+
+    items = [
         {
             "id": a.id,
             "username": a.username,
+            "user_role": role,
+            "user_municipality": municipality_name,
             "action": a.action,
+            "method": (a.action or "").split(" ", 1)[0] if a.action else "",
+            "path": (a.action or "").split(" ", 1)[1] if " " in (a.action or "") else a.action,
             "resource_type": a.resource_type,
+            "details": a.details,
             "ip_address": a.ip_address,
             "status_code": a.status_code,
             "created_at": a.created_at.isoformat() + "Z",
         }
-        for a in q.limit(limit).all()
+        for a, role, municipality_name in rows
     ]
+    return {"items": items, "total": total, "users": users, "resource_types": resource_types}
 
 
 @app.get("/api/audit/export/csv")
@@ -3355,19 +3414,24 @@ def export_audit_csv(
         .all()
     )
 
+    def _csv_field(value) -> str:
+        text_value = "" if value is None else str(value)
+        return '"' + text_value.replace('"', '""') + '"'
+
     def _csv():
-        yield "id,username,action,resource_type,ip_address,status_code,created_at\n"
+        yield "id,username,action,resource_type,details,ip_address,status_code,created_at\n"
         for a in logs:
             fields = [
                 str(a.id),
-                a.username.replace(",", " "),
-                a.action.replace(",", " "),
-                (a.resource_type or "").replace(",", " "),
-                (a.ip_address or ""),
+                a.username,
+                a.action,
+                a.resource_type or "",
+                a.details or "",
+                a.ip_address or "",
                 str(a.status_code or ""),
                 a.created_at.isoformat() + "Z",
             ]
-            yield ",".join(fields) + "\n"
+            yield ",".join(_csv_field(field) for field in fields) + "\n"
 
     filename = f"audit_{datetime.utcnow().strftime('%Y%m%d')}.csv"
     return StreamingResponse(

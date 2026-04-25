@@ -1147,20 +1147,43 @@
             </div>
             <a id="audit-export-link" href="/api/audit/export/csv?days=30" class="btn ghost" style="font-size:.85rem;padding:.35rem .75rem">⬇ Exporter CSV</a>
           </div>
-          <div style="display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1rem;align-items:center">
-            <input id="audit-user-filter" placeholder="Filtrer par utilisateur" style="max-width:180px" />
-            <select id="audit-type-filter" style="min-width:160px">
-              <option value="">Toutes les actions</option>
-              <option value="auth">Authentification</option>
-              <option value="users">Utilisateurs</option>
-              <option value="municipalities">Communes</option>
-              <option value="logs">Main courante</option>
-              <option value="resources">Ressources</option>
-              <option value="reports">Rapports</option>
+          <div class="audit-toolbar">
+            <input id="audit-search-filter" type="search" placeholder="Rechercher action, utilisateur, IP, détail..." />
+            <select id="audit-user-filter"><option value="">Tous les utilisateurs</option></select>
+            <select id="audit-type-filter"><option value="">Tous les modules</option></select>
+            <select id="audit-method-filter">
+              <option value="">Toutes méthodes</option>
+              <option value="POST">Création / action</option>
+              <option value="PATCH">Modification</option>
+              <option value="PUT">Remplacement</option>
+              <option value="DELETE">Suppression</option>
+              <option value="GET">Export / lecture tracée</option>
+            </select>
+            <select id="audit-status-filter">
+              <option value="">Tous statuts</option>
+              <option value="success">Réussites</option>
+              <option value="warning">Redirections</option>
+              <option value="error">Erreurs</option>
+            </select>
+            <select id="audit-sort-select">
+              <option value="created_at:desc">Plus récent</option>
+              <option value="created_at:asc">Plus ancien</option>
+              <option value="username:asc">Utilisateur A-Z</option>
+              <option value="resource_type:asc">Module A-Z</option>
+              <option value="status_code:desc">Statut élevé</option>
+            </select>
+            <select id="audit-limit-select">
+              <option value="100">100 lignes</option>
+              <option value="250">250 lignes</option>
+              <option value="500">500 lignes</option>
             </select>
             <button id="audit-refresh-btn" type="button">Actualiser</button>
           </div>
-          <div id="audit-list" class="flux-service-list"></div>
+          <div id="audit-summary" class="audit-summary muted"></div>
+          <div class="audit-layout">
+            <div id="audit-list" class="audit-table-wrap"></div>
+            <aside id="audit-details" class="audit-details muted">Sélectionnez une ligne pour afficher le détail.</aside>
+          </div>
         </section>
 
         <dialog id="situation-kpi-modal" class="municipality-details-modal situation-kpi-modal">
