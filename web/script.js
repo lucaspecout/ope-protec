@@ -3893,18 +3893,23 @@ function renderStations(vigicruesPayload = []) {
 }
 
 async function geocodeMunicipality(municipality) {
-  const key = `${municipality.name}|${municipality.postal_code || ''}`;
+  const key = `mairie|${municipality.name}|${municipality.postal_code || ''}|${municipality.insee_code || ''}`;
   if (geocodeCache.has(key)) return geocodeCache.get(key);
   try {
     const cityCodeParam = municipality.insee_code ? `&citycode=${encodeURIComponent(municipality.insee_code)}` : '';
+    const expectedName = normalizeLooseCityKey(municipality.name || '');
+    const expectedPostcode = String(municipality.postal_code || '').trim();
+    const expectedCityCode = String(municipality.insee_code || '').trim();
     const townHallQueries = municipality.postal_code
       ? [
           `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(`mairie ${municipality.name}`)}&postcode=${encodeURIComponent(municipality.postal_code)}${cityCodeParam}&limit=5`,
           `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(`mairie de ${municipality.name}`)}&postcode=${encodeURIComponent(municipality.postal_code)}${cityCodeParam}&limit=5`,
+          `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(`hotel de ville ${municipality.name}`)}&postcode=${encodeURIComponent(municipality.postal_code)}${cityCodeParam}&limit=5`,
         ]
       : [
           `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(`mairie ${municipality.name}`)}${cityCodeParam}&limit=5`,
           `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(`mairie de ${municipality.name}`)}${cityCodeParam}&limit=5`,
+          `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(`hotel de ville ${municipality.name}`)}${cityCodeParam}&limit=5`,
         ];
 
     for (const url of townHallQueries) {
@@ -3913,31 +3918,19 @@ async function geocodeMunicipality(municipality) {
       const features = Array.isArray(payload?.features) ? payload.features : [];
       const preferred = features.find((feature) => {
         const props = feature?.properties || {};
-        const label = String(props.label || props.name || '').toLowerCase();
-        const city = String(props.city || '').toLowerCase();
-        return label.includes('mairie') && city.includes(String(municipality.name || '').toLowerCase());
-      }) || features.find((feature) => String(feature?.properties?.label || feature?.properties?.name || '').toLowerCase().includes('mairie')) || features[0];
+        const label = normalizeLooseCityKey(`${props.label || ''} ${props.name || ''}`);
+        const city = normalizeLooseCityKey(props.city || '');
+        const postcode = String(props.postcode || '').trim();
+        const citycode = String(props.citycode || '').trim();
+        const isTownHall = label.includes('mairie') || label.includes('hotel de ville');
+        const matchesCity = !expectedName || city.includes(expectedName) || expectedName.includes(city);
+        const matchesPostcode = !expectedPostcode || postcode === expectedPostcode;
+        const matchesCityCode = !expectedCityCode || citycode === expectedCityCode;
+        return isTownHall && matchesCity && matchesPostcode && matchesCityCode;
+      });
       const coords = preferred?.geometry?.coordinates;
       if (!Array.isArray(coords) || coords.length !== 2) continue;
       const point = normalizeMapCoordinates(coords[1], coords[0]);
-      if (!point) continue;
-      geocodeCache.set(key, point);
-      return point;
-    }
-
-    const centerQueries = municipality.postal_code
-      ? [
-          `https://geo.api.gouv.fr/communes?nom=${encodeURIComponent(municipality.name)}&codePostal=${encodeURIComponent(municipality.postal_code)}&fields=centre&limit=1`,
-          `https://geo.api.gouv.fr/communes?nom=${encodeURIComponent(municipality.name)}&fields=centre&limit=1`,
-        ]
-      : [`https://geo.api.gouv.fr/communes?nom=${encodeURIComponent(municipality.name)}&fields=centre&limit=1`];
-
-    for (const url of centerQueries) {
-      const response = await queueApiRequest(() => fetchWithTimeout(url));
-      const payload = await parseJsonResponse(response, url);
-      const center = payload?.[0]?.centre?.coordinates;
-      if (!Array.isArray(center) || center.length !== 2) continue;
-      const point = normalizeMapCoordinates(center[1], center[0]);
       if (!point) continue;
       geocodeCache.set(key, point);
       return point;
