@@ -270,6 +270,19 @@ app = FastAPI(title=settings.app_name)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.add_middleware(GZipMiddleware, minimum_size=800)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+AUDIT_LOG_MAX_ROWS = 500
+
+
+def prune_audit_logs(db: Session) -> None:
+    db.flush()
+    db.execute(text("""
+        DELETE FROM audit_log
+        WHERE id NOT IN (
+            SELECT id FROM audit_log
+            ORDER BY created_at DESC, id DESC
+            LIMIT :limit
+        )
+    """), {"limit": AUDIT_LOG_MAX_ROWS})
 
 
 @app.middleware("http")
@@ -305,6 +318,7 @@ async def audit_log_middleware(request: Request, call_next):
                     ip_address=ip,
                     status_code=status_code,
                 ))
+                prune_audit_logs(db)
                 db.commit()
             except Exception:
                 pass
@@ -589,11 +603,13 @@ def validate_user_payload(user_payload: UserCreate | UserUpdate, actor: User | N
 bootstrap_default_admin()
 with Session(bind=engine) as db:
     cleanup_old_weather_alerts(db)
+    prune_audit_logs(db)
+    db.commit()
 
 
-def touch_user_site_access(user: User, db: Session) -> None:
+def touch_user_site_access(user: User, db: Session, force: bool = False) -> None:
     now = datetime.utcnow()
-    if user.last_access_at and now - user.last_access_at < timedelta(minutes=1):
+    if not force and user.last_access_at and now - user.last_access_at < timedelta(minutes=1):
         return
     user.last_access_at = now
     db.commit()
@@ -1192,6 +1208,7 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
                     ip_address=ip,
                     status_code=status,
                 ))
+                prune_audit_logs(db2)
                 db2.commit()
             except Exception:
                 pass
@@ -1229,7 +1246,8 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
 
 
 @app.get("/auth/me", response_model=UserOut)
-def auth_me(user: User = Depends(get_current_user)):
+def auth_me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    touch_user_site_access(user, db, force=True)
     return user
 
 
