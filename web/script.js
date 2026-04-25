@@ -306,7 +306,6 @@ let cachedBisonFute = {};
 let cachedBisonLiveEvents = [];
 let geocodeCache = new Map();
 let municipalityContourCache = new Map();
-let cachedPcsGeometries = [];
 const municipalityDocumentsUiState = new Map();
 let trafficGeocodeCache = new Map();
 let mapStats = { stations: 0, pcs: 0, resources: 0, custom: 0, traffic: 0 };
@@ -3473,7 +3472,6 @@ async function handleOsmDetailsClick(event) {
   const lat = Number(event?.latlng?.lat);
   const lon = Number(event?.latlng?.lng);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
-  if (cachedPcsGeometries.some((geometry) => isPointInsideGeometry({ lat, lon }, geometry))) return;
   updateSelectedLocationPanel(lat, lon);
 
   if (osmDetailsController) osmDetailsController.abort();
@@ -3986,7 +3984,6 @@ async function renderMunicipalitiesOnMap(municipalities = []) {
   if (!pcsLayer) return;
   pcsLayer.clearLayers();
   if (pcsBoundaryLayer) pcsBoundaryLayer.clearLayers();
-  cachedPcsGeometries = [];
   if (!(document.getElementById('filter-pcs')?.checked ?? true)) {
     mapStats.pcs = 0;
     updateMapSummary();
@@ -4001,7 +3998,6 @@ async function renderMunicipalitiesOnMap(municipalities = []) {
   );
   let renderedCount = 0;
   cachedCrisisPoints = [];
-  cachedPcsGeometries = points.map(({ contour }) => contour).filter(Boolean);
   points.forEach(({ municipality, point, contour }) => {
     if (contour && pcsBoundaryLayer) {
       window.L.geoJSON({ type: 'Feature', geometry: contour }, {
