@@ -119,6 +119,8 @@ with engine.begin() as conn:
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT FALSE"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS municipality_name VARCHAR(120)"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP WITHOUT TIME ZONE"))
+    conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_access_at TIMESTAMP WITHOUT TIME ZONE"))
+    conn.execute(text("UPDATE users SET last_access_at = last_login_at WHERE last_access_at IS NULL AND last_login_at IS NOT NULL"))
     conn.execute(text("ALTER TABLE weather_alerts ADD COLUMN IF NOT EXISTS internal_mail_group VARCHAR(255)"))
     conn.execute(text("ALTER TABLE weather_alerts ADD COLUMN IF NOT EXISTS sent_to_internal_group BOOLEAN DEFAULT FALSE"))
     conn.execute(text("ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS contacts TEXT"))
@@ -583,6 +585,14 @@ with Session(bind=engine) as db:
     cleanup_old_weather_alerts(db)
 
 
+def touch_user_site_access(user: User, db: Session) -> None:
+    now = datetime.utcnow()
+    if user.last_access_at and now - user.last_access_at < timedelta(minutes=1):
+        return
+    user.last_access_at = now
+    db.commit()
+
+
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
     credentials_exception = HTTPException(status_code=401, detail="Invalid credentials")
     try:
@@ -595,6 +605,7 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     user = db.query(User).filter(User.username == username).first()
     if not user:
         raise credentials_exception
+    touch_user_site_access(user, db)
     return user
 
 
@@ -618,6 +629,7 @@ def get_user_from_token_value(token: str, db: Session) -> User:
         raise credentials_exception
     if user.must_change_password:
         raise HTTPException(403, "Changement du mot de passe obligatoire")
+    touch_user_site_access(user, db)
     return user
 
 
@@ -1196,7 +1208,9 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
         raise HTTPException(401, "Utilisateur ou mot de passe incorrect")
     if new_hash:
         user.hashed_password = new_hash
-    user.last_login_at = datetime.utcnow()
+    now = datetime.utcnow()
+    user.last_login_at = now
+    user.last_access_at = now
     db.commit()
     db.refresh(user)
     _audit(200)

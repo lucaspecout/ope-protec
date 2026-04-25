@@ -58,6 +58,7 @@ class UserOut(BaseModel):
     must_change_password: bool
     created_at: datetime
     last_login_at: datetime | None = None
+    last_access_at: datetime | None = None
 
     class Config:
         from_attributes = True
