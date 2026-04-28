@@ -310,6 +310,11 @@ const municipalityDocumentsUiState = new Map();
 let trafficGeocodeCache = new Map();
 let mapStats = { stations: 0, pcs: 0, resources: 0, custom: 0, traffic: 0 };
 let mapControlsCollapsed = false;
+const GEORISQUES_WMS_URL = 'https://www.georisques.gouv.fr/services';
+const GEORISQUES_FLOOD_PPRI_LAYERS = [
+  'PPRN_COMMUNE_RISQINOND_APPROUV',
+  'PPRN_COMMUNE_RISQINOND_PRESCRIT',
+].join(',');
 let cachedCrisisPoints = [];
 let cachedEvents = [];
 let selectedOperationalEventId = null;
@@ -3203,18 +3208,23 @@ function applyFloodZoneLayer() {
     pane.style.zIndex = 450;
     pane.style.pointerEvents = 'none';
   }
-  // Couches WMS Géorisques plus précises :
-  // on privilégie les zones PPR inondation détaillées plutôt que les simples emprises communales.
-  // Cela améliore nettement la lecture opérationnelle sur la carte.
-  floodZoneWmsLayer = window.L.tileLayer.wms('https://georisques.gouv.fr/services', {
-    layers: 'PPRN_ZONE_RISQINOND_APPROUV,PPRN_ZONE_RISQINOND_PRESCRIT',
+  floodZoneWmsLayer = window.L.tileLayer.wms(GEORISQUES_WMS_URL, {
+    layers: GEORISQUES_FLOOD_PPRI_LAYERS,
+    styles: '',
     format: 'image/png',
     transparent: true,
     version: '1.3.0',
     opacity: 0.72,
     pane: 'floodZonePane',
-    attribution: '&copy; État / Géorisques — Zones inondables PPR détaillées',
-  }).addTo(leafletMap);
+    attribution: '&copy; État / Géorisques — Communes concernées par un PPR inondation',
+  });
+  floodZoneWmsLayer.on('tileerror', () => {
+    setMapFeedback("Impossible de charger les zones PPRI Géorisques. Le service WMS distant ne répond pas correctement.");
+  });
+  floodZoneWmsLayer.on('load', () => {
+    setMapFeedback('Zones PPRI inondation Géorisques affichées.');
+  });
+  floodZoneWmsLayer.addTo(leafletMap);
 }
 
 function applyAvalancheZoneLayer() {
