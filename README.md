@@ -70,15 +70,11 @@ Pour améliorer la fluidité des requêtes et réduire les bugs en production, a
 
 ## Accès aux services
 
-- Interface web : `http://localhost:1182`
-- API backend (reverse-proxy via Nginx) : `http://localhost:1182`
-- PostgreSQL : `localhost:5432` (base `veille`, utilisateur `postgres`, mot de passe `postgres`)
-- Redis : `localhost:6379`
+
 
 ## Authentification par défaut
 
-- Utilisateur initial : `admin`
-- Mot de passe initial : `admin`
+
 - Le changement du mot de passe est obligatoire à la première connexion.
 - Le token de connexion est conservé côté navigateur et reste valide 7 jours par défaut (`ACCESS_TOKEN_EXPIRE_MINUTES=10080`).
 
