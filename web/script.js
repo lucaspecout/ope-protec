@@ -507,6 +507,10 @@ function mergeHomeLiveSnapshot(previous = {}, next = {}) {
       vigilance: keepPreviousValue(prevDashboard.vigilance, nextDashboard.vigilance),
       crues: keepPreviousValue(prevDashboard.crues, nextDashboard.crues),
       global_risk: keepPreviousValue(prevDashboard.global_risk, nextDashboard.global_risk),
+      global_risk_score: keepPreviousValue(prevDashboard.global_risk_score, nextDashboard.global_risk_score),
+      global_risk_percent: keepPreviousValue(prevDashboard.global_risk_percent, nextDashboard.global_risk_percent),
+      global_risk_label: keepPreviousValue(prevDashboard.global_risk_label, nextDashboard.global_risk_label),
+      global_risk_factors: keepPreviousArray(prevDashboard.global_risk_factors, nextDashboard.global_risk_factors),
       communes_crise: keepPreviousValue(prevDashboard.communes_crise, nextDashboard.communes_crise),
     },
     georisques: {
@@ -1122,6 +1126,29 @@ function debounce(fn, wait = 200) {
 
 function riskRank(level) {
   return ({ rouge: 4, orange: 3, jaune: 2, vert: 1 }[normalizeLevel(level)] || 0);
+}
+
+function globalRiskPercent(dashboard = {}) {
+  const raw = dashboard.global_risk_percent ?? dashboard.global_risk_score;
+  const score = Number(raw);
+  if (Number.isFinite(score)) return Math.max(0, Math.min(100, Math.round(score)));
+  const fallback = { vert: 8, jaune: 35, orange: 65, rouge: 90 }[normalizeLevel(dashboard.global_risk)];
+  return fallback ?? 0;
+}
+
+function formatGlobalRiskValue(dashboard = {}) {
+  const level = normalizeLevel(dashboard.global_risk || dashboard.vigilance || 'vert');
+  return `${globalRiskPercent(dashboard)}% · ${level}`;
+}
+
+function buildGlobalRiskFactorsMarkup(dashboard = {}) {
+  const factors = Array.isArray(dashboard.global_risk_factors) ? dashboard.global_risk_factors : [];
+  if (!factors.length) return '<li>Aucun facteur aggravant significatif.</li>';
+  return factors.map((factor) => {
+    const points = Number(factor.points || 0);
+    const detail = factor.detail ? ` · <span class="muted">${escapeHtml(factor.detail)}</span>` : '';
+    return `<li><strong>${escapeHtml(factor.label || 'Facteur')}</strong> +${points} pts${detail}</li>`;
+  }).join('');
 }
 
 function stationStatusLevel(station = {}) {
@@ -8489,7 +8516,7 @@ function buildSituationKpiModalContent(key, externalRisks = {}) {
       `;
     }
     case 'global-risk':
-      return `<p><strong>Risque global consolidé:</strong> ${escapeHtml(normalizeLevel(dashboard.global_risk || meteo.level || 'inconnu'))}</p><p class="muted">Consolidation météo + crues + alertes externes.</p>`;
+      return `<p><strong>Risque global consolidé:</strong> ${escapeHtml(formatGlobalRiskValue(dashboard))}</p><p class="muted">Score opérationnel 0-100 consolidant météo, crues, PCS et alertes externes.</p><ul class="situation-kpi-modal__list">${buildGlobalRiskFactorsMarkup(dashboard)}</ul>`;
     case 'communes-crise':
       return `<p><strong>Communes en crise:</strong> ${Number(dashboard.communes_crise ?? 0)}</p><p class="muted">Valeur issue du suivi des PCS actifs côté dashboard.</p>`;
     case 'bison':
@@ -8624,6 +8651,7 @@ function renderSituationOverview() {
   ].reduce((max, lvl) => riskRank(lvl) > riskRank(max) ? lvl : max, 'vert');
 
   const globalRisk = normalizeLevel(dashboard.global_risk || vigilance);
+  const globalRiskValue = formatGlobalRiskValue(dashboard);
   const crisisCount = Number(dashboard.communes_crise ?? 0);
 
   const logs = Array.isArray(cachedLogs) && cachedLogs.length
@@ -8662,7 +8690,7 @@ function renderSituationOverview() {
   const kpiCards = [
     { key: 'meteo', label: 'Vigilance météo', value: vigilance, info: 'Source Météo-France', css: normalizeLevel(vigilance) },
     { key: 'crues', label: 'Niveau crues', value: crues, info: `Tronçons AN11/12/20/30/31 max ${mainTronconLevel} · stations max ${stationsLevel}`, css: normalizeLevel(crues) },
-    { key: 'global-risk', label: 'Risque global', value: globalRisk, info: 'Calcul consolidé', css: normalizeLevel(globalRisk) },
+    { key: 'global-risk', label: 'Risque global', value: globalRiskValue, info: 'Score consolidé 0-100', css: normalizeLevel(globalRisk) },
     { key: 'communes-crise', label: 'Communes en crise', value: String(crisisCount), info: 'PCS actif', css: crisisCount > 0 ? 'rouge' : 'vert' },
   ];
   // ── Nouvelles tuiles risques (Features 13/15/17/18/20) ───────────────────
@@ -8953,6 +8981,7 @@ function buildSitrepHtml() {
   const vigilance    = normalizeLevel(dashboard.vigilance || meteo.level || 'vert');
   const crues        = normalizeLevel(dashboard.crues || vigicrues.water_alert_level || 'vert');
   const globalRisk   = normalizeLevel(dashboard.global_risk || 'vert');
+  const globalRiskDisplay = escapeHtml(formatGlobalRiskValue(dashboard));
   const crisisCount  = Number(dashboard.communes_crise ?? 0);
   const globalColor  = sitrepLevelColor(globalRisk);
   const globalBg     = sitrepLevelBg(globalRisk);
@@ -8972,7 +9001,7 @@ function buildSitrepHtml() {
     <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:14px">
       ${sitrepKpiCard('Vigilance météo', sitrepLevelBadge(vigilance), vigilance)}
       ${sitrepKpiCard('Niveau crues', sitrepLevelBadge(crues), crues)}
-      ${sitrepKpiCard('Risque global', sitrepLevelBadge(globalRisk), globalRisk)}
+      ${sitrepKpiCard('Risque global', globalRiskDisplay, globalRisk)}
       ${sitrepKpiCard('Communes en crise', String(crisisCount), crisisCount > 0 ? 'rouge' : 'vert')}
       ${sitrepKpiCard('Stations en alerte', String(alertStations.length), alertStations.length > 0 ? (alertStations.some((s) => stationStatusLevel(s) === 'rouge') ? 'rouge' : 'orange') : 'vert')}
     </div>
@@ -12373,7 +12402,7 @@ function buildSitrepText() {
     '',
     `VIGILANCE MÉTÉO : ${vigilance.toUpperCase()}`,
     `COMMUNES EN CRISE : ${crises}`,
-    `RISQUE GLOBAL : ${normalizeLevel(dashboard.global_risk || vigilance).toUpperCase()}`,
+    `RISQUE GLOBAL : ${formatGlobalRiskValue(dashboard).toUpperCase()}`,
     '',
     '── ÉVÉNEMENTS OUVERTS ──────────────────────────',
     ...(openEvents.length
@@ -12511,7 +12540,7 @@ function renderHomeLiveStatus(data = {}) {
   const dashboard = data?.dashboard || {};
   setRiskText('home-meteo-state', normalizeLevel(dashboard.vigilance || '-'), dashboard.vigilance || 'vert');
   setRiskText('home-river-state', normalizeLevel(dashboard.crues || '-'), dashboard.crues || 'vert');
-  setRiskText('home-global-risk', normalizeLevel(dashboard.global_risk || '-'), dashboard.global_risk || 'vert');
+  setRiskText('home-global-risk', formatGlobalRiskValue(dashboard), dashboard.global_risk || 'vert');
   const crisisCount = keepLastKnownCount('home_crisis_count', dashboard.communes_crise, 0);
   const seismicState = keepLastKnownStatus('home_seismic_state', data.georisques?.highest_seismic_zone_label || 'inconnue');
   const floodDocs = keepLastKnownCount('home_flood_documents_total', data.georisques?.flood_documents_total, 0);
@@ -12532,7 +12561,7 @@ function renderHomeLiveStatus(data = {}) {
 
   setRiskText('home-indication-meteo', normalizeLevel(dashboard.vigilance || '-'), dashboard.vigilance || 'vert');
   setRiskText('home-indication-crues', normalizeLevel(dashboard.crues || '-'), dashboard.crues || 'vert');
-  setRiskText('home-indication-global', normalizeLevel(dashboard.global_risk || '-'), dashboard.global_risk || 'vert');
+  setRiskText('home-indication-global', formatGlobalRiskValue(dashboard), dashboard.global_risk || 'vert');
   document.getElementById('home-indication-crisis').textContent = String(crisisCount);
   document.getElementById('home-indication-seismic').textContent = seismicState;
   document.getElementById('home-indication-traffic').textContent = String(itinisereEvents);

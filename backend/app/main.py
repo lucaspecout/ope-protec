@@ -540,6 +540,127 @@ def compute_global_risk(*levels: str) -> str:
     return "vert"
 
 
+def _risk_rank(level: str | None) -> int:
+    return {"vert": 0, "jaune": 1, "orange": 2, "rouge": 3}.get(str(level or "").lower(), 0)
+
+
+def _risk_level_from_score(score: int) -> str:
+    if score >= 75:
+        return "rouge"
+    if score >= 50:
+        return "orange"
+    if score >= 25:
+        return "jaune"
+    return "vert"
+
+
+def _max_level(*levels: str | None) -> str:
+    return max((str(level or "vert").lower() for level in levels), key=_risk_rank, default="vert")
+
+
+def _safe_int(value: object, fallback: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _safe_float(value: object, fallback: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def compute_global_risk_details(
+    *,
+    meteo_level: str | None = "vert",
+    crues_level: str | None = "vert",
+    external_risks: dict | None = None,
+    crisis_count: int = 0,
+) -> dict:
+    """Calcule un score opérationnel 0-100 sans remplacer les niveaux officiels.
+
+    Le score est une pondération de signaux hétérogènes : vigilance officielle,
+    crues observées, alertes flash, crises PCS et impacts de mobilité/réseaux.
+    """
+    risks = external_risks or {}
+    vigicrues = risks.get("vigicrues") if isinstance(risks.get("vigicrues"), dict) else {}
+    meteo = risks.get("meteo_france") if isinstance(risks.get("meteo_france"), dict) else {}
+
+    station_levels = [
+        str(station.get("level") or station.get("control_status") or "vert").lower()
+        for station in (vigicrues.get("stations") or [])
+        if isinstance(station, dict)
+    ]
+    troncon_levels = [
+        str(troncon.get("level") or "vert").lower()
+        for troncon in (vigicrues.get("troncons") or [])
+        if isinstance(troncon, dict)
+    ]
+    crues_observed = _max_level(crues_level, vigicrues.get("water_alert_level"), *station_levels, *troncon_levels)
+    meteo_observed = _max_level(meteo_level, meteo.get("level"))
+
+    score = 0
+    factors: list[dict] = []
+
+    def add_factor(label: str, points: int, detail: str = "") -> None:
+        nonlocal score
+        points = max(0, int(points))
+        if points <= 0:
+            return
+        score += points
+        factors.append({"label": label, "points": points, "detail": detail})
+
+    level_points = {"vert": 0, "jaune": 12, "orange": 28, "rouge": 45}
+    add_factor("Vigilance météo", level_points.get(meteo_observed, 0), meteo_observed)
+    add_factor("Crues observées", level_points.get(crues_observed, 0), crues_observed)
+    add_factor("Communes en crise", min(30, crisis_count * 12), f"{crisis_count} commune(s)")
+
+    apic = risks.get("apic_isere") if isinstance(risks.get("apic_isere"), dict) else {}
+    apic_total = _safe_int(apic.get("alerts_total"), len(apic.get("alerts") or []))
+    add_factor("Pluie intense APIC", min(20, apic_total * 8), f"{apic_total} alerte(s)")
+
+    flash = risks.get("vigicrues_flash_isere") if isinstance(risks.get("vigicrues_flash_isere"), dict) else {}
+    flash_total = _safe_int(flash.get("alerts_total"), len(flash.get("alerts") or []))
+    add_factor("Vigicrues Flash", min(20, flash_total * 8), f"{flash_total} alerte(s)")
+
+    avalanche = risks.get("avalanche_isere") if isinstance(risks.get("avalanche_isere"), dict) else {}
+    bra_level = _safe_int(avalanche.get("niveau_max_bra"))
+    add_factor("Avalanche BRA", {3: 8, 4: 16, 5: 24}.get(bra_level, 0), f"niveau {bra_level}/5")
+
+    feux = risks.get("feux_foret_isere") if isinstance(risks.get("feux_foret_isere"), dict) else {}
+    fires_total = _safe_int(feux.get("fires_total"))
+    add_factor("Feux détectés", 16 if fires_total > 5 else 8 if fires_total > 0 else 0, f"{fires_total} foyer(s)")
+
+    seismes = risks.get("seismes_isere") if isinstance(risks.get("seismes_isere"), dict) else {}
+    magnitudes = [_safe_float(item.get("magnitude")) for item in (seismes.get("items") or []) if isinstance(item, dict)]
+    max_magnitude = max(magnitudes, default=0)
+    add_factor("Séismes récents", 18 if max_magnitude >= 4 else 10 if max_magnitude >= 3 else 0, f"M{max_magnitude:g}")
+
+    sncf = risks.get("sncf_isere") if isinstance(risks.get("sncf_isere"), dict) else {}
+    sncf_total = _safe_int(sncf.get("alerts_total"), len(sncf.get("alerts") or []))
+    add_factor("SNCF Isère", min(10, sncf_total * 3), f"{sncf_total} alerte(s)")
+
+    arcep = risks.get("arcep_isere") if isinstance(risks.get("arcep_isere"), dict) else {}
+    outages = _safe_int(arcep.get("outages_total"))
+    add_factor("Réseau mobile", min(10, outages * 2), f"{outages} site(s)")
+
+    vigieau = risks.get("vigieau") if isinstance(risks.get("vigieau"), dict) else {}
+    water_total = int(len(vigieau.get("alerts") or []))
+    add_factor("Restrictions eau", min(10, water_total * 3), f"{water_total} restriction(s)")
+
+    score = max(0, min(100, score))
+    level = _max_level(_risk_level_from_score(score), compute_global_risk(meteo_observed, crues_observed))
+    return {
+        "level": level,
+        "score": score,
+        "percent": score,
+        "label": f"{score}%",
+        "factors": factors[:8],
+    }
+
+
 def validate_password_strength(password: str) -> None:
     if len(password) < 8:
         raise HTTPException(400, "Le mot de passe doit contenir au moins 8 caractères")
@@ -889,12 +1010,17 @@ def public_live_status(db: Session = Depends(get_db)):
     risks_snapshot = get_external_risks_payload(refresh=False)
     meteo = risks_snapshot.get("meteo_france") or {}
     meteo_level = (meteo.get("level") or db_meteo_level).lower()
-    global_risk = compute_global_risk(meteo_level, crues_level)
     vigicrues = risks_snapshot.get("vigicrues") or {}
     itinisere = risks_snapshot.get("itinisere") or {}
     bison_fute = risks_snapshot.get("bison_fute") or {}
     georisques = risks_snapshot.get("georisques") or {}
     prefecture = risks_snapshot.get("prefecture_isere") or {}
+    global_risk_details = compute_global_risk_details(
+        meteo_level=meteo_level,
+        crues_level=crues_level,
+        external_risks=risks_snapshot,
+        crisis_count=crisis_count,
+    )
     weather_situation = [
         {
             "label": alert.get("phenomenon", "Risque météo"),
@@ -908,7 +1034,11 @@ def public_live_status(db: Session = Depends(get_db)):
         "dashboard": {
             "vigilance": meteo_level,
             "crues": crues_level,
-            "global_risk": global_risk,
+            "global_risk": global_risk_details["level"],
+            "global_risk_score": global_risk_details["score"],
+            "global_risk_percent": global_risk_details["percent"],
+            "global_risk_label": global_risk_details["label"],
+            "global_risk_factors": global_risk_details["factors"],
             "communes_crise": crisis_count,
         },
         "meteo_france": {
@@ -1300,12 +1430,22 @@ def build_dashboard_payload(db: Session, user: User, external_risks: dict | None
     db_meteo_level = latest_alert.level if latest_alert else "vert"
     meteo_level = meteo.get("level") or db_meteo_level
     crues_level = river_level.level if river_level else "vert"
+    global_risk_details = compute_global_risk_details(
+        meteo_level=meteo_level,
+        crues_level=crues_level,
+        external_risks=external_risks,
+        crisis_count=crisis_count,
+    )
 
     return {
         "vigilance": meteo_level,
         "crues": crues_level,
         "vigilance_risk_type": latest_alert.risk_type if latest_alert else "",
-        "global_risk": compute_global_risk(meteo_level, crues_level),
+        "global_risk": global_risk_details["level"],
+        "global_risk_score": global_risk_details["score"],
+        "global_risk_percent": global_risk_details["percent"],
+        "global_risk_label": global_risk_details["label"],
+        "global_risk_factors": global_risk_details["factors"],
         "communes_crise": crisis_count,
         "latest_logs": [OperationalLogOut.model_validate(log).model_dump() for log in logs],
     }
