@@ -311,9 +311,11 @@ let trafficGeocodeCache = new Map();
 let mapStats = { stations: 0, pcs: 0, resources: 0, custom: 0, traffic: 0 };
 let mapControlsCollapsed = false;
 const GEORISQUES_WMS_URL = 'https://www.georisques.gouv.fr/services';
-const GEORISQUES_FLOOD_PPRI_LAYERS = [
-  'PPRN_COMMUNE_RISQINOND_APPROUV',
-  'PPRN_COMMUNE_RISQINOND_PRESCRIT',
+const GEORISQUES_FLOOD_PPRI_LAYER = 'PPRN_ZONE_INOND';
+const GEORISQUES_FLOOD_TRI_LAYERS = [
+  'ALEA_SYNT_01_01FOR_FXX',
+  'ALEA_SYNT_01_02MOY_FXX',
+  'ALEA_SYNT_01_04FAI_FXX',
 ].join(',');
 let cachedCrisisPoints = [];
 let cachedEvents = [];
@@ -3199,7 +3201,11 @@ function applyFloodZoneLayer() {
     return;
   }
   if (floodZoneWmsLayer) {
-    floodZoneWmsLayer.bringToFront();
+    if (typeof floodZoneWmsLayer.bringToFront === 'function') {
+      floodZoneWmsLayer.bringToFront();
+    } else if (typeof floodZoneWmsLayer.eachLayer === 'function') {
+      floodZoneWmsLayer.eachLayer((layer) => layer?.bringToFront?.());
+    }
     return;
   }
   // Créer un pane dédié au-dessus des markers (overlayPane = 400) mais sous les popups (700)
@@ -3208,22 +3214,39 @@ function applyFloodZoneLayer() {
     pane.style.zIndex = 450;
     pane.style.pointerEvents = 'none';
   }
-  floodZoneWmsLayer = window.L.tileLayer.wms(GEORISQUES_WMS_URL, {
-    layers: GEORISQUES_FLOOD_PPRI_LAYERS,
+
+  const pprLayer = window.L.tileLayer.wms(GEORISQUES_WMS_URL, {
+    layers: GEORISQUES_FLOOD_PPRI_LAYER,
     styles: '',
     format: 'image/png',
     transparent: true,
     version: '1.3.0',
-    opacity: 0.72,
+    opacity: 0.78,
     pane: 'floodZonePane',
-    attribution: '&copy; État / Géorisques — Communes concernées par un PPR inondation',
+    attribution: '&copy; État / Géorisques — Zonage réglementaire PPR inondation',
   });
-  floodZoneWmsLayer.on('tileerror', () => {
-    setMapFeedback("Impossible de charger les zones PPRI Géorisques. Le service WMS distant ne répond pas correctement.");
+
+  const triLayer = window.L.tileLayer.wms(GEORISQUES_WMS_URL, {
+    layers: GEORISQUES_FLOOD_TRI_LAYERS,
+    styles: '',
+    format: 'image/png',
+    transparent: true,
+    version: '1.3.0',
+    opacity: 0.34,
+    pane: 'floodZonePane',
+    attribution: '&copy; État / Géorisques — Surfaces inondables TRI rapportage 2020',
   });
-  floodZoneWmsLayer.on('load', () => {
-    setMapFeedback('Zones PPRI inondation Géorisques affichées.');
+
+  [pprLayer, triLayer].forEach((layer) => {
+    layer.on('tileerror', () => {
+      setMapFeedback("Impossible de charger le zonage inondation détaillé. Le service WMS Géorisques ne répond pas correctement.");
+    });
   });
+  pprLayer.on('load', () => {
+    setMapFeedback('Zonage inondation détaillé affiché: PPR réglementaire + surfaces TRI.');
+  });
+
+  floodZoneWmsLayer = window.L.layerGroup([triLayer, pprLayer]);
   floodZoneWmsLayer.addTo(leafletMap);
 }
 
