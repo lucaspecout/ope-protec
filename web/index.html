@@ -919,8 +919,12 @@
                     <button id="map-zone-impact-clear" type="button" class="ghost map-btn-lite">🧹 Effacer analyse</button>
                     <button id="map-add-point-btn" type="button" class="ghost map-btn-lite" aria-pressed="false" data-requires-edit>➕ Créer un POI</button>
                   </div>
-                  <div class="filter-tool-row" style="margin-top:.4rem">
-                    <input id="map-evacuation-radius-km" type="number" min="0.1" step="0.1" value="1" aria-label="Rayon d'évacuation en kilomètres" placeholder="Rayon km" />
+                  <div class="filter-tool-row filter-tool-row--evacuation" style="margin-top:.4rem">
+                    <label class="evacuation-radius-field" for="map-evacuation-radius-km">
+                      <span>Rayon</span>
+                      <input id="map-evacuation-radius-km" type="number" min="0.1" step="0.1" value="1" aria-label="Rayon d'évacuation en kilomètres" />
+                      <span>km</span>
+                    </label>
                     <button id="map-evacuation-circle-start" type="button" class="ghost map-btn-lite" aria-pressed="false">⭕ Zone évacuation</button>
                     <button id="map-evacuation-circle-clear" type="button" class="ghost map-btn-lite">❌ Effacer rond</button>
                   </div>
