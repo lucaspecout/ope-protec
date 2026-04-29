@@ -310,6 +310,7 @@ const municipalityDocumentsUiState = new Map();
 let trafficGeocodeCache = new Map();
 let mapStats = { stations: 0, pcs: 0, resources: 0, custom: 0, traffic: 0 };
 let mapControlsCollapsed = false;
+let mapStreetViewMode = false;
 const GEORISQUES_WMS_URL = 'https://www.georisques.gouv.fr/services';
 const GEORISQUES_FLOOD_PPRI_LAYER = 'PPRN_ZONE_INOND';
 const GEORISQUES_FLOOD_TRI_LAYERS = [
@@ -3490,6 +3491,7 @@ function initMap() {
   leafletMap.on('click', onMapClickEvacuationCircle);
   leafletMap.on('click', onMapClickMeasure);
   leafletMap.on('click', onMapClickAddPoint);
+  leafletMap.on('click', onMapClickStreetView);
   leafletMap.on('click', handleOsmDetailsClick);
   leafletMap.on('zoomend', updateTrafficZoomClass);
   updateTrafficZoomClass();
@@ -3569,7 +3571,7 @@ async function handleOsmDetailsClick(event) {
 }
 
 function isMapToolActive() {
-  if (mapAddPointMode || mapEvacuationCircleMode || mapMeasureMode) return true;
+  if (mapAddPointMode || mapEvacuationCircleMode || mapMeasureMode || mapStreetViewMode) return true;
   if (mapZoneImpactDrawHandler?.enabled && mapZoneImpactDrawHandler.enabled()) return true;
   const drawToolbarModes = mapDrawControl?._toolbars?.draw?._modes;
   if (drawToolbarModes && typeof drawToolbarModes === 'object') {
@@ -3583,6 +3585,91 @@ function isMapToolActive() {
     if (hasActiveLeafletDrawTool) return true;
   }
   return false;
+}
+
+function buildStreetViewUrl(lat, lon, embedded = true) {
+  const latNumber = Number(lat);
+  const lonNumber = Number(lon);
+  if (!Number.isFinite(latNumber) || !Number.isFinite(lonNumber)) return '#';
+  const params = new URLSearchParams({
+    layer: 'c',
+    cbll: `${latNumber.toFixed(6)},${lonNumber.toFixed(6)}`,
+    cbp: '12,0,0,0,0',
+  });
+  if (embedded) params.set('output', 'svembed');
+  return `https://www.google.com/maps?${params.toString()}`;
+}
+
+function syncStreetViewModeButton() {
+  const button = document.getElementById('map-streetview-toggle');
+  if (!button) return;
+  button.classList.toggle('active', mapStreetViewMode);
+  button.setAttribute('aria-pressed', String(mapStreetViewMode));
+  button.title = mapStreetViewMode ? 'Cliquez sur la carte pour ouvrir Street View' : 'Choisir un point Street View';
+  if (leafletMap) {
+    leafletMap.getContainer().style.cursor = mapStreetViewMode ? 'crosshair' : '';
+  }
+}
+
+function setStreetViewMode(enabled) {
+  mapStreetViewMode = Boolean(enabled);
+  if (mapStreetViewMode) {
+    if (mapAddPointMode) {
+      mapAddPointMode = false;
+      document.getElementById('map-add-point-btn')?.classList.remove('active');
+      document.getElementById('map-add-point-btn')?.setAttribute('aria-pressed', 'false');
+    }
+    if (mapEvacuationCircleMode) mapEvacuationCircleMode = false;
+    if (mapMeasureMode) clearMapMeasure(false);
+    if (typeof _mapWeatherMode !== 'undefined' && _mapWeatherMode) _toggleMapWeatherMode();
+    setMapFeedback('Mode Street View actif: cliquez sur une route ou un lieu sur la carte.');
+  } else {
+    setMapFeedback('');
+  }
+  syncStreetViewModeButton();
+}
+
+function openStreetViewAt(lat, lon) {
+  const latNumber = Number(lat);
+  const lonNumber = Number(lon);
+  if (!Number.isFinite(latNumber) || !Number.isFinite(lonNumber)) return;
+  const panel = document.getElementById('map-streetview-panel');
+  const frame = document.getElementById('map-streetview-frame');
+  const title = document.getElementById('map-streetview-title');
+  const externalLink = document.getElementById('map-streetview-open-external');
+  if (!panel || !frame) return;
+
+  const embedUrl = buildStreetViewUrl(latNumber, lonNumber, true);
+  const externalUrl = buildStreetViewUrl(latNumber, lonNumber, false);
+  frame.src = embedUrl;
+  if (externalLink) externalLink.href = externalUrl;
+  if (title) title.textContent = `Street View · ${formatCoordinates(latNumber, lonNumber)}`;
+  panel.hidden = false;
+  panel.classList.remove('hidden');
+  setStreetViewMode(false);
+  updateSelectedLocationPanel(latNumber, lonNumber);
+}
+
+function closeStreetView() {
+  const panel = document.getElementById('map-streetview-panel');
+  const frame = document.getElementById('map-streetview-frame');
+  const wasOpen = Boolean(panel && !panel.hidden);
+  if (!wasOpen && !mapStreetViewMode) return;
+  if (frame) frame.src = 'about:blank';
+  if (panel) {
+    panel.hidden = true;
+    panel.classList.add('hidden');
+  }
+  setStreetViewMode(false);
+  if (wasOpen) setMapFeedback('Retour carte.');
+}
+
+function onMapClickStreetView(event) {
+  if (!mapStreetViewMode) return;
+  const lat = Number(event?.latlng?.lat);
+  const lon = Number(event?.latlng?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+  openStreetViewAt(lat, lon);
 }
 
 function setMapFeedback(message = '', isError = false) {
@@ -3603,6 +3690,7 @@ function updateSelectedLocationPanel(lat, lon) {
   const panel = document.getElementById('map-selected-location');
   const coordsNode = document.getElementById('map-selected-coords');
   const googleLink = document.getElementById('map-open-google-maps');
+  const streetViewButton = document.getElementById('map-open-streetview');
   if (!panel || !coordsNode || !googleLink) return;
   const formattedCoords = formatCoordinates(lat, lon);
   const hasCoords = formattedCoords !== '-';
@@ -3611,10 +3699,20 @@ function updateSelectedLocationPanel(lat, lon) {
     const latNumber = Number(lat);
     const lonNumber = Number(lon);
     googleLink.href = `https://www.google.com/maps?q=${encodeURIComponent(`${latNumber},${lonNumber}`)}`;
+    if (streetViewButton) {
+      streetViewButton.dataset.lat = String(latNumber);
+      streetViewButton.dataset.lon = String(lonNumber);
+      streetViewButton.disabled = false;
+    }
     panel.hidden = false;
     return;
   }
   googleLink.href = '#';
+  if (streetViewButton) {
+    delete streetViewButton.dataset.lat;
+    delete streetViewButton.dataset.lon;
+    streetViewButton.disabled = true;
+  }
   panel.hidden = true;
 }
 
@@ -11729,7 +11827,11 @@ function bindAppInteractions() {
     if (isOpen) openMobileSidebar(); else closeMobileSidebar();
   });
   document.getElementById('sidebar-backdrop')?.addEventListener('click', closeMobileSidebar);
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMobileSidebar(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    closeStreetView();
+    closeMobileSidebar();
+  });
   const appSidebarToggle = document.getElementById('app-sidebar-toggle');
   appSidebarToggle?.addEventListener('click', () => {
     const appView = document.getElementById('app-view');
@@ -11748,6 +11850,12 @@ function bindAppInteractions() {
   });
   document.getElementById('map-fullscreen-toggle')?.addEventListener('click', toggleMapFullscreen);
   document.getElementById('map-toolbar-fullscreen-toggle')?.addEventListener('click', toggleMapFullscreen);
+  document.getElementById('map-streetview-toggle')?.addEventListener('click', () => setStreetViewMode(!mapStreetViewMode));
+  document.getElementById('map-streetview-close')?.addEventListener('click', closeStreetView);
+  document.getElementById('map-open-streetview')?.addEventListener('click', () => {
+    const button = document.getElementById('map-open-streetview');
+    openStreetViewAt(button?.dataset.lat, button?.dataset.lon);
+  });
   document.addEventListener('fullscreenchange', updateMapFullscreenButton);
   updateMapFullscreenButton();
   document.getElementById('map-fit-btn')?.addEventListener('click', () => fitMapToData(true));

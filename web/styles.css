@@ -970,6 +970,66 @@ label { display: block; margin-bottom: .8rem; }
 }
 .map-fullscreen-toggle:hover { background: #eaf1ff; }
 
+.map-streetview-toggle {
+  position: absolute;
+  top: 3.25rem;
+  right: .65rem;
+  z-index: 1200;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid #9eb8eb;
+  background: rgba(255, 255, 255, .95);
+  color: #10306a;
+  font-size: 1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 16px rgba(16, 48, 106, .15);
+}
+.map-streetview-toggle:hover { background: #eaf1ff; }
+.map-streetview-toggle.active {
+  background: #123b80;
+  color: #fff;
+  border-color: #123b80;
+}
+.map-streetview-panel {
+  position: absolute;
+  inset: .65rem;
+  z-index: 1600;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 360px;
+  background: #fff;
+  border: 1px solid rgba(18, 59, 128, .24);
+  border-radius: 12px;
+  box-shadow: 0 24px 60px rgba(7, 24, 52, .28);
+  overflow: hidden;
+}
+.map-streetview-panel.hidden { display: none !important; }
+.map-streetview-panel__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  padding: .55rem .7rem;
+  background: linear-gradient(180deg, #f8fbff, #eef5ff);
+  border-bottom: 1px solid #d8e4f5;
+}
+.map-streetview-panel__bar > div {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: .45rem;
+  flex-wrap: wrap;
+}
+.map-streetview-panel iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #eef2f7;
+}
+
 /* ── Groupes de filtres (details/summary) ── */
 .filter-group {
   border: 1px solid #dde8fb;
@@ -1638,6 +1698,7 @@ svg text { font-size: 14px; fill: #17335f; }
   }
   .map-controls-toggle { display: none; }
   .map-fullscreen-toggle { display: inline-flex; top: .65rem; right: .65rem; }
+  .map-streetview-toggle { display: inline-flex; top: 3.25rem; right: .65rem; }
   .map-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .status-grid { grid-template-columns: 1fr; }
   .hero-main h1 { font-size: clamp(1.65rem, 7vw, 2.3rem); }
@@ -1678,6 +1739,9 @@ svg text { font-size: 14px; fill: #17335f; }
   min-height: 100%;
   border-radius: 12px;
   border-left: 1px solid #ccdbf4;
+}
+.map-canvas-wrap:fullscreen .map-streetview-panel {
+  inset: .75rem;
 }
 
 #map-source { font-size: .86rem; }

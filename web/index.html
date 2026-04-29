@@ -960,6 +960,7 @@
               <div id="map-selected-location" class="map-selected-location" hidden>
                 <p class="muted">📍 <strong id="map-selected-coords">-</strong></p>
                 <a id="map-open-google-maps" class="ghost map-btn-lite" href="#" target="_blank" rel="noreferrer noopener">🗺️ Google Maps</a>
+                <button id="map-open-streetview" type="button" class="ghost map-btn-lite">👁️ Street View</button>
               </div>
 
               <!-- Liste ressources -->
@@ -993,6 +994,24 @@
                   title="Plein écran"
                   aria-label="Passer la carte en plein écran"
                 >⛶</button>
+                <button
+                  id="map-streetview-toggle"
+                  class="map-streetview-toggle"
+                  type="button"
+                  aria-pressed="false"
+                  title="Street View"
+                  aria-label="Choisir un point Street View"
+                >👁️</button>
+                <div id="map-streetview-panel" class="map-streetview-panel hidden" hidden aria-label="Street View">
+                  <div class="map-streetview-panel__bar">
+                    <strong id="map-streetview-title">Street View</strong>
+                    <div>
+                      <a id="map-streetview-open-external" class="ghost map-btn-lite" href="#" target="_blank" rel="noreferrer noopener">Ouvrir Google Maps</a>
+                      <button id="map-streetview-close" type="button" class="ghost map-btn-lite">Retour carte</button>
+                    </div>
+                  </div>
+                  <iframe id="map-streetview-frame" title="Street View Google Maps" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+                </div>
               </div>
 
               <!-- Statistiques résumé -->
