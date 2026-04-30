@@ -1131,6 +1131,7 @@ const homeView = document.getElementById('home-view');
 const loginView = document.getElementById('login-view');
 const appView = document.getElementById('app-view');
 const loginForm = document.getElementById('login-form');
+const loginSubmitBtn = document.getElementById('login-submit-btn');
 const passwordForm = document.getElementById('password-form');
 
 const normalizeLevel = (level) => ({ verte: 'vert', green: 'vert', yellow: 'jaune', red: 'rouge' }[(level || '').toLowerCase()] || (level || 'vert').toLowerCase());
@@ -13594,8 +13595,8 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
   if (el) el.addEventListener('input', () => { setLoginError(''); _setLoginStatus(''); });
 });
 
-loginForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
+async function handleLoginSubmit(event) {
+  event?.preventDefault?.();
   if (isLoginSubmitting) return;
   isLoginSubmitting = true;
   setLoginError('');
@@ -13672,9 +13673,13 @@ loginForm.addEventListener('submit', async (event) => {
   setLoginError(lastError?.message || 'Connexion impossible', buildLoginDebugDetails(lastError, username));
   isLoginSubmitting = false;
   _setLoginSubmitting(false);
-});
+}
 
-passwordForm.addEventListener('submit', async (event) => {
+loginForm?.addEventListener('submit', handleLoginSubmit);
+loginSubmitBtn?.addEventListener('click', handleLoginSubmit);
+window.__crisis38LoginReady = true;
+
+passwordForm?.addEventListener('submit', async (event) => {
   event.preventDefault();
   document.getElementById('password-error').textContent = '';
   const form = new FormData(passwordForm);
