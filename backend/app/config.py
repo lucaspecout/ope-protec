@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     # INSEE SIRENE open data — jeton "ouvert avec compte".
     sirene_api_token: str = ""
     sirene_api_base_url: str = "https://api.insee.fr/api-sirene/3.11"
+    # TomTom Routing API. If configured, route estimates include live traffic.
+    tomtom_api_key: str = ""
 
     class Config:
         env_file = ".env"

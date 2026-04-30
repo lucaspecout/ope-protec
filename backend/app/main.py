@@ -104,6 +104,7 @@ from .services import (
     fetch_isere_public_services_by_city,
     fetch_rnb_buildings_bbox,
     fetch_pr_autoroutes,
+    fetch_route_estimate,
     get_static_data_status,
     collect_all_static_data,
     flush_service_memory_cache,
@@ -1759,6 +1760,20 @@ def interactive_map_vigicrues_geojson(
     safe_limit = None if limit is None else max(10, min(limit, 500))
     vigicrues = fetch_vigicrues_isere(station_limit=safe_limit, force_refresh=refresh)
     return vigicrues_geojson_from_stations(vigicrues.get("stations", []))
+
+
+@app.get("/api/routes/estimate")
+def interactive_map_route_estimate(
+    start_lat: float = Query(..., ge=-90, le=90),
+    start_lon: float = Query(..., ge=-180, le=180),
+    end_lat: float = Query(..., ge=-90, le=90),
+    end_lon: float = Query(..., ge=-180, le=180),
+    _: User = Depends(require_roles(*READ_ROLES)),
+):
+    try:
+        return fetch_route_estimate(start_lat, start_lon, end_lat, end_lon)
+    except Exception as exc:
+        raise HTTPException(502, f"Calcul trajet indisponible: {exc}") from exc
 
 
 @app.get("/api/itinisere/events")

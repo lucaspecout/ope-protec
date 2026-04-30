@@ -11247,3 +11247,96 @@ def fetch_cols_alpins_isere(force_refresh: bool = False) -> dict[str, Any]:
         loader=_fetch_cols_alpins_live_fast,
     )
 
+
+def _validate_route_coord(lat: float, lon: float) -> tuple[float, float]:
+    lat_num = float(lat)
+    lon_num = float(lon)
+    if not (-90 <= lat_num <= 90 and -180 <= lon_num <= 180):
+        raise ValueError("Coordonnees hors limites")
+    return lat_num, lon_num
+
+
+def _tomtom_route_estimate(start_lat: float, start_lon: float, end_lat: float, end_lon: float) -> dict[str, Any]:
+    api_key = (settings.tomtom_api_key or "").strip()
+    if not api_key:
+        raise RuntimeError("TOMTOM_API_KEY non configure")
+    locations = f"{start_lat},{start_lon}:{end_lat},{end_lon}"
+    query = urlencode({
+        "key": api_key,
+        "traffic": "true",
+        "routeType": "fastest",
+        "travelMode": "car",
+        "computeTravelTimeFor": "all",
+        "instructionsType": "text",
+        "language": "fr-FR",
+    })
+    payload = _http_get_json(f"https://api.tomtom.com/routing/1/calculateRoute/{locations}/json?{query}", timeout=12)
+    routes = payload.get("routes") if isinstance(payload, dict) else []
+    if not routes:
+        raise RuntimeError("Aucun trajet TomTom trouve")
+    route = routes[0]
+    summary = route.get("summary") or {}
+    points: list[list[float]] = []
+    for leg in route.get("legs") or []:
+        for point in leg.get("points") or []:
+            lat = point.get("latitude")
+            lon = point.get("longitude")
+            if lat is not None and lon is not None:
+                points.append([float(lat), float(lon)])
+    return {
+        "status": "online",
+        "provider": "tomtom",
+        "traffic_aware": True,
+        "source": "TomTom Routing API",
+        "distance_meters": int(summary.get("lengthInMeters") or 0),
+        "duration_seconds": int(summary.get("travelTimeInSeconds") or 0),
+        "duration_no_traffic_seconds": int(summary.get("noTrafficTravelTimeInSeconds") or 0),
+        "traffic_delay_seconds": int(summary.get("trafficDelayInSeconds") or 0),
+        "polyline": points,
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+def _osrm_route_estimate(start_lat: float, start_lon: float, end_lat: float, end_lon: float) -> dict[str, Any]:
+    coords = f"{start_lon},{start_lat};{end_lon},{end_lat}"
+    query = urlencode({
+        "overview": "full",
+        "geometries": "geojson",
+        "alternatives": "false",
+        "steps": "false",
+    })
+    payload = _http_get_json(f"https://router.project-osrm.org/route/v1/driving/{coords}?{query}", timeout=12)
+    routes = payload.get("routes") if isinstance(payload, dict) else []
+    if not routes:
+        raise RuntimeError("Aucun trajet OSRM trouve")
+    route = routes[0]
+    coordinates = ((route.get("geometry") or {}).get("coordinates") or [])
+    points = [[float(lat), float(lon)] for lon, lat in coordinates if lon is not None and lat is not None]
+    duration_seconds = int(route.get("duration") or 0)
+    return {
+        "status": "degraded",
+        "provider": "osrm",
+        "traffic_aware": False,
+        "source": "OSRM public routing",
+        "distance_meters": int(route.get("distance") or 0),
+        "duration_seconds": duration_seconds,
+        "duration_no_traffic_seconds": duration_seconds,
+        "traffic_delay_seconds": 0,
+        "polyline": points,
+        "note": "Estimation routiere sans trafic live. Configurez TOMTOM_API_KEY pour une duree tenant compte de la circulation.",
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+def fetch_route_estimate(start_lat: float, start_lon: float, end_lat: float, end_lon: float) -> dict[str, Any]:
+    start_lat, start_lon = _validate_route_coord(start_lat, start_lon)
+    end_lat, end_lon = _validate_route_coord(end_lat, end_lon)
+    if (settings.tomtom_api_key or "").strip():
+        try:
+            return _tomtom_route_estimate(start_lat, start_lon, end_lat, end_lon)
+        except Exception as exc:
+            fallback = _osrm_route_estimate(start_lat, start_lon, end_lat, end_lon)
+            fallback["tomtom_error"] = str(exc)
+            return fallback
+    return _osrm_route_estimate(start_lat, start_lon, end_lat, end_lon)
+

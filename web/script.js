@@ -40,6 +40,7 @@ const API_ORIGIN_COOLDOWN_MS = 60000;
 const STATIC_POINTS_CACHE_TTL_MS = 10 * 60 * 1000;
 const TELECOM_POINTS_CACHE_TTL_MS = 10 * 60 * 1000;
 const PR_AUTOROUTES_LOCAL_CACHE_TTL_MS = 365 * 24 * 60 * 60 * 1000;
+const MAP_ROUTE_REFRESH_MS = 60 * 1000;
 const OSM_DETAILS_MIN_ZOOM = 15;
 const FLUX_SERVICES = [
   { key: 'meteo_france',           label: 'Météo-France',              icon: '⛅', category: 'Météo',         interval: 120,   metric: (d) => d.level ? `Vigilance ${d.level}` : `${(d.alerts || []).length} alerte(s)` },
@@ -293,6 +294,12 @@ let mapEvacuationCircle = null;
 let mapMeasureLayer = null;
 let mapMeasureMode = false;
 let mapMeasurePoints = [];
+let mapRouteLayer = null;
+let mapRouteMode = false;
+let mapRoutePoints = [];
+let mapRouteRefreshTimer = null;
+let mapRouteAbortController = null;
+let mapRouteRequestSeq = 0;
 const mapPointVisibilityOverrides = new Map();
 const resourceVisibilityOverrides = new Map();
 let pendingMapPointCoords = null;
@@ -3937,6 +3944,7 @@ function initMap() {
   mapZoneImpactLayer = window.L.layerGroup().addTo(leafletMap);
   mapEvacuationCircleLayer = window.L.layerGroup().addTo(leafletMap);
   mapMeasureLayer = window.L.layerGroup().addTo(leafletMap);
+  mapRouteLayer = window.L.layerGroup().addTo(leafletMap);
   initMapAnnotationModule();
   itinisereLayer = window.L.layerGroup().addTo(leafletMap);
   bisonLayer = window.L.layerGroup().addTo(leafletMap);
@@ -3954,6 +3962,7 @@ function initMap() {
   colsAlpinsLayer = window.L.layerGroup();
   leafletMap.on('click', onMapClickEvacuationCircle);
   leafletMap.on('click', onMapClickMeasure);
+  leafletMap.on('click', onMapClickRoute);
   leafletMap.on('click', onMapClickAddPoint);
   leafletMap.on('click', onMapClickStreetView);
   leafletMap.on('click', handleOsmDetailsClick);
@@ -3993,6 +4002,7 @@ function formatOsmDetailsPopup(payload = {}) {
 }
 
 async function handleOsmDetailsClick(event) {
+  if (event?.originalEvent?._mapRouteHandled) return;
   if (!leafletMap || isMapToolActive() || typeof fetch !== 'function') return;
   if (leafletMap.getZoom() < OSM_DETAILS_MIN_ZOOM) return;
   const lat = Number(event?.latlng?.lat);
@@ -4035,7 +4045,7 @@ async function handleOsmDetailsClick(event) {
 }
 
 function isMapToolActive() {
-  if (mapAddPointMode || mapEvacuationCircleMode || mapMeasureMode || mapStreetViewMode) return true;
+  if (mapAddPointMode || mapEvacuationCircleMode || mapMeasureMode || mapRouteMode || mapStreetViewMode) return true;
   if (mapZoneImpactDrawHandler?.enabled && mapZoneImpactDrawHandler.enabled()) return true;
   const drawToolbarModes = mapDrawControl?._toolbars?.draw?._modes;
   if (drawToolbarModes && typeof drawToolbarModes === 'object') {
@@ -4085,6 +4095,7 @@ function setStreetViewMode(enabled) {
     }
     if (mapEvacuationCircleMode) mapEvacuationCircleMode = false;
     if (mapMeasureMode) clearMapMeasure(false);
+    if (mapRouteMode) clearMapRoute(false);
     if (typeof _mapWeatherMode !== 'undefined' && _mapWeatherMode) _toggleMapWeatherMode();
     setMapFeedback('Mode Street View actif: cliquez sur une route ou un lieu sur la carte.');
   } else {
@@ -7347,6 +7358,7 @@ function startMapMeasureMode() {
     mapEvacuationCircleMode = false;
     updateEvacuationCircleButtons();
   }
+  if (mapRouteMode) clearMapRoute(false);
   mapMeasureMode = !mapMeasureMode;
   mapMeasurePoints = [];
   if (mapMeasureLayer) mapMeasureLayer.clearLayers();
@@ -7404,6 +7416,207 @@ function onMapClickMeasure(event) {
   setMapFeedback(`Distance mesurée: ${formatDistanceMeters(distanceMeters)}.`);
 }
 
+function formatDurationSeconds(seconds = 0) {
+  const total = Math.max(0, Math.round(Number(seconds) || 0));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.round((total % 3600) / 60);
+  if (hours > 0) return `${hours} h ${String(minutes).padStart(2, '0')}`;
+  return `${Math.max(1, minutes)} min`;
+}
+
+function mapRouteMarkerIcon(label) {
+  return window.L.divIcon({
+    className: 'map-route-marker',
+    html: `<span>${escapeHtml(label)}</span>`,
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
+  });
+}
+
+function updateRouteButtons() {
+  const startBtn = document.getElementById('map-route-start');
+  if (startBtn) {
+    startBtn.classList.toggle('active', mapRouteMode);
+    startBtn.setAttribute('aria-pressed', String(mapRouteMode));
+  }
+  const refreshBtn = document.getElementById('map-route-refresh');
+  if (refreshBtn) refreshBtn.disabled = mapRoutePoints.length < 2;
+}
+
+function setRouteSummary(html, isError = false) {
+  const el = document.getElementById('map-route-summary');
+  if (!el) return;
+  el.classList.toggle('route-tool__summary--error', Boolean(isError));
+  el.innerHTML = html;
+}
+
+function stopRouteRefreshTimer() {
+  if (mapRouteRefreshTimer) {
+    clearInterval(mapRouteRefreshTimer);
+    mapRouteRefreshTimer = null;
+  }
+}
+
+function startRouteRefreshTimer() {
+  stopRouteRefreshTimer();
+  mapRouteRefreshTimer = setInterval(() => {
+    if (mapRoutePoints.length === 2) refreshMapRoute(false);
+  }, MAP_ROUTE_REFRESH_MS);
+}
+
+function clearMapRoute(showFeedback = true) {
+  mapRouteMode = false;
+  mapRoutePoints = [];
+  mapRouteRequestSeq += 1;
+  stopRouteRefreshTimer();
+  if (mapRouteAbortController) {
+    mapRouteAbortController.abort();
+    mapRouteAbortController = null;
+  }
+  if (mapRouteLayer) mapRouteLayer.clearLayers();
+  updateRouteButtons();
+  setRouteSummary('Cliquez deux points sur la carte pour estimer un trajet.');
+  if (showFeedback) setMapFeedback('Trajet efface.');
+}
+
+function startMapRouteMode() {
+  if (mapAddPointMode) {
+    mapAddPointMode = false;
+    pendingMapPointCoords = null;
+    document.getElementById('map-add-point-btn')?.classList.remove('active');
+    document.getElementById('map-add-point-btn')?.setAttribute('aria-pressed', 'false');
+  }
+  if (mapEvacuationCircleMode) {
+    mapEvacuationCircleMode = false;
+    updateEvacuationCircleButtons();
+  }
+  if (mapMeasureMode) clearMapMeasure(false);
+  if (mapStreetViewMode) setStreetViewMode(false);
+  if (typeof _mapWeatherMode !== 'undefined' && _mapWeatherMode) _toggleMapWeatherMode();
+
+  const nextMode = !mapRouteMode;
+  clearMapRoute(false);
+  mapRouteMode = nextMode;
+  updateRouteButtons();
+  setRouteSummary(mapRouteMode ? 'Point de depart: cliquez sur la carte.' : 'Cliquez deux points sur la carte pour estimer un trajet.');
+  setMapFeedback(mapRouteMode ? 'Mode trajet actif: cliquez le depart puis l arrivee.' : 'Mode trajet desactive.');
+}
+
+function drawRouteEndpoint(point, index) {
+  if (!mapRouteLayer || typeof window.L === 'undefined') return;
+  const marker = window.L.marker([point.lat, point.lon], {
+    draggable: true,
+    icon: mapRouteMarkerIcon(index === 0 ? 'A' : 'B'),
+  }).addTo(mapRouteLayer);
+  marker.on('dragend', () => {
+    const pos = marker.getLatLng();
+    mapRoutePoints[index] = { lat: pos.lat, lon: pos.lng };
+    refreshMapRoute(true);
+  });
+}
+
+function drawRoutePolyline(payload = {}) {
+  if (!mapRouteLayer || typeof window.L === 'undefined') return;
+  mapRouteLayer.clearLayers();
+  mapRoutePoints.forEach((point, index) => drawRouteEndpoint(point, index));
+  const line = Array.isArray(payload.polyline) && payload.polyline.length >= 2
+    ? payload.polyline.map((point) => [Number(point[0]), Number(point[1])]).filter((point) => Number.isFinite(point[0]) && Number.isFinite(point[1]))
+    : mapRoutePoints.map((point) => [point.lat, point.lon]);
+  if (line.length >= 2) {
+    window.L.polyline(line, {
+      color: payload.traffic_aware ? '#d9480f' : '#1c7ed6',
+      weight: 6,
+      opacity: 0.86,
+    }).addTo(mapRouteLayer);
+  }
+}
+
+function renderRouteEstimate(payload = {}) {
+  const trafficAware = Boolean(payload.traffic_aware);
+  const distance = formatDistanceMeters(payload.distance_meters);
+  const duration = formatDurationSeconds(payload.duration_seconds);
+  const delay = Number(payload.traffic_delay_seconds || 0);
+  const delayText = trafficAware
+    ? `Retard trafic: ${delay > 0 ? formatDurationSeconds(delay) : 'aucun'}`
+    : 'Trafic live non configure';
+  const updatedAt = payload.updated_at ? new Date(payload.updated_at) : null;
+  const updatedLabel = updatedAt && !Number.isNaN(updatedAt.getTime())
+    ? updatedAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : '--:--';
+  const source = payload.source || (trafficAware ? 'TomTom' : 'OSRM');
+  setRouteSummary(`
+    <strong>${escapeHtml(duration)}</strong> - ${escapeHtml(distance)}<br>
+    <span>${escapeHtml(delayText)}</span><br>
+    <span class="muted">Source: ${escapeHtml(source)} - MAJ ${escapeHtml(updatedLabel)} - auto 60 s</span>
+  `);
+}
+
+async function refreshMapRoute(showFeedback = true) {
+  if (mapRoutePoints.length < 2) {
+    setRouteSummary('Posez un depart et une arrivee pour calculer le trajet.', true);
+    return;
+  }
+  const [start, end] = mapRoutePoints;
+  const requestSeq = ++mapRouteRequestSeq;
+  if (mapRouteAbortController) mapRouteAbortController.abort();
+  mapRouteAbortController = new AbortController();
+  if (showFeedback) setMapFeedback('Calcul du trajet en cours...');
+  setRouteSummary('Calcul du trajet en cours...');
+  const params = new URLSearchParams({
+    start_lat: String(start.lat),
+    start_lon: String(start.lon),
+    end_lat: String(end.lat),
+    end_lon: String(end.lon),
+  });
+  try {
+    const payload = await api(`/api/routes/estimate?${params.toString()}`, {
+      bypassCache: true,
+      cacheTtlMs: 0,
+      timeoutMs: API_SLOW_ENDPOINT_TIMEOUT_MS,
+      maxRetries: 1,
+    });
+    if (requestSeq !== mapRouteRequestSeq || mapRoutePoints.length < 2) return;
+    drawRoutePolyline(payload);
+    renderRouteEstimate(payload);
+    startRouteRefreshTimer();
+    if (showFeedback) {
+      setMapFeedback(payload.traffic_aware ? 'Trajet calcule avec trafic live.' : 'Trajet calcule sans trafic live: configurez TOMTOM_API_KEY pour le temps circulation.');
+    }
+  } catch (error) {
+    if (requestSeq !== mapRouteRequestSeq) return;
+    if (error?.name === 'AbortError') return;
+    drawRoutePolyline({});
+    setRouteSummary(`Trajet indisponible: ${escapeHtml(sanitizeErrorMessage(error.message))}`, true);
+    if (showFeedback) setMapFeedback(`Trajet indisponible: ${sanitizeErrorMessage(error.message)}`, true);
+  } finally {
+    if (requestSeq === mapRouteRequestSeq) mapRouteAbortController = null;
+    updateRouteButtons();
+  }
+}
+
+function onMapClickRoute(event) {
+  if (!mapRouteMode || !leafletMap || typeof window.L === 'undefined') return;
+  if (event?.originalEvent) event.originalEvent._mapRouteHandled = true;
+  const lat = Number(event?.latlng?.lat);
+  const lon = Number(event?.latlng?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+  if (mapRoutePoints.length >= 2) {
+    mapRoutePoints = [];
+    if (mapRouteLayer) mapRouteLayer.clearLayers();
+  }
+  mapRoutePoints.push({ lat, lon });
+  drawRoutePolyline({});
+  updateRouteButtons();
+  if (mapRoutePoints.length === 1) {
+    setRouteSummary('Depart pose. Cliquez le point d arrivee.');
+    setMapFeedback('Depart du trajet pose. Cliquez l arrivee.');
+    return;
+  }
+  mapRouteMode = false;
+  updateRouteButtons();
+  refreshMapRoute(true);
+}
+
 function clearEvacuationCircle(showFeedback = true) {
   mapEvacuationCircleMode = false;
   updateEvacuationCircleButtons();
@@ -7425,6 +7638,7 @@ function startEvacuationCircleMode() {
     document.getElementById('map-add-point-btn')?.setAttribute('aria-pressed', 'false');
   }
   if (mapMeasureMode) clearMapMeasure(false);
+  if (mapRouteMode) clearMapRoute(false);
   mapEvacuationCircleMode = !mapEvacuationCircleMode;
   updateEvacuationCircleButtons();
   setMapFeedback(
@@ -12330,6 +12544,10 @@ function bindAppInteractions() {
   document.getElementById('map-evacuation-circle-clear')?.addEventListener('click', () => clearEvacuationCircle(true));
   document.getElementById('map-measure-start')?.addEventListener('click', startMapMeasureMode);
   document.getElementById('map-measure-clear')?.addEventListener('click', () => clearMapMeasure(true));
+  document.getElementById('map-route-start')?.addEventListener('click', startMapRouteMode);
+  document.getElementById('map-route-refresh')?.addEventListener('click', () => refreshMapRoute(true));
+  document.getElementById('map-route-clear')?.addEventListener('click', () => clearMapRoute(true));
+  updateRouteButtons();
   document.getElementById('map-add-point-btn')?.addEventListener('click', () => {
     if (!canEdit()) {
       setMapFeedback('Vous n\'avez pas le droit de créer un POI.', true);
@@ -12340,6 +12558,7 @@ function bindAppInteractions() {
       updateEvacuationCircleButtons();
     }
     if (mapMeasureMode) clearMapMeasure(false);
+    if (mapRouteMode) clearMapRoute(false);
     mapAddPointMode = !mapAddPointMode;
     pendingMapPointCoords = null;
     const button = document.getElementById('map-add-point-btn');
@@ -12904,6 +13123,7 @@ function logout() {
   if (liveEventsTimer) clearInterval(liveEventsTimer);
   if (apiPanelTimer) clearInterval(apiPanelTimer);
   if (apiResyncTimer) clearInterval(apiResyncTimer);
+  stopRouteRefreshTimer();
   stopMapAnnotationsSync();
   stopExternalRisksSSE();
   finishStartupQueue();
