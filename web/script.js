@@ -74,6 +74,14 @@ const FLUX_SERVICES = [
   { key: 'isere_opendata',         label: 'Isère OpenData · Résilience', icon: '📊', category: 'Données',    interval: 1800,  metric: (d) => `${d.totals?.schools ?? 0} écoles · ${d.totals?.health_centers ?? 0} santé · ${d.totals?.food_aid_points ?? 0} aide alim.` },
   { key: 'finess_isere',           label: 'FINESS · Établissements santé', icon: '🏥', category: 'Santé',    interval: 21600, metric: (d) => `${d.resources_total ?? 0} établissement(s)` },
 ];
+FLUX_SERVICES.splice(FLUX_SERVICES.findIndex((svc) => svc.key === 'dauphine_isere'), 0, {
+  key: 'fr_alert_isere',
+  label: 'FR-Alert Isère',
+  icon: 'FR',
+  category: 'Actualités',
+  interval: 90,
+  metric: (d) => `${d.today_count ?? 0} aujourd'hui - ${(d.events || []).length} alerte(s)`,
+});
 const AUTOROUTES_ISERE_ROADS = Object.freeze(['A41', 'A43', 'A48', 'A49', 'A51', 'A480']);
 const AUTOROUTES_ISERE_ROAD_SET = new Set(AUTOROUTES_ISERE_ROADS);
 const AUTOROUTES_ISERE_ROAD_REGEX = /\bA\s?(480|49|48|51|43|41)\b/i;
@@ -693,6 +701,13 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
       // Conserver les articles précédents si le flux est temporairement vide ou en erreur
       items: keepPreviousArray((previous.prefecture_isere || {}).items, (next.prefecture_isere || {}).items),
       articles: keepPreviousArray((previous.prefecture_isere || {}).articles, (next.prefecture_isere || {}).articles),
+    },
+    fr_alert_isere: {
+      ...(previous.fr_alert_isere || {}),
+      ...(next.fr_alert_isere || {}),
+      events: keepPreviousArray((previous.fr_alert_isere || {}).events, (next.fr_alert_isere || {}).events),
+      today_events: keepPreviousArray((previous.fr_alert_isere || {}).today_events, (next.fr_alert_isere || {}).today_events),
+      today_count: keepPreviousValue((previous.fr_alert_isere || {}).today_count, (next.fr_alert_isere || {}).today_count),
     },
     dauphine_isere: {
       ...(previous.dauphine_isere || {}),
@@ -7838,6 +7853,23 @@ function renderPrefectureNews(prefecture = {}) {
 }
 
 
+function renderFrAlertIsere(frAlert = {}) {
+  const events = Array.isArray(frAlert.events) ? frAlert.events : [];
+  const todayEvents = Array.isArray(frAlert.today_events) ? frAlert.today_events : [];
+  const todayCount = Number(frAlert.today_count ?? todayEvents.length);
+  setRiskText('fr-alert-status', `${frAlert.status || 'inconnu'} - ${todayCount} aujourd'hui - ${events.length} alerte(s)`, todayCount > 0 ? 'rouge' : 'vert');
+  setText('fr-alert-info', `${frAlert.updated_at ? new Date(frAlert.updated_at).toLocaleString() : 'MAJ inconnue'} - source officielle FR-Alert`);
+  setHtml('fr-alert-list', events.slice(0, 10).map((event) => {
+    const isToday = event.is_today ? '<span class="badge red">Aujourd'hui</span> ' : '';
+    const exercise = event.is_exercise ? '<span class="badge neutral">Exercice</span> ' : '';
+    const title = escapeHtml(event.title || 'FR-Alert Isère');
+    const location = event.location ? `<br><span class="muted">${escapeHtml(event.location)}</span>` : '';
+    const date = event.started_at_label || event.started_at || 'Date non précisée';
+    const link = String(event.link || '').startsWith('http') ? event.link : 'https://fr-alert.gouv.fr';
+    return `<li>${isToday}${exercise}<strong>${title}</strong><br><span class="muted">${escapeHtml(date)} - ${escapeHtml(event.source || 'FR-Alert')}</span>${location}<br><a href="${escapeHtml(link)}" target="_blank" rel="noreferrer">Voir l'alerte</a></li>`;
+  }).join('') || '<li>Aucune FR-Alert Isère récente détectée.</li>');
+}
+
 function renderDauphineNews(dauphine = {}) {
   const items = sortPrefectureItemsByRecency(Array.isArray(dauphine.items) ? dauphine.items : []);
   const panelItems = items.slice(0, 15);
@@ -9263,6 +9295,10 @@ function buildCriticalRisksMarkup(dashboard = {}, externalRisks = {}) {
   });
 
   const itinisereEvents = externalRisks?.itinisere?.events || [];
+  const frAlertToday = Array.isArray(externalRisks?.fr_alert_isere?.today_events) ? externalRisks.fr_alert_isere.today_events : [];
+  if (frAlertToday.length) {
+    risks.unshift(`<li><strong>FR-Alert Isère</strong> · <span class="risk-rouge">${frAlertToday.length} alerte(s) aujourd'hui</span> · ${escapeHtml(frAlertToday[0]?.title || 'Alerte population')}</li>`);
+  }
   const georisques = externalRisks?.georisques?.data && typeof externalRisks.georisques.data === 'object'
     ? { ...externalRisks.georisques.data, ...externalRisks.georisques }
     : (externalRisks?.georisques || {});
@@ -9321,6 +9357,23 @@ function buildOpenEventsSituationMarkup(events = []) {
       ${lastLogLine}
     </li>`;
   }).join('');
+}
+
+function buildFrAlertTodayBanner(frAlert = {}) {
+  const todayEvents = Array.isArray(frAlert.today_events) ? frAlert.today_events : [];
+  if (!todayEvents.length) return '';
+  return `<section class="fr-alert-home-banner" role="alert">
+    <div>
+      <p class="tag">FR-Alert Isère - aujourd'hui</p>
+      <h3>${todayEvents.length} alerte(s) détectée(s) dans l'Isère</h3>
+    </div>
+    <ul class="list compact">
+      ${todayEvents.slice(0, 4).map((event) => {
+        const link = String(event.link || '').startsWith('http') ? event.link : 'https://fr-alert.gouv.fr';
+        return `<li><strong>${escapeHtml(event.title || 'FR-Alert')}</strong>${event.is_exercise ? ' - Exercice' : ''}<br><span class="muted">${escapeHtml(event.started_at_label || event.started_at || '')} - ${escapeHtml(event.location || event.source || '')}</span><br><a href="${escapeHtml(link)}" target="_blank" rel="noreferrer">Ouvrir l'alerte officielle</a></li>`;
+      }).join('')}
+    </ul>
+  </section>`;
 }
 
 function buildMeteoSituationModalContent(meteo = {}) {
@@ -9542,6 +9595,7 @@ function renderSituationOverview() {
   const prefectureItems = Array.isArray(externalRisks?.prefecture_isere?.items)
     ? sortPrefectureItemsByRecency(externalRisks.prefecture_isere.items).slice(0, 4)
     : [];
+  const frAlert = externalRisks?.fr_alert_isere || {};
   const cruesTopLevel = riskRank(mainTronconLevel) >= riskRank(stationsLevel) ? mainTronconLevel : stationsLevel;
   const cruesAlertHtml = `
     <div style="margin-top:6px;font-size:0.82em">
@@ -9604,6 +9658,7 @@ function renderSituationOverview() {
   const generatedAt = safeDateToLocale(Date.now());
 
   setHtml('situation-content', `
+    ${buildFrAlertTodayBanner(frAlert)}
     <div class="situation-toolbar">
       <div>
         <h3>SITREP prêt à diffusion · Isère</h3>
@@ -10926,6 +10981,7 @@ const SVC_CARD_META = {
   autoroutes_isere:      { statusId: 'autoroutes-status',      infoId: 'autoroutes-info',      url: 'https://www.bison-fute.gouv.fr' },
   sncf_isere:            { statusId: 'sncf-status',            infoId: 'sncf-info',            url: 'https://www.sncf.com/fr/itineraire-reservation/info-trafic' },
   prefecture_isere:      { statusId: 'prefecture-status',      infoId: 'prefecture-info',      url: 'https://www.isere.gouv.fr' },
+  fr_alert_isere:        { statusId: 'fr-alert-status',        infoId: 'fr-alert-info',        url: 'https://fr-alert.gouv.fr' },
   dauphine_isere:        { statusId: 'dauphine-status',        infoId: 'dauphine-info',        url: 'https://www.ledauphine.com' },
   france_bleu_isere:     { statusId: 'francebleu-status',      infoId: 'francebleu-info',      url: 'https://www.francebleu.fr/isere' },
   placegrenet:           { statusId: 'placegrenet-svc-status', infoId: null,                   url: 'https://www.placegrenet.fr' },
@@ -10968,6 +11024,7 @@ const SVC_DETAIL_LISTS = {
   autoroutes_isere:      [{ id: 'autoroutes-list',       label: 'Événements grands axes Isère' }],
   sncf_isere:            [{ id: 'sncf-alerts-list',      label: 'Alertes voie ferrée' }],
   prefecture_isere:      [{ id: 'prefecture-news-list',  label: 'Actualités', titleId: 'prefecture-news-title' }],
+  fr_alert_isere:        [{ id: 'fr-alert-list',         label: 'Dernières FR-Alert Isère' }],
   dauphine_isere:        [{ id: 'dauphine-news-list',    label: 'Articles' }],
   france_bleu_isere:     [{ id: 'francebleu-news-list',  label: 'Articles France Bleu' }],
   anfr_isere:            [{ id: 'anfr-list',             label: 'Synthèse antennes' }],
@@ -11474,6 +11531,7 @@ function renderExternalRisks(data = {}) {
   const itinisere = mergedData?.itinisere || {};
   const bisonFute = mergedData?.bison_fute || {};
   const prefecture = mergedData?.prefecture_isere || {};
+  const frAlert = mergedData?.fr_alert_isere || {};
   const dauphine = mergedData?.dauphine_isere || {};
   const franceBleu = mergedData?.france_bleu_isere || {};
   const sncf = mergedData?.sncf_isere || {};
@@ -11515,6 +11573,7 @@ function renderExternalRisks(data = {}) {
   setText('itinisere-status', `${itinisere.status || 'inconnu'} · ${itinisereTotal} événements`);
   renderBisonFuteSummary(bisonFute);
   renderPrefectureNews(prefecture);
+  renderFrAlertIsere(frAlert);
   renderDauphineNews(dauphine);
   renderFranceBleuNews(franceBleu);
   renderPlacegrenetNews(placegrenet);
