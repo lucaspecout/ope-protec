@@ -3,6 +3,7 @@ import csv
 from datetime import datetime, timedelta
 from copy import deepcopy
 import io
+import math
 from email.utils import parsedate_to_datetime
 from html import unescape
 from http.client import RemoteDisconnected, IncompleteRead
@@ -11328,6 +11329,49 @@ def _osrm_route_estimate(start_lat: float, start_lon: float, end_lat: float, end
     }
 
 
+def _haversine_distance_meters(start_lat: float, start_lon: float, end_lat: float, end_lon: float) -> float:
+    radius_m = 6371000
+    phi1 = math.radians(start_lat)
+    phi2 = math.radians(end_lat)
+    delta_phi = math.radians(end_lat - start_lat)
+    delta_lambda = math.radians(end_lon - start_lon)
+    a = (
+        math.sin(delta_phi / 2) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+    )
+    return radius_m * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def _local_route_estimate(
+    start_lat: float,
+    start_lon: float,
+    end_lat: float,
+    end_lon: float,
+    error: str = "",
+) -> dict[str, Any]:
+    # Conservative road factor: a road route is usually longer than straight-line distance.
+    distance_meters = int(_haversine_distance_meters(start_lat, start_lon, end_lat, end_lon) * 1.32)
+    average_speed_mps = 50_000 / 3600
+    duration_seconds = int(distance_meters / average_speed_mps) if distance_meters > 0 else 0
+    return {
+        "status": "degraded",
+        "provider": "local",
+        "traffic_aware": False,
+        "source": "Estimation locale de secours",
+        "distance_meters": distance_meters,
+        "duration_seconds": duration_seconds,
+        "duration_no_traffic_seconds": duration_seconds,
+        "traffic_delay_seconds": 0,
+        "polyline": [[start_lat, start_lon], [end_lat, end_lon]],
+        "note": (
+            "Routage externe indisponible. Distance et temps estimes localement sans trafic live "
+            "ni suivi precis de la route."
+        ),
+        "routing_error": error,
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
 def fetch_route_estimate(start_lat: float, start_lon: float, end_lat: float, end_lon: float) -> dict[str, Any]:
     start_lat, start_lon = _validate_route_coord(start_lat, start_lon)
     end_lat, end_lon = _validate_route_coord(end_lat, end_lon)
@@ -11335,8 +11379,20 @@ def fetch_route_estimate(start_lat: float, start_lon: float, end_lat: float, end
         try:
             return _tomtom_route_estimate(start_lat, start_lon, end_lat, end_lon)
         except Exception as exc:
-            fallback = _osrm_route_estimate(start_lat, start_lon, end_lat, end_lon)
-            fallback["tomtom_error"] = str(exc)
-            return fallback
-    return _osrm_route_estimate(start_lat, start_lon, end_lat, end_lon)
+            try:
+                fallback = _osrm_route_estimate(start_lat, start_lon, end_lat, end_lon)
+                fallback["tomtom_error"] = str(exc)
+                return fallback
+            except Exception as fallback_exc:
+                return _local_route_estimate(
+                    start_lat,
+                    start_lon,
+                    end_lat,
+                    end_lon,
+                    error=f"tomtom: {exc}; osrm: {fallback_exc}",
+                )
+    try:
+        return _osrm_route_estimate(start_lat, start_lon, end_lat, end_lon)
+    except Exception as exc:
+        return _local_route_estimate(start_lat, start_lon, end_lat, end_lon, error=str(exc))
 
