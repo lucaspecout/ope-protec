@@ -2821,7 +2821,32 @@ function zoneImpactMunicipalityNameFromCode(code) {
   if (!safeCode) return '';
   const municipality = (Array.isArray(cachedMunicipalities) ? cachedMunicipalities : [])
     .find((item) => String(item.insee_code || item.code_insee || item.code || '').trim() === safeCode);
-  return municipality?.name || municipality?.commune || safeCode;
+  return municipality?.name || municipality?.commune || '';
+}
+
+function zoneImpactMunicipalityRecordFromCode(code) {
+  const safeCode = String(code || '').trim();
+  if (!safeCode) return null;
+  return (Array.isArray(cachedMunicipalities) ? cachedMunicipalities : [])
+    .find((item) => String(item.insee_code || item.code_insee || item.code || '').trim() === safeCode) || null;
+}
+
+function zoneImpactMunicipalityPostalLabel(input = {}) {
+  const commune = typeof input === 'string' ? { code: input } : (input || {});
+  const code = String(commune.code_insee || commune.insee || commune.code || '').trim();
+  const name = String(commune.name || commune.commune || '').trim();
+  const byCode = zoneImpactMunicipalityRecordFromCode(code);
+  const byName = name
+    ? (Array.isArray(cachedMunicipalities) ? cachedMunicipalities : [])
+      .find((item) => String(item.name || item.commune || '').trim().toLowerCase() === name.toLowerCase())
+    : null;
+  const record = byCode || byName || {};
+  const city = String(name || record.name || record.commune || '').trim();
+  const postalCode = String(commune.postal_code || commune.code_postal || record.postal_code || record.code_postal || '').trim();
+  if (postalCode && city) return `${postalCode} (${city})`;
+  if (city) return city;
+  if (postalCode) return postalCode;
+  return 'Commune non identifiée';
 }
 
 function zoneImpactResourceCity(resource = {}) {
@@ -2861,6 +2886,7 @@ async function computeZoneMunicipalityBreakdown(geometry, municipalitiesInZone =
     return municipalitiesInZone.map((municipality) => ({
       code: String(municipality.code_insee || municipality.insee || '').trim(),
       name: municipality.name || municipality.commune || 'Commune',
+      displayLabel: zoneImpactMunicipalityPostalLabel(municipality),
       overlapAreaM2: 0,
       overlapKm2: 0,
       estimatedPopulation: 0,
@@ -2884,6 +2910,9 @@ async function computeZoneMunicipalityBreakdown(geometry, municipalitiesInZone =
     return source
       .map((commune) => {
         try {
+          const sourceMunicipality = municipalitiesInZone.find((municipality) => (
+            String(municipality.code_insee || municipality.insee || '').trim() === commune.code
+          )) || {};
           const communeFeature = window.turf.feature(commune.geometry);
           const overlapFeature = window.turf.intersect(zoneFeature, communeFeature);
           if (!overlapFeature) return null;
@@ -2896,7 +2925,8 @@ async function computeZoneMunicipalityBreakdown(geometry, municipalitiesInZone =
             : 0;
           return {
             code: commune.code,
-            name: zoneImpactMunicipalityNameFromCode(commune.code),
+            name: sourceMunicipality.name || sourceMunicipality.commune || zoneImpactMunicipalityNameFromCode(commune.code),
+            displayLabel: zoneImpactMunicipalityPostalLabel({ ...sourceMunicipality, code: commune.code }),
             overlapAreaM2,
             overlapKm2: overlapAreaM2 / 1_000_000,
             estimatedPopulation,
@@ -3041,7 +3071,7 @@ async function computeZoneImpact() {
 
   if (municipalityBreakdown.length) {
     parts.push(section('📏', 'Surface dessinée par ville', municipalityBreakdown.slice(0, 8).map((row) => (
-      `<strong>${escapeHtml(row.name || row.code)}</strong> · ${row.overlapKm2.toLocaleString('fr-FR', { maximumFractionDigits: 3 })} km²`
+      `<strong>${escapeHtml(row.displayLabel || row.name || 'Commune non identifiée')}</strong> · ${row.overlapKm2.toLocaleString('fr-FR', { maximumFractionDigits: 3 })} km²`
       + ` · ${row.sharePercent.toLocaleString('fr-FR', { maximumFractionDigits: 1 })}% de la zone`
       + `${row.estimatedPopulation > 0 ? ` · ~${row.estimatedPopulation.toLocaleString('fr-FR')} hab.` : ''}`
     ))));
@@ -3070,7 +3100,7 @@ async function computeZoneImpact() {
 
   if (riskSummary.communes.length) {
     parts.push(section('🏛️', 'Communes et risques connus', riskSummary.communes.map((commune) => {
-      const name = escapeHtml(commune.name || commune.commune || commune.code_insee || 'Commune');
+      const name = escapeHtml(zoneImpactMunicipalityPostalLabel(commune));
       const floodDocs = Number(commune.flood_documents || commune.nb_documents || 0);
       const movements = Number(commune.ground_movements_total || 0);
       const ppr = Number(commune.ppr_total || commune.pprn_total || 0);
@@ -3290,7 +3320,7 @@ function exportZoneImpactReport() {
   <tbody>
     <tr><th style="width:35%">Échelle détectée</th><td>${scaleIcons[d.scale]} ${scaleLabels[d.scale]}${d.geoLabel ? ` — ${toText(d.geoLabel)}` : ''}</td></tr>
     ${d.zoneAreaM2 > 0 ? `<tr><th>Surface</th><td><strong>${(d.zoneAreaM2 / 1_000_000).toFixed(2).replace('.', ',')} km²</strong> (${Math.round(d.zoneAreaM2).toLocaleString('fr-FR')} m²)</td></tr>` : ''}
-    <tr><th>Communes intersectées</th><td class="communes-list">${d.municipalitiesInZone.map((m) => toText(m.name || m.commune || '')).filter(Boolean).join(', ') || 'Non déterminées'}</td></tr>
+    <tr><th>Communes intersectées</th><td class="communes-list">${d.municipalitiesInZone.map((m) => toText(zoneImpactMunicipalityPostalLabel(m))).filter(Boolean).join(', ') || 'Non déterminées'}</td></tr>
     ${d.geoCtx.city ? `<tr><th>Ville / commune centre</th><td>${toText(d.geoCtx.city)}${d.geoCtx.postcode ? ` (${toText(d.geoCtx.postcode)})` : ''}</td></tr>` : ''}
     ${d.geoCtx.district ? `<tr><th>Quartier</th><td>${toText(d.geoCtx.district)}</td></tr>` : ''}
     ${d.geoCtx.street ? `<tr><th>Rue / voie</th><td>${toText(d.geoCtx.street)}</td></tr>` : ''}
@@ -3300,7 +3330,7 @@ function exportZoneImpactReport() {
 </table>
 
 ${simpleTable('Surface dessinée par ville', '📏', d.municipalityBreakdown || [], [
-  { label: 'Ville', value: (row) => row.name || row.code },
+  { label: 'Code postal (ville)', value: (row) => row.displayLabel || row.name },
   { label: 'Surface concernée', value: (row) => `${Number(row.overlapKm2 || 0).toLocaleString('fr-FR', { maximumFractionDigits: 3 })} km²` },
   { label: 'Part de la zone', value: (row) => `${Number(row.sharePercent || 0).toLocaleString('fr-FR', { maximumFractionDigits: 1 })}%` },
   { label: 'Population estimée', value: (row) => row.estimatedPopulation > 0 ? `~${Number(row.estimatedPopulation).toLocaleString('fr-FR')} hab.` : '–' },
@@ -3323,7 +3353,7 @@ ${simpleTable('Niveaux officiels et signaux externes', '📡', officialRows, [
 ])}
 
 ${simpleTable('Communes et risques connus', '🏛️', Array.isArray(riskSummary.communes) ? riskSummary.communes : [], [
-  { label: 'Commune', value: (row) => row.name || row.commune || row.code_insee },
+  { label: 'Code postal (ville)', value: (row) => zoneImpactMunicipalityPostalLabel(row) },
   { label: 'Exposition', value: (row) => row.exposureLabel },
   { label: 'Danger', value: (row) => row.dangerLabel },
   { label: 'Données clés', value: (row) => [
