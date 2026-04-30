@@ -46,6 +46,43 @@
       </form>
     </section>
 
+    <script>
+      (function () {
+        var form = document.getElementById('login-form');
+        var button = document.getElementById('login-submit-btn');
+        if (!form || !button || window.__crisis38FallbackLoginInstalled) return;
+        window.__crisis38FallbackLoginInstalled = true;
+        button.disabled = false;
+        async function fallbackLogin(event) {
+          if (event) event.preventDefault();
+          if (event && event.stopImmediatePropagation) event.stopImmediatePropagation();
+          var status = document.getElementById('login-status');
+          var error = document.getElementById('login-error');
+          if (status) { status.classList.remove('hidden'); status.textContent = 'Connexion en cours...'; }
+          if (error) error.textContent = '';
+          button.disabled = true;
+          try {
+            var body = new URLSearchParams(new FormData(form));
+            var response = await fetch('/auth/login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
+              body: body
+            });
+            var data = await response.json();
+            if (!response.ok) throw new Error(data.detail || 'Connexion impossible');
+            localStorage.setItem('token', data.access_token);
+            window.location.replace('/');
+          } catch (err) {
+            button.disabled = false;
+            if (status) status.classList.add('hidden');
+            if (error) error.textContent = err && err.message ? err.message : 'Connexion impossible';
+          }
+        }
+        form.addEventListener('submit', fallbackLogin);
+        button.addEventListener('click', fallbackLogin);
+      }());
+    </script>
+
     <div id="sidebar-backdrop" class="sidebar-backdrop" aria-hidden="true"></div>
     <section id="app-view" class="app hidden" hidden>
       <aside id="app-sidebar" class="panel sidebar">
@@ -1303,37 +1340,6 @@
     <path id="isere-shape" d="M0 0h1v1H0z"></path>
   </svg>
   <script src="/hosting_data.js"></script>
-  <script src="/script.js?v=20260430-loginfix1"></script>
-  <script>
-    (function () {
-      var form = document.getElementById('login-form');
-      var button = document.getElementById('login-submit-btn');
-      if (!form || !button || window.__crisis38LoginReady) return;
-      async function fallbackLogin(event) {
-        if (event) event.preventDefault();
-        var status = document.getElementById('login-status');
-        var error = document.getElementById('login-error');
-        if (status) { status.classList.remove('hidden'); status.textContent = 'Connexion en cours...'; }
-        if (error) error.textContent = '';
-        try {
-          var body = new URLSearchParams(new FormData(form));
-          var response = await fetch('/auth/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: body
-          });
-          var data = await response.json();
-          if (!response.ok) throw new Error(data.detail || 'Connexion impossible');
-          localStorage.setItem('token', data.access_token);
-          window.location.replace('/');
-        } catch (err) {
-          if (status) status.classList.add('hidden');
-          if (error) error.textContent = err && err.message ? err.message : 'Connexion impossible';
-        }
-      }
-      form.addEventListener('submit', fallbackLogin);
-      button.addEventListener('click', fallbackLogin);
-    }());
-  </script>
+  <script src="/script.js?v=20260430-loginfix2"></script>
 </body>
 </html>
