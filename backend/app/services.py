@@ -686,6 +686,7 @@ _ITINISERE_CACHE_TTL_SECONDS = 180
 _BISON_CACHE_TTL_SECONDS = 600
 _GEORISQUES_CACHE_TTL_SECONDS = 900
 _PREFECTURE_CACHE_TTL_SECONDS = 120
+_FR_ALERT_ISERE_CACHE_TTL_SECONDS = 180
 _DAUPHINE_CACHE_TTL_SECONDS = 300
 _VIGIEAU_CACHE_TTL_SECONDS = 900
 _ATMO_AURA_CACHE_TTL_SECONDS = 900
@@ -721,6 +722,8 @@ _georisques_cache_lock = Lock()
 _georisques_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "georisques"}
 _prefecture_cache_lock = Lock()
 _prefecture_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "prefecture"}
+_fr_alert_isere_cache_lock = Lock()
+_fr_alert_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "fr_alert_isere"}
 _dauphine_cache_lock = Lock()
 _dauphine_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "dauphine"}
 _FRANCE_BLEU_ISERE_CACHE_TTL_SECONDS = 300
@@ -3875,6 +3878,186 @@ def fetch_prefecture_isere_news(limit: int = 7, force_refresh: bool = False) -> 
         ttl_seconds=_PREFECTURE_CACHE_TTL_SECONDS,
         force_refresh=force_refresh,
         loader=lambda: _fetch_prefecture_isere_news_live(limit=limit),
+    )
+
+
+_FR_ALERT_LIST_URLS = (
+    "https://fr-alert.gouv.fr/",
+    "https://fr-alert.gouv.fr/tableau-alertes",
+    f"https://fr-alert.gouv.fr/tableau-alertes/{datetime.utcnow().year}",
+    "https://www.fr-alert.gouv.fr/tableau-alertes",
+)
+_FR_ALERT_LINK_RE = re.compile(r'href=["\']([^"\']*/les-alertes/FR-ALERT\.[^"\']+)["\']', re.IGNORECASE)
+_FR_ALERT_DATE_RE = re.compile(
+    r"((?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\s+\d{1,2}\s+"
+    r"(?:janvier|f[eé]vrier|mars|avril|mai|juin|juillet|ao[uû]t|septembre|octobre|novembre|d[eé]cembre)\s+"
+    r"\d{4},\s+\d{1,2}h\d{2})",
+    re.IGNORECASE,
+)
+_FR_ALERT_MONTHS = {
+    "janvier": 1, "fevrier": 2, "février": 2, "mars": 3, "avril": 4, "mai": 5, "juin": 6,
+    "juillet": 7, "aout": 8, "août": 8, "septembre": 9, "octobre": 10, "novembre": 11,
+    "decembre": 12, "décembre": 12,
+}
+
+
+def _fr_alert_normalize(value: str) -> str:
+    raw = unicodedata.normalize("NFKD", str(value or "")).encode("ascii", "ignore").decode("ascii")
+    raw = raw.lower().replace("'", " ").replace("-", " ")
+    return re.sub(r"\s+", " ", raw).strip()
+
+
+def _parse_fr_alert_date(raw: str) -> datetime | None:
+    value = re.sub(r"\s+", " ", str(raw or "")).strip()
+    match = re.search(
+        r"(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\s+(\d{1,2})\s+"
+        r"([A-Za-zÀ-ÿ]+)\s+(\d{4}),\s+(\d{1,2})h(\d{2})",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    day, month_label, year, hour, minute = match.groups()
+    month = _FR_ALERT_MONTHS.get(month_label.lower()) or _FR_ALERT_MONTHS.get(_fr_alert_normalize(month_label))
+    if not month:
+        return None
+    try:
+        return datetime(int(year), int(month), int(day), int(hour), int(minute))
+    except ValueError:
+        return None
+
+
+def _fr_alert_is_today(value: datetime | None) -> bool:
+    if value is None:
+        return False
+    return value.date() == (datetime.utcnow() + timedelta(hours=2)).date()
+
+
+def _fr_alert_detail_to_event(url: str, html: str) -> dict[str, Any] | None:
+    text = _strip_html_tags(html)
+    normalized = _fr_alert_normalize(text)
+    if not any(token in normalized for token in ("isere", "grenoble", "prefecture de l isere")):
+        return None
+
+    title_match = re.search(r"<h[12][^>]*>(.*?)</h[12]>", html or "", flags=re.IGNORECASE | re.DOTALL)
+    title = _strip_html_tags(title_match.group(1)) if title_match else "FR-Alert Isère"
+    title = re.sub(r"\s+", " ", title).strip() or "FR-Alert Isère"
+
+    date_match = _FR_ALERT_DATE_RE.search(text)
+    started_label = date_match.group(1) if date_match else ""
+    started_dt = _parse_fr_alert_date(started_label)
+    source_match = re.search(r"Source\s*:\s*([^*]+?)(?:EXERCICE|Informations|Fin de l|$)", text, flags=re.IGNORECASE)
+    source = re.sub(r"\s+", " ", source_match.group(1)).strip(" -") if source_match else "FR-Alert"
+    is_exercise = "exercice" in normalized
+    message = re.sub(r"\s+", " ", text).strip()
+    location = ""
+    if started_label and started_label in text:
+        location = re.sub(r"\s+", " ", text.split(started_label, 1)[-1][:220]).strip(" -")
+        location = re.sub(r"Fuseau horaire.*", "", location, flags=re.IGNORECASE).strip(" -")
+
+    return {
+        "title": title[:180],
+        "category": title.split(" - ", 1)[0][:80],
+        "location": location[:220],
+        "message": message[:900],
+        "source": source[:140],
+        "link": url,
+        "started_at": started_dt.isoformat() if started_dt else "",
+        "started_at_label": started_label,
+        "is_today": _fr_alert_is_today(started_dt),
+        "is_exercise": is_exercise,
+    }
+
+
+def _prefecture_fr_alert_fallback(limit: int = 8) -> list[dict[str, Any]]:
+    try:
+        payload = fetch_prefecture_isere_news(limit=30, force_refresh=False)
+    except Exception:
+        return []
+    items = payload.get("items") if isinstance(payload, dict) else []
+    events: list[dict[str, Any]] = []
+    for item in items if isinstance(items, list) else []:
+        blob = f"{item.get('title', '')} {item.get('description', '')}"
+        normalized = _fr_alert_normalize(blob)
+        if "fr alert" not in normalized:
+            continue
+        published_dt = _parse_prefecture_published_date(str(item.get("published_at") or ""))
+        events.append({
+            "title": str(item.get("title") or "FR-Alert Isère")[:180],
+            "category": "Information préfecture",
+            "location": "Isère",
+            "message": str(item.get("description") or "")[:900],
+            "source": "Préfecture de l'Isère",
+            "link": str(item.get("link") or "https://www.isere.gouv.fr"),
+            "started_at": published_dt.isoformat() if published_dt and published_dt != datetime.min else "",
+            "started_at_label": str(item.get("published_at") or ""),
+            "is_today": _fr_alert_is_today(published_dt if published_dt != datetime.min else None),
+            "is_exercise": "exercice" in normalized,
+        })
+        if len(events) >= limit:
+            break
+    return events
+
+
+def _fetch_fr_alert_isere_live(limit: int = 12) -> dict[str, Any]:
+    urls: list[str] = []
+    source_used = ""
+    for source_url in _FR_ALERT_LIST_URLS:
+        try:
+            html = _http_get_text(source_url, timeout=12, headers={"User-Agent": _BROWSER_UA})
+        except Exception:
+            continue
+        source_used = source_url
+        for raw_url in _FR_ALERT_LINK_RE.findall(html):
+            absolute = raw_url if raw_url.startswith("http") else f"https://fr-alert.gouv.fr{raw_url}"
+            if absolute not in urls:
+                urls.append(absolute)
+        if len(urls) >= 80:
+            break
+
+    events: list[dict[str, Any]] = []
+    for url in urls[:80]:
+        try:
+            detail_html = _http_get_text(url, timeout=10, headers={"User-Agent": _BROWSER_UA})
+            event = _fr_alert_detail_to_event(url, detail_html)
+            if event:
+                events.append(event)
+        except Exception:
+            continue
+        if len(events) >= limit:
+            break
+
+    seen = {str(event.get("link") or event.get("title") or "").lower() for event in events}
+    for event in _prefecture_fr_alert_fallback(limit=limit):
+        key = str(event.get("link") or event.get("title") or "").lower()
+        if key not in seen:
+            events.append(event)
+            seen.add(key)
+
+    events.sort(key=lambda event: str(event.get("started_at") or event.get("started_at_label") or ""), reverse=True)
+    today_events = [event for event in events if event.get("is_today")]
+    return {
+        "service": "FR-Alert Isère",
+        "status": "online" if events else "degraded",
+        "source": source_used or "https://fr-alert.gouv.fr",
+        "events": events[:limit],
+        "events_total": len(events),
+        "today_events": today_events,
+        "today_count": len(today_events),
+        "latest": events[0] if events else None,
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+        "note": "Source officielle FR-Alert, complétée par les actualités de la préfecture de l'Isère.",
+    }
+
+
+def fetch_fr_alert_isere(limit: int = 12, force_refresh: bool = False) -> dict[str, Any]:
+    safe_limit = max(1, min(int(limit or 12), 30))
+    return _cached_external_payload(
+        cache=_fr_alert_isere_cache,
+        lock=_fr_alert_isere_cache_lock,
+        ttl_seconds=_FR_ALERT_ISERE_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=lambda: _fetch_fr_alert_isere_live(limit=safe_limit),
     )
 
 
@@ -10403,6 +10586,7 @@ def flush_service_memory_cache(service_key: str) -> dict[str, str]:
     _known: dict[str, tuple[dict[str, Any], Any]] = {
         "france_bleu_isere":   (_france_bleu_cache,          _france_bleu_cache_lock),
         "prefecture_isere":    (_prefecture_cache,            _prefecture_cache_lock),
+        "fr_alert_isere":      (_fr_alert_isere_cache,        _fr_alert_isere_cache_lock),
         "dauphine_isere":      (_dauphine_cache,              _dauphine_cache_lock),
         "meteo_france":        (_meteo_cache,                 _meteo_cache_lock),
         "vigicrues":           (_vigicrues_cache,             _vigicrues_cache_lock),

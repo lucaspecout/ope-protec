@@ -63,6 +63,7 @@ from .services import (
     fetch_meteo_france_isere,
     fetch_itinisere_disruptions,
     fetch_prefecture_isere_news,
+    fetch_fr_alert_isere,
     fetch_dauphine_isere_news,
     fetch_france_bleu_isere_news,
     fetch_placegrenet_news,
@@ -348,6 +349,7 @@ EDIT_ROLES = {"admin", "ope"}
 # rafraîchies plus souvent que les données quasi-statiques.
 SERVICE_REFRESH_INTERVALS: dict[str, int] = {
     "prefecture_isere":        90,   # Actualités urgentes
+    "fr_alert_isere":          90,
     "meteo_france":           120,
     "itinisere":              120,
     "sncf_isere":             120,
@@ -455,7 +457,7 @@ _SVC_LABELS: dict[str, str] = {
     "avalanche_isere": "Avalanches BRA", "feux_foret_isere": "Feux de forêt EFFIS",
     "seismes_isere": "Séismes Isère", "vigicrues_flash_isere": "Vigicrues Flash",
     "vigieau": "Vigieau", "atmo_aura": "Atmo AURA", "copernicus_ems": "GDACS · Catastrophes Europe",
-    "cols_alpins_isere": "Cols alpins", "prefecture_isere": "Préfecture Isère",
+    "cols_alpins_isere": "Cols alpins", "prefecture_isere": "Préfecture Isère", "fr_alert_isere": "FR-Alert Isère",
 }
 
 
@@ -646,6 +648,10 @@ def compute_global_risk_details(
     arcep = risks.get("arcep_isere") if isinstance(risks.get("arcep_isere"), dict) else {}
     outages = _safe_int(arcep.get("outages_total"))
     add_factor("Réseau mobile", min(10, outages * 2), f"{outages} site(s)")
+
+    fr_alert = risks.get("fr_alert_isere") if isinstance(risks.get("fr_alert_isere"), dict) else {}
+    fr_today = _safe_int(fr_alert.get("today_count"), len(fr_alert.get("today_events") or []))
+    add_factor("FR-Alert Isère aujourd'hui", 35 if fr_today > 0 else 0, f"{fr_today} alerte(s)")
 
     vigieau = risks.get("vigieau") if isinstance(risks.get("vigieau"), dict) else {}
     water_total = int(len(vigieau.get("alerts") or []))
@@ -1461,6 +1467,7 @@ def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str])
         "georisques": (lambda: fetch_georisques_isere_summary(force_refresh=refresh, commune_names=pcs_commune_names), {"status": "pending", "details": []}),
         "rnb_isere": (lambda: fetch_rnb_isere_summary(force_refresh=refresh), {"status": "pending", "buildings_total": 0, "sample": []}),
         "prefecture_isere": (lambda: fetch_prefecture_isere_news(force_refresh=refresh), {"status": "pending", "articles": []}),
+        "fr_alert_isere": (lambda: fetch_fr_alert_isere(force_refresh=refresh), {"status": "pending", "events": [], "today_events": [], "today_count": 0}),
         "dauphine_isere": (lambda: fetch_dauphine_isere_news(force_refresh=refresh), {"status": "pending", "articles": []}),
         "france_bleu_isere": (lambda: fetch_france_bleu_isere_news(force_refresh=refresh), {"status": "pending", "items": []}),
         "placegrenet": (lambda: fetch_placegrenet_news(force_refresh=refresh), {"status": "pending", "items": []}),
@@ -1749,6 +1756,15 @@ def operations_bootstrap(
 @app.get("/api/meteo-france/vigilance")
 def interactive_map_meteo_vigilance():
     return fetch_meteo_france_isere()
+
+
+@app.get("/api/fr-alert/isere")
+def api_fr_alert_isere(
+    refresh: bool = False,
+    limit: int = 12,
+    _: User = Depends(require_roles(*READ_ROLES)),
+):
+    return fetch_fr_alert_isere(limit=max(1, min(limit, 30)), force_refresh=refresh)
 
 
 @app.get("/api/vigicrues/geojson")
@@ -2667,6 +2683,7 @@ _SERVICE_LABELS: dict[str, str] = {
     "vinci_autoroutes": "Vinci Autoroutes",
     "cars_region_aura": "Cars Région · AURA",
     "prefecture_isere": "Préfecture Isère",
+    "fr_alert_isere": "FR-Alert Isère",
     "france_bleu_isere": "France Bleu Isère",
     "bison_fute": "Bison Futé",
 }
@@ -2712,6 +2729,9 @@ def _extract_service_level(key: str, data: dict) -> str:
         return worst
     if key == "sncf_isere":
         return "jaune" if len(data.get("alerts") or []) > 0 else "vert"
+
+    if key == "fr_alert_isere":
+        return "rouge" if int(data.get("today_count") or 0) > 0 else "vert"
 
     # Fallback générique
     raw = str(data.get("level") or data.get("alert_level") or "vert").lower()
