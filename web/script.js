@@ -2816,6 +2816,103 @@ function zoneImpactNearestResources(geometry, resources = [], typeSet = new Set(
     .slice(0, max);
 }
 
+function zoneImpactMunicipalityNameFromCode(code) {
+  const safeCode = String(code || '').trim();
+  if (!safeCode) return '';
+  const municipality = (Array.isArray(cachedMunicipalities) ? cachedMunicipalities : [])
+    .find((item) => String(item.insee_code || item.code_insee || item.code || '').trim() === safeCode);
+  return municipality?.name || municipality?.commune || safeCode;
+}
+
+function zoneImpactResourceCity(resource = {}) {
+  const direct = resource.city || resource.commune || resource.municipality || resource.town || resource.locality;
+  if (direct) return String(direct).trim();
+
+  const address = String(resource.address || '').trim();
+  const postcodeMatch = address.match(/\b38\d{3}\s+([^,;]+)/i);
+  if (postcodeMatch?.[1]) return postcodeMatch[1].trim();
+
+  const coords = zoneImpactPointFromItem(resource);
+  if (coords && Array.isArray(isereCommunesGeometryCache)) {
+    const commune = isereCommunesGeometryCache.find((item) => isPointInsideGeometry(coords, item.geometry));
+    if (commune?.code) return zoneImpactMunicipalityNameFromCode(commune.code);
+  }
+  return '';
+}
+
+function zoneImpactResourceDetails(resource = {}) {
+  const city = zoneImpactResourceCity(resource);
+  const address = String(resource.address || '').trim();
+  return [
+    city ? `Ville : ${escapeHtml(city)}` : '',
+    address ? `Adresse : ${escapeHtml(address)}` : '',
+  ].filter(Boolean).join(' · ');
+}
+
+function zoneImpactResourceDetailsWithDistance(resource = {}) {
+  return [
+    zoneImpactResourceDetails(resource),
+    Number.isFinite(resource.distanceMeters) ? formatDistanceMeters(resource.distanceMeters) : '',
+  ].filter(Boolean).join(' · ');
+}
+
+async function computeZoneMunicipalityBreakdown(geometry, municipalitiesInZone = [], inseePopulationMap = new Map()) {
+  if (!geometry || typeof window.turf === 'undefined') {
+    return municipalitiesInZone.map((municipality) => ({
+      code: String(municipality.code_insee || municipality.insee || '').trim(),
+      name: municipality.name || municipality.commune || 'Commune',
+      overlapAreaM2: 0,
+      overlapKm2: 0,
+      estimatedPopulation: 0,
+      sharePercent: 0,
+    }));
+  }
+
+  try {
+    const zoneFeature = window.turf.feature(geometry);
+    const zoneAreaM2 = Number(window.turf.area(zoneFeature) || 0);
+    const communesGeometry = await loadIsereCommunesGeometry();
+    const selectedCodes = new Set(
+      municipalitiesInZone
+        .map((municipality) => String(municipality.code_insee || municipality.insee || '').trim())
+        .filter(Boolean),
+    );
+    const source = selectedCodes.size
+      ? communesGeometry.filter((commune) => selectedCodes.has(commune.code))
+      : communesGeometry;
+
+    return source
+      .map((commune) => {
+        try {
+          const communeFeature = window.turf.feature(commune.geometry);
+          const overlapFeature = window.turf.intersect(zoneFeature, communeFeature);
+          if (!overlapFeature) return null;
+          const overlapAreaM2 = Number(window.turf.area(overlapFeature) || 0);
+          if (!Number.isFinite(overlapAreaM2) || overlapAreaM2 <= 0) return null;
+          const communeAreaM2 = Number(window.turf.area(communeFeature) || 0);
+          const basePopulation = Number(inseePopulationMap.get(commune.code) || commune.population || 0);
+          const estimatedPopulation = communeAreaM2 > 0 && basePopulation > 0
+            ? Math.round(basePopulation * Math.min(1, overlapAreaM2 / communeAreaM2))
+            : 0;
+          return {
+            code: commune.code,
+            name: zoneImpactMunicipalityNameFromCode(commune.code),
+            overlapAreaM2,
+            overlapKm2: overlapAreaM2 / 1_000_000,
+            estimatedPopulation,
+            sharePercent: zoneAreaM2 > 0 ? (overlapAreaM2 / zoneAreaM2) * 100 : 0,
+          };
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.overlapAreaM2 - a.overlapAreaM2);
+  } catch {
+    return [];
+  }
+}
+
 async function computeZoneImpact() {
   const runSeq = ++mapZoneImpactComputationSeq;
   const geometry = selectedZoneGeometry();
@@ -2840,6 +2937,8 @@ async function computeZoneImpact() {
   if (runSeq !== mapZoneImpactComputationSeq) return;
 
   const municipalitiesInZone = zoneImpactDepartmentCommunesInZone(geometry);
+  const municipalityBreakdown = await computeZoneMunicipalityBreakdown(geometry, municipalitiesInZone, inseePopulationMap);
+  if (runSeq !== mapZoneImpactComputationSeq) return;
   const resources = getResourcesForZoneImpact();
   const resourcesInZone = resources.filter((r) => {
     const c = normalizeMapCoordinates(r.lat, r.lon);
@@ -2915,7 +3014,10 @@ async function computeZoneImpact() {
     return `<li style="margin-bottom:.6em"><strong>${icon} ${escapeHtml(title)}</strong><br>${content}</li>`;
   };
 
-  const nameList = (arr, max = 5) => arr.slice(0, max).map((r) => `<em>${_zoneResourceName(r)}</em>`).join(', ')
+  const nameList = (arr, max = 5) => arr.slice(0, max).map((r) => {
+    const details = zoneImpactResourceDetails(r);
+    return `<em>${_zoneResourceName(r)}</em>${details ? ` <span class="muted">(${details})</span>` : ''}`;
+  }).join(', ')
     + (arr.length > max ? ` <span class="muted">+${arr.length - max}</span>` : '');
 
   const parts = [];
@@ -2936,6 +3038,14 @@ async function computeZoneImpact() {
     ${zoneAreaM2 > 0 ? `Surface : <strong>${(zoneAreaM2 / 1_000_000).toFixed(2).replace('.', ',')} km²</strong> · ` : ''}
     ${municipalitiesInZone.length} commune(s) couverte(s)${municipalitiesInZone.length ? ` (${municipalitiesInZone.slice(0, 3).map((m) => escapeHtml(m.name || m.commune || '')).filter(Boolean).join(', ')}${municipalitiesInZone.length > 3 ? '…' : ''})` : ''}
   </li>`);
+
+  if (municipalityBreakdown.length) {
+    parts.push(section('📏', 'Surface dessinée par ville', municipalityBreakdown.slice(0, 8).map((row) => (
+      `<strong>${escapeHtml(row.name || row.code)}</strong> · ${row.overlapKm2.toLocaleString('fr-FR', { maximumFractionDigits: 3 })} km²`
+      + ` · ${row.sharePercent.toLocaleString('fr-FR', { maximumFractionDigits: 1 })}% de la zone`
+      + `${row.estimatedPopulation > 0 ? ` · ~${row.estimatedPopulation.toLocaleString('fr-FR')} hab.` : ''}`
+    ))));
+  }
 
   // 2. Population
   parts.push(`<li style="margin-bottom:.6em;padding:.4em;background:#fff7e6;border-radius:6px">
@@ -2976,7 +3086,8 @@ async function computeZoneImpact() {
     parts.push(section('⚠️', `DANGERS DANS LA ZONE (${dangers.length})`, [
       dangers.map((r) => {
         const meta = RESOURCE_TYPE_META[r.type] || {};
-        return `${meta.icon || '⚠️'} <strong>${_zoneResourceName(r)}</strong> <span class="muted">(${escapeHtml(r.address || '')})</span>`;
+        const details = zoneImpactResourceDetails(r);
+        return `${meta.icon || '⚠️'} <strong>${_zoneResourceName(r)}</strong>${details ? ` <span class="muted">(${details})</span>` : ''}`;
       }).join('</li><li>'),
     ]));
   }
@@ -3044,9 +3155,9 @@ async function computeZoneImpact() {
   if (trafficItems.length) parts.push(section('🚧', 'Trafic impactant la zone', trafficItems));
 
   const nearbyItems = [];
-  if (nearbyFireStations.length) nearbyItems.push(`🚒 Pompiers proches : ${nearbyFireStations.map((r) => `${_zoneResourceName(r)} <span class="muted">(${formatDistanceMeters(r.distanceMeters)})</span>`).join(', ')}`);
-  if (nearbyHospitals.length) nearbyItems.push(`🏥 Soins proches : ${nearbyHospitals.map((r) => `${_zoneResourceName(r)} <span class="muted">(${formatDistanceMeters(r.distanceMeters)})</span>`).join(', ')}`);
-  if (nearbyHostings.length) nearbyItems.push(`🏟️ Accueil proche : ${nearbyHostings.map((r) => `${_zoneResourceName(r)} <span class="muted">(${formatDistanceMeters(r.distanceMeters)})</span>`).join(', ')}`);
+  if (nearbyFireStations.length) nearbyItems.push(`🚒 Pompiers proches : ${nearbyFireStations.map((r) => `${_zoneResourceName(r)} <span class="muted">(${zoneImpactResourceDetailsWithDistance(r)})</span>`).join(', ')}`);
+  if (nearbyHospitals.length) nearbyItems.push(`🏥 Soins proches : ${nearbyHospitals.map((r) => `${_zoneResourceName(r)} <span class="muted">(${zoneImpactResourceDetailsWithDistance(r)})</span>`).join(', ')}`);
+  if (nearbyHostings.length) nearbyItems.push(`🏟️ Accueil proche : ${nearbyHostings.map((r) => `${_zoneResourceName(r)} <span class="muted">(${zoneImpactResourceDetailsWithDistance(r)})</span>`).join(', ')}`);
   parts.push(section('🧭', 'Ressources proches hors zone', nearbyItems,
     'Aucune ressource proche calculable depuis les données chargées.'));
 
@@ -3063,7 +3174,7 @@ async function computeZoneImpact() {
     scale, geoLabel, geoCtx, zoneAreaM2, population, popSource,
     buildingCount,
     childrenEstimate, ehpadResidents,
-    municipalitiesInZone, resourcesInZone,
+    municipalitiesInZone, municipalityBreakdown, resourcesInZone,
     rnbBuildings,
     schools, ehpads, hospitals, fireStations, police, hostings, dangers, transports,
     allDistricts, streetInsights,
@@ -3102,9 +3213,10 @@ function exportZoneImpactReport() {
     if (!arr.length) return `<p class="empty">${icon} <em>Aucun(e) détecté(e) dans la zone.</em></p>`;
     return `<h3>${icon} ${toText(title)} (${arr.length})</h3>
     <table>
-      <thead><tr><th>Nom</th><th>Adresse</th><th>Priorité</th></tr></thead>
+      <thead><tr><th>Nom</th><th>Ville</th><th>Adresse</th><th>Priorité</th></tr></thead>
       <tbody>${arr.map((r) => `<tr>
         <td>${toText(r.name || 'Sans nom')}</td>
+        <td>${toText(zoneImpactResourceCity(r) || '–')}</td>
         <td>${toText(r.address || '–')}</td>
         <td class="tag-${r.priority || 'standard'}">${priorityText(r.priority)}</td>
       </tr>`).join('')}</tbody>
@@ -3187,6 +3299,13 @@ function exportZoneImpactReport() {
   </tbody>
 </table>
 
+${simpleTable('Surface dessinée par ville', '📏', d.municipalityBreakdown || [], [
+  { label: 'Ville', value: (row) => row.name || row.code },
+  { label: 'Surface concernée', value: (row) => `${Number(row.overlapKm2 || 0).toLocaleString('fr-FR', { maximumFractionDigits: 3 })} km²` },
+  { label: 'Part de la zone', value: (row) => `${Number(row.sharePercent || 0).toLocaleString('fr-FR', { maximumFractionDigits: 1 })}%` },
+  { label: 'Population estimée', value: (row) => row.estimatedPopulation > 0 ? `~${Number(row.estimatedPopulation).toLocaleString('fr-FR')} hab.` : '–' },
+])}
+
 <h2>2. Population exposée</h2>
 <div class="pop-block">
   <div class="pop-num">${d.population > 0 ? d.population.toLocaleString('fr-FR') : '?'} habitants</div>
@@ -3239,10 +3358,11 @@ ${d.dangers.length ? `<div class="danger-block">
   <strong>⚠️ ${d.dangers.length} site(s) dangereux détecté(s) — plan d'évacuation à adapter</strong>
 </div>
 <table>
-  <thead><tr><th>Nom</th><th>Type</th><th>Adresse</th></tr></thead>
+  <thead><tr><th>Nom</th><th>Type</th><th>Ville</th><th>Adresse</th></tr></thead>
   <tbody>${d.dangers.map((r) => `<tr>
     <td>${toText(r.name || 'Sans nom')}</td>
     <td>${toText((RESOURCE_TYPE_META[r.type] || {}).label || r.type)}</td>
+    <td>${toText(zoneImpactResourceCity(r) || '–')}</td>
     <td>${toText(r.address || '–')}</td>
   </tr>`).join('')}</tbody>
 </table>` : '<p class="empty">⚠️ Aucun site dangereux détecté dans la zone.</p>'}
@@ -3259,16 +3379,19 @@ ${resourceTable('Nœuds de transport', '🚆', d.transports)}
 <h2>7. Ressources proches hors zone</h2>
 ${simpleTable('Pompiers proches', '🚒', d.nearbyFireStations || [], [
   { label: 'Nom', value: (row) => row.name },
+  { label: 'Ville', value: (row) => zoneImpactResourceCity(row) },
   { label: 'Adresse', value: (row) => row.address },
   { label: 'Distance depuis la zone', value: (row) => formatDistanceMeters(row.distanceMeters) },
 ])}
 ${simpleTable('Soins proches', '🏥', d.nearbyHospitals || [], [
   { label: 'Nom', value: (row) => row.name },
+  { label: 'Ville', value: (row) => zoneImpactResourceCity(row) },
   { label: 'Adresse', value: (row) => row.address },
   { label: 'Distance depuis la zone', value: (row) => formatDistanceMeters(row.distanceMeters) },
 ])}
 ${simpleTable('Accueil proche', '🏟️', d.nearbyHostings || [], [
   { label: 'Nom', value: (row) => row.name },
+  { label: 'Ville', value: (row) => zoneImpactResourceCity(row) },
   { label: 'Adresse', value: (row) => row.address },
   { label: 'Distance depuis la zone', value: (row) => formatDistanceMeters(row.distanceMeters) },
 ])}
