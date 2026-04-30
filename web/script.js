@@ -59,6 +59,7 @@ const FLUX_SERVICES = [
   { key: 'mreseau',                 label: 'M Réseau · Grenoble',       icon: '🚊', category: 'Transport',     interval: 120,   metric: (d) => d.normal_service ? 'Trafic normal' : `${d.disruptions_total ?? 0} perturbation(s)` },
   { key: 'cars_region_aura',       label: 'Cars Région · AURA',        icon: '🚐', category: 'Transport',     interval: 300,   metric: (d) => `${d.disruptions_total ?? 0} perturbation(s) cars région` },
   { key: 'prefecture_isere',       label: 'Préfecture Isère',          icon: '🏛️', category: 'Actualités',   interval: 90,    metric: (d) => `${(d.items || []).length} actualité(s)` },
+  { key: 'fr_alert_isere',         label: 'FR-Alert Isère',            icon: 'FR', category: 'Actualités',   interval: 90,    metric: (d) => `${d.today_count ?? 0} aujourd'hui - ${(d.events || []).length} alerte(s)` },
   { key: 'dauphine_isere',         label: 'Dauphiné Libéré',           icon: '📰', category: 'Actualités',   interval: 180,   metric: (d) => `${(d.items || []).length} article(s)` },
   { key: 'france_bleu_isere',      label: 'France Bleu Isère',         icon: '📻', category: 'Actualités',   interval: 180,   metric: (d) => `${(d.items || []).length} article(s)` },
   { key: 'placegrenet',            label: "Place Gre'net",             icon: '🗞️', category: 'Actualités',   interval: 180,   metric: (d) => `${(d.items || []).length} article(s)` },
@@ -74,14 +75,6 @@ const FLUX_SERVICES = [
   { key: 'isere_opendata',         label: 'Isère OpenData · Résilience', icon: '📊', category: 'Données',    interval: 1800,  metric: (d) => `${d.totals?.schools ?? 0} écoles · ${d.totals?.health_centers ?? 0} santé · ${d.totals?.food_aid_points ?? 0} aide alim.` },
   { key: 'finess_isere',           label: 'FINESS · Établissements santé', icon: '🏥', category: 'Santé',    interval: 21600, metric: (d) => `${d.resources_total ?? 0} établissement(s)` },
 ];
-FLUX_SERVICES.splice(FLUX_SERVICES.findIndex((svc) => svc.key === 'dauphine_isere'), 0, {
-  key: 'fr_alert_isere',
-  label: 'FR-Alert Isère',
-  icon: 'FR',
-  category: 'Actualités',
-  interval: 90,
-  metric: (d) => `${d.today_count ?? 0} aujourd'hui - ${(d.events || []).length} alerte(s)`,
-});
 const AUTOROUTES_ISERE_ROADS = Object.freeze(['A41', 'A43', 'A48', 'A49', 'A51', 'A480']);
 const AUTOROUTES_ISERE_ROAD_SET = new Set(AUTOROUTES_ISERE_ROADS);
 const AUTOROUTES_ISERE_ROAD_REGEX = /\bA\s?(480|49|48|51|43|41)\b/i;
