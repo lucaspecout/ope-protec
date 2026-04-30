@@ -17,7 +17,7 @@
   </div>
   <main class="shell">
     <section id="login-view" class="auth-wrap">
-      <form id="login-form" class="panel auth-card" method="post" action="/auth/login" autocomplete="off" onsubmit="event.preventDefault(); return false;">
+      <form id="login-form" class="panel auth-card" method="post" action="/auth/login" autocomplete="off">
         <div class="login-logo">
           <div class="login-logo__icon" aria-hidden="true"></div>
           <div class="login-logo__text">
@@ -38,7 +38,7 @@
         </details>
       </form>
 
-      <form id="password-form" class="panel auth-card hidden" hidden method="post" action="/auth/change-password" autocomplete="off" onsubmit="event.preventDefault(); return false;">
+      <form id="password-form" class="panel auth-card hidden" hidden method="post" action="/auth/change-password" autocomplete="off">
         <h2>Nouveau mot de passe</h2>
         <label>Nouveau mot de passe<input name="new_password" type="password" minlength="8" required /></label>
         <button type="submit">Valider</button>
