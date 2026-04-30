@@ -92,7 +92,6 @@ from .services import (
     fetch_feux_foret_isere,
     fetch_cols_alpins_isere,
     fetch_copernicus_ems_france,
-    fetch_fr_alert_isere,
     generate_pdf_report,
     resolve_commune_insee_code,
     vigicrues_geojson_from_stations,
@@ -349,7 +348,6 @@ EDIT_ROLES = {"admin", "ope"}
 # rafraîchies plus souvent que les données quasi-statiques.
 SERVICE_REFRESH_INTERVALS: dict[str, int] = {
     "prefecture_isere":        90,   # Actualités urgentes
-    "fr_alert_isere":          90,
     "meteo_france":           120,
     "itinisere":              120,
     "sncf_isere":             120,
@@ -648,10 +646,6 @@ def compute_global_risk_details(
     arcep = risks.get("arcep_isere") if isinstance(risks.get("arcep_isere"), dict) else {}
     outages = _safe_int(arcep.get("outages_total"))
     add_factor("Réseau mobile", min(10, outages * 2), f"{outages} site(s)")
-
-    fr_alert = risks.get("fr_alert_isere") if isinstance(risks.get("fr_alert_isere"), dict) else {}
-    fr_today = _safe_int(fr_alert.get("today_count"), len(fr_alert.get("today_events") or []))
-    add_factor("FR-Alert Isère aujourd'hui", 35 if fr_today > 0 else 0, f"{fr_today} alerte(s)")
 
     vigieau = risks.get("vigieau") if isinstance(risks.get("vigieau"), dict) else {}
     water_total = int(len(vigieau.get("alerts") or []))
@@ -1467,7 +1461,6 @@ def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str])
         "georisques": (lambda: fetch_georisques_isere_summary(force_refresh=refresh, commune_names=pcs_commune_names), {"status": "pending", "details": []}),
         "rnb_isere": (lambda: fetch_rnb_isere_summary(force_refresh=refresh), {"status": "pending", "buildings_total": 0, "sample": []}),
         "prefecture_isere": (lambda: fetch_prefecture_isere_news(force_refresh=refresh), {"status": "pending", "articles": []}),
-        "fr_alert_isere": (lambda: fetch_fr_alert_isere(force_refresh=refresh), {"status": "pending", "events": [], "today_events": [], "today_count": 0}),
         "dauphine_isere": (lambda: fetch_dauphine_isere_news(force_refresh=refresh), {"status": "pending", "articles": []}),
         "france_bleu_isere": (lambda: fetch_france_bleu_isere_news(force_refresh=refresh), {"status": "pending", "items": []}),
         "placegrenet": (lambda: fetch_placegrenet_news(force_refresh=refresh), {"status": "pending", "items": []}),
@@ -1756,14 +1749,6 @@ def operations_bootstrap(
 @app.get("/api/meteo-france/vigilance")
 def interactive_map_meteo_vigilance():
     return fetch_meteo_france_isere()
-
-
-@app.get("/api/fr-alert/isere")
-def api_fr_alert_isere(
-    refresh: bool = False,
-    _: User = Depends(require_roles(*READ_ROLES)),
-):
-    return fetch_fr_alert_isere(force_refresh=refresh)
 
 
 @app.get("/api/vigicrues/geojson")

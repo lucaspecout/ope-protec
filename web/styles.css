@@ -1268,23 +1268,6 @@ details[open] > .filter-group__title::after { transform: rotate(90deg); }
 .map-checks-list .ko { color: var(--danger); font-weight: 700; }
 
 /* ── Données opérationnelles (bas de page) ── */
-.fr-alert-home-banner {
-  display: grid;
-  grid-template-columns: minmax(220px, .7fr) minmax(0, 1fr);
-  gap: .8rem;
-  align-items: start;
-  margin-bottom: .8rem;
-  padding: .8rem .95rem;
-  border: 2px solid #c92a2a;
-  border-radius: 8px;
-  background: #fff5f5;
-}
-.fr-alert-home-banner h3 { margin: .15rem 0 0; color: #9b1c1c; }
-.fr-alert-home-banner .tag { color: #9b1c1c; }
-.fr-alert-home-banner .list { margin: 0; }
-@media (max-width: 760px) {
-  .fr-alert-home-banner { grid-template-columns: 1fr; }
-}
 .map-layout { display: grid; gap: .8rem; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); margin-top: .8rem; }
 .map-data-col { display: flex; flex-direction: column; gap: .45rem; }
 
