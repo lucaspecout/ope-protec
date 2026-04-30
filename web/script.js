@@ -7533,22 +7533,68 @@ function drawRoutePolyline(payload = {}) {
 
 function renderRouteEstimate(payload = {}) {
   const trafficAware = Boolean(payload.traffic_aware);
+  const trafficMode = String(payload.traffic_mode || '');
   const distance = formatDistanceMeters(payload.distance_meters);
   const duration = formatDurationSeconds(payload.duration_seconds);
   const delay = Number(payload.traffic_delay_seconds || 0);
-  const delayText = trafficAware
-    ? `Retard trafic: ${delay > 0 ? formatDurationSeconds(delay) : 'aucun'}`
-    : 'Trafic live non configure';
+  const nearbyEvents = Array.isArray(payload.traffic_events_nearby) ? payload.traffic_events_nearby : [];
+  let delayText = 'Trafic live non disponible sans source externe';
+  if (trafficMode === 'live_speed') {
+    delayText = `Retard trafic live: ${delay > 0 ? formatDurationSeconds(delay) : 'aucun'}`;
+  } else if (trafficMode === 'open_incidents') {
+    delayText = `${nearbyEvents.length} perturbation(s) proche(s) - ajustement ${delay > 0 ? formatDurationSeconds(delay) : '0 min'}`;
+  } else if (trafficAware) {
+    delayText = `Ajustement trafic: ${delay > 0 ? formatDurationSeconds(delay) : 'aucun'}`;
+  }
   const updatedAt = payload.updated_at ? new Date(payload.updated_at) : null;
   const updatedLabel = updatedAt && !Number.isNaN(updatedAt.getTime())
     ? updatedAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     : '--:--';
   const source = payload.source || (trafficAware ? 'TomTom' : 'OSRM');
+  const altText = payload.alternatives_checked
+    ? `<br><span class="muted">Alternative ${escapeHtml(String(payload.selected_alternative || 1))}/${escapeHtml(String(payload.alternatives_checked))} retenue</span>`
+    : '';
+  const eventText = nearbyEvents.length
+    ? `<br><span class="muted">${nearbyEvents.slice(0, 2).map((event) => escapeHtml(event.title || event.category || 'Perturbation')).join(' / ')}</span>`
+    : '';
   setRouteSummary(`
     <strong>${escapeHtml(duration)}</strong> - ${escapeHtml(distance)}<br>
     <span>${escapeHtml(delayText)}</span><br>
-    <span class="muted">Source: ${escapeHtml(source)} - MAJ ${escapeHtml(updatedLabel)} - auto 60 s</span>
+    <span class="muted">Source: ${escapeHtml(source)} - MAJ ${escapeHtml(updatedLabel)} - auto 60 s</span>${altText}${eventText}
   `);
+}
+
+async function fetchClientOsrmRoute(start, end) {
+  const coords = `${encodeURIComponent(start.lon)},${encodeURIComponent(start.lat)};${encodeURIComponent(end.lon)},${encodeURIComponent(end.lat)}`;
+  const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson&alternatives=true&steps=false`;
+  const response = await fetchWithTimeout(url, {}, API_SLOW_ENDPOINT_TIMEOUT_MS);
+  if (!response.ok) throw createApiError(`OSRM direct indisponible (${response.status})`, response.status);
+  const payload = await response.json();
+  const routes = Array.isArray(payload?.routes) ? payload.routes : [];
+  if (!routes.length) throw createApiError('Aucun trajet OSRM direct trouve');
+  const best = routes
+    .slice(0, 4)
+    .map((route, index) => ({ route, index, duration: Number(route.duration || 0) }))
+    .sort((a, b) => a.duration - b.duration)[0];
+  const coordinates = best.route?.geometry?.coordinates || [];
+  const polyline = coordinates
+    .map((point) => [Number(point[1]), Number(point[0])])
+    .filter((point) => Number.isFinite(point[0]) && Number.isFinite(point[1]));
+  return {
+    status: 'online',
+    provider: 'osrm_browser',
+    traffic_aware: false,
+    traffic_mode: 'none',
+    source: 'OSRM public routing direct navigateur',
+    distance_meters: Number(best.route.distance || 0),
+    duration_seconds: Number(best.route.duration || 0),
+    duration_no_traffic_seconds: Number(best.route.duration || 0),
+    traffic_delay_seconds: 0,
+    polyline,
+    alternatives_checked: Math.min(routes.length, 4),
+    selected_alternative: best.index + 1,
+    updated_at: new Date().toISOString(),
+  };
 }
 
 async function refreshMapRoute(showFeedback = true) {
@@ -7580,14 +7626,30 @@ async function refreshMapRoute(showFeedback = true) {
     renderRouteEstimate(payload);
     startRouteRefreshTimer();
     if (showFeedback) {
-      setMapFeedback(payload.traffic_aware ? 'Trajet calcule avec trafic live.' : 'Trajet calcule sans trafic live: configurez TOMTOM_API_KEY pour le temps circulation.');
+      const mode = String(payload.traffic_mode || '');
+      if (mode === 'live_speed') {
+        setMapFeedback('Trajet calcule avec trafic live.');
+      } else if (mode === 'open_incidents') {
+        setMapFeedback('Trajet calcule avec itineraire routier et perturbations temps reel sans cle API.');
+      } else {
+        setMapFeedback('Trajet calcule en mode secours sans trafic live.');
+      }
     }
   } catch (error) {
     if (requestSeq !== mapRouteRequestSeq) return;
     if (error?.name === 'AbortError') return;
-    drawRoutePolyline({});
-    setRouteSummary(`Trajet indisponible: ${escapeHtml(sanitizeErrorMessage(error.message))}`, true);
-    if (showFeedback) setMapFeedback(`Trajet indisponible: ${sanitizeErrorMessage(error.message)}`, true);
+    try {
+      const directPayload = await fetchClientOsrmRoute(start, end);
+      if (requestSeq !== mapRouteRequestSeq || mapRoutePoints.length < 2) return;
+      drawRoutePolyline(directPayload);
+      renderRouteEstimate(directPayload);
+      startRouteRefreshTimer();
+      if (showFeedback) setMapFeedback('Trajet calcule en direct via OSRM public, sans trafic live.');
+    } catch (directError) {
+      drawRoutePolyline({});
+      setRouteSummary(`Trajet indisponible: ${escapeHtml(sanitizeErrorMessage(directError.message || error.message))}`, true);
+      if (showFeedback) setMapFeedback(`Trajet indisponible: ${sanitizeErrorMessage(directError.message || error.message)}`, true);
+    }
   } finally {
     if (requestSeq === mapRouteRequestSeq) mapRouteAbortController = null;
     updateRouteButtons();

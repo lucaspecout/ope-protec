@@ -11288,6 +11288,7 @@ def _tomtom_route_estimate(start_lat: float, start_lon: float, end_lat: float, e
         "status": "online",
         "provider": "tomtom",
         "traffic_aware": True,
+        "traffic_mode": "live_speed",
         "source": "TomTom Routing API",
         "distance_meters": int(summary.get("lengthInMeters") or 0),
         "duration_seconds": int(summary.get("travelTimeInSeconds") or 0),
@@ -11298,33 +11299,154 @@ def _tomtom_route_estimate(start_lat: float, start_lon: float, end_lat: float, e
     }
 
 
+def _route_incident_weight(event: dict[str, Any]) -> int:
+    text = _normalize_col_token(
+        f"{event.get('severity', '')} {event.get('level', '')} {event.get('category', '')} "
+        f"{event.get('type', '')} {event.get('title', '')} {event.get('description', '')}"
+    )
+    if any(token in text for token in ("fermeture", "ferme", "route coupee", "route barree", "circulation interrompue", "rouge")):
+        return 2400
+    if any(token in text for token in ("accident", "bouchon", "bloque", "orange", "travaux", "chantier")):
+        return 900
+    if any(token in text for token in ("ralentissement", "deviation", "alternat", "jaune", "reduction")):
+        return 420
+    return 180
+
+
+def _traffic_events_for_routing() -> list[dict[str, Any]]:
+    sources: list[tuple[str, Callable[[], dict[str, Any]]]] = [
+        ("Itinisere", lambda: fetch_itinisere_disruptions(limit=120, force_refresh=False)),
+        ("Bison Fute", lambda: fetch_bison_fute_live_events(limit=120, force_refresh=False)),
+        ("APRR/AREA", lambda: fetch_aprr_isere_traffic(force_refresh=False)),
+        ("Vinci Autoroutes", lambda: fetch_vinci_autoroutes_isere(force_refresh=False)),
+    ]
+    events: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, int, int]] = set()
+    for source_name, fetcher in sources:
+        try:
+            payload = fetcher()
+        except Exception:
+            continue
+        source_events = payload.get("events") if isinstance(payload, dict) else []
+        if not isinstance(source_events, list):
+            continue
+        for event in source_events:
+            if not isinstance(event, dict):
+                continue
+            try:
+                lat = float(event.get("lat"))
+                lon = float(event.get("lon"))
+            except (TypeError, ValueError):
+                continue
+            if not _is_coord_in_isere_pr_bbox(lat, lon):
+                continue
+            title = str(event.get("title") or event.get("description") or "Evenement trafic")[:140]
+            key = (source_name, title[:70].lower(), round(lat * 1000), round(lon * 1000))
+            if key in seen:
+                continue
+            seen.add(key)
+            weight = _route_incident_weight(event)
+            events.append({
+                "source": source_name,
+                "title": title,
+                "category": str(event.get("category") or event.get("type") or "trafic")[:60],
+                "severity": str(event.get("severity") or event.get("level") or "")[:20],
+                "lat": lat,
+                "lon": lon,
+                "penalty_seconds": weight,
+            })
+    return events[:80]
+
+
+def _route_point_distance_meters(route_points: list[list[float]], lat: float, lon: float) -> float:
+    if not route_points:
+        return float("inf")
+    step = max(1, len(route_points) // 240)
+    distances = [
+        _haversine_distance_meters(float(point[0]), float(point[1]), lat, lon)
+        for point in route_points[::step]
+        if isinstance(point, list) and len(point) >= 2
+    ]
+    return min(distances) if distances else float("inf")
+
+
+def _traffic_penalty_for_route(route_points: list[list[float]], events: list[dict[str, Any]]) -> tuple[int, list[dict[str, Any]]]:
+    nearby: list[dict[str, Any]] = []
+    total_penalty = 0
+    for event in events:
+        distance_m = _route_point_distance_meters(route_points, float(event["lat"]), float(event["lon"]))
+        if distance_m > 700:
+            continue
+        proximity_factor = 1.0 if distance_m <= 250 else 0.65
+        penalty = int(float(event.get("penalty_seconds") or 0) * proximity_factor)
+        total_penalty += penalty
+        nearby.append({
+            "source": event.get("source"),
+            "title": event.get("title"),
+            "category": event.get("category"),
+            "severity": event.get("severity"),
+            "lat": event.get("lat"),
+            "lon": event.get("lon"),
+            "distance_meters": int(distance_m),
+            "penalty_seconds": penalty,
+        })
+    nearby.sort(key=lambda item: (-int(item.get("penalty_seconds") or 0), int(item.get("distance_meters") or 999999)))
+    return total_penalty, nearby[:8]
+
+
 def _osrm_route_estimate(start_lat: float, start_lon: float, end_lat: float, end_lon: float) -> dict[str, Any]:
     coords = f"{start_lon},{start_lat};{end_lon},{end_lat}"
     query = urlencode({
         "overview": "full",
         "geometries": "geojson",
-        "alternatives": "false",
+        "alternatives": "true",
         "steps": "false",
     })
     payload = _http_get_json(f"https://router.project-osrm.org/route/v1/driving/{coords}?{query}", timeout=12)
     routes = payload.get("routes") if isinstance(payload, dict) else []
     if not routes:
         raise RuntimeError("Aucun trajet OSRM trouve")
-    route = routes[0]
-    coordinates = ((route.get("geometry") or {}).get("coordinates") or [])
-    points = [[float(lat), float(lon)] for lon, lat in coordinates if lon is not None and lat is not None]
-    duration_seconds = int(route.get("duration") or 0)
+
+    traffic_events = _traffic_events_for_routing()
+    scored_routes: list[dict[str, Any]] = []
+    for index, route in enumerate(routes[:4]):
+        coordinates = ((route.get("geometry") or {}).get("coordinates") or [])
+        points = [[float(lat), float(lon)] for lon, lat in coordinates if lon is not None and lat is not None]
+        duration_seconds = int(route.get("duration") or 0)
+        penalty_seconds, nearby = _traffic_penalty_for_route(points, traffic_events)
+        scored_routes.append({
+            "index": index,
+            "route": route,
+            "points": points,
+            "duration_seconds": duration_seconds,
+            "penalty_seconds": penalty_seconds,
+            "nearby": nearby,
+            "score_seconds": duration_seconds + penalty_seconds,
+        })
+    best = min(scored_routes, key=lambda item: item["score_seconds"])
+    route = best["route"]
+    points = best["points"]
+    duration_seconds = int(best["duration_seconds"])
+    penalty_seconds = int(best["penalty_seconds"])
     return {
-        "status": "degraded",
+        "status": "online",
         "provider": "osrm",
-        "traffic_aware": False,
-        "source": "OSRM public routing",
+        "traffic_aware": bool(traffic_events),
+        "traffic_mode": "open_incidents",
+        "source": "OSRM + flux ouverts Itinisere/Bison/APRR/Vinci",
         "distance_meters": int(route.get("distance") or 0),
-        "duration_seconds": duration_seconds,
+        "duration_seconds": duration_seconds + penalty_seconds,
         "duration_no_traffic_seconds": duration_seconds,
-        "traffic_delay_seconds": 0,
+        "traffic_delay_seconds": penalty_seconds,
+        "traffic_events_nearby": best["nearby"],
+        "traffic_events_checked": len(traffic_events),
+        "alternatives_checked": len(scored_routes),
+        "selected_alternative": best["index"] + 1,
         "polyline": points,
-        "note": "Estimation routiere sans trafic live. Configurez TOMTOM_API_KEY pour une duree tenant compte de la circulation.",
+        "note": (
+            "Calcul sans cle: meilleur trajet OSRM ajuste avec les incidents/travaux/fermetures "
+            "issus de flux ouverts. Ce n'est pas une mesure de congestion vitesse par vitesse."
+        ),
         "updated_at": datetime.utcnow().isoformat() + "Z",
     }
 
@@ -11357,6 +11479,7 @@ def _local_route_estimate(
         "status": "degraded",
         "provider": "local",
         "traffic_aware": False,
+        "traffic_mode": "none",
         "source": "Estimation locale de secours",
         "distance_meters": distance_meters,
         "duration_seconds": duration_seconds,
