@@ -2663,6 +2663,159 @@ function _zoneResourceName(r) {
   return escapeHtml(r.name || 'Sans nom');
 }
 
+function zoneImpactCenter(geometry) {
+  const coords = zoneImpactGeometryCoordinates(geometry);
+  const valid = coords
+    .map((coord) => ({ lon: Number(coord?.[0]), lat: Number(coord?.[1]) }))
+    .filter((coord) => Number.isFinite(coord.lat) && Number.isFinite(coord.lon));
+  if (!valid.length) return null;
+  return {
+    lat: valid.reduce((sum, coord) => sum + coord.lat, 0) / valid.length,
+    lon: valid.reduce((sum, coord) => sum + coord.lon, 0) / valid.length,
+  };
+}
+
+function zoneImpactDistanceMeters(from, to) {
+  const a = normalizeMapCoordinates(from?.lat, from?.lon);
+  const b = normalizeMapCoordinates(to?.lat, to?.lon);
+  if (!a || !b) return Number.POSITIVE_INFINITY;
+  if (leafletMap?.distance) return leafletMap.distance([a.lat, a.lon], [b.lat, b.lon]);
+  const rad = Math.PI / 180;
+  const earth = 6371000;
+  const dLat = (b.lat - a.lat) * rad;
+  const dLon = (b.lon - a.lon) * rad;
+  const lat1 = a.lat * rad;
+  const lat2 = b.lat * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return earth * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+function zoneImpactPointFromItem(item = {}) {
+  return normalizeMapCoordinates(item.lat, item.lon)
+    || normalizeMapCoordinates(item.latitude, item.longitude)
+    || normalizeMapCoordinates(item.y, item.x);
+}
+
+function zoneImpactOperationalEventsInZone(geometry, municipalitiesInZone = []) {
+  const municipalityIds = new Set(
+    municipalitiesInZone
+      .map((m) => String(m.id || m.municipality_id || m.code_insee || m.insee || '').trim())
+      .filter(Boolean),
+  );
+  const municipalityNames = new Set(
+    municipalitiesInZone
+      .map((m) => String(m.name || m.commune || '').trim().toLowerCase())
+      .filter(Boolean),
+  );
+  const logs = Array.isArray(cachedLogs) ? cachedLogs : [];
+  return sortOperationalEvents(cachedEvents)
+    .map((event) => {
+      const point = zoneImpactPointFromItem(event);
+      const inGeometry = point ? isPointInsideGeometry(point, geometry) : false;
+      const municipalityMatch = event.municipality_id && municipalityIds.has(String(event.municipality_id));
+      const municipalityNameMatch = event.municipality_id
+        ? municipalityNames.has(String(getMunicipalityName(event.municipality_id) || '').trim().toLowerCase())
+        : false;
+      if (!inGeometry && !municipalityMatch && !municipalityNameMatch) return null;
+      const eventLogs = logs.filter((log) => String(log.event_id || '') === String(event.id || ''));
+      const worstLevel = eventLogs.reduce((level, log) => (
+        riskRank(log.danger_level) > riskRank(level) ? normalizeLevel(log.danger_level) : level
+      ), normalizeLevel(event.level || event.severity || 'vert'));
+      const activeLogCount = eventLogs.filter((log) => String(log.status || '').toLowerCase() !== 'clos').length;
+      return { ...event, coords: point, logs: eventLogs, worstLevel, activeLogCount };
+    })
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
+function zoneImpactTrafficIncidentsInZone(geometry) {
+  const source = [
+    ...(Array.isArray(cachedItinisereEvents) ? cachedItinisereEvents : []),
+    ...(Array.isArray(cachedBisonLiveEvents) ? cachedBisonLiveEvents : []),
+  ];
+  return source
+    .map((event) => {
+      const point = zoneImpactPointFromItem(event);
+      if (!point || !isPointInsideGeometry(point, geometry)) return null;
+      return { ...event, coords: point };
+    })
+    .filter(Boolean)
+    .slice(0, 10);
+}
+
+function zoneImpactCustomPointsInZone(geometry) {
+  return (Array.isArray(mapPoints) ? mapPoints : [])
+    .map((point) => ({ ...point, coords: zoneImpactPointFromItem(point) }))
+    .filter((point) => point.coords && isPointInsideGeometry(point.coords, geometry))
+    .slice(0, 30);
+}
+
+function zoneImpactVigicruesStationsInZone(geometry) {
+  const externalStations = Array.isArray(cachedExternalRisksSnapshot?.vigicrues?.stations)
+    ? cachedExternalRisksSnapshot.vigicrues.stations
+    : [];
+  const source = [
+    ...(Array.isArray(cachedVigicruesPayload?.stations) ? cachedVigicruesPayload.stations : []),
+    ...externalStations,
+  ];
+  const seen = new Set();
+  return source
+    .map((station) => {
+      const point = zoneImpactPointFromItem(station);
+      const key = String(station.code || station.station || station.id || `${point?.lat},${point?.lon}`).trim();
+      if (!point || seen.has(key) || !isPointInsideGeometry(point, geometry)) return null;
+      seen.add(key);
+      return { ...station, coords: point, statusLevel: stationStatusLevel(station) };
+    })
+    .filter(Boolean)
+    .sort((a, b) => riskRank(b.statusLevel) - riskRank(a.statusLevel))
+    .slice(0, 12);
+}
+
+function zoneImpactExternalRiskSummary(municipalitiesInZone = []) {
+  const external = cachedExternalRisksSnapshot || {};
+  const meteoLevel = normalizeLevel(external.meteo_france?.level || external.meteo_france?.vigilance || 'vert');
+  const vigicruesLevel = normalizeLevel(external.vigicrues?.water_alert_level || 'vert');
+  const apicAlerts = Number(external.apic_isere?.alerts_total ?? (external.apic_isere?.alerts || []).length ?? 0);
+  const vigicruesFlashAlerts = Number(external.vigicrues_flash_isere?.alerts_total ?? (external.vigicrues_flash_isere?.alerts || []).length ?? 0);
+  const atmoToday = external.atmo_aura?.today || {};
+  const communes = municipalitiesInZone
+    .map((commune) => {
+      const score = mapZoneImpactRiskScoreFromCommune(commune);
+      return {
+        ...commune,
+        score,
+        exposureLabel: mapZoneImpactExposureLevel(score),
+        dangerLabel: georisquesDangerLevel(commune).label,
+      };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 6);
+  return {
+    meteoLevel,
+    vigicruesLevel,
+    apicAlerts,
+    vigicruesFlashAlerts,
+    atmoLabel: atmoToday.label || atmoToday.index || atmoToday.level || 'non disponible',
+    communes,
+  };
+}
+
+function zoneImpactNearestResources(geometry, resources = [], typeSet = new Set(), max = 3) {
+  const center = zoneImpactCenter(geometry);
+  if (!center) return [];
+  return resources
+    .filter((resource) => typeSet.has(resource.type))
+    .map((resource) => {
+      const coords = zoneImpactPointFromItem(resource);
+      if (!coords || isPointInsideGeometry(coords, geometry)) return null;
+      return { ...resource, coords, distanceMeters: zoneImpactDistanceMeters(center, coords) };
+    })
+    .filter((resource) => resource && Number.isFinite(resource.distanceMeters))
+    .sort((a, b) => a.distanceMeters - b.distanceMeters)
+    .slice(0, max);
+}
+
 async function computeZoneImpact() {
   const runSeq = ++mapZoneImpactComputationSeq;
   const geometry = selectedZoneGeometry();
@@ -2734,6 +2887,14 @@ async function computeZoneImpact() {
   const hostings      = resourcesInZone.filter((r) => HOSTING_RESOURCE_TYPES.has(r.type));
   const dangers       = resourcesInZone.filter((r) => RISK_RESOURCE_TYPES.has(r.type));
   const transports    = resourcesInZone.filter((r) => TRANSPORT_RESOURCE_TYPES.has(r.type));
+  const operationalEventsInZone = zoneImpactOperationalEventsInZone(geometry, municipalitiesInZone);
+  const trafficIncidentsInZone = zoneImpactTrafficIncidentsInZone(geometry);
+  const customPointsInZone = zoneImpactCustomPointsInZone(geometry);
+  const vigicruesStationsInZone = zoneImpactVigicruesStationsInZone(geometry);
+  const nearbyFireStations = zoneImpactNearestResources(geometry, resources, FIRE_RESOURCE_TYPES, 3);
+  const nearbyHospitals = zoneImpactNearestResources(geometry, resources, HEALTH_URGENT_CARE_TYPES, 3);
+  const nearbyHostings = zoneImpactNearestResources(geometry, resources, HOSTING_RESOURCE_TYPES, 3);
+  const riskSummary = zoneImpactExternalRiskSummary(municipalitiesInZone);
 
   // Estimation populations vulnérables (ratios standards)
   const childrenEstimate = schools.length > 0 ? Math.round(population * 0.12) : 0;
@@ -2758,6 +2919,16 @@ async function computeZoneImpact() {
     + (arr.length > max ? ` <span class="muted">+${arr.length - max}</span>` : '');
 
   const parts = [];
+  const kpis = [
+    ['Population', population > 0 ? population.toLocaleString('fr-FR') : '?'],
+    ['Bâtiments', buildingCount.toLocaleString('fr-FR')],
+    ['Ressources', resourcesInZone.length.toLocaleString('fr-FR')],
+    ['Événements actifs', operationalEventsInZone.filter((event) => String(event.status || '').toLowerCase() !== 'clos').length.toLocaleString('fr-FR')],
+    ['Sites sensibles', (schools.length + ehpads.length + dangers.length).toLocaleString('fr-FR')],
+  ];
+  parts.push(`<li style="margin-bottom:.7em;display:grid;grid-template-columns:repeat(auto-fit,minmax(92px,1fr));gap:.35em">
+    ${kpis.map(([label, value]) => `<span style="display:block;padding:.45em;background:#f8faff;border:1px solid #dbe7fb;border-radius:6px"><strong style="display:block;font-size:1rem">${escapeHtml(value)}</strong><span class="muted">${escapeHtml(label)}</span></span>`).join('')}
+  </li>`);
 
   // 1. Identification de la zone
   parts.push(`<li style="margin-bottom:.7em;padding:.5em;background:#f0f4ff;border-radius:6px">
@@ -2777,6 +2948,28 @@ async function computeZoneImpact() {
     <strong>🏢 Bâtiments sélectionnés : <span style="font-size:1.15em;color:#0b4daa">${buildingCount.toLocaleString('fr-FR')}</span></strong><br>
     <span class="muted">Calculé à partir du Référentiel National des Bâtiments dans l'emprise tracée.</span>
   </li>`);
+
+  const officialItems = [
+    `⛅ Météo-France : <strong style="color:${levelColor(riskSummary.meteoLevel)}">${escapeHtml(riskSummary.meteoLevel)}</strong>`,
+    `🌊 Vigicrues : <strong style="color:${levelColor(riskSummary.vigicruesLevel)}">${escapeHtml(riskSummary.vigicruesLevel)}</strong>`,
+    `🌧️ APIC pluie intense : <strong>${riskSummary.apicAlerts.toLocaleString('fr-FR')}</strong> avertissement(s)`,
+    `⚡ Vigicrues Flash : <strong>${riskSummary.vigicruesFlashAlerts.toLocaleString('fr-FR')}</strong> alerte(s)`,
+    `🌫️ Qualité de l'air : <strong>${escapeHtml(String(riskSummary.atmoLabel))}</strong>`,
+  ];
+  parts.push(section('📡', 'Situation officielle actuelle', officialItems));
+
+  if (riskSummary.communes.length) {
+    parts.push(section('🏛️', 'Communes et risques connus', riskSummary.communes.map((commune) => {
+      const name = escapeHtml(commune.name || commune.commune || commune.code_insee || 'Commune');
+      const floodDocs = Number(commune.flood_documents || commune.nb_documents || 0);
+      const movements = Number(commune.ground_movements_total || 0);
+      const ppr = Number(commune.ppr_total || commune.pprn_total || 0);
+      return `<strong>${name}</strong> · exposition ${escapeHtml(commune.exposureLabel)} · danger ${escapeHtml(commune.dangerLabel)}`
+        + `${floodDocs > 0 ? ` · ${floodDocs} doc. inondation` : ''}`
+        + `${ppr > 0 ? ` · ${ppr} PPR` : ''}`
+        + `${movements > 0 ? ` · ${movements} mouvement(s) terrain` : ''}`;
+    })));
+  }
 
   // 3. Dangers dans la zone
   if (dangers.length) {
@@ -2826,6 +3019,44 @@ async function computeZoneImpact() {
   }
   if (geoItems.length) parts.push(section('🗺️', 'Contexte géographique (OpenStreetMap)', geoItems));
 
+  const eventItems = operationalEventsInZone.map((event) => {
+    const status = EVENT_STATUS_LABEL[String(event.status || '').toLowerCase()] || event.status || 'Statut inconnu';
+    const locality = event.municipality_id ? getMunicipalityName(event.municipality_id) : (event.location || event.address || '');
+    const logsText = event.logs.length ? ` · ${event.logs.length} MCO (${event.activeLogCount} actif(s))` : '';
+    return `<strong>${escapeHtml(event.title || event.name || `Événement #${event.id || '?'}`)}</strong> · ${escapeHtml(status)} · <span style="color:${levelColor(event.worstLevel)}">${escapeHtml(event.worstLevel)}</span>${locality ? ` · ${escapeHtml(locality)}` : ''}${logsText}`;
+  });
+  parts.push(section('📍', 'Événements opérationnels dans la zone', eventItems,
+    'Aucun événement opérationnel géolocalisé ou rattaché aux communes de la zone.'));
+
+  const hydroItems = vigicruesStationsInZone.map((station) => {
+    const level = station.statusLevel || stationStatusLevel(station);
+    const height = station.height_m || station.height || station.last_height_m;
+    return `<strong>${escapeHtml(station.station || station.name || station.code || 'Station')}</strong> · ${escapeHtml(station.river || station.troncon || '')} · <span style="color:${levelColor(level)}">${escapeHtml(level)}</span>${height ? ` · ${escapeHtml(height)} m` : ''}`;
+  });
+  parts.push(section('🌊', 'Hydrologie locale', hydroItems,
+    'Aucune station Vigicrues dans l’emprise exacte. Vérifier aussi les stations en aval/amont sur la carte.'));
+
+  const trafficItems = trafficIncidentsInZone.map((event) => {
+    const road = event.road || (Array.isArray(event.roads) ? event.roads.join(', ') : '');
+    const severity = event.severity || event.category || 'incident trafic';
+    return `<strong>${escapeHtml(event.title || event.description || 'Incident trafic')}</strong>${road ? ` · ${escapeHtml(road)}` : ''} · ${escapeHtml(severity)}`;
+  });
+  if (trafficItems.length) parts.push(section('🚧', 'Trafic impactant la zone', trafficItems));
+
+  const nearbyItems = [];
+  if (nearbyFireStations.length) nearbyItems.push(`🚒 Pompiers proches : ${nearbyFireStations.map((r) => `${_zoneResourceName(r)} <span class="muted">(${formatDistanceMeters(r.distanceMeters)})</span>`).join(', ')}`);
+  if (nearbyHospitals.length) nearbyItems.push(`🏥 Soins proches : ${nearbyHospitals.map((r) => `${_zoneResourceName(r)} <span class="muted">(${formatDistanceMeters(r.distanceMeters)})</span>`).join(', ')}`);
+  if (nearbyHostings.length) nearbyItems.push(`🏟️ Accueil proche : ${nearbyHostings.map((r) => `${_zoneResourceName(r)} <span class="muted">(${formatDistanceMeters(r.distanceMeters)})</span>`).join(', ')}`);
+  parts.push(section('🧭', 'Ressources proches hors zone', nearbyItems,
+    'Aucune ressource proche calculable depuis les données chargées.'));
+
+  const customPointItems = customPointsInZone.map((point) => {
+    const category = point.category ? ` · ${escapeHtml(point.category)}` : '';
+    const notes = point.notes ? ` · <span class="muted">${escapeHtml(point.notes)}</span>` : '';
+    return `<strong>${escapeHtml(point.name || 'Point terrain')}</strong>${category}${notes}`;
+  });
+  if (customPointItems.length) parts.push(section('📌', 'Points terrain personnalisés', customPointItems));
+
   // Stocker les données brutes pour l'export
   mapZoneImpactReportData = {
     generatedAt: new Date(),
@@ -2836,6 +3067,8 @@ async function computeZoneImpact() {
     rnbBuildings,
     schools, ehpads, hospitals, fireStations, police, hostings, dangers, transports,
     allDistricts, streetInsights,
+    operationalEventsInZone, trafficIncidentsInZone, customPointsInZone, vigicruesStationsInZone,
+    nearbyFireStations, nearbyHospitals, nearbyHostings, riskSummary,
   };
 
   const actionBar = `<div style="display:flex;gap:.5em;margin-top:.7em;flex-wrap:wrap">
@@ -2877,6 +3110,22 @@ function exportZoneImpactReport() {
       </tr>`).join('')}</tbody>
     </table>`;
   };
+  const simpleTable = (title, icon, rows, columns) => {
+    if (!rows.length) return `<p class="empty">${icon} <em>Aucun élément détecté.</em></p>`;
+    return `<h3>${icon} ${toText(title)} (${rows.length})</h3>
+    <table>
+      <thead><tr>${columns.map((col) => `<th>${toText(col.label)}</th>`).join('')}</tr></thead>
+      <tbody>${rows.map((row) => `<tr>${columns.map((col) => `<td>${toText(col.value(row) || '–')}</td>`).join('')}</tr>`).join('')}</tbody>
+    </table>`;
+  };
+  const riskSummary = d.riskSummary || {};
+  const officialRows = [
+    { source: 'Météo-France', value: riskSummary.meteoLevel || 'vert', detail: 'Vigilance départementale' },
+    { source: 'Vigicrues', value: riskSummary.vigicruesLevel || 'vert', detail: 'Niveau eau départemental' },
+    { source: 'APIC pluie intense', value: `${Number(riskSummary.apicAlerts || 0).toLocaleString('fr-FR')} avertissement(s)`, detail: 'Météo-France APIC' },
+    { source: 'Vigicrues Flash', value: `${Number(riskSummary.vigicruesFlashAlerts || 0).toLocaleString('fr-FR')} alerte(s)`, detail: 'Crues rapides' },
+    { source: "Qualité de l'air", value: riskSummary.atmoLabel || 'non disponible', detail: 'Atmo Auvergne-Rhône-Alpes' },
+  ];
 
   const schoolsByType = { creche: [], ecole_primaire: [], college: [], lycee: [], universite: [] };
   d.schools.forEach((r) => { if (schoolsByType[r.type]) schoolsByType[r.type].push(r); });
@@ -2947,7 +3196,45 @@ function exportZoneImpactReport() {
   ${d.ehpadResidents > 0 ? `<div>🧓 Résidents EHPAD (mobilité réduite) : <strong>~${d.ehpadResidents.toLocaleString('fr-FR')}</strong></div>` : ''}
 </div>
 
-<h2>3. Dangers dans la zone</h2>
+<h2>3. Situation opérationnelle actuelle</h2>
+${simpleTable('Niveaux officiels et signaux externes', '📡', officialRows, [
+  { label: 'Source', value: (row) => row.source },
+  { label: 'Valeur', value: (row) => row.value },
+  { label: 'Détail', value: (row) => row.detail },
+])}
+
+${simpleTable('Communes et risques connus', '🏛️', Array.isArray(riskSummary.communes) ? riskSummary.communes : [], [
+  { label: 'Commune', value: (row) => row.name || row.commune || row.code_insee },
+  { label: 'Exposition', value: (row) => row.exposureLabel },
+  { label: 'Danger', value: (row) => row.dangerLabel },
+  { label: 'Données clés', value: (row) => [
+    Number(row.flood_documents || row.nb_documents || 0) ? `${Number(row.flood_documents || row.nb_documents || 0)} doc. inondation` : '',
+    Number(row.ppr_total || row.pprn_total || 0) ? `${Number(row.ppr_total || row.pprn_total || 0)} PPR` : '',
+    Number(row.ground_movements_total || 0) ? `${Number(row.ground_movements_total || 0)} mouvements terrain` : '',
+  ].filter(Boolean).join(' · ') },
+])}
+
+${simpleTable('Événements et MCO dans la zone', '📍', d.operationalEventsInZone || [], [
+  { label: 'Événement', value: (row) => row.title || row.name || `#${row.id || ''}` },
+  { label: 'Statut', value: (row) => EVENT_STATUS_LABEL[String(row.status || '').toLowerCase()] || row.status },
+  { label: 'Niveau', value: (row) => row.worstLevel },
+  { label: 'MCO', value: (row) => `${(row.logs || []).length} fiche(s), ${row.activeLogCount || 0} active(s)` },
+])}
+
+${simpleTable('Hydrologie locale', '🌊', d.vigicruesStationsInZone || [], [
+  { label: 'Station', value: (row) => row.station || row.name || row.code },
+  { label: 'Cours d’eau', value: (row) => row.river || row.troncon },
+  { label: 'Niveau', value: (row) => row.statusLevel || stationStatusLevel(row) },
+  { label: 'Hauteur', value: (row) => row.height_m || row.height || row.last_height_m },
+])}
+
+${(d.trafficIncidentsInZone || []).length ? simpleTable('Trafic impactant la zone', '🚧', d.trafficIncidentsInZone || [], [
+  { label: 'Incident', value: (row) => row.title || row.description },
+  { label: 'Axe', value: (row) => row.road || (Array.isArray(row.roads) ? row.roads.join(', ') : '') },
+  { label: 'Type', value: (row) => row.category || row.severity || row.type },
+]) : ''}
+
+<h2>4. Dangers dans la zone</h2>
 ${d.dangers.length ? `<div class="danger-block">
   <strong>⚠️ ${d.dangers.length} site(s) dangereux détecté(s) — plan d'évacuation à adapter</strong>
 </div>
@@ -2960,16 +3247,33 @@ ${d.dangers.length ? `<div class="danger-block">
   </tr>`).join('')}</tbody>
 </table>` : '<p class="empty">⚠️ Aucun site dangereux détecté dans la zone.</p>'}
 
-<h2>4. Secours disponibles dans la zone</h2>
+<h2>5. Secours disponibles dans la zone</h2>
 ${resourceTable('Casernes de pompiers', '🚒', d.fireStations)}
 ${resourceTable('Police / Gendarmerie', '🛡️', d.police)}
 ${resourceTable('Hôpitaux et cliniques', '🏥', d.hospitals)}
 
-<h2>5. Points d'évacuation et d'accueil</h2>
+<h2>6. Points d'évacuation et d'accueil</h2>
 ${resourceTable("Lieux d'accueil hébergeables", '🏟️', d.hostings)}
 ${resourceTable('Nœuds de transport', '🚆', d.transports)}
 
-<h2>6. Populations vulnérables — évacuation prioritaire</h2>
+<h2>7. Ressources proches hors zone</h2>
+${simpleTable('Pompiers proches', '🚒', d.nearbyFireStations || [], [
+  { label: 'Nom', value: (row) => row.name },
+  { label: 'Adresse', value: (row) => row.address },
+  { label: 'Distance depuis la zone', value: (row) => formatDistanceMeters(row.distanceMeters) },
+])}
+${simpleTable('Soins proches', '🏥', d.nearbyHospitals || [], [
+  { label: 'Nom', value: (row) => row.name },
+  { label: 'Adresse', value: (row) => row.address },
+  { label: 'Distance depuis la zone', value: (row) => formatDistanceMeters(row.distanceMeters) },
+])}
+${simpleTable('Accueil proche', '🏟️', d.nearbyHostings || [], [
+  { label: 'Nom', value: (row) => row.name },
+  { label: 'Adresse', value: (row) => row.address },
+  { label: 'Distance depuis la zone', value: (row) => formatDistanceMeters(row.distanceMeters) },
+])}
+
+<h2>8. Populations vulnérables — évacuation prioritaire</h2>
 ${schoolsByType.creche.length ? resourceTable('Crèches', '🍼', schoolsByType.creche) : ''}
 ${schoolsByType.ecole_primaire.length ? resourceTable('Écoles primaires', '🧒', schoolsByType.ecole_primaire) : ''}
 ${schoolsByType.college.length ? resourceTable('Collèges', '🎒', schoolsByType.college) : ''}
@@ -2978,8 +3282,15 @@ ${schoolsByType.universite.length ? resourceTable('Universités', '🎓', school
 ${d.ehpads.length ? resourceTable('EHPAD (évacuation médicalisée requise)', '🧓', d.ehpads) : ''}
 ${!d.schools.length && !d.ehpads.length ? '<p class="empty">Aucun établissement scolaire ni EHPAD détecté dans la zone.</p>' : ''}
 
+<h2>9. Points terrain personnalisés</h2>
+${simpleTable('Points ajoutés sur la carte', '📌', d.customPointsInZone || [], [
+  { label: 'Nom', value: (row) => row.name },
+  { label: 'Catégorie', value: (row) => row.category },
+  { label: 'Notes', value: (row) => row.notes },
+])}
+
 <div class="footer">
-  Rapport généré automatiquement par OPE-Protec · Sources : INSEE, geo.api.gouv.fr, FINESS data.gouv.fr, OpenStreetMap, Géorisques<br>
+  Rapport généré automatiquement par OPE-Protec · Sources : INSEE, RNB, geo.api.gouv.fr, FINESS data.gouv.fr, OpenStreetMap, Géorisques, Météo-France, Vigicrues, Atmo AURA<br>
   Les données de population sont des estimations — se référer aux données communales officielles pour les décisions définitives.<br>
   Document à usage opérationnel interne · ${dateStr} ${timeStr}
 </div>
