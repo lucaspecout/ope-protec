@@ -3886,8 +3886,18 @@ _FR_ALERT_LIST_URLS = (
     "https://fr-alert.gouv.fr/tableau-alertes",
     f"https://fr-alert.gouv.fr/tableau-alertes/{datetime.utcnow().year}",
     "https://www.fr-alert.gouv.fr/tableau-alertes",
+    "https://fr-alert.gouv.fr/les-alertes/31/type/Actual/all",
+    "https://fr-alert.gouv.fr/les-alertes/28/categorie/NRBCE/all",
+    "https://fr-alert.gouv.fr/les-alertes/200/categorie/Transport/all",
 )
-_FR_ALERT_LINK_RE = re.compile(r'href=["\']([^"\']*/les-alertes/FR-ALERT\.[^"\']+)["\']', re.IGNORECASE)
+_FR_ALERT_LINK_RE = re.compile(r'href=["\']([^"\']*les-alertes/FR-ALERT\.[^"\']+)["\']', re.IGNORECASE)
+_FR_ALERT_ISERE_SEED_URLS = (
+    "https://fr-alert.gouv.fr/les-alertes/FR-ALERT.1770129825.90000.0",
+    "https://www.fr-alert.gouv.fr/les-alertes/FR-ALERT.1762946678.90000.0",
+    "https://fr-alert.gouv.fr/les-alertes/FR-ALERT.1746023423.90000.0",
+    "https://fr-alert.gouv.fr/les-alertes/FR-ALERT.1746022020.90000.0",
+    "https://fr-alert.gouv.fr/les-alertes/FR-ALERT.1728901287.90000.0",
+)
 _FR_ALERT_DATE_RE = re.compile(
     r"((?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\s+\d{1,2}\s+"
     r"(?:janvier|f[eé]vrier|mars|avril|mai|juin|juillet|ao[uû]t|septembre|octobre|novembre|d[eé]cembre)\s+"
@@ -3999,8 +4009,71 @@ def _prefecture_fr_alert_fallback(limit: int = 8) -> list[dict[str, Any]]:
     return events
 
 
+def _official_fr_alert_isere_fallback(limit: int = 5) -> list[dict[str, Any]]:
+    known_events = [
+        {
+            "title": "NRBCE - Accident industriel - EXERCICE PPI Seveso Umicore",
+            "category": "NRBCE - Accident industriel",
+            "location": "Site SEVESO Umicore de Grenoble",
+            "message": "Exercice FR-Alert diffuse par la prefecture de l'Isere pour le site SEVESO Umicore de Grenoble.",
+            "source": "Prefecture de l'Isere",
+            "link": "https://fr-alert.gouv.fr/les-alertes/FR-ALERT.1770129825.90000.0",
+            "started_at": "2026-02-03T14:43:00",
+            "started_at_label": "Mardi 3 fevrier 2026, 14h43",
+            "is_exercise": True,
+        },
+        {
+            "title": "NRBCE - Accident industriel - EXERCICE PPI FINORGA",
+            "category": "NRBCE - Accident industriel",
+            "location": "Site FINORGA a Chasse-sur-Rhone",
+            "message": "Exercice FR-Alert mentionnant un accident industriel sur le site FINORGA a Chasse-sur-Rhone.",
+            "source": "Zone de defense et de securite Sud-Est",
+            "link": "https://www.fr-alert.gouv.fr/les-alertes/FR-ALERT.1762946678.90000.0",
+            "started_at": "2025-11-12T11:24:00",
+            "started_at_label": "Mercredi 12 novembre 2025, 11h24",
+            "is_exercise": True,
+        },
+        {
+            "title": "NRBCE - Accident industriel - EXERCICE Titanobel 1100m",
+            "category": "NRBCE - Accident industriel",
+            "location": "Site SEVESO Titanobel a Saint-Quentin-sur-Isere",
+            "message": "Exercice FR-Alert pour un risque d'explosion sur le site SEVESO Titanobel.",
+            "source": "Prefecture de l'Isere",
+            "link": "https://fr-alert.gouv.fr/les-alertes/FR-ALERT.1746023423.90000.0",
+            "started_at": "2025-04-30T14:30:00",
+            "started_at_label": "Mercredi 30 avril 2025, 14h30",
+            "is_exercise": True,
+        },
+        {
+            "title": "NRBCE - Accident industriel - EXERCICE Titanobel 560m",
+            "category": "NRBCE - Accident industriel",
+            "location": "Site SEVESO Titanobel a Saint-Quentin-sur-Isere",
+            "message": "Exercice FR-Alert pour un risque d'explosion sur le site SEVESO Titanobel.",
+            "source": "Prefecture de l'Isere",
+            "link": "https://fr-alert.gouv.fr/les-alertes/FR-ALERT.1746022020.90000.0",
+            "started_at": "2025-04-30T14:07:00",
+            "started_at_label": "Mercredi 30 avril 2025, 14h07",
+            "is_exercise": True,
+        },
+        {
+            "title": "NRBCE - Risque chimique - EXERCICE Pont de Claix",
+            "category": "NRBCE - Risque chimique",
+            "location": "Plateforme chimique de Pont-de-Claix",
+            "message": "Exercice FR-Alert sur la plateforme chimique de Pont-de-Claix.",
+            "source": "Prefecture de l'Isere",
+            "link": "https://fr-alert.gouv.fr/les-alertes/FR-ALERT.1728901287.90000.0",
+            "started_at": "2024-10-14T10:21:00",
+            "started_at_label": "Lundi 14 octobre 2024, 10h21",
+            "is_exercise": True,
+        },
+    ]
+    for event in known_events:
+        event["is_today"] = _fr_alert_is_today(datetime.fromisoformat(event["started_at"]))
+    return known_events[: max(1, min(int(limit or 5), len(known_events)))]
+
+
 def _fetch_fr_alert_isere_live(limit: int = 12) -> dict[str, Any]:
-    urls: list[str] = []
+    urls: list[str] = list(_FR_ALERT_ISERE_SEED_URLS)
     source_used = ""
     for source_url in _FR_ALERT_LIST_URLS:
         try:
@@ -4009,7 +4082,7 @@ def _fetch_fr_alert_isere_live(limit: int = 12) -> dict[str, Any]:
             continue
         source_used = source_url
         for raw_url in _FR_ALERT_LINK_RE.findall(html):
-            absolute = raw_url if raw_url.startswith("http") else f"https://fr-alert.gouv.fr{raw_url}"
+            absolute = raw_url if raw_url.startswith("http") else f"https://fr-alert.gouv.fr/{raw_url.lstrip('/')}"
             if absolute not in urls:
                 urls.append(absolute)
         if len(urls) >= 80:
@@ -4034,11 +4107,16 @@ def _fetch_fr_alert_isere_live(limit: int = 12) -> dict[str, Any]:
             events.append(event)
             seen.add(key)
 
+    used_static_fallback = False
+    if not events:
+        events = _official_fr_alert_isere_fallback(limit=limit)
+        used_static_fallback = bool(events)
+
     events.sort(key=lambda event: str(event.get("started_at") or event.get("started_at_label") or ""), reverse=True)
     today_events = [event for event in events if event.get("is_today")]
     return {
         "service": "FR-Alert Isère",
-        "status": "online" if events else "degraded",
+        "status": "stale" if used_static_fallback else ("online" if events else "degraded"),
         "source": source_used or "https://fr-alert.gouv.fr",
         "events": events[:limit],
         "events_total": len(events),
@@ -4046,7 +4124,11 @@ def _fetch_fr_alert_isere_live(limit: int = 12) -> dict[str, Any]:
         "today_count": len(today_events),
         "latest": events[0] if events else None,
         "updated_at": datetime.utcnow().isoformat() + "Z",
-        "note": "Source officielle FR-Alert, complétée par les actualités de la préfecture de l'Isère.",
+        "note": (
+            "Dernier inventaire officiel connu FR-Alert Isere utilise car la collecte live est indisponible."
+            if used_static_fallback else
+            "Source officielle FR-Alert, complétée par les actualités de la préfecture de l'Isère."
+        ),
     }
 
 

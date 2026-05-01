@@ -11658,6 +11658,7 @@ function _fluxServiceState(payload, intervalSec) {
   const updatedAt = payload?.updated_at ? new Date(payload.updated_at).getTime() : 0;
   const ageMs = updatedAt > 0 ? (Date.now() - updatedAt) : Infinity;
   if (status === 'pending' || status === 'idle') return { state: 'pending', updatedAt, ageMs };
+  if (status === 'stale' || status === 'partial') return { state: 'stale', updatedAt, ageMs };
   if (status !== 'online' || payload?.error) return { state: 'error', updatedAt, ageMs };
   if (ageMs > intervalSec * 1000 * 2.5) return { state: 'stale', updatedAt, ageMs };
   return { state: 'online', updatedAt, ageMs };
