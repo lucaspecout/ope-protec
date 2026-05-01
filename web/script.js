@@ -298,6 +298,8 @@ let mapMeasurePoints = [];
 let mapRouteLayer = null;
 let mapRouteMode = false;
 let mapRoutePoints = [];
+let mapRoutes = [];
+let mapRouteIdSeq = 1;
 let mapRouteRefreshTimer = null;
 let mapRouteAbortController = null;
 let mapRouteRequestSeq = 0;
@@ -7441,6 +7443,26 @@ function mapRouteMarkerIcon(label) {
   });
 }
 
+function mapRouteDurationIcon(label) {
+  return window.L.divIcon({
+    className: 'map-route-duration-label',
+    html: `<span>${escapeHtml(label)}</span>`,
+    iconSize: [74, 24],
+    iconAnchor: [37, 12],
+  });
+}
+
+const MAP_ROUTE_COLORS = ['#1c7ed6', '#d9480f', '#2b8a3e', '#7048e8', '#0b7285', '#c92a2a', '#5f3dc4'];
+
+function routeDisplayIndex(route) {
+  const index = mapRoutes.findIndex((item) => item.id === route?.id);
+  return index >= 0 ? index + 1 : '?';
+}
+
+function routeColorForIndex(index) {
+  return MAP_ROUTE_COLORS[Math.max(0, index) % MAP_ROUTE_COLORS.length];
+}
+
 function updateRouteButtons() {
   const startBtn = document.getElementById('map-route-start');
   if (startBtn) {
@@ -7448,7 +7470,7 @@ function updateRouteButtons() {
     startBtn.setAttribute('aria-pressed', String(mapRouteMode));
   }
   const refreshBtn = document.getElementById('map-route-refresh');
-  if (refreshBtn) refreshBtn.disabled = mapRoutePoints.length < 2;
+  if (refreshBtn) refreshBtn.disabled = mapRoutes.length === 0 && mapRoutePoints.length < 2;
 }
 
 function setRouteSummary(html, isError = false) {
@@ -7468,13 +7490,14 @@ function stopRouteRefreshTimer() {
 function startRouteRefreshTimer() {
   stopRouteRefreshTimer();
   mapRouteRefreshTimer = setInterval(() => {
-    if (mapRoutePoints.length === 2) refreshMapRoute(false);
+    if (mapRoutes.length) refreshAllMapRoutes(false);
   }, MAP_ROUTE_REFRESH_MS);
 }
 
 function clearMapRoute(showFeedback = true) {
   mapRouteMode = false;
   mapRoutePoints = [];
+  mapRoutes = [];
   mapRouteRequestSeq += 1;
   stopRouteRefreshTimer();
   if (mapRouteAbortController) {
@@ -7483,6 +7506,7 @@ function clearMapRoute(showFeedback = true) {
   }
   if (mapRouteLayer) mapRouteLayer.clearLayers();
   updateRouteButtons();
+  renderRouteList();
   setRouteSummary('Cliquez deux points sur la carte pour estimer un trajet.');
   if (showFeedback) setMapFeedback('Trajet efface.');
 }
@@ -7503,46 +7527,122 @@ function startMapRouteMode() {
   if (typeof _mapWeatherMode !== 'undefined' && _mapWeatherMode) _toggleMapWeatherMode();
 
   const nextMode = !mapRouteMode;
-  clearMapRoute(false);
+  mapRoutePoints = [];
+  if (mapRouteAbortController) {
+    mapRouteAbortController.abort();
+    mapRouteAbortController = null;
+  }
   mapRouteMode = nextMode;
+  renderMapRoutes();
   updateRouteButtons();
   setRouteSummary(mapRouteMode ? 'Point de depart: cliquez sur la carte.' : 'Cliquez deux points sur la carte pour estimer un trajet.');
   setMapFeedback(mapRouteMode ? 'Mode trajet actif: cliquez le depart puis l arrivee.' : 'Mode trajet desactive.');
 }
 
-function drawRouteEndpoint(point, index) {
+function drawRouteEndpoint(point, index, route = null) {
   if (!mapRouteLayer || typeof window.L === 'undefined') return;
+  const display = route ? routeDisplayIndex(route) : '';
   const marker = window.L.marker([point.lat, point.lon], {
-    draggable: true,
-    icon: mapRouteMarkerIcon(index === 0 ? 'A' : 'B'),
+    draggable: Boolean(route),
+    icon: mapRouteMarkerIcon(`${index === 0 ? 'A' : 'B'}${display}`),
   }).addTo(mapRouteLayer);
   marker.on('dragend', () => {
     const pos = marker.getLatLng();
-    mapRoutePoints[index] = { lat: pos.lat, lon: pos.lng };
-    refreshMapRoute(true);
+    if (!route) return;
+    route.points[index] = { lat: pos.lat, lon: pos.lng };
+    calculateRouteForRoute(route, true);
   });
+  if (route) {
+    marker.bindPopup(`<strong>Trajet ${display}</strong><br>${index === 0 ? 'Depart' : 'Arrivee'}<br>Glissez le point pour recalculer.`);
+  }
 }
 
-function drawRoutePolyline(payload = {}, options = {}) {
+function routeLineFromPayload(payload = {}, fallbackPoints = []) {
+  const hasRouteGeometry = hasDetailedRoutePolyline(payload);
+  if (hasRouteGeometry) {
+    return payload.polyline
+      .map((point) => [Number(point[0]), Number(point[1])])
+      .filter((point) => Number.isFinite(point[0]) && Number.isFinite(point[1]));
+  }
+  return fallbackPoints.map((point) => [point.lat, point.lon]);
+}
+
+function drawRouteDurationLabel(line, payload = {}) {
+  if (!mapRouteLayer || line.length < 2) return;
+  const middle = line[Math.floor(line.length / 2)];
+  const label = formatDurationSeconds(payload.duration_seconds);
+  window.L.marker(middle, {
+    interactive: false,
+    icon: mapRouteDurationIcon(label),
+  }).addTo(mapRouteLayer);
+}
+
+function renderRouteList() {
+  const el = document.getElementById('map-route-list');
+  if (!el) return;
+  if (!mapRoutes.length) {
+    el.innerHTML = '';
+    return;
+  }
+  el.innerHTML = mapRoutes.map((route, index) => {
+    const payload = route.payload || {};
+    const duration = route.loading ? 'calcul...' : formatDurationSeconds(payload.duration_seconds);
+    const distance = route.loading ? '' : ` - ${formatDistanceMeters(payload.distance_meters)}`;
+    const source = route.error ? sanitizeErrorMessage(route.error) : (payload.source || 'Source inconnue');
+    return `
+      <div class="route-item" data-route-id="${escapeHtml(route.id)}">
+        <span class="route-item__swatch" style="background:${escapeHtml(route.color)}"></span>
+        <div class="route-item__main">
+          <strong>Trajet ${index + 1} - ${escapeHtml(duration)}${escapeHtml(distance)}</strong>
+          <span>${escapeHtml(source)}</span>
+        </div>
+        <div class="route-item__actions">
+          <button type="button" class="ghost map-btn-lite" data-route-action="focus" data-route-id="${escapeHtml(route.id)}">Voir</button>
+          <button type="button" class="ghost map-btn-lite" data-route-action="info" data-route-id="${escapeHtml(route.id)}">Infos</button>
+          <button type="button" class="ghost map-btn-lite" data-route-action="delete" data-route-id="${escapeHtml(route.id)}">Suppr.</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function renderMapRoutes(options = {}) {
   if (!mapRouteLayer || typeof window.L === 'undefined') return;
   mapRouteLayer.clearLayers();
-  mapRoutePoints.forEach((point, index) => drawRouteEndpoint(point, index));
-  const hasRouteGeometry = hasDetailedRoutePolyline(payload);
-  const line = hasRouteGeometry
-    ? payload.polyline.map((point) => [Number(point[0]), Number(point[1])]).filter((point) => Number.isFinite(point[0]) && Number.isFinite(point[1]))
-    : (options.showDirectLine ? mapRoutePoints.map((point) => [point.lat, point.lon]) : []);
-  if (line.length >= 2) {
+  let focusBounds = null;
+  mapRoutes.forEach((route) => {
+    const payload = route.payload || {};
+    const line = route.payload || route.loading ? routeLineFromPayload(payload, route.points || []) : [];
+    if (line.length < 2) {
+      (route.points || []).forEach((point, index) => drawRouteEndpoint(point, index, route));
+      return;
+    }
     const routeLine = window.L.polyline(line, {
-      color: payload.traffic_aware ? '#d9480f' : '#1c7ed6',
+      color: route.color,
       weight: 6,
       opacity: 0.86,
-      dashArray: hasRouteGeometry ? null : '8 8',
+      dashArray: hasDetailedRoutePolyline(payload) ? null : '8 8',
     }).addTo(mapRouteLayer);
     routeLine.bringToFront?.();
-    if (options.fitBounds && leafletMap) {
-      leafletMap.fitBounds(routeLine.getBounds(), { padding: [36, 36], maxZoom: 15 });
+    routeLine.bindPopup(buildRouteInfoHtml(route));
+    if (route.payload && !route.loading) drawRouteDurationLabel(line, payload);
+    (route.points || []).forEach((point, index) => drawRouteEndpoint(point, index, route));
+    if (options.focusRouteId === route.id) {
+      focusBounds = routeLine.getBounds();
     }
+  });
+  mapRoutePoints.forEach((point, index) => drawRouteEndpoint(point, index, null));
+  if (mapRoutePoints.length === 2) {
+    window.L.polyline(mapRoutePoints.map((point) => [point.lat, point.lon]), {
+      color: '#7895c9',
+      weight: 4,
+      opacity: .65,
+      dashArray: '6 8',
+    }).addTo(mapRouteLayer);
   }
+  if (options.fitBounds && leafletMap && focusBounds?.isValid?.()) {
+    leafletMap.fitBounds(focusBounds, { padding: [36, 36], maxZoom: 15 });
+  }
+  renderRouteList();
 }
 
 function hasDetailedRoutePolyline(payload = {}) {
@@ -7557,6 +7657,17 @@ function hasDetailedRoutePolyline(payload = {}) {
 function shouldPreferBrowserRoute(payload = {}) {
   const provider = String(payload.provider || '').toLowerCase();
   return provider === 'local' || !hasDetailedRoutePolyline(payload);
+}
+
+function buildRouteInfoHtml(route = {}) {
+  const payload = route.payload || {};
+  const duration = formatDurationSeconds(payload.duration_seconds);
+  const distance = formatDistanceMeters(payload.distance_meters);
+  const source = payload.source || 'Source inconnue';
+  const delay = Number(payload.traffic_delay_seconds || 0);
+  const delayText = delay > 0 ? `<br>Retard estime: ${escapeHtml(formatDurationSeconds(delay))}` : '';
+  const errorText = route.error ? `<br><span style="color:#9b1c1c">${escapeHtml(sanitizeErrorMessage(route.error))}</span>` : '';
+  return `<strong>Trajet ${escapeHtml(String(routeDisplayIndex(route)))}</strong><br>${escapeHtml(duration)} - ${escapeHtml(distance)}<br>${escapeHtml(source)}${delayText}${errorText}`;
 }
 
 function renderRouteEstimate(payload = {}) {
@@ -7625,17 +7736,7 @@ async function fetchClientOsrmRoute(start, end) {
   };
 }
 
-async function refreshMapRoute(showFeedback = true) {
-  if (mapRoutePoints.length < 2) {
-    setRouteSummary('Posez un depart et une arrivee pour calculer le trajet.', true);
-    return;
-  }
-  const [start, end] = mapRoutePoints;
-  const requestSeq = ++mapRouteRequestSeq;
-  if (mapRouteAbortController) mapRouteAbortController.abort();
-  mapRouteAbortController = new AbortController();
-  if (showFeedback) setMapFeedback('Calcul du trajet en cours...');
-  setRouteSummary('Calcul du trajet en cours...');
+async function fetchBestRoutePayload(start, end) {
   const params = new URLSearchParams({
     start_lat: String(start.lat),
     start_lon: String(start.lon),
@@ -7649,47 +7750,96 @@ async function refreshMapRoute(showFeedback = true) {
       timeoutMs: API_SLOW_ENDPOINT_TIMEOUT_MS,
       maxRetries: 1,
     });
-    if (requestSeq !== mapRouteRequestSeq || mapRoutePoints.length < 2) return;
-    let routePayload = payload;
-    if (shouldPreferBrowserRoute(payload)) {
-      routePayload = await fetchClientOsrmRoute(start, end);
-      routePayload.backend_fallback = payload;
-    }
-    if (requestSeq !== mapRouteRequestSeq || mapRoutePoints.length < 2) return;
-    drawRoutePolyline(routePayload, { fitBounds: showFeedback });
+    if (!shouldPreferBrowserRoute(payload)) return payload;
+    const browserPayload = await fetchClientOsrmRoute(start, end);
+    browserPayload.backend_fallback = payload;
+    return browserPayload;
+  } catch (error) {
+    const browserPayload = await fetchClientOsrmRoute(start, end);
+    browserPayload.backend_error = sanitizeErrorMessage(error.message || 'Backend trajet indisponible');
+    return browserPayload;
+  }
+}
+
+function createMapRouteFromPending() {
+  if (mapRoutePoints.length < 2) return null;
+  const id = `route-${mapRouteIdSeq++}`;
+  const route = {
+    id,
+    color: routeColorForIndex(mapRoutes.length),
+    points: mapRoutePoints.slice(0, 2).map((point) => ({ lat: point.lat, lon: point.lon })),
+    payload: null,
+    loading: true,
+    error: '',
+    requestSeq: 0,
+  };
+  mapRoutes.push(route);
+  mapRoutePoints = [];
+  renderMapRoutes();
+  renderRouteList();
+  return route;
+}
+
+async function calculateRouteForRoute(route, showFeedback = true) {
+  if (!route || !Array.isArray(route.points) || route.points.length < 2) return;
+  const requestSeq = ++route.requestSeq;
+  route.loading = true;
+  route.error = '';
+  renderRouteList();
+  if (showFeedback) setMapFeedback(`Calcul du trajet ${routeDisplayIndex(route)} en cours...`);
+  setRouteSummary('Calcul du trajet en cours...');
+  const [start, end] = route.points;
+  try {
+    const routePayload = await fetchBestRoutePayload(start, end);
+    if (!mapRoutes.some((item) => item.id === route.id) || requestSeq !== route.requestSeq) return;
+    route.payload = routePayload;
+    route.loading = false;
+    route.error = '';
+    renderMapRoutes({ fitBounds: showFeedback, focusRouteId: route.id });
     renderRouteEstimate(routePayload);
     startRouteRefreshTimer();
     if (showFeedback) {
       const mode = String(routePayload.traffic_mode || '');
       if (mode === 'live_speed') {
-        setMapFeedback('Trajet calcule avec trafic live.');
+        setMapFeedback(`Trajet ${routeDisplayIndex(route)} calcule avec trafic live.`);
       } else if (mode === 'open_incidents') {
-        setMapFeedback('Trajet calcule avec itineraire routier et perturbations temps reel sans cle API.');
-      } else if (String(routePayload.provider || '') === 'osrm_browser') {
-        setMapFeedback('Trajet calcule via OSRM public avec trace routiere detaillee.');
+        setMapFeedback(`Trajet ${routeDisplayIndex(route)} calcule avec itineraire routier et perturbations temps reel.`);
       } else {
-        setMapFeedback('Trajet calcule en mode secours sans trafic live.');
+        setMapFeedback(`Trajet ${routeDisplayIndex(route)} calcule via OSRM public avec trace routiere detaillee.`);
       }
     }
   } catch (error) {
-    if (requestSeq !== mapRouteRequestSeq) return;
-    if (error?.name === 'AbortError') return;
-    try {
-      const directPayload = await fetchClientOsrmRoute(start, end);
-      if (requestSeq !== mapRouteRequestSeq || mapRoutePoints.length < 2) return;
-      drawRoutePolyline(directPayload, { fitBounds: showFeedback });
-      renderRouteEstimate(directPayload);
-      startRouteRefreshTimer();
-      if (showFeedback) setMapFeedback('Trajet calcule en direct via OSRM public, sans trafic live.');
-    } catch (directError) {
-      drawRoutePolyline({});
-      setRouteSummary(`Trajet indisponible: ${escapeHtml(sanitizeErrorMessage(directError.message || error.message))}`, true);
-      if (showFeedback) setMapFeedback(`Trajet indisponible: ${sanitizeErrorMessage(directError.message || error.message)}`, true);
-    }
+    if (!mapRoutes.some((item) => item.id === route.id) || requestSeq !== route.requestSeq) return;
+    route.loading = false;
+    route.error = sanitizeErrorMessage(error.message || 'Routage indisponible');
+    renderMapRoutes();
+    setRouteSummary(`Trajet ${routeDisplayIndex(route)} indisponible: ${escapeHtml(route.error)}`, true);
+    if (showFeedback) setMapFeedback(`Trajet indisponible: ${route.error}`, true);
   } finally {
-    if (requestSeq === mapRouteRequestSeq) mapRouteAbortController = null;
     updateRouteButtons();
   }
+}
+
+async function refreshAllMapRoutes(showFeedback = true) {
+  if (!mapRoutes.length) {
+    if (mapRoutePoints.length === 2) {
+      const route = createMapRouteFromPending();
+      if (route) calculateRouteForRoute(route, showFeedback);
+      return;
+    }
+    setRouteSummary('Ajoutez au moins un trajet pour actualiser.', true);
+    return;
+  }
+  await Promise.all(mapRoutes.map((route) => calculateRouteForRoute(route, showFeedback)));
+}
+
+async function refreshMapRoute(showFeedback = true) {
+  if (mapRoutePoints.length < 2) {
+    setRouteSummary('Posez un depart et une arrivee pour calculer le trajet.', true);
+    return;
+  }
+  const route = createMapRouteFromPending();
+  if (route) calculateRouteForRoute(route, showFeedback);
 }
 
 function onMapClickRoute(event) {
@@ -7700,19 +7850,19 @@ function onMapClickRoute(event) {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
   if (mapRoutePoints.length >= 2) {
     mapRoutePoints = [];
-    if (mapRouteLayer) mapRouteLayer.clearLayers();
   }
   mapRoutePoints.push({ lat, lon });
-  drawRoutePolyline({});
+  renderMapRoutes();
   updateRouteButtons();
   if (mapRoutePoints.length === 1) {
     setRouteSummary('Depart pose. Cliquez le point d arrivee.');
     setMapFeedback('Depart du trajet pose. Cliquez l arrivee.');
     return;
   }
-  mapRouteMode = false;
+  mapRouteMode = true;
   updateRouteButtons();
   refreshMapRoute(true);
+  setRouteSummary('Trajet ajoute. Cliquez un nouveau depart pour ajouter un autre trajet.');
 }
 
 function clearEvacuationCircle(showFeedback = true) {
@@ -12688,8 +12838,28 @@ function bindAppInteractions() {
   document.getElementById('map-measure-start')?.addEventListener('click', startMapMeasureMode);
   document.getElementById('map-measure-clear')?.addEventListener('click', () => clearMapMeasure(true));
   document.getElementById('map-route-start')?.addEventListener('click', startMapRouteMode);
-  document.getElementById('map-route-refresh')?.addEventListener('click', () => refreshMapRoute(true));
+  document.getElementById('map-route-refresh')?.addEventListener('click', () => refreshAllMapRoutes(true));
   document.getElementById('map-route-clear')?.addEventListener('click', () => clearMapRoute(true));
+  document.getElementById('map-route-list')?.addEventListener('click', (event) => {
+    const btn = event.target.closest('[data-route-action]');
+    if (!btn) return;
+    const route = mapRoutes.find((item) => item.id === btn.dataset.routeId);
+    if (!route) return;
+    const action = btn.dataset.routeAction;
+    if (action === 'delete') {
+      const displayIndex = routeDisplayIndex(route);
+      mapRoutes = mapRoutes.filter((item) => item.id !== route.id);
+      renderMapRoutes();
+      updateRouteButtons();
+      setRouteSummary(mapRoutes.length ? `${mapRoutes.length} trajet(s) affiché(s).` : 'Cliquez deux points sur la carte pour estimer un trajet.');
+      setMapFeedback(`Trajet ${displayIndex} supprime.`);
+    } else if (action === 'focus') {
+      renderMapRoutes({ fitBounds: true, focusRouteId: route.id });
+      if (route.payload) renderRouteEstimate(route.payload);
+    } else if (action === 'info') {
+      setRouteSummary(buildRouteInfoHtml(route), Boolean(route.error));
+    }
+  });
   updateRouteButtons();
   document.getElementById('map-add-point-btn')?.addEventListener('click', () => {
     if (!canEdit()) {
