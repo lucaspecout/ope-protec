@@ -7523,20 +7523,40 @@ function drawRouteEndpoint(point, index) {
   });
 }
 
-function drawRoutePolyline(payload = {}) {
+function drawRoutePolyline(payload = {}, options = {}) {
   if (!mapRouteLayer || typeof window.L === 'undefined') return;
   mapRouteLayer.clearLayers();
   mapRoutePoints.forEach((point, index) => drawRouteEndpoint(point, index));
-  const line = Array.isArray(payload.polyline) && payload.polyline.length >= 2
+  const hasRouteGeometry = hasDetailedRoutePolyline(payload);
+  const line = hasRouteGeometry
     ? payload.polyline.map((point) => [Number(point[0]), Number(point[1])]).filter((point) => Number.isFinite(point[0]) && Number.isFinite(point[1]))
-    : mapRoutePoints.map((point) => [point.lat, point.lon]);
+    : (options.showDirectLine ? mapRoutePoints.map((point) => [point.lat, point.lon]) : []);
   if (line.length >= 2) {
-    window.L.polyline(line, {
+    const routeLine = window.L.polyline(line, {
       color: payload.traffic_aware ? '#d9480f' : '#1c7ed6',
       weight: 6,
       opacity: 0.86,
+      dashArray: hasRouteGeometry ? null : '8 8',
     }).addTo(mapRouteLayer);
+    routeLine.bringToFront?.();
+    if (options.fitBounds && leafletMap) {
+      leafletMap.fitBounds(routeLine.getBounds(), { padding: [36, 36], maxZoom: 15 });
+    }
   }
+}
+
+function hasDetailedRoutePolyline(payload = {}) {
+  const points = Array.isArray(payload.polyline) ? payload.polyline : [];
+  if (points.length < 3) return false;
+  return points
+    .map((point) => [Number(point?.[0]), Number(point?.[1])])
+    .filter((point) => Number.isFinite(point[0]) && Number.isFinite(point[1]))
+    .length >= 3;
+}
+
+function shouldPreferBrowserRoute(payload = {}) {
+  const provider = String(payload.provider || '').toLowerCase();
+  return provider === 'local' || !hasDetailedRoutePolyline(payload);
 }
 
 function renderRouteEstimate(payload = {}) {
@@ -7630,15 +7650,23 @@ async function refreshMapRoute(showFeedback = true) {
       maxRetries: 1,
     });
     if (requestSeq !== mapRouteRequestSeq || mapRoutePoints.length < 2) return;
-    drawRoutePolyline(payload);
-    renderRouteEstimate(payload);
+    let routePayload = payload;
+    if (shouldPreferBrowserRoute(payload)) {
+      routePayload = await fetchClientOsrmRoute(start, end);
+      routePayload.backend_fallback = payload;
+    }
+    if (requestSeq !== mapRouteRequestSeq || mapRoutePoints.length < 2) return;
+    drawRoutePolyline(routePayload, { fitBounds: showFeedback });
+    renderRouteEstimate(routePayload);
     startRouteRefreshTimer();
     if (showFeedback) {
-      const mode = String(payload.traffic_mode || '');
+      const mode = String(routePayload.traffic_mode || '');
       if (mode === 'live_speed') {
         setMapFeedback('Trajet calcule avec trafic live.');
       } else if (mode === 'open_incidents') {
         setMapFeedback('Trajet calcule avec itineraire routier et perturbations temps reel sans cle API.');
+      } else if (String(routePayload.provider || '') === 'osrm_browser') {
+        setMapFeedback('Trajet calcule via OSRM public avec trace routiere detaillee.');
       } else {
         setMapFeedback('Trajet calcule en mode secours sans trafic live.');
       }
@@ -7649,7 +7677,7 @@ async function refreshMapRoute(showFeedback = true) {
     try {
       const directPayload = await fetchClientOsrmRoute(start, end);
       if (requestSeq !== mapRouteRequestSeq || mapRoutePoints.length < 2) return;
-      drawRoutePolyline(directPayload);
+      drawRoutePolyline(directPayload, { fitBounds: showFeedback });
       renderRouteEstimate(directPayload);
       startRouteRefreshTimer();
       if (showFeedback) setMapFeedback('Trajet calcule en direct via OSRM public, sans trafic live.');
