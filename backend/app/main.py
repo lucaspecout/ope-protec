@@ -1467,7 +1467,7 @@ def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str])
         "georisques": (lambda: fetch_georisques_isere_summary(force_refresh=refresh, commune_names=pcs_commune_names), {"status": "pending", "details": []}),
         "rnb_isere": (lambda: fetch_rnb_isere_summary(force_refresh=refresh), {"status": "pending", "buildings_total": 0, "sample": []}),
         "prefecture_isere": (lambda: fetch_prefecture_isere_news(force_refresh=refresh), {"status": "pending", "articles": []}),
-        "fr_alert_isere": (lambda: fetch_fr_alert_isere(force_refresh=refresh), {"status": "pending", "events": [], "today_events": [], "today_count": 0}),
+        "fr_alert_isere": (lambda: fetch_fr_alert_isere(limit=5, force_refresh=refresh), {"status": "pending", "events": [], "today_events": [], "today_count": 0}),
         "dauphine_isere": (lambda: fetch_dauphine_isere_news(force_refresh=refresh), {"status": "pending", "articles": []}),
         "france_bleu_isere": (lambda: fetch_france_bleu_isere_news(force_refresh=refresh), {"status": "pending", "items": []}),
         "placegrenet": (lambda: fetch_placegrenet_news(force_refresh=refresh), {"status": "pending", "items": []}),
@@ -1761,7 +1761,7 @@ def interactive_map_meteo_vigilance():
 @app.get("/api/fr-alert/isere")
 def api_fr_alert_isere(
     refresh: bool = False,
-    limit: int = 12,
+    limit: int = 5,
     _: User = Depends(require_roles(*READ_ROLES)),
 ):
     return fetch_fr_alert_isere(limit=max(1, min(limit, 30)), force_refresh=refresh)

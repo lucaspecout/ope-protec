@@ -7851,7 +7851,7 @@ function renderFrAlertIsere(frAlert = {}) {
   const todayCount = Number(frAlert.today_count ?? todayEvents.length);
   setRiskText('fr-alert-status', `${frAlert.status || 'inconnu'} · ${todayCount} aujourd'hui · ${events.length} alerte(s)`, todayCount > 0 ? 'rouge' : 'vert');
   setText('fr-alert-info', `${frAlert.updated_at ? new Date(frAlert.updated_at).toLocaleString() : 'MAJ inconnue'} · source officielle FR-Alert`);
-  setHtml('fr-alert-list', events.slice(0, 10).map((event) => {
+  setHtml('fr-alert-list', events.slice(0, 5).map((event) => {
     const isToday = event.is_today ? '<span class="badge red">Aujourd’hui</span> ' : '';
     const exercise = event.is_exercise ? '<span class="badge neutral">Exercice</span> ' : '';
     const title = escapeHtml(event.title || 'FR-Alert Isère');
