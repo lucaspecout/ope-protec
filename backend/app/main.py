@@ -54,6 +54,7 @@ from .schemas import (
 from .security import create_access_token, hash_password, verify_password, verify_and_upgrade, warmup_crypto
 from .services import (
     fetch_institutions_isere,
+    fetch_verified_hosting_isere,
     fetch_bison_fute_live_events,
     fetch_bison_fute_traffic,
     fetch_georisques_commune_risks,
@@ -1835,6 +1836,15 @@ def api_institutions_isere(
     _: User = Depends(require_roles(*READ_ROLES)),
 ):
     return fetch_institutions_isere(force_refresh=refresh)
+
+
+@app.get("/api/hosting/isere/verified")
+def api_verified_hosting_isere(
+    refresh: bool = Query(False),
+    limit: int = Query(2000, ge=1, le=5000),
+    current_user: User = Depends(get_current_user),
+):
+    return fetch_verified_hosting_isere(force_refresh=refresh, limit=limit)
 
 
 @app.get("/api/finess/isere/resources")

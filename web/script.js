@@ -374,6 +374,8 @@ function updateTrafficZoomClass() {
 let currentMunicipalityPreviewUrl = null;
 let institutionPointsCache = [];
 let institutionsLoaded = false;
+let verifiedHostingPointsCache = [];
+let verifiedHostingLoaded = false;
 let finessPointsCache = [];
 let finessLoaded = false;
 let finessTypeCounts = {};
@@ -4879,10 +4881,21 @@ function isHostingCandidateType(type = '') {
 }
 
 function estimateHostingCapacity(resource = {}) {
+  const min = Number(resource.capacity_min);
+  const max = Number(resource.capacity_max);
+  if (Number.isFinite(min) && min > 0 && Number.isFinite(max) && max > 0) {
+    return { value: max, label: `${min.toLocaleString('fr-FR')}-${max.toLocaleString('fr-FR')} pers.`, source: resource.capacity_source || 'catégorie ERP renseignée' };
+  }
+  if (Number.isFinite(min) && min > 0) {
+    return { value: min, label: `${min.toLocaleString('fr-FR')}+ pers.`, source: resource.capacity_source || 'catégorie ERP renseignée' };
+  }
   const explicit = Number(resource.capacity || resource.hosting_capacity || resource.details?.capacity);
-  if (Number.isFinite(explicit) && explicit > 0) return { value: Math.round(explicit), source: resource.capacity_source || 'capacité renseignée' };
+  if (Number.isFinite(explicit) && explicit > 0) return { value: Math.round(explicit), label: `${Math.round(explicit).toLocaleString('fr-FR')} pers.`, source: resource.capacity_source || 'capacité renseignée' };
   const surface = Number(resource.surface_m2 || resource.details?.surface_m2);
-  if (Number.isFinite(surface) && surface > 0) return { value: Math.max(1, Math.floor(surface / 4)), source: 'estimation surface / 4 m²' };
+  if (Number.isFinite(surface) && surface > 0) {
+    const value = Math.max(1, Math.floor(surface / 4));
+    return { value, label: `${value.toLocaleString('fr-FR')} pers.`, source: 'estimation surface / 4 m²' };
+  }
   const fallback = {
     palais_congres: 800,
     salle_omnisports: 500,
@@ -4897,7 +4910,7 @@ function estimateHostingCapacity(resource = {}) {
     salle_fetes: 80,
     ecole_primaire: 70,
   }[String(resource.type || '')];
-  return fallback ? { value: fallback, source: 'estimation par type, à confirmer' } : { value: null, source: 'capacité à confirmer' };
+  return fallback ? { value: fallback, label: `${fallback.toLocaleString('fr-FR')} pers.`, source: 'estimation par type, à confirmer' } : { value: null, label: 'à confirmer', source: 'capacité à confirmer' };
 }
 
 function hostingAmenityStatus(resource = {}, key = '') {
@@ -4925,6 +4938,7 @@ function buildHostingProfile(resource = {}) {
   const capacity = estimateHostingCapacity(resource);
   return {
     capacity: capacity.value,
+    capacityLabel: capacity.label,
     capacitySource: resource.capacity_source || capacity.source,
     surfaceM2: Number(resource.surface_m2) || null,
     accessibility: hostingAmenityStatus(resource, 'accessibility'),
@@ -4951,7 +4965,7 @@ function hostingMatchesAdvancedFilters(resource = {}) {
 function formatHostingDetailsHtml(resource = {}) {
   const profile = buildHostingProfile(resource);
   if (!profile) return '';
-  const capacity = profile.capacity ? `${Number(profile.capacity).toLocaleString('fr-FR')} pers.` : 'à confirmer';
+  const capacity = profile.capacityLabel || (profile.capacity ? `${Number(profile.capacity).toLocaleString('fr-FR')} pers.` : 'à confirmer');
   const surface = profile.surfaceM2 ? `Surface ${Number(profile.surfaceM2).toLocaleString('fr-FR')} m²` : '';
   const chips = [
     `<span class="hosting-chip hosting-chip--ok">Capacité ${escapeHtml(capacity)}</span>`,
@@ -5245,6 +5259,25 @@ function filterIserePoints(points) {
   });
 }
 
+function isVerifiedHostingResource(resource = {}) {
+  const source = String(resource.source || resource.verified_source || resource.info || '').toLowerCase();
+  return Boolean(resource.verified) || source.includes('data es') || source.includes('data.education.gouv.fr') || source.includes('sports');
+}
+
+async function loadVerifiedHostingIsere() {
+  if (verifiedHostingLoaded) return verifiedHostingPointsCache;
+  try {
+    const payload = await api('/api/hosting/isere/verified?limit=2000', { cacheTtlMs: 24 * 60 * 60 * 1000 });
+    verifiedHostingPointsCache = filterIserePoints(Array.isArray(payload?.points) ? payload.points : [])
+      .filter((point) => HOSTING_RESOURCE_TYPES.has(String(point.type || '')))
+      .map((point) => ({ ...point, verified: true, dynamic: true }));
+  } catch {
+    verifiedHostingPointsCache = [];
+  }
+  verifiedHostingLoaded = true;
+  return verifiedHostingPointsCache;
+}
+
 async function loadIsereInstitutions() {
   if (institutionsLoaded) return institutionPointsCache;
 
@@ -5417,18 +5450,20 @@ async function loadTelecomPoints() {
 
 function getDisplayedResources() {
   const query = (document.getElementById('map-search')?.value || '').trim().toLowerCase();
-  const hostingStatic = Array.isArray(window.HOSTING_STATIC_VENUES) ? window.HOSTING_STATIC_VENUES : [];
-  const allStaticPoints = [...RESOURCE_POINTS, ...hostingStatic];
+  const hostingStatic = [];
+  const allStaticPoints = RESOURCE_POINTS.filter((resource) => !HOSTING_RESOURCE_TYPES.has(String(resource.type || '')));
   const staticResources = allStaticPoints
     .filter((r) => r.active)
     .filter((r) => resourceVisibilityOverrides.get(r.id) !== false)
     .filter((r) => shouldDisplayBaseResourceType(r.type, r))
     .filter((r) => !query || `${r.name} ${r.address}`.toLowerCase().includes(query))
     .map((r) => ({ ...r, dynamic: false }));
-  const dynamicResources = [...institutionPointsCache, ...finessPointsCache, ...telecomPointsCache]
+  const osmNonHostingInstitutions = institutionPointsCache.filter((r) => !HOSTING_RESOURCE_TYPES.has(String(r.type || '')));
+  const dynamicResources = [...osmNonHostingInstitutions, ...verifiedHostingPointsCache, ...finessPointsCache, ...telecomPointsCache]
     .filter((r) => r.type)
     // Exclure les doublons avec les données statiques hébergement (même id)
     .filter((r) => !hostingStatic.some((h) => h.id === r.id))
+    .filter((r) => !HOSTING_RESOURCE_TYPES.has(String(r.type || '')) || isVerifiedHostingResource(r))
     .filter((r) => shouldDisplayBaseResourceType(r.type, r))
     .filter((r) => resourceVisibilityOverrides.get(r.id) !== false)
     .filter((r) => !query || `${r.name} ${r.address}`.toLowerCase().includes(query));
@@ -5441,11 +5476,13 @@ function getDisplayedResources() {
 }
 
 function getResourcesForZoneImpact() {
-  const hostingStatic = Array.isArray(window.HOSTING_STATIC_VENUES) ? window.HOSTING_STATIC_VENUES : [];
-  const staticResources = [...RESOURCE_POINTS, ...hostingStatic]
+  const hostingStatic = [];
+  const staticResources = RESOURCE_POINTS
     .filter((resource) => resource.active)
+    .filter((resource) => !HOSTING_RESOURCE_TYPES.has(String(resource.type || '')))
     .map((resource) => ({ ...resource, dynamic: false }));
-  const dynamicResources = [...institutionPointsCache, ...finessPointsCache, ...telecomPointsCache]
+  const osmNonHostingInstitutions = institutionPointsCache.filter((r) => !HOSTING_RESOURCE_TYPES.has(String(r.type || '')));
+  const dynamicResources = [...osmNonHostingInstitutions, ...verifiedHostingPointsCache, ...finessPointsCache, ...telecomPointsCache]
     .filter((r) => !hostingStatic.some((h) => h.id === r.id));
   return [...staticResources, ...dynamicResources];
 }
@@ -5623,9 +5660,9 @@ function renderHelipadLayer() {
 }
 
 function _ensureStaticDataLoaded() {
-  if (!institutionsLoaded && !_institutionsLoadInFlight) {
+  if ((!institutionsLoaded || !verifiedHostingLoaded) && !_institutionsLoadInFlight) {
     _institutionsLoadInFlight = true;
-    loadIsereInstitutions()
+    Promise.all([loadIsereInstitutions(), loadVerifiedHostingIsere()])
       .then(() => { _institutionsLoadInFlight = false; _drawResourceMarkers(); })
       .catch(() => { _institutionsLoadInFlight = false; });
   }
@@ -5690,7 +5727,7 @@ function tryLocalMapSearch(query = '') {
     const point = geocodeCache.get(cacheKey);
     if (point) return { ...point, label: `${municipality.name} (commune)` };
   }
-  const resources = [...RESOURCE_POINTS, ...institutionPointsCache];
+  const resources = [...RESOURCE_POINTS, ...institutionPointsCache, ...verifiedHostingPointsCache];
   const resource = resources.find((item) => `${item.name} ${item.address}`.toLowerCase().includes(needle));
   if (resource) {
     const coords = normalizeMapCoordinates(resource.lat, resource.lon);
