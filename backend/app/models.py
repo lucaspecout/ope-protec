@@ -193,6 +193,10 @@ class InstitutionPoint(Base):
     capacity: Mapped[int | None] = mapped_column(Integer, nullable=True)
     surface_m2: Mapped[float | None] = mapped_column(Float, nullable=True)
     capacity_source: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    accessibility: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    sanitary: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    heating: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    parking: Mapped[str | None] = mapped_column(String(40), nullable=True)
     source: Mapped[str] = mapped_column(String(200), default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

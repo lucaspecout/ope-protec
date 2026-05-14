@@ -220,6 +220,10 @@ with engine.begin() as conn:
             capacity INTEGER,
             surface_m2 DOUBLE PRECISION,
             capacity_source VARCHAR(80),
+            accessibility VARCHAR(40),
+            sanitary VARCHAR(40),
+            heating VARCHAR(40),
+            parking VARCHAR(40),
             source VARCHAR(200) NOT NULL DEFAULT '',
             updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
         )
@@ -227,6 +231,10 @@ with engine.begin() as conn:
     conn.execute(text("ALTER TABLE institution_points ADD COLUMN IF NOT EXISTS capacity INTEGER"))
     conn.execute(text("ALTER TABLE institution_points ADD COLUMN IF NOT EXISTS surface_m2 DOUBLE PRECISION"))
     conn.execute(text("ALTER TABLE institution_points ADD COLUMN IF NOT EXISTS capacity_source VARCHAR(80)"))
+    conn.execute(text("ALTER TABLE institution_points ADD COLUMN IF NOT EXISTS accessibility VARCHAR(40)"))
+    conn.execute(text("ALTER TABLE institution_points ADD COLUMN IF NOT EXISTS sanitary VARCHAR(40)"))
+    conn.execute(text("ALTER TABLE institution_points ADD COLUMN IF NOT EXISTS heating VARCHAR(40)"))
+    conn.execute(text("ALTER TABLE institution_points ADD COLUMN IF NOT EXISTS parking VARCHAR(40)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_institution_points_type ON institution_points(type)"))
     conn.execute(text("""
         CREATE TABLE IF NOT EXISTS alert_history (

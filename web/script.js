@@ -861,7 +861,8 @@ const RISK_RESOURCE_TYPES = new Set(['lieu_risque', 'centrale_nucleaire', 'energ
 const TRANSPORT_RESOURCE_TYPES = new Set(['transport', 'transport_gare_sncf', 'transport_gare_routiere', 'transport_aeroport']);
 const COMMAND_RESOURCE_TYPES = new Set(['poste_commandement']);
 const PC_RESOURCE_TYPES = new Set(['protection_civile']);
-const HOSTING_RESOURCE_TYPES = new Set(['gymnase', 'complexe_sportif', 'salle_omnisports', 'centre_culturel', 'salle_spectacle_public', 'palais_congres', 'salle_fetes']);
+const HOSTING_RESOURCE_TYPES = new Set(['gymnase', 'complexe_sportif', 'stade', 'salle_omnisports', 'centre_culturel', 'salle_spectacle_public', 'palais_congres', 'salle_fetes']);
+const SCHOOL_HOSTING_TYPES = new Set(['ecole_primaire', 'college', 'lycee', 'universite']);
 const TELECOM_RESOURCE_TYPES = new Set(['anfr_antenna', 'arcep_mobile_outage']);
 
 const ISERE_BOUNDARY_STYLE = { color: '#163a87', weight: 2, fillColor: '#63c27d', fillOpacity: 0.2 };
@@ -4212,6 +4213,8 @@ async function resetMapFilters() {
     'filter-resources-transport-type': 'all',
     'filter-resources-health-type': 'all',
     'filter-resources-hosting-type': 'all',
+    'filter-resources-hosting-capacity': '0',
+    'filter-resources-hosting-accessibility': 'all',
     'filter-resources-telecom-type': 'all',
     'map-basemap-select': 'osm',
   };
@@ -4234,6 +4237,10 @@ async function resetMapFilters() {
   const healthResources = document.getElementById('filter-resources-health');
   const commandResources = document.getElementById('filter-resources-command');
   const hostingResources = document.getElementById('filter-resources-hosting');
+  const hostingSchools = document.getElementById('filter-resources-hosting-schools');
+  const hostingSanitary = document.getElementById('filter-resources-hosting-sanitary');
+  const hostingHeating = document.getElementById('filter-resources-hosting-heating');
+  const hostingParking = document.getElementById('filter-resources-hosting-parking');
   const telecomResources = document.getElementById('filter-resources-telecom');
   if (hydro) hydro.checked = true;
   if (pcs) pcs.checked = true;
@@ -4248,6 +4255,10 @@ async function resetMapFilters() {
   if (healthResources) healthResources.checked = false;
   if (commandResources) commandResources.checked = true;
   if (hostingResources) hostingResources.checked = false;
+  if (hostingSchools) hostingSchools.checked = false;
+  if (hostingSanitary) hostingSanitary.checked = false;
+  if (hostingHeating) hostingHeating.checked = false;
+  if (hostingParking) hostingParking.checked = false;
   if (telecomResources) telecomResources.checked = false;
   if (googleFlow) googleFlow.checked = false;
   resourceVisibilityOverrides.clear();
@@ -4774,7 +4785,8 @@ function classifyInstitutionPoint(element = {}) {
   return null;
 }
 
-function shouldDisplayBaseResourceType(type = '') {
+function shouldDisplayBaseResourceType(type = '', resource = null) {
+  const resourceForFilters = resource || { type };
   if (TELECOM_RESOURCE_TYPES.has(type)) {
     const telecomEnabled = document.getElementById('filter-resources-telecom')?.checked ?? false;
     const telecomTypeFilter = document.getElementById('filter-resources-telecom-type')?.value || 'all';
@@ -4782,6 +4794,12 @@ function shouldDisplayBaseResourceType(type = '') {
     return telecomTypeFilter === 'all' || telecomTypeFilter === type;
   }
   if (SCHOOL_RESOURCE_TYPES.has(type)) {
+    const hostingEnabled = document.getElementById('filter-resources-hosting')?.checked ?? false;
+    const hostingTypeFilter = document.getElementById('filter-resources-hosting-type')?.value || 'all';
+    const includeSchoolsAsHosting = document.getElementById('filter-resources-hosting-schools')?.checked ?? false;
+    if (hostingEnabled && (includeSchoolsAsHosting || hostingTypeFilter === 'school_hosting')) {
+      return hostingMatchesAdvancedFilters(resourceForFilters);
+    }
     const schoolsEnabled = document.getElementById('filter-resources-schools')?.checked ?? false;
     const schoolTypeFilter = document.getElementById('filter-resources-schools-type')?.value || 'all';
     if (!schoolsEnabled) return false;
@@ -4821,20 +4839,131 @@ function shouldDisplayBaseResourceType(type = '') {
     const hostingEnabled = document.getElementById('filter-resources-hosting')?.checked ?? false;
     const hostingTypeFilter = document.getElementById('filter-resources-hosting-type')?.value || 'all';
     if (!hostingEnabled) return false;
-    return hostingTypeFilter === 'all' || hostingTypeFilter === type;
+    if (hostingTypeFilter === 'school_hosting') return false;
+    if (hostingTypeFilter !== 'all' && hostingTypeFilter !== type) return false;
+    return hostingMatchesAdvancedFilters(resourceForFilters);
   }
-  if (type === 'stade') return false;
   if (PC_RESOURCE_TYPES.has(type)) return document.getElementById('filter-resources-protcivile')?.checked ?? true;
   return true;
 }
 
-function formatHostingDetailsHtml(resource = {}) {
+function legacyFormatHostingDetailsHtml(resource = {}) {
   if (!HOSTING_RESOURCE_TYPES.has(String(resource.type || ''))) return '';
   const parts = [];
   if (resource.capacity) parts.push(`Capacité: ${Number(resource.capacity).toLocaleString('fr-FR')} pers.`);
   if (resource.surface_m2) parts.push(`Surface: ${Number(resource.surface_m2).toLocaleString('fr-FR')} m²`);
   if (resource.capacity_source) parts.push(String(resource.capacity_source));
   return parts.length ? `<br><span class="muted">${escapeHtml(parts.join(' · '))}</span>` : '';
+}
+
+function normalizeYesNo(value) {
+  const text = String(value ?? '').trim().toLowerCase();
+  if (!text) return null;
+  if (['yes', 'true', '1', 'oui', 'available', 'present', 'designated'].includes(text)) return true;
+  if (['no', 'false', '0', 'non', 'none', 'absent'].includes(text)) return false;
+  if (['limited', 'partial', 'partiel', 'unknown', 'inconnu'].includes(text)) return text;
+  return text;
+}
+
+function yesNoLabel(value, { unknown = 'Non renseigné', yes = 'Oui', no = 'Non' } = {}) {
+  const normalized = normalizeYesNo(value);
+  if (normalized === true) return yes;
+  if (normalized === false) return no;
+  if (['limited', 'partial', 'partiel'].includes(normalized)) return 'Partiel';
+  if (normalized === 'probable') return 'Probable';
+  return unknown;
+}
+
+function isHostingCandidateType(type = '') {
+  return HOSTING_RESOURCE_TYPES.has(type) || SCHOOL_HOSTING_TYPES.has(type);
+}
+
+function estimateHostingCapacity(resource = {}) {
+  const explicit = Number(resource.capacity || resource.hosting_capacity || resource.details?.capacity);
+  if (Number.isFinite(explicit) && explicit > 0) return { value: Math.round(explicit), source: resource.capacity_source || 'capacité renseignée' };
+  const surface = Number(resource.surface_m2 || resource.details?.surface_m2);
+  if (Number.isFinite(surface) && surface > 0) return { value: Math.max(1, Math.floor(surface / 4)), source: 'estimation surface / 4 m²' };
+  const fallback = {
+    palais_congres: 800,
+    salle_omnisports: 500,
+    stade: 300,
+    complexe_sportif: 220,
+    lycee: 220,
+    universite: 220,
+    college: 160,
+    centre_culturel: 150,
+    salle_spectacle_public: 150,
+    gymnase: 120,
+    salle_fetes: 80,
+    ecole_primaire: 70,
+  }[String(resource.type || '')];
+  return fallback ? { value: fallback, source: 'estimation par type, à confirmer' } : { value: null, source: 'capacité à confirmer' };
+}
+
+function hostingAmenityStatus(resource = {}, key = '') {
+  const details = resource.details && typeof resource.details === 'object' ? resource.details : {};
+  const value = resource[key] ?? resource[`hosting_${key}`] ?? details[key] ?? details[`hosting_${key}`];
+  const normalized = normalizeYesNo(value);
+  if (normalized !== null) return normalized;
+  const type = String(resource.type || '');
+  if (key === 'sanitary' && isHostingCandidateType(type)) return true;
+  if (key === 'heating') {
+    if (type === 'stade') return false;
+    if (isHostingCandidateType(type)) return true;
+  }
+  if (key === 'parking' && ['complexe_sportif', 'salle_omnisports', 'palais_congres', 'stade', 'lycee', 'college', 'universite'].includes(type)) return true;
+  if (key === 'accessibility') {
+    if (normalizeYesNo(resource.wheelchair ?? details.wheelchair) === true) return true;
+    if (['palais_congres', 'salle_omnisports', 'complexe_sportif', 'centre_culturel', 'lycee', 'college', 'universite'].includes(type)) return 'probable';
+  }
+  return null;
+}
+
+function buildHostingProfile(resource = {}) {
+  const type = String(resource.type || '');
+  if (!isHostingCandidateType(type)) return null;
+  const capacity = estimateHostingCapacity(resource);
+  return {
+    capacity: capacity.value,
+    capacitySource: resource.capacity_source || capacity.source,
+    surfaceM2: Number(resource.surface_m2) || null,
+    accessibility: hostingAmenityStatus(resource, 'accessibility'),
+    sanitary: hostingAmenityStatus(resource, 'sanitary'),
+    heating: hostingAmenityStatus(resource, 'heating'),
+    parking: hostingAmenityStatus(resource, 'parking'),
+    isSchool: SCHOOL_HOSTING_TYPES.has(type),
+  };
+}
+
+function hostingMatchesAdvancedFilters(resource = {}) {
+  const profile = buildHostingProfile(resource);
+  if (!profile) return false;
+  const minCapacity = Number(document.getElementById('filter-resources-hosting-capacity')?.value || 0);
+  if (Number.isFinite(minCapacity) && minCapacity > 0 && (!profile.capacity || profile.capacity < minCapacity)) return false;
+  const accessibility = document.getElementById('filter-resources-hosting-accessibility')?.value || 'all';
+  if (accessibility === 'accessible' && !(profile.accessibility === true || profile.accessibility === 'probable' || profile.accessibility === 'limited')) return false;
+  if ((document.getElementById('filter-resources-hosting-sanitary')?.checked ?? false) && profile.sanitary !== true) return false;
+  if ((document.getElementById('filter-resources-hosting-heating')?.checked ?? false) && profile.heating !== true) return false;
+  if ((document.getElementById('filter-resources-hosting-parking')?.checked ?? false) && !(profile.parking === true || profile.parking === 'probable')) return false;
+  return true;
+}
+
+function formatHostingDetailsHtml(resource = {}) {
+  const profile = buildHostingProfile(resource);
+  if (!profile) return '';
+  const capacity = profile.capacity ? `${Number(profile.capacity).toLocaleString('fr-FR')} pers.` : 'à confirmer';
+  const surface = profile.surfaceM2 ? `Surface ${Number(profile.surfaceM2).toLocaleString('fr-FR')} m²` : '';
+  const chips = [
+    `<span class="hosting-chip hosting-chip--ok">Capacité ${escapeHtml(capacity)}</span>`,
+    `<span class="hosting-chip ${profile.accessibility ? 'hosting-chip--ok' : 'hosting-chip--warn'}">PMR ${escapeHtml(yesNoLabel(profile.accessibility, { unknown: 'à vérifier', yes: 'oui', no: 'non' }))}</span>`,
+    `<span class="hosting-chip ${profile.sanitary === true ? 'hosting-chip--ok' : 'hosting-chip--warn'}">Sanitaires ${escapeHtml(yesNoLabel(profile.sanitary, { unknown: 'à vérifier', yes: 'oui', no: 'non' }))}</span>`,
+    `<span class="hosting-chip ${profile.heating === true ? 'hosting-chip--ok' : 'hosting-chip--warn'}">Chauffage ${escapeHtml(yesNoLabel(profile.heating, { unknown: 'à vérifier', yes: 'oui', no: 'non' }))}</span>`,
+    `<span class="hosting-chip ${profile.parking === true ? 'hosting-chip--ok' : 'hosting-chip--warn'}">Parking ${escapeHtml(yesNoLabel(profile.parking, { unknown: 'à vérifier', yes: 'oui', no: 'non' }))}</span>`,
+  ].join('');
+  const note = [profile.capacitySource, surface, profile.isSchool ? 'ERP scolaire: accord commune/établissement à valider avant ouverture accueil.' : 'Lieu d’accueil: à confirmer avec la commune avant activation.']
+    .filter(Boolean)
+    .join(' · ');
+  return `<div class="hosting-details"><div class="hosting-details__chips">${chips}</div><div class="hosting-details__note">${escapeHtml(note)}</div></div>`;
 }
 
 async function loadFinessIsereResources() {
@@ -5293,14 +5422,14 @@ function getDisplayedResources() {
   const staticResources = allStaticPoints
     .filter((r) => r.active)
     .filter((r) => resourceVisibilityOverrides.get(r.id) !== false)
-    .filter((r) => shouldDisplayBaseResourceType(r.type))
+    .filter((r) => shouldDisplayBaseResourceType(r.type, r))
     .filter((r) => !query || `${r.name} ${r.address}`.toLowerCase().includes(query))
     .map((r) => ({ ...r, dynamic: false }));
   const dynamicResources = [...institutionPointsCache, ...finessPointsCache, ...telecomPointsCache]
     .filter((r) => r.type)
     // Exclure les doublons avec les données statiques hébergement (même id)
     .filter((r) => !hostingStatic.some((h) => h.id === r.id))
-    .filter((r) => shouldDisplayBaseResourceType(r.type))
+    .filter((r) => shouldDisplayBaseResourceType(r.type, r))
     .filter((r) => resourceVisibilityOverrides.get(r.id) !== false)
     .filter((r) => !query || `${r.name} ${r.address}`.toLowerCase().includes(query));
   const customSensible = (Array.isArray(mapPoints) ? mapPoints : [])
@@ -13401,6 +13530,8 @@ function bindAppInteractions() {
   // Filtres qui n'affectent que les ressources (rendu immédiat, pas de re-fetch réseau)
   const RESOURCE_ONLY_FILTERS = new Set([
     'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type',
+    'filter-resources-hosting-schools', 'filter-resources-hosting-capacity', 'filter-resources-hosting-accessibility',
+    'filter-resources-hosting-sanitary', 'filter-resources-hosting-heating', 'filter-resources-hosting-parking',
     'filter-resources-schools', 'filter-resources-schools-type',
     'filter-resources-security', 'filter-resources-security-type',
     'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type',
@@ -13409,7 +13540,7 @@ function bindAppInteractions() {
     'filter-resources-telecom', 'filter-resources-telecom-type',
     'filter-resources-active', 'filter-resources-protcivile',
   ]);
-  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-resources-protcivile', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras', 'filter-autoroutes', 'filter-autoroutes-type', 'filter-pr-autoroutes'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type', 'filter-resources-hosting-schools', 'filter-resources-hosting-capacity', 'filter-resources-hosting-accessibility', 'filter-resources-hosting-sanitary', 'filter-resources-hosting-heating', 'filter-resources-hosting-parking', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-resources-protcivile', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras', 'filter-autoroutes', 'filter-autoroutes-type', 'filter-pr-autoroutes'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       if (RESOURCE_ONLY_FILTERS.has(id)) {
         // Rendu immédiat depuis le cache

@@ -804,6 +804,7 @@
                       <option value="all">Tous les types</option>
                       <option value="gymnase">Gymnases</option>
                       <option value="complexe_sportif">Complexes sportifs</option>
+                      <option value="school_hosting">Établissements scolaires</option>
                       <option value="stade">Stades</option>
                       <option value="salle_omnisports">Salles omnisports / palais des sports</option>
                       <option value="centre_culturel">Centres culturels</option>
@@ -811,6 +812,29 @@
                       <option value="palais_congres">Palais des congrès / salons</option>
                       <option value="salle_fetes">Salles des fêtes / polyvalentes</option>
                     </select>
+                    <div class="hosting-filter-grid" aria-label="Filtres avancés lieux d'accueil">
+                      <label class="map-inline-checkbox"><input id="filter-resources-hosting-schools" type="checkbox" /> Inclure écoles/collèges/lycées</label>
+                      <label>
+                        Capacité min.
+                        <select id="filter-resources-hosting-capacity" aria-label="Capacité minimale d'accueil">
+                          <option value="0">Toutes capacités</option>
+                          <option value="50">50+ personnes</option>
+                          <option value="100">100+ personnes</option>
+                          <option value="200">200+ personnes</option>
+                          <option value="500">500+ personnes</option>
+                        </select>
+                      </label>
+                      <label>
+                        Accès
+                        <select id="filter-resources-hosting-accessibility" aria-label="Filtrer par accessibilité">
+                          <option value="all">Tous</option>
+                          <option value="accessible">Accessible PMR confirmé/probable</option>
+                        </select>
+                      </label>
+                      <label class="map-inline-checkbox"><input id="filter-resources-hosting-sanitary" type="checkbox" /> Sanitaires</label>
+                      <label class="map-inline-checkbox"><input id="filter-resources-hosting-heating" type="checkbox" /> Chauffage</label>
+                      <label class="map-inline-checkbox"><input id="filter-resources-hosting-parking" type="checkbox" /> Parking</label>
+                    </div>
                   </div>
 
                   <div class="filter-subgroup">

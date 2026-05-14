@@ -911,6 +911,38 @@ def _hosting_capacity_metadata(tags: dict, resource_type: str) -> tuple[int | No
     return None, surface_m2, None
 
 
+def _hosting_amenity_metadata(tags: dict, resource_type: str) -> dict[str, str | None]:
+    def norm(value: Any) -> str | None:
+        raw = str(value or "").strip().lower()
+        if not raw:
+            return None
+        if raw in {"yes", "designated", "permissive"}:
+            return "yes"
+        if raw in {"no", "private", "customers"}:
+            return "no"
+        if raw in {"limited", "partial"}:
+            return "limited"
+        return raw[:40]
+
+    accessibility = norm(tags.get("wheelchair") or tags.get("access:wheelchair") or tags.get("disabled"))
+    sanitary = norm(tags.get("toilets") or tags.get("amenity:toilets") or tags.get("toilets:wheelchair"))
+    heating = norm(tags.get("heating") or tags.get("building:heating"))
+    parking = norm(tags.get("parking") or tags.get("parking:condition") or tags.get("parking:lane:both"))
+
+    if sanitary is None and resource_type in _HOSTING_INDOOR_TYPES:
+        sanitary = "yes"
+    if heating is None and resource_type in _HOSTING_INDOOR_TYPES:
+        heating = "yes"
+    if parking is None and resource_type in {"complexe_sportif", "salle_omnisports", "palais_congres"}:
+        parking = "probable"
+    return {
+        "accessibility": accessibility,
+        "sanitary": sanitary,
+        "heating": heating,
+        "parking": parking,
+    }
+
+
 def _is_public_indoor_hosting(tags: dict, resource_type: str) -> bool:
     if resource_type not in _HOSTING_INDOOR_TYPES:
         return False
@@ -991,6 +1023,7 @@ def _fetch_institutions_isere_live() -> dict[str, Any]:
         if is_hosting and not _is_public_indoor_hosting(tags, resource_type):
             continue
         capacity, surface_m2, capacity_source = _hosting_capacity_metadata(tags, resource_type) if is_hosting else (None, None, None)
+        hosting_amenities = _hosting_amenity_metadata(tags, resource_type) if is_hosting else {}
 
         lat = element.get("lat") or (element.get("center") or {}).get("lat")
         lon = element.get("lon") or (element.get("center") or {}).get("lon")
@@ -1041,6 +1074,10 @@ def _fetch_institutions_isere_live() -> dict[str, Any]:
             "capacity": capacity,
             "surface_m2": surface_m2,
             "capacity_source": capacity_source,
+            "accessibility": hosting_amenities.get("accessibility"),
+            "sanitary": hosting_amenities.get("sanitary"),
+            "heating": hosting_amenities.get("heating"),
+            "parking": hosting_amenities.get("parking"),
             "dynamic": True,
         })
 
@@ -1079,6 +1116,10 @@ def _institutions_save_to_db(points: list[dict[str, Any]]) -> None:
                     existing.capacity = p.get("capacity")
                     existing.surface_m2 = p.get("surface_m2")
                     existing.capacity_source = p.get("capacity_source")
+                    existing.accessibility = p.get("accessibility")
+                    existing.sanitary = p.get("sanitary")
+                    existing.heating = p.get("heating")
+                    existing.parking = p.get("parking")
                     existing.source = p["source"]
                     existing.updated_at = now
                 else:
@@ -1094,6 +1135,10 @@ def _institutions_save_to_db(points: list[dict[str, Any]]) -> None:
                         capacity=p.get("capacity"),
                         surface_m2=p.get("surface_m2"),
                         capacity_source=p.get("capacity_source"),
+                        accessibility=p.get("accessibility"),
+                        sanitary=p.get("sanitary"),
+                        heating=p.get("heating"),
+                        parking=p.get("parking"),
                         source=p["source"],
                         updated_at=now,
                     ))
@@ -1127,6 +1172,10 @@ def _institutions_load_from_db() -> list[dict[str, Any]] | None:
                     "capacity": r.capacity,
                     "surface_m2": r.surface_m2,
                     "capacity_source": r.capacity_source,
+                    "accessibility": r.accessibility,
+                    "sanitary": r.sanitary,
+                    "heating": r.heating,
+                    "parking": r.parking,
                     "source": r.source,
                     "dynamic": True,
                     "updated_at": r.updated_at.isoformat() + "Z" if r.updated_at else None,
