@@ -809,11 +809,18 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
   };
 }
 
+function getStartupQueuePercent() {
+  const total = startupQueueState.total;
+  const completed = startupQueueState.completed;
+  return total > 0 ? Math.min(100, Math.round((completed / total) * 100)) : 0;
+}
+
 function updateApiQueueVisual() {
   const summaryNode = document.getElementById('api-queue-summary');
   const progressNode = document.getElementById('api-queue-progress-bar');
   const currentNode = document.getElementById('api-queue-current');
   const progressWrap = document.querySelector('.api-queue-progress');
+  updateGlobalLoadingVisual(getStartupQueuePercent());
   if (!summaryNode || !progressNode || !currentNode || !progressWrap) return;
 
   const pending = apiRequestQueue.length;
@@ -828,6 +835,32 @@ function updateApiQueueVisual() {
   progressNode.style.width = `${percent}%`;
   progressWrap.setAttribute('aria-valuenow', String(percent));
   currentNode.textContent = startupQueueState.current || 'Aucune tâche en cours.';
+}
+
+function updateGlobalLoadingVisual(percent = 0) {
+  const bar = document.getElementById('global-loading-bar');
+  if (!bar) return;
+
+  const hasStartupLoading = startupQueueState.total > 0 && startupQueueState.completed < startupQueueState.total;
+  const hasApiLoading = apiActiveRequests > 0 || apiRequestQueue.length > 0;
+  const isLoading = hasStartupLoading || hasApiLoading;
+  const visiblePercent = hasStartupLoading ? percent : 55;
+  bar.hidden = !isLoading;
+  bar.classList.toggle('hidden', !isLoading);
+
+  const progress = document.getElementById('global-loading-progress');
+  const percentNode = document.getElementById('global-loading-percent');
+  const currentNode = document.getElementById('global-loading-current');
+  const track = bar.querySelector('.global-loading-bar__track');
+
+  if (progress) progress.style.width = `${visiblePercent}%`;
+  if (percentNode) percentNode.textContent = hasStartupLoading ? `${percent}%` : '...';
+  if (currentNode) currentNode.textContent = startupQueueState.current || 'Chargement des donnees...';
+  if (track) track.setAttribute('aria-valuenow', String(visiblePercent));
+
+  document.querySelectorAll('.view').forEach((panel) => {
+    panel.classList.toggle('is-loading', isLoading && !panel.hidden);
+  });
 }
 
 function startStartupQueue(total = 0) {
@@ -2404,6 +2437,7 @@ function setActivePanel(panelId) {
   localStorage.setItem(STORAGE_KEYS.activePanel, panelId);
   document.querySelectorAll('.menu-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.target === panelId));
   document.querySelectorAll('.view').forEach((panel) => setVisibility(panel, panel.id === panelId));
+  updateGlobalLoadingVisual(getStartupQueuePercent());
   updateMobileNavActive(panelId);
   document.getElementById('panel-title').textContent = PANEL_TITLES[panelId] || 'Centre opérationnel';
   if (panelId === 'map-panel' && leafletMap) {

@@ -99,6 +99,16 @@
             </div>
           </div>
         </header>
+        <div id="global-loading-bar" class="global-loading-bar hidden" hidden aria-live="polite">
+          <div class="global-loading-bar__top">
+            <strong id="global-loading-title">Chargement des données</strong>
+            <span id="global-loading-percent">0%</span>
+          </div>
+          <div class="global-loading-bar__track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <span id="global-loading-progress"></span>
+          </div>
+          <p id="global-loading-current">Préparation des modules...</p>
+        </div>
 
         <section id="situation-panel" class="panel view situation-panel">
           <div id="situation-content" class="situation-content">

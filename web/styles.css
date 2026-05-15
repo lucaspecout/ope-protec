@@ -279,6 +279,82 @@ label { display: block; margin-bottom: .8rem; }
 }
 .header-actions { display: flex; align-items: center; gap: .8rem; }
 .view { padding: 1rem; }
+.view.is-loading {
+  position: relative;
+}
+.view.is-loading::after {
+  content: 'Chargement des données...';
+  display: none;
+  position: absolute;
+  right: 1rem;
+  top: 1rem;
+  border: 1px solid #cfe0fb;
+  border-radius: 999px;
+  padding: .28rem .65rem .28rem 1.65rem;
+  background: #f7fbff;
+  color: var(--primary);
+  font-size: .78rem;
+  font-weight: 800;
+  box-shadow: 0 8px 18px rgba(16, 43, 94, .08);
+}
+.view.is-loading::before {
+  content: '';
+  display: none;
+  position: absolute;
+  right: calc(1rem + 5.75rem);
+  top: 1.48rem;
+  z-index: 1;
+  width: .58rem;
+  height: .58rem;
+  border: 2px solid #2e5c96;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin-login .7s linear infinite;
+}
+.view.is-loading::before,
+.view.is-loading::after {
+  display: block;
+  pointer-events: none;
+}
+.global-loading-bar {
+  position: sticky;
+  top: .55rem;
+  z-index: 140;
+  border: 1px solid #cfe0fb;
+  border-radius: 12px;
+  padding: .58rem .75rem;
+  background: rgba(248, 251, 255, .96);
+  box-shadow: 0 10px 24px rgba(16, 43, 94, .1);
+  backdrop-filter: blur(6px);
+}
+.global-loading-bar__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .8rem;
+  font-size: .84rem;
+  color: var(--primary);
+}
+.global-loading-bar__track {
+  height: 7px;
+  margin: .38rem 0 .25rem;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #dfeafa;
+}
+.global-loading-bar__track span {
+  display: block;
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #f07800, #2e5c96);
+  transition: width 180ms ease;
+}
+.global-loading-bar p {
+  margin: 0;
+  color: var(--muted);
+  font-size: .78rem;
+}
 
 .kpis { display: grid; gap: .7rem; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: .9rem; }
 .tile { border: 1px solid var(--line); border-radius: 12px; padding: .8rem; background: linear-gradient(180deg, #fff, #f7faff); }
