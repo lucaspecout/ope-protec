@@ -68,7 +68,7 @@ services:
         condition: service_healthy
     networks:
       - default
-      - ldap_net
+      - lldap_ldap_net
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)\" 2>/dev/null && echo ok"]
       interval: 8s
@@ -94,5 +94,5 @@ volumes:
   app_data:
 
 networks:
-  ldap_net:
+  lldap_ldap_net:
     external: true
