@@ -882,7 +882,7 @@ def authenticate_ldap_user(username: str, password: str) -> dict | None:
     user_filter = str(settings.ldap_user_filter or "(uid={username})").replace(
         "{username}", ldap_escape_filter_value(username)
     )
-    attrs = ["uid", "mail", "displayname", "firstname", "lastname"]
+    attrs = ["uid", "mail"]
     municipality_attr = str(settings.ldap_municipality_attr or "").strip()
     if municipality_attr:
         attrs.append(municipality_attr)
@@ -990,8 +990,16 @@ def test_ldap_directory_connection() -> dict:
         with Connection(server, user=bind_user, password=bind_password, auto_bind=True) as conn:
             add_check("Bind", True, bind_user or "bind anonyme")
             if settings.ldap_user_base_dn:
-                found = conn.search(settings.ldap_user_base_dn, "(objectClass=*)", search_scope=SUBTREE, attributes=["uid", "mail", "displayname", "firstname", "lastname"], size_limit=1)
+                found = conn.search(settings.ldap_user_base_dn, "(objectClass=*)", search_scope=SUBTREE, attributes=["uid", "mail"], size_limit=1)
                 add_check("Base utilisateurs", bool(found), settings.ldap_user_base_dn)
+                for attr in ("displayname", "display_name", "cn", "givenname", "sn"):
+                    try:
+                        attr_ok = conn.search(settings.ldap_user_base_dn, "(objectClass=*)", search_scope=SUBTREE, attributes=[attr], size_limit=1)
+                        add_check(f"Attribut {attr}", bool(attr_ok), "lisible" if attr_ok else "non trouve")
+                        if attr_ok:
+                            break
+                    except Exception as exc:
+                        add_check(f"Attribut {attr}", False, str(exc))
             else:
                 add_check("Base utilisateurs", False, "LDAP_USER_BASE_DN manquant")
                 return {"ok": False, "detail": "Base utilisateurs manquante", "checks": checks}
