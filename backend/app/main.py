@@ -257,6 +257,12 @@ with engine.begin() as conn:
             resource_type VARCHAR(60) NOT NULL DEFAULT 'autre',
             status VARCHAR(30) NOT NULL DEFAULT 'disponible',
             unit VARCHAR(80),
+            identifier VARCHAR(80),
+            assigned_to VARCHAR(120),
+            autonomy_hours DOUBLE PRECISION,
+            capacity INTEGER,
+            contact VARCHAR(120),
+            location_label VARCHAR(160),
             notes TEXT,
             lat DOUBLE PRECISION,
             lon DOUBLE PRECISION,
@@ -266,6 +272,12 @@ with engine.begin() as conn:
             updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
         )
     """))
+    conn.execute(text("ALTER TABLE operational_resources ADD COLUMN IF NOT EXISTS identifier VARCHAR(80)"))
+    conn.execute(text("ALTER TABLE operational_resources ADD COLUMN IF NOT EXISTS assigned_to VARCHAR(120)"))
+    conn.execute(text("ALTER TABLE operational_resources ADD COLUMN IF NOT EXISTS autonomy_hours DOUBLE PRECISION"))
+    conn.execute(text("ALTER TABLE operational_resources ADD COLUMN IF NOT EXISTS capacity INTEGER"))
+    conn.execute(text("ALTER TABLE operational_resources ADD COLUMN IF NOT EXISTS contact VARCHAR(120)"))
+    conn.execute(text("ALTER TABLE operational_resources ADD COLUMN IF NOT EXISTS location_label VARCHAR(160)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_operational_resources_status ON operational_resources(status)"))
     conn.execute(text("""
         CREATE TABLE IF NOT EXISTS audit_log (
@@ -3437,6 +3449,12 @@ def _resource_to_dict(r: OperationalResource) -> dict:
         "resource_type": r.resource_type,
         "status": r.status,
         "unit": r.unit,
+        "identifier": r.identifier,
+        "assigned_to": r.assigned_to,
+        "autonomy_hours": r.autonomy_hours,
+        "capacity": r.capacity,
+        "contact": r.contact,
+        "location_label": r.location_label,
         "notes": r.notes,
         "lat": r.lat,
         "lon": r.lon,
@@ -3477,9 +3495,15 @@ async def create_resource(
         resource_type=str(body.get("resource_type") or "autre")[:60],
         status=str(body.get("status") or "disponible")[:30],
         unit=str(body.get("unit") or "")[:80] or None,
+        identifier=str(body.get("identifier") or "")[:80] or None,
+        assigned_to=str(body.get("assigned_to") or "")[:120] or None,
+        autonomy_hours=float(body["autonomy_hours"]) if body.get("autonomy_hours") not in (None, "") else None,
+        capacity=int(body["capacity"]) if body.get("capacity") not in (None, "") else None,
+        contact=str(body.get("contact") or "")[:120] or None,
+        location_label=str(body.get("location_label") or "")[:160] or None,
         notes=str(body.get("notes") or "")[:1000] or None,
-        lat=float(body["lat"]) if body.get("lat") is not None else None,
-        lon=float(body["lon"]) if body.get("lon") is not None else None,
+        lat=float(body["lat"]) if body.get("lat") not in (None, "") else None,
+        lon=float(body["lon"]) if body.get("lon") not in (None, "") else None,
         municipality_id=int(body["municipality_id"]) if body.get("municipality_id") else None,
         created_by_id=user.id,
     )
@@ -3503,13 +3527,17 @@ async def update_resource(
         body = await request.json()
     except Exception:
         raise HTTPException(400, "Corps JSON invalide")
-    for field in ("name", "resource_type", "status", "unit", "notes"):
+    for field in ("name", "resource_type", "status", "unit", "identifier", "assigned_to", "contact", "location_label", "notes"):
         if field in body:
             setattr(r, field, body[field])
+    if "autonomy_hours" in body:
+        r.autonomy_hours = float(body["autonomy_hours"]) if body["autonomy_hours"] not in (None, "") else None
+    if "capacity" in body:
+        r.capacity = int(body["capacity"]) if body["capacity"] not in (None, "") else None
     if "lat" in body:
-        r.lat = float(body["lat"]) if body["lat"] is not None else None
+        r.lat = float(body["lat"]) if body["lat"] not in (None, "") else None
     if "lon" in body:
-        r.lon = float(body["lon"]) if body["lon"] is not None else None
+        r.lon = float(body["lon"]) if body["lon"] not in (None, "") else None
     if "municipality_id" in body:
         r.municipality_id = int(body["municipality_id"]) if body["municipality_id"] else None
     r.updated_at = datetime.utcnow()

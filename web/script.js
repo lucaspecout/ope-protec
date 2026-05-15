@@ -321,6 +321,7 @@ let trafficGeocodeCache = new Map();
 let mapStats = { stations: 0, pcs: 0, resources: 0, custom: 0, traffic: 0 };
 let mapControlsCollapsed = false;
 let mapStreetViewMode = false;
+const TACTICAL_LAYER_CATEGORIES = new Set(['evacuation', 'rassemblement', 'roadblock', 'barriere', 'danger_zone', 'centre_accueil', 'team']);
 const GEORISQUES_WMS_URL = 'https://www.georisques.gouv.fr/services';
 const GEORISQUES_FLOOD_PPRI_LAYER = 'PPRN_ZONE_INOND';
 const GEORISQUES_FLOOD_TRI_LAYERS = [
@@ -2411,6 +2412,7 @@ function setActivePanel(panelId) {
       centerMapOnIsere();
     }, 100);
     if (token) _refreshAgentMarkers();
+    if (token) loadResources();
   }
   if (panelId === 'logs-panel') ensureLogMunicipalitiesLoaded();
   if (panelId === 'news-panel') ensureSocialFeedsRendered();
@@ -2436,6 +2438,7 @@ function setActivePanel(panelId) {
     _notifLoad();
     _notifLoadLog();
   }
+  if (panelId === 'resources-panel' && token) loadResources();
 }
 
 function ensureSocialFeedsRendered() { /* social feeds removed */ }
@@ -4262,6 +4265,7 @@ async function resetMapFilters() {
   if (hostingParking) hostingParking.checked = false;
   if (telecomResources) telecomResources.checked = false;
   if (googleFlow) googleFlow.checked = false;
+  document.querySelectorAll('.tactical-layer-toggle').forEach((input) => { input.checked = true; });
   resourceVisibilityOverrides.clear();
   syncTelecomFilterState();
   if (searchLayer) searchLayer.clearLayers();
@@ -5847,8 +5851,13 @@ function serviceErrorLabel(service) {
 const MAP_POINT_ICONS = {
   incident: '🚨',
   evacuation: '🏃',
+  rassemblement: '📍',
   water: '💧',
   roadblock: '🚧',
+  barriere: '⛔',
+  danger_zone: '⚠️',
+  centre_accueil: '🏟️',
+  team: '🧑‍🚒',
   medical: '🏥',
   logistics: '📦',
   command: '🛰️',
@@ -5859,8 +5868,13 @@ const MAP_POINT_ICONS = {
 const MAP_ICON_SUGGESTIONS = {
   incident: ['🚨', '🔥', '⚠️', '💥', '🚓', '🚒', '🧯'],
   evacuation: ['🏃', '🏘️', '🚌', '🚶', '🏟️', '🏫', '🧒'],
+  rassemblement: ['📍', '🧭', '🏁', '👥', '🏟️', '🏫', '🅿️'],
   water: ['💧', '🌊', '🛶', '🌧️', '🏞️', '🚤', '🪵'],
   roadblock: ['⛔', '🚧', '🚦', '🛑', '🚫', '🚓', '⚠️'],
+  barriere: ['⛔', '🚧', '🛑', '🚫', '🔒', '⚠️'],
+  danger_zone: ['⚠️', '🔥', '☣️', '☢️', '🌊', '⛰️', '💥'],
+  centre_accueil: ['🏟️', '🏫', '🏠', '🛏️', '🍽️', '👥'],
+  team: ['🧑‍🚒', '🚑', '🚒', '👷', '📡', '🚙', '🦺'],
   medical: ['🏥', '🚑', '🩺', '💊', '🧑‍⚕️', '❤️', '🫁'],
   logistics: ['📦', '🚛', '🛠️', '⛽', '🔋', '🧰', '🏗️'],
   command: ['🛰️', '📡', '🧭', '🖥️', '📞', '📢', '🗺️'],
@@ -7348,6 +7362,58 @@ function renderMapAnnotations(showFeedback = false) {
   if (showFeedback) setMapFeedback(`${mapAnnotations.length} annotation(s) tactique(s) visible(s).`);
 }
 
+function exportMapBriefing() {
+  const exportedAt = new Date().toLocaleString('fr-FR');
+  const tacticalCounts = tacticalLayerCounts();
+  const tacticalRows = [
+    ['Zones d\'évacuation', tacticalCounts.evacuation || 0],
+    ['Points de rassemblement', tacticalCounts.rassemblement || 0],
+    ['Routes coupées', tacticalCounts.roadblock || 0],
+    ['Barrières', tacticalCounts.barriere || 0],
+    ['Zones dangereuses', tacticalCounts.danger_zone || 0],
+    ['Centres d\'accueil', tacticalCounts.centre_accueil || 0],
+    ['Équipes terrain', tacticalCounts.team || 0],
+  ];
+  const activeResources = cachedResources.filter((r) => r.status !== 'hors_service');
+  const engagedResources = cachedResources.filter((r) => r.status === 'engage');
+  const rowsHtml = tacticalRows.map(([label, count]) => `<tr><td>${escapeHtml(label)}</td><td>${count}</td></tr>`).join('');
+  const resourcesHtml = cachedResources.slice(0, 80).map((r) => {
+    const status = _RESOURCE_STATUS_META[r.status]?.label || r.status || '-';
+    const type = _RESOURCE_TYPE_LABELS[r.resource_type] || r.resource_type || '-';
+    const location = r.location_label || [r.lat, r.lon].filter((v) => v != null).join(', ') || '-';
+    return `<tr><td>${escapeHtml(r.name || '-')}</td><td>${escapeHtml(type)}</td><td>${escapeHtml(status)}</td><td>${escapeHtml(r.assigned_to || '-')}</td><td>${escapeHtml(location)}</td></tr>`;
+  }).join('');
+  const annotationsHtml = mapAnnotations.slice(0, 80).map((a) => `<li>${escapeHtml(a.annotation_type || 'annotation')} - ${escapeHtml(a.text_label || 'zone tracée')}</li>`).join('');
+  const win = window.open('', '_blank', 'width=980,height=720');
+  if (!win) {
+    setMapFeedback('Veuillez autoriser les popups pour générer le briefing carte.', true);
+    return;
+  }
+  win.document.write(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Briefing carte CRISIS38</title>
+    <style>
+      body{font-family:Inter,Arial,sans-serif;margin:28px;color:#17233f} h1{margin:0 0 4px} h2{margin:24px 0 8px;font-size:18px}
+      .muted{color:#637087}.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:16px 0}
+      .kpi{border:1px solid #d9e2f2;border-radius:8px;padding:10px;background:#f7faff}.kpi strong{display:block;font-size:22px}
+      table{width:100%;border-collapse:collapse;margin-top:8px} th,td{border:1px solid #d9e2f2;padding:7px;text-align:left;font-size:13px} th{background:#eef4ff}
+      ul{margin-top:8px}.footer{margin-top:24px;font-size:12px;color:#637087}@media print{button{display:none} body{margin:16mm}}
+    </style></head><body>
+    <button onclick="window.print()">Exporter PDF / imprimer</button>
+    <h1>Briefing carte CRISIS38</h1><p class="muted">Généré le ${escapeHtml(exportedAt)}</p>
+    <div class="kpis">
+      <div class="kpi"><span>Points tactiques</span><strong>${mapPoints.length}</strong></div>
+      <div class="kpi"><span>Annotations</span><strong>${mapAnnotations.length}</strong></div>
+      <div class="kpi"><span>Ressources actives</span><strong>${activeResources.length}</strong></div>
+      <div class="kpi"><span>Ressources engagées</span><strong>${engagedResources.length}</strong></div>
+    </div>
+    <h2>Calques actions</h2><table><thead><tr><th>Calque</th><th>Points visibles</th></tr></thead><tbody>${rowsHtml}</tbody></table>
+    <h2>Ressources opérationnelles</h2><table><thead><tr><th>Nom</th><th>Type</th><th>Statut</th><th>Affectation</th><th>Localisation</th></tr></thead><tbody>${resourcesHtml || '<tr><td colspan="5">Aucune ressource enregistrée.</td></tr>'}</tbody></table>
+    <h2>Annotations tactiques</h2><ul>${annotationsHtml || '<li>Aucune annotation tactique.</li>'}</ul>
+    <p class="footer">Document de briefing opérationnel. Vérifier les informations critiques auprès des sources officielles et du terrain.</p>
+    </body></html>`);
+  win.document.close();
+  win.focus();
+}
+
 function stopMapAnnotationsSync() {
   if (mapAnnotationsSync) {
     mapAnnotationsSync.close();
@@ -7440,6 +7506,20 @@ async function deleteMapPoint(pointId) {
   await loadMapPoints();
 }
 
+function isTacticalLayerEnabled(category = '') {
+  if (!TACTICAL_LAYER_CATEGORIES.has(category)) return true;
+  const escaped = window.CSS?.escape ? window.CSS.escape(category) : category.replace(/"/g, '');
+  const input = document.querySelector(`.tactical-layer-toggle[data-tactical-layer="${escaped}"]`);
+  return input ? input.checked : true;
+}
+
+function tacticalLayerCounts() {
+  return [...TACTICAL_LAYER_CATEGORIES].reduce((acc, category) => {
+    acc[category] = mapPoints.filter((point) => point.category === category && isTacticalLayerEnabled(category)).length;
+    return acc;
+  }, {});
+}
+
 function renderCustomPoints(showFeedback = true) {
   if (customPointsLayer) customPointsLayer.clearLayers();
   if (mapPointsLayer) mapPointsLayer.clearLayers();
@@ -7449,6 +7529,7 @@ function renderCustomPoints(showFeedback = true) {
   const filteredPoints = mapPoints.filter((point) => {
     const isVisible = mapPointVisibilityOverrides.get(point.id) !== false;
     if (!isVisible) return false;
+    if (!isTacticalLayerEnabled(point.category)) return false;
     return (selectedCategory === 'all' || point.category === selectedCategory)
       && (targetedCategory === 'all' || point.category === targetedCategory);
   });
@@ -12993,6 +13074,10 @@ function bindAppInteractions() {
   document.getElementById('map-locate-btn')?.addEventListener('click', locateUserOnMap);
   document.getElementById('map-zone-impact-start')?.addEventListener('click', startZoneImpactSelection);
   document.getElementById('map-zone-impact-clear')?.addEventListener('click', clearZoneImpactSelection);
+  document.getElementById('map-briefing-export-btn')?.addEventListener('click', exportMapBriefing);
+  document.querySelectorAll('.tactical-layer-toggle').forEach((input) => {
+    input.addEventListener('change', () => renderCustomPoints(true));
+  });
   document.getElementById('map-evacuation-circle-start')?.addEventListener('click', startEvacuationCircleMode);
   document.getElementById('map-evacuation-circle-clear')?.addEventListener('click', () => clearEvacuationCircle(true));
   document.getElementById('map-measure-start')?.addEventListener('click', startMapMeasureMode);
@@ -15025,9 +15110,11 @@ let resourcesMapLayer = null;
 const _RESOURCE_TYPE_LABELS = {
   vehicule_lsc: 'Véhicule LSC', vehicule_vttu: 'Véhicule VTTU', vehicule_vtu: 'Véhicule VTU / pick-up',
   vehicule_pl: 'Camion / Poids lourd', vehicule_tp: 'Transport personnel',
+  radio: 'Radio / transmissions',
   groupe_electrogene: 'Groupe électrogène', lot_eau_potable: 'Lot eau potable',
   lot_soutien_vie: 'Lot soutien vie (VSB)', materiel_eclairage: "Mât d'éclairage",
   equipe_secours: 'Équipe secours', equipe_logistique: 'Équipe logistique',
+  lieu_accueil: "Lieu d'accueil",
   poste_secours: 'Poste de secours médical', autre: 'Autre matériel',
 };
 
@@ -15045,7 +15132,7 @@ async function loadResources() {
     renderResourcesList();
     renderResourcesMapLayer();
   } catch (err) {
-    const el = document.getElementById('resources-list');
+    const el = document.getElementById('operational-resources-list');
     if (el) el.innerHTML = `<p class="error">Erreur : ${escapeHtml(sanitizeErrorMessage(err.message))}</p>`;
   }
 }
@@ -15066,7 +15153,7 @@ function renderResourcesList() {
     }).join('');
   }
 
-  const el = document.getElementById('resources-list');
+  const el = document.getElementById('operational-resources-list');
   if (!el) return;
   if (!filtered.length) {
     el.innerHTML = '<p class="muted" style="padding:1rem">Aucune ressource enregistrée.</p>';
@@ -15087,6 +15174,10 @@ function renderResourcesList() {
         <strong>${escapeHtml(r.name)}</strong>
         <span class="muted" style="font-size:.82rem;margin-left:.4rem">${escapeHtml(typeLabel)}</span>
         ${r.unit ? `<span class="muted" style="font-size:.78rem;margin-left:.4rem">· ${escapeHtml(r.unit)}</span>` : ''}
+        ${r.identifier ? `<span class="muted" style="font-size:.78rem;margin-left:.4rem">· ${escapeHtml(r.identifier)}</span>` : ''}
+        ${r.assigned_to ? `<p class="muted" style="font-size:.78rem;margin:.1rem 0 0">Affectation: ${escapeHtml(r.assigned_to)}</p>` : ''}
+        ${(r.autonomy_hours != null || r.capacity != null) ? `<p class="muted" style="font-size:.78rem;margin:.1rem 0 0">${r.autonomy_hours != null ? `Autonomie ${escapeHtml(String(r.autonomy_hours))} h` : ''}${r.autonomy_hours != null && r.capacity != null ? ' · ' : ''}${r.capacity != null ? `Capacité ${escapeHtml(String(r.capacity))}` : ''}</p>` : ''}
+        ${(r.location_label || r.contact) ? `<p class="muted" style="font-size:.78rem;margin:.1rem 0 0">${r.location_label ? `Localisation: ${escapeHtml(r.location_label)}` : ''}${r.location_label && r.contact ? ' · ' : ''}${r.contact ? `Contact: ${escapeHtml(r.contact)}` : ''}</p>` : ''}
         ${r.notes ? `<p class="muted" style="font-size:.78rem;margin:.1rem 0 0">${escapeHtml(r.notes)}</p>` : ''}
         ${pos}
       </div>
@@ -15112,7 +15203,7 @@ function renderResourcesMapLayer() {
     });
     L.marker([r.lat, r.lon], { icon })
       .addTo(resourcesMapLayer)
-      .bindPopup(`<strong>${escapeHtml(r.name)}</strong><br>${escapeHtml(_RESOURCE_STATUS_META[r.status]?.label || r.status)}<br>${escapeHtml(_RESOURCE_TYPE_LABELS[r.resource_type] || r.resource_type)}`);
+      .bindPopup(`<strong>${escapeHtml(r.name)}</strong><br>${escapeHtml(_RESOURCE_STATUS_META[r.status]?.label || r.status)}<br>${escapeHtml(_RESOURCE_TYPE_LABELS[r.resource_type] || r.resource_type)}${r.assigned_to ? `<br>Affectation: ${escapeHtml(r.assigned_to)}` : ''}${r.autonomy_hours != null ? `<br>Autonomie: ${escapeHtml(String(r.autonomy_hours))} h` : ''}${r.capacity != null ? `<br>Capacité: ${escapeHtml(String(r.capacity))}` : ''}${r.location_label ? `<br>Localisation: ${escapeHtml(r.location_label)}` : ''}${r.contact ? `<br>Contact: ${escapeHtml(r.contact)}` : ''}`);
   });
 }
 
@@ -15123,6 +15214,12 @@ function _openResourceModal(resource = null) {
   document.getElementById('resource-type').value = resource?.resource_type || 'vehicule_lsc';
   document.getElementById('resource-status-input').value = resource?.status || 'disponible';
   document.getElementById('resource-unit').value = resource?.unit || '';
+  document.getElementById('resource-identifier').value = resource?.identifier || '';
+  document.getElementById('resource-assigned-to').value = resource?.assigned_to || '';
+  document.getElementById('resource-autonomy').value = resource?.autonomy_hours ?? '';
+  document.getElementById('resource-capacity').value = resource?.capacity ?? '';
+  document.getElementById('resource-contact').value = resource?.contact || '';
+  document.getElementById('resource-location-label').value = resource?.location_label || '';
   document.getElementById('resource-notes').value = resource?.notes || '';
   document.getElementById('resource-lat').value = resource?.lat ?? '';
   document.getElementById('resource-lon').value = resource?.lon ?? '';
@@ -15173,6 +15270,12 @@ async function _deleteResource(id) {
         resource_type: document.getElementById('resource-type').value,
         status: document.getElementById('resource-status-input').value,
         unit: document.getElementById('resource-unit').value.trim() || null,
+        identifier: document.getElementById('resource-identifier').value.trim() || null,
+        assigned_to: document.getElementById('resource-assigned-to').value.trim() || null,
+        autonomy_hours: document.getElementById('resource-autonomy').value !== '' ? parseFloat(document.getElementById('resource-autonomy').value) : null,
+        capacity: document.getElementById('resource-capacity').value !== '' ? parseInt(document.getElementById('resource-capacity').value, 10) : null,
+        contact: document.getElementById('resource-contact').value.trim() || null,
+        location_label: document.getElementById('resource-location-label').value.trim() || null,
         notes: document.getElementById('resource-notes').value.trim() || null,
         lat: latVal !== '' ? parseFloat(latVal) : null,
         lon: lonVal !== '' ? parseFloat(lonVal) : null,

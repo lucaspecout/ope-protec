@@ -66,6 +66,7 @@
           <button class="menu-btn" data-target="municipalities-panel" data-icon="🏛️"><span class="menu-label">Communes</span></button>
           <button class="menu-btn" data-target="logs-panel" data-icon="📝"><span class="menu-label">Main courante</span><span id="menu-events-badge" class="menu-badge hidden" aria-label="événements ouverts"></span></button>
           <button class="menu-btn" data-target="map-panel" data-icon="🗺️"><span class="menu-label">Carte Isère</span></button>
+          <button class="menu-btn" data-target="resources-panel" data-icon="🚙"><span class="menu-label">Ressources</span></button>
           <button class="menu-btn" data-target="users-panel" data-icon="👤"><span class="menu-label">Utilisateurs</span></button>
           <button class="menu-btn" data-target="api-panel" data-icon="🧩"><span class="menu-label">Interconnexions API</span></button>
           <button class="menu-btn" data-target="notifications-panel" data-icon="🔔"><span class="menu-label">Notifications</span></button>
@@ -954,10 +955,20 @@
               <details class="filter-group">
                 <summary class="filter-group__title">🛠️ Outils terrain</summary>
                 <div class="filter-group__body">
+                  <div class="tactical-layer-grid" aria-label="Calques actions">
+                    <label><input class="tactical-layer-toggle" data-tactical-layer="evacuation" type="checkbox" checked /> Zones d'évacuation</label>
+                    <label><input class="tactical-layer-toggle" data-tactical-layer="rassemblement" type="checkbox" checked /> Points de rassemblement</label>
+                    <label><input class="tactical-layer-toggle" data-tactical-layer="roadblock" type="checkbox" checked /> Routes coupées</label>
+                    <label><input class="tactical-layer-toggle" data-tactical-layer="barriere" type="checkbox" checked /> Barrières</label>
+                    <label><input class="tactical-layer-toggle" data-tactical-layer="danger_zone" type="checkbox" checked /> Zones dangereuses</label>
+                    <label><input class="tactical-layer-toggle" data-tactical-layer="centre_accueil" type="checkbox" checked /> Centres d'accueil</label>
+                    <label><input class="tactical-layer-toggle" data-tactical-layer="team" type="checkbox" checked /> Équipes terrain</label>
+                  </div>
                   <div class="filter-tool-row">
                     <button id="map-zone-impact-start" type="button" class="ghost map-btn-lite">🧭 Analyser une zone</button>
                     <button id="map-zone-impact-clear" type="button" class="ghost map-btn-lite">🧹 Effacer analyse</button>
                     <button id="map-add-point-btn" type="button" class="ghost map-btn-lite" aria-pressed="false" data-requires-edit>➕ Créer un POI</button>
+                    <button id="map-briefing-export-btn" type="button" class="ghost map-btn-lite">📄 Briefing carte</button>
                   </div>
                   <div class="filter-tool-row filter-tool-row--evacuation" style="margin-top:.4rem">
                     <label class="evacuation-radius-field" for="map-evacuation-radius-km">
@@ -995,8 +1006,13 @@
                       <option value="all">POI : afficher tout</option>
                       <option value="incident">Incidents</option>
                       <option value="evacuation">Évacuations</option>
+                      <option value="rassemblement">Points de rassemblement</option>
                       <option value="water">Risque eau</option>
-                      <option value="roadblock">Barrages</option>
+                      <option value="roadblock">Routes coupées</option>
+                      <option value="barriere">Barrières</option>
+                      <option value="danger_zone">Zones dangereuses</option>
+                      <option value="centre_accueil">Centres d'accueil</option>
+                      <option value="team">Équipes terrain</option>
                       <option value="medical">Médical</option>
                       <option value="logistics">Logistique</option>
                       <option value="command">Commandement</option>
@@ -1125,8 +1141,13 @@
                 <select id="map-point-category" name="category">
                   <option value="incident">Incident</option>
                   <option value="evacuation">Évacuation</option>
+                  <option value="rassemblement">Point de rassemblement</option>
                   <option value="water">Risque eau</option>
-                  <option value="roadblock">Barrage</option>
+                  <option value="roadblock">Route coupée</option>
+                  <option value="barriere">Barrière</option>
+                  <option value="danger_zone">Zone dangereuse</option>
+                  <option value="centre_accueil">Centre d'accueil</option>
+                  <option value="team">Équipe terrain</option>
                   <option value="medical">Médical</option>
                   <option value="logistics">Logistique</option>
                   <option value="command">Commandement</option>
@@ -1148,6 +1169,78 @@
               </div>
             </form>
           </dialog>
+
+        <section id="resources-panel" class="panel view hidden" hidden>
+          <div class="resources-panel-head">
+            <div>
+              <h3>Tableau des ressources disponibles</h3>
+              <p class="muted">Suivi des véhicules, lots, radios, équipes, lieux d'accueil et moyens engagés.</p>
+            </div>
+            <div class="resources-panel-actions">
+              <select id="resource-status-filter" aria-label="Filtrer les ressources par statut">
+                <option value="all">Tous les statuts</option>
+                <option value="disponible">Disponibles</option>
+                <option value="en_alerte">En alerte</option>
+                <option value="engage">Engagés</option>
+                <option value="hors_service">Hors service</option>
+              </select>
+              <button id="resource-add-btn" type="button">Ajouter un moyen</button>
+            </div>
+          </div>
+          <div id="resources-summary" class="resources-summary"></div>
+          <div id="operational-resources-list" class="resources-table-wrap"></div>
+        </section>
+
+        <dialog id="resource-modal" class="municipality-details-modal">
+          <div class="municipality-details-modal__head">
+            <h4 id="resource-modal-title">Nouvelle ressource</h4>
+            <button type="button" id="resource-modal-close" class="ghost">Fermer</button>
+          </div>
+          <form id="resource-form" class="municipality-edit-form">
+            <label>Nom du moyen<input id="resource-name" required maxlength="120" placeholder="Ex: VPSP 1, Lot radio, Équipe logistique" /></label>
+            <label>Type
+              <select id="resource-type">
+                <option value="vehicule_lsc">Véhicule LSC</option>
+                <option value="vehicule_vttu">Véhicule VTTU</option>
+                <option value="vehicule_vtu">Véhicule VTU / pick-up</option>
+                <option value="vehicule_pl">Camion / poids lourd</option>
+                <option value="vehicule_tp">Transport personnel</option>
+                <option value="radio">Radio / transmissions</option>
+                <option value="groupe_electrogene">Groupe électrogène</option>
+                <option value="lot_eau_potable">Lot eau potable</option>
+                <option value="lot_soutien_vie">Lot soutien vie</option>
+                <option value="materiel_eclairage">Éclairage</option>
+                <option value="equipe_secours">Équipe secours</option>
+                <option value="equipe_logistique">Équipe logistique</option>
+                <option value="lieu_accueil">Lieu d'accueil</option>
+                <option value="poste_secours">Poste de secours médical</option>
+                <option value="autre">Autre matériel</option>
+              </select>
+            </label>
+            <label>Statut
+              <select id="resource-status-input">
+                <option value="disponible">Disponible</option>
+                <option value="en_alerte">En alerte</option>
+                <option value="engage">Engagé</option>
+                <option value="hors_service">Hors service</option>
+              </select>
+            </label>
+            <label>Unité / antenne<input id="resource-unit" maxlength="80" placeholder="Ex: Grenoble, Voiron" /></label>
+            <label>Identifiant<input id="resource-identifier" maxlength="80" placeholder="Ex: immatriculation, indicatif radio" /></label>
+            <label>Affecté à<input id="resource-assigned-to" maxlength="120" placeholder="Ex: Incident A480, PC Grenoble" /></label>
+            <label>Autonomie (h)<input id="resource-autonomy" type="number" min="0" step="0.5" placeholder="Ex: 8" /></label>
+            <label>Capacité<input id="resource-capacity" type="number" min="0" step="1" placeholder="Personnes, kits, radios..." /></label>
+            <label>Contact<input id="resource-contact" maxlength="120" placeholder="Téléphone, responsable, canal radio" /></label>
+            <label>Localisation<input id="resource-location-label" maxlength="160" placeholder="Ex: dépôt, commune, site d'accueil" /></label>
+            <label>Latitude<input id="resource-lat" type="number" step="0.000001" /></label>
+            <label>Longitude<input id="resource-lon" type="number" step="0.000001" /></label>
+            <label class="span-full">Notes<textarea id="resource-notes" rows="3" placeholder="État, contenu du lot, contraintes, prochain contrôle..."></textarea></label>
+            <div class="span-full municipality-actions">
+              <button type="submit">Enregistrer</button>
+              <button type="button" id="resource-modal-cancel" class="ghost">Annuler</button>
+            </div>
+          </form>
+        </dialog>
 
         <section id="users-panel" class="panel view hidden" hidden>
           <h3>Comptes utilisateurs</h3>
