@@ -882,7 +882,7 @@ def authenticate_ldap_user(username: str, password: str) -> dict | None:
     user_filter = str(settings.ldap_user_filter or "(uid={username})").replace(
         "{username}", ldap_escape_filter_value(username)
     )
-    attrs = ["cn", "displayName", "mail", "uid"]
+    attrs = ["uid", "mail", "displayname", "firstname", "lastname"]
     municipality_attr = str(settings.ldap_municipality_attr or "").strip()
     if municipality_attr:
         attrs.append(municipality_attr)
@@ -990,7 +990,7 @@ def test_ldap_directory_connection() -> dict:
         with Connection(server, user=bind_user, password=bind_password, auto_bind=True) as conn:
             add_check("Bind", True, bind_user or "bind anonyme")
             if settings.ldap_user_base_dn:
-                found = conn.search(settings.ldap_user_base_dn, "(objectClass=*)", search_scope=SUBTREE, attributes=["uid", "mail", "displayname"], size_limit=1)
+                found = conn.search(settings.ldap_user_base_dn, "(objectClass=*)", search_scope=SUBTREE, attributes=["uid", "mail", "displayname", "firstname", "lastname"], size_limit=1)
                 add_check("Base utilisateurs", bool(found), settings.ldap_user_base_dn)
             else:
                 add_check("Base utilisateurs", False, "LDAP_USER_BASE_DN manquant")
