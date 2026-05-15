@@ -990,13 +990,13 @@ def test_ldap_directory_connection() -> dict:
         with Connection(server, user=bind_user, password=bind_password, auto_bind=True) as conn:
             add_check("Bind", True, bind_user or "bind anonyme")
             if settings.ldap_user_base_dn:
-                found = conn.search(settings.ldap_user_base_dn, "(objectClass=*)", search_scope=SUBTREE, attributes=["dn"], size_limit=1)
+                found = conn.search(settings.ldap_user_base_dn, "(objectClass=*)", search_scope=SUBTREE, attributes=["uid", "mail", "displayName"], size_limit=1)
                 add_check("Base utilisateurs", bool(found), settings.ldap_user_base_dn)
             else:
                 add_check("Base utilisateurs", False, "LDAP_USER_BASE_DN manquant")
                 return {"ok": False, "detail": "Base utilisateurs manquante", "checks": checks}
             if settings.ldap_group_base_dn:
-                found_groups = conn.search(settings.ldap_group_base_dn, "(objectClass=*)", search_scope=SUBTREE, attributes=["dn"], size_limit=1)
+                found_groups = conn.search(settings.ldap_group_base_dn, "(objectClass=*)", search_scope=SUBTREE, attributes=["cn"], size_limit=1)
                 add_check("Base groupes", bool(found_groups), settings.ldap_group_base_dn)
             return {"ok": all(bool(c["ok"]) for c in checks), "detail": "Diagnostic LDAP termine", "checks": checks}
     except Exception as exc:
