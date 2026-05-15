@@ -11760,9 +11760,11 @@ async function loadAndRenderWaterPanel(forceRefresh = false) {
     waterPanelCache.set(cacheKey, payload);
     renderWaterQualityPanel(payload?.quality || {});
     renderWaterServicesPanel(payload?.services || {});
-    document.getElementById('panel-title').textContent = municipality?.name
-      ? `Eau potable et assainissement · ${municipality.name}`
-      : PANEL_TITLES['water-panel'];
+    if ((localStorage.getItem(STORAGE_KEYS.activePanel) || '') === 'water-panel') {
+      document.getElementById('panel-title').textContent = municipality?.name
+        ? `Eau potable et assainissement - ${municipality.name}`
+        : PANEL_TITLES['water-panel'];
+    }
   } catch (error) {
     if (seq !== waterPanelLoadSeq) return;
     waterPanelEmptyState(`Impossible de charger les données eau pour ${municipality?.name || 'la commune sélectionnée'} : ${sanitizeErrorMessage(error.message)}`);
@@ -11889,9 +11891,11 @@ async function loadAndRenderContactsPanel(city = '', forceRefresh = false) {
     setText('contacts-results-title', payload?.city || payload?.municipality_name || normalizedCity);
     setText('contacts-results-meta', `${Number(payload?.contacts_total ?? contacts.length)} contact(s) utile(s) · source Annuaire administration`);
     setText('contacts-results-error', payload?.error ? sanitizeErrorMessage(payload.error) : '');
-    document.getElementById('panel-title').textContent = (payload?.city || payload?.municipality_name)
-      ? `Contacts utiles · ${payload.city || payload.municipality_name}`
-      : PANEL_TITLES['contacts-panel'];
+    if ((localStorage.getItem(STORAGE_KEYS.activePanel) || '') === 'contacts-panel') {
+      document.getElementById('panel-title').textContent = (payload?.city || payload?.municipality_name)
+        ? `Contacts utiles - ${payload.city || payload.municipality_name}`
+        : PANEL_TITLES['contacts-panel'];
+    }
     setHtml('contacts-results-list', cards.length
       ? `${cards.join('')}${importantCards.length ? `<div class="contacts-results-divider"><h5>Contacts importants Isère</h5>${importantCards.join('')}</div>` : ''}`
       : '<p class="muted">Aucun contact public exploitable trouvé pour cette ville iséroise.</p>');
@@ -13246,6 +13250,45 @@ async function loadOperationsBootstrap(forceRefresh = false) {
   return payload;
 }
 
+function getDefaultContactsPreloadCity() {
+  if (currentUser?.role === 'mairie' && currentUser?.municipality_name) return currentUser.municipality_name;
+  if (selectedContactsCity) return selectedContactsCity;
+  const municipality = (Array.isArray(cachedMunicipalities) ? cachedMunicipalities : [])
+    .find((item) => String(item?.name || '').trim());
+  return municipality?.name || 'Grenoble';
+}
+
+function ensureWaterPreloadMunicipality() {
+  const municipalities = renderWaterMunicipalitySelector();
+  if (selectedWaterMunicipalityId) return selectedWaterMunicipalityId;
+  const preferredName = currentUser?.municipality_name ? String(currentUser.municipality_name).trim().toLowerCase() : '';
+  const preferred = preferredName
+    ? municipalities.find((item) => String(item?.name || '').trim().toLowerCase() === preferredName)
+    : null;
+  const fallback = preferred || municipalities[0];
+  if (fallback?.id != null) {
+    selectedWaterMunicipalityId = String(fallback.id);
+    const select = document.getElementById('water-municipality-select');
+    if (select) select.value = selectedWaterMunicipalityId;
+  }
+  return selectedWaterMunicipalityId;
+}
+
+async function preloadAllPanelData(forceRefresh = false) {
+  const jobs = [];
+  jobs.push(loadResources());
+  if (ensureWaterPreloadMunicipality()) jobs.push(loadAndRenderWaterPanel(forceRefresh));
+  const contactsCity = getDefaultContactsPreloadCity();
+  if (contactsCity) jobs.push(loadAndRenderContactsPanel(contactsCity, forceRefresh));
+  jobs.push(renderWeeklyWeatherPanel(cachedExternalRisksSnapshot || {}));
+
+  const results = await Promise.allSettled(jobs);
+  const failures = results.filter((result) => result.status === 'rejected');
+  if (failures.length) {
+    console.warn('Prechargement partiel des pages', failures.map((item) => item.reason));
+  }
+}
+
 async function refreshAll(forceRefresh = false) {
   if (refreshAllInFlight) return refreshAllInFlight;
 
@@ -13253,7 +13296,7 @@ async function refreshAll(forceRefresh = false) {
     // Phase 1 : bootstrap (dashboard + risks + communes + évènements + MCO + users) → 1 requête
     // Phase 2 : points carte + annotations + trafic en parallèle → 3 requêtes simultanées
     // Total : 4 requêtes au lieu de 10, tout tient dans la limite de 6 connexions du navigateur.
-    startStartupQueue(4);
+    startStartupQueue(5);
 
     // Effacer toute erreur résiduelle du cycle précédent dès le début.
     // Sans ce reset, une erreur ponctuelle reste affichée pour toujours même si les
@@ -13330,9 +13373,8 @@ async function refreshAll(forceRefresh = false) {
     }));
 
     renderResources();
-    if ((localStorage.getItem(STORAGE_KEYS.activePanel) || '') === 'water-panel') {
-      await loadAndRenderWaterPanel(forceRefresh);
-    }
+    await preloadAllPanelData(forceRefresh);
+    advanceStartupQueue('pages applicatives');
     _ensureStaticDataLoaded();
 
     // N'afficher "Chargement dégradé" que si le fallback a aussi échoué (≥3 sources en erreur).
