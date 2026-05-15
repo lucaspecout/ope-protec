@@ -60,7 +60,8 @@ services:
       LDAP_GROUP_BASE_DN: ${LDAP_GROUP_BASE_DN:-ou=groups,dc=apc38,dc=local}
       LDAP_GROUP_FILTER: "(member={user_dn})"
       LDAP_GROUP_NAME_ATTR: ${LDAP_GROUP_NAME_ATTR:-cn}
-      LDAP_GROUP_ROLE_MAP: ${LDAP_GROUP_ROLE_MAP:-}
+      LDAP_GROUP_REQUIRED: ${LDAP_GROUP_REQUIRED:-alerte}
+      LDAP_GROUP_ROLE_MAP: ${LDAP_GROUP_ROLE_MAP:-alerte:ope}
     depends_on:
       db:
         condition: service_healthy

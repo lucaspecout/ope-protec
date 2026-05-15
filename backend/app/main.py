@@ -852,6 +852,14 @@ def ldap_role_from_groups(group_names: set[str]) -> str:
     return role
 
 
+def ldap_required_groups() -> set[str]:
+    return {
+        group.strip().lower()
+        for group in str(settings.ldap_group_required or "").split(",")
+        if group.strip()
+    }
+
+
 def ldap_query_groups(connection: Connection, user_dn: str) -> set[str]:
     base_dn = str(settings.ldap_group_base_dn or "").strip()
     if not base_dn:
@@ -891,6 +899,8 @@ def authenticate_ldap_user(username: str, password: str) -> dict | None:
         if settings.ldap_user_dn_template:
             user_dn = settings.ldap_user_dn_template.replace("{username}", username)
             with Connection(server, user=user_dn, password=password, auto_bind=True):
+                if ldap_required_groups():
+                    return None
                 return {
                     "username": username,
                     "role": ldap_role_from_groups(set()),
@@ -917,6 +927,9 @@ def authenticate_ldap_user(username: str, password: str) -> dict | None:
                 if municipality_value and municipality_value.value:
                     municipality_name = str(municipality_value.value).strip() or None
             groups = ldap_query_groups(search_conn, user_dn)
+            required_groups = ldap_required_groups()
+            if required_groups and not groups.intersection(required_groups):
+                return None
 
         with Connection(server, user=user_dn, password=password, auto_bind=True):
             return {
@@ -1006,6 +1019,15 @@ def test_ldap_directory_connection() -> dict:
             if settings.ldap_group_base_dn:
                 found_groups = conn.search(settings.ldap_group_base_dn, "(objectClass=*)", search_scope=SUBTREE, attributes=["cn"], size_limit=1)
                 add_check("Base groupes", bool(found_groups), settings.ldap_group_base_dn)
+                required_groups = ldap_required_groups()
+                if required_groups:
+                    required_ok = False
+                    for group in required_groups:
+                        group_filter = f"({settings.ldap_group_name_attr or 'cn'}={ldap_escape_filter_value(group)})"
+                        if conn.search(settings.ldap_group_base_dn, group_filter, search_scope=SUBTREE, attributes=[settings.ldap_group_name_attr or "cn"], size_limit=1):
+                            required_ok = True
+                            break
+                    add_check("Groupe requis", required_ok, ", ".join(sorted(required_groups)))
             return {"ok": all(bool(c["ok"]) for c in checks), "detail": "Diagnostic LDAP termine", "checks": checks}
     except Exception as exc:
         add_check("LDAP", False, str(exc))

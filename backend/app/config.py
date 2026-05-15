@@ -50,7 +50,8 @@ class Settings(BaseSettings):
     ldap_group_base_dn: str = ""
     ldap_group_filter: str = "(member={user_dn})"
     ldap_group_name_attr: str = "cn"
-    ldap_group_role_map: str = ""
+    ldap_group_required: str = "alerte"
+    ldap_group_role_map: str = "alerte:ope"
 
     class Config:
         env_file = ".env"
