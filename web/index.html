@@ -101,7 +101,22 @@
         </header>
 
         <section id="situation-panel" class="panel view situation-panel">
-          <div id="situation-content" class="situation-content"></div>
+          <div id="situation-content" class="situation-content">
+            <div class="situation-loading">
+              <div class="situation-loading__head">
+                <div>
+                  <p class="tag">Initialisation</p>
+                  <h3>Chargement de la situation opérationnelle</h3>
+                  <p class="muted">Préparation du tableau de bord, des alertes et des flux terrain.</p>
+                </div>
+                <span class="situation-loading__pulse">En cours</span>
+              </div>
+              <div class="situation-loading__grid" aria-hidden="true">
+                <span></span><span></span><span></span><span></span>
+              </div>
+              <div class="situation-loading__wide" aria-hidden="true"></div>
+            </div>
+          </div>
         </section>
 
         <section id="services-panel" class="panel view hidden" hidden>

@@ -14070,9 +14070,9 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
   initMobileNav();
   initMobileGeoLocate();
   startAgentMarkersPolling();
+  renderSituationOverview();
   setActivePanel(localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel');
   syncMobileNavWithPanel();
-  hydrateUiFromLocalCache();
   loadIsereBoundary();
   renderStations(cachedVigicruesPayload);
   syncLogScopeFields();
