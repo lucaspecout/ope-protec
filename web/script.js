@@ -841,10 +841,8 @@ function updateGlobalLoadingVisual(percent = 0) {
   const bar = document.getElementById('global-loading-bar');
   if (!bar) return;
 
-  const hasStartupLoading = startupQueueState.total > 0 && startupQueueState.completed < startupQueueState.total;
-  const hasApiLoading = apiActiveRequests > 0 || apiRequestQueue.length > 0;
-  const isLoading = hasStartupLoading || hasApiLoading;
-  const visiblePercent = hasStartupLoading ? percent : 55;
+  const isLoading = startupQueueState.total > 0 && startupQueueState.completed < startupQueueState.total;
+  const visiblePercent = isLoading ? percent : 0;
   bar.hidden = !isLoading;
   bar.classList.toggle('hidden', !isLoading);
 
@@ -854,12 +852,12 @@ function updateGlobalLoadingVisual(percent = 0) {
   const track = bar.querySelector('.global-loading-bar__track');
 
   if (progress) progress.style.width = `${visiblePercent}%`;
-  if (percentNode) percentNode.textContent = hasStartupLoading ? `${percent}%` : '...';
+  if (percentNode) percentNode.textContent = isLoading ? `${percent}%` : '';
   if (currentNode) currentNode.textContent = startupQueueState.current || 'Chargement des donnees...';
   if (track) track.setAttribute('aria-valuenow', String(visiblePercent));
 
   document.querySelectorAll('.view').forEach((panel) => {
-    panel.classList.toggle('is-loading', isLoading && !panel.hidden);
+    panel.classList.remove('is-loading');
   });
 }
 
