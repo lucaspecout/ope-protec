@@ -990,7 +990,7 @@ def test_ldap_directory_connection() -> dict:
         with Connection(server, user=bind_user, password=bind_password, auto_bind=True) as conn:
             add_check("Bind", True, bind_user or "bind anonyme")
             if settings.ldap_user_base_dn:
-                found = conn.search(settings.ldap_user_base_dn, "(objectClass=*)", search_scope=SUBTREE, attributes=["uid", "mail", "displayName"], size_limit=1)
+                found = conn.search(settings.ldap_user_base_dn, "(objectClass=*)", search_scope=SUBTREE, attributes=["uid", "mail", "displayname"], size_limit=1)
                 add_check("Base utilisateurs", bool(found), settings.ldap_user_base_dn)
             else:
                 add_check("Base utilisateurs", False, "LDAP_USER_BASE_DN manquant")
