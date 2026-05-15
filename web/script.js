@@ -7411,6 +7411,184 @@ function renderMapAnnotations(showFeedback = false) {
   if (showFeedback) setMapFeedback(`${mapAnnotations.length} annotation(s) tactique(s) visible(s).`);
 }
 
+const MAP_BRIEFING_COLORS = {
+  evacuation: '#c92a2a',
+  rassemblement: '#1971c2',
+  roadblock: '#f08c00',
+  barriere: '#495057',
+  danger_zone: '#d6336c',
+  centre_accueil: '#2b8a3e',
+  team: '#6741d9',
+  incident: '#e03131',
+  poi: '#0b7285',
+  autre: '#364fc7',
+};
+
+function mapBriefingColor(category = '') {
+  return MAP_BRIEFING_COLORS[category] || MAP_BRIEFING_COLORS.autre;
+}
+
+function mapBriefingPointLabel(point = {}) {
+  const labels = {
+    evacuation: 'EVAC',
+    rassemblement: 'RAS',
+    roadblock: 'ROUTE',
+    barriere: 'BARR',
+    danger_zone: 'DANGER',
+    centre_accueil: 'ACCUEIL',
+    team: 'EQUIPE',
+    incident: 'INC',
+    poi: 'POI',
+  };
+  return labels[point.category] || 'POI';
+}
+
+function mapBriefingProjector(width, height) {
+  if (!leafletMap) return null;
+  const size = leafletMap.getSize?.();
+  const mapWidth = Math.max(1, Number(size?.x || width || 900));
+  const mapHeight = Math.max(1, Number(size?.y || height || 520));
+  const scale = Math.min(width / mapWidth, height / mapHeight);
+  const offsetX = (width - (mapWidth * scale)) / 2;
+  const offsetY = (height - (mapHeight * scale)) / 2;
+  return (lat, lon) => {
+    const projected = leafletMap.latLngToContainerPoint([lat, lon]);
+    return {
+      x: offsetX + (projected.x * scale),
+      y: offsetY + (projected.y * scale),
+      scale,
+    };
+  };
+}
+
+function mapBriefingGeoJsonSvg(geojson, project, fallbackColor = '#d7263d') {
+  const geometry = geojson?.geometry || geojson;
+  if (!geometry || !project) return '';
+  const color = fallbackColor || '#d7263d';
+  const pointFromCoord = (coord) => {
+    if (!Array.isArray(coord) || coord.length < 2) return null;
+    return project(Number(coord[1]), Number(coord[0]));
+  };
+  const pointsText = (coords) => (coords || [])
+    .map(pointFromCoord)
+    .filter(Boolean)
+    .map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`)
+    .join(' ');
+
+  if (geometry.type === 'LineString') {
+    const points = pointsText(geometry.coordinates);
+    return points ? `<polyline points="${points}" fill="none" stroke="${escapeHtml(color)}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>` : '';
+  }
+  if (geometry.type === 'Polygon') {
+    return (geometry.coordinates || []).map((ring) => {
+      const points = pointsText(ring);
+      return points ? `<polygon points="${points}" fill="${escapeHtml(color)}" fill-opacity=".16" stroke="${escapeHtml(color)}" stroke-width="2"/>` : '';
+    }).join('');
+  }
+  if (geometry.type === 'MultiPolygon') {
+    return (geometry.coordinates || []).flatMap((polygon) => (polygon || []).map((ring) => {
+      const points = pointsText(ring);
+      return points ? `<polygon points="${points}" fill="${escapeHtml(color)}" fill-opacity=".16" stroke="${escapeHtml(color)}" stroke-width="2"/>` : '';
+    })).join('');
+  }
+  if (geometry.type === 'Point') {
+    const point = pointFromCoord(geometry.coordinates);
+    return point ? `<circle cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="5" fill="${escapeHtml(color)}"/>` : '';
+  }
+  return '';
+}
+
+function buildMapBriefingSnapshotSvg() {
+  if (!leafletMap) return '<p class="muted">Carte non initialisee: capture indisponible.</p>';
+  leafletMap.invalidateSize?.();
+  const width = 900;
+  const height = 520;
+  const project = mapBriefingProjector(width, height);
+  const bounds = leafletMap.getBounds?.();
+  const safeBoundsContains = (lat, lon) => {
+    try { return !bounds || bounds.pad(0.08).contains([lat, lon]); } catch (_) { return true; }
+  };
+  const shapes = [];
+  const labels = [];
+
+  mapAnnotations.forEach((annotation) => {
+    const color = annotation.color || '#d7263d';
+    shapes.push(mapBriefingGeoJsonSvg(annotation.geojson, project, color));
+    if (annotation.text_label && annotation.geojson?.geometry?.type === 'Point') {
+      const coords = annotation.geojson.geometry.coordinates || [];
+      const point = project(Number(coords[1]), Number(coords[0]));
+      if (point) labels.push(`<text x="${(point.x + 8).toFixed(1)}" y="${(point.y - 8).toFixed(1)}" class="map-label">${escapeHtml(annotation.text_label)}</text>`);
+    }
+  });
+
+  if (mapEvacuationCircle?.getLatLng && mapEvacuationCircle?.getRadius) {
+    const center = mapEvacuationCircle.getLatLng();
+    const centerPoint = project(center.lat, center.lng);
+    const radiusLat = center.lat + (Number(mapEvacuationCircle.getRadius()) / 111320);
+    const radiusPoint = project(radiusLat, center.lng);
+    const radius = Math.max(6, Math.abs(radiusPoint.y - centerPoint.y));
+    shapes.push(`<circle cx="${centerPoint.x.toFixed(1)}" cy="${centerPoint.y.toFixed(1)}" r="${radius.toFixed(1)}" fill="#ff8787" fill-opacity=".18" stroke="#c92a2a" stroke-width="2"/>`);
+    labels.push(`<text x="${(centerPoint.x + 10).toFixed(1)}" y="${(centerPoint.y - 10).toFixed(1)}" class="map-label map-label--danger">Zone evacuation ${(Number(mapEvacuationCircle.getRadius()) / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} km</text>`);
+  }
+
+  const visiblePoints = (Array.isArray(mapPoints) ? mapPoints : [])
+    .filter((point) => mapPointVisibilityOverrides.get(point.id) !== false)
+    .filter((point) => isTacticalLayerEnabled(point.category))
+    .filter((point) => safeBoundsContains(point.lat, point.lon));
+
+  visiblePoints.forEach((point, index) => {
+    const projected = project(point.lat, point.lon);
+    if (!projected) return;
+    const color = mapBriefingColor(point.category);
+    const label = mapBriefingPointLabel(point);
+    shapes.push(`<circle cx="${projected.x.toFixed(1)}" cy="${projected.y.toFixed(1)}" r="8" fill="#fff" stroke="${escapeHtml(color)}" stroke-width="3"/>`);
+    shapes.push(`<circle cx="${projected.x.toFixed(1)}" cy="${projected.y.toFixed(1)}" r="4" fill="${escapeHtml(color)}"/>`);
+    if (index < 45) {
+      labels.push(`<text x="${(projected.x + 11).toFixed(1)}" y="${(projected.y + 4).toFixed(1)}" class="map-label"><tspan class="map-label-kind">${escapeHtml(label)}</tspan> ${escapeHtml(point.name || '')}</text>`);
+    }
+  });
+
+  const engagedResources = (Array.isArray(cachedResources) ? cachedResources : [])
+    .filter((resource) => resource.status === 'engage')
+    .map((resource) => ({ ...resource, coords: normalizeMapCoordinates(resource.lat, resource.lon) }))
+    .filter((resource) => resource.coords && safeBoundsContains(resource.coords.lat, resource.coords.lon))
+    .slice(0, 25);
+
+  engagedResources.forEach((resource) => {
+    const projected = project(resource.coords.lat, resource.coords.lon);
+    shapes.push(`<rect x="${(projected.x - 6).toFixed(1)}" y="${(projected.y - 6).toFixed(1)}" width="12" height="12" rx="3" fill="#f08c00" stroke="#7c2d12" stroke-width="2"/>`);
+    labels.push(`<text x="${(projected.x + 10).toFixed(1)}" y="${(projected.y + 4).toFixed(1)}" class="map-label"><tspan class="map-label-kind">MOYEN</tspan> ${escapeHtml(resource.name || '')}</text>`);
+  });
+
+  const center = leafletMap.getCenter?.();
+  const zoom = leafletMap.getZoom?.();
+  const visibleSummary = [
+    `${visiblePoints.length} point(s) tactique(s) visibles`,
+    `${mapAnnotations.length} annotation(s)`,
+    `${engagedResources.length} moyen(s) engage(s) visibles`,
+    center ? `centre ${center.lat.toFixed(4)}, ${center.lng.toFixed(4)}` : '',
+    zoom != null ? `zoom ${zoom}` : '',
+  ].filter(Boolean).join(' - ');
+
+  return `<figure class="map-capture">
+    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Capture operationnelle de la carte">
+      <defs>
+        <pattern id="briefing-grid" width="48" height="48" patternUnits="userSpaceOnUse">
+          <path d="M 48 0 L 0 0 0 48" fill="none" stroke="#d8e2f2" stroke-width="1"/>
+        </pattern>
+        <filter id="label-shadow"><feDropShadow dx="0" dy="1" stdDeviation="1" flood-color="#ffffff" flood-opacity=".95"/></filter>
+      </defs>
+      <rect width="${width}" height="${height}" fill="#eef4fb"/>
+      <rect width="${width}" height="${height}" fill="url(#briefing-grid)" opacity=".75"/>
+      <path d="M80,395 C170,350 230,360 315,305 C410,245 492,260 570,190 C640,130 700,125 820,82" fill="none" stroke="#b9d4f3" stroke-width="18" stroke-linecap="round" opacity=".75"/>
+      <path d="M55,410 C190,438 330,405 460,432 C610,462 720,420 852,455" fill="none" stroke="#c8d2df" stroke-width="10" stroke-linecap="round" opacity=".55"/>
+      ${shapes.join('')}
+      ${labels.join('')}
+    </svg>
+    <figcaption>${escapeHtml(visibleSummary || 'Vue carte courante')}</figcaption>
+  </figure>`;
+}
+
 function exportMapBriefing() {
   const exportedAt = new Date().toLocaleString('fr-FR');
   const tacticalCounts = tacticalLayerCounts();
@@ -7425,6 +7603,7 @@ function exportMapBriefing() {
   ];
   const activeResources = cachedResources.filter((r) => r.status !== 'hors_service');
   const engagedResources = cachedResources.filter((r) => r.status === 'engage');
+  const mapCaptureHtml = buildMapBriefingSnapshotSvg();
   const rowsHtml = tacticalRows.map(([label, count]) => `<tr><td>${escapeHtml(label)}</td><td>${count}</td></tr>`).join('');
   const resourcesHtml = cachedResources.slice(0, 80).map((r) => {
     const status = _RESOURCE_STATUS_META[r.status]?.label || r.status || '-';
@@ -7444,6 +7623,7 @@ function exportMapBriefing() {
       .muted{color:#637087}.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:16px 0}
       .kpi{border:1px solid #d9e2f2;border-radius:8px;padding:10px;background:#f7faff}.kpi strong{display:block;font-size:22px}
       table{width:100%;border-collapse:collapse;margin-top:8px} th,td{border:1px solid #d9e2f2;padding:7px;text-align:left;font-size:13px} th{background:#eef4ff}
+      .map-capture{margin:16px 0 20px;border:1px solid #d9e2f2;border-radius:10px;overflow:hidden;background:#fff}.map-capture svg{display:block;width:100%;height:auto}.map-capture figcaption{padding:8px 10px;color:#637087;font-size:12px;border-top:1px solid #d9e2f2}.map-label{font:700 12px Inter,Arial,sans-serif;fill:#17233f;paint-order:stroke;stroke:#fff;stroke-width:4px;stroke-linejoin:round;filter:url(#label-shadow)}.map-label-kind{fill:#0b4daa}
       ul{margin-top:8px}.footer{margin-top:24px;font-size:12px;color:#637087}@media print{button{display:none} body{margin:16mm}}
     </style></head><body>
     <button onclick="window.print()">Exporter PDF / imprimer</button>
@@ -7454,6 +7634,7 @@ function exportMapBriefing() {
       <div class="kpi"><span>Ressources actives</span><strong>${activeResources.length}</strong></div>
       <div class="kpi"><span>Ressources engagées</span><strong>${engagedResources.length}</strong></div>
     </div>
+    <h2>Capture carte</h2>${mapCaptureHtml}
     <h2>Calques actions</h2><table><thead><tr><th>Calque</th><th>Points visibles</th></tr></thead><tbody>${rowsHtml}</tbody></table>
     <h2>Ressources opérationnelles</h2><table><thead><tr><th>Nom</th><th>Type</th><th>Statut</th><th>Affectation</th><th>Localisation</th></tr></thead><tbody>${resourcesHtml || '<tr><td colspan="5">Aucune ressource enregistrée.</td></tr>'}</tbody></table>
     <h2>Annotations tactiques</h2><ul>${annotationsHtml || '<li>Aucune annotation tactique.</li>'}</ul>
