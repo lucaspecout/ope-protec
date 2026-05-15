@@ -178,6 +178,14 @@ class PublicShare(Base):
     municipality = relationship("Municipality")
 
 
+class AppSetting(Base):
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(120), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class InstitutionPoint(Base):
     """Cache persistant des points OSM (écoles, pompiers, police, transport).
     Mis à jour en arrière-plan une fois par semaine sans jamais effacer les données existantes."""

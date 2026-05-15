@@ -123,6 +123,23 @@ class LdapTestResponse(BaseModel):
     municipality_name: str | None = None
 
 
+class LdapBindPasswordStatus(BaseModel):
+    configured: bool
+    source: str
+
+
+class LdapBindPasswordUpdate(BaseModel):
+    password: str | None = None
+    clear: bool = False
+
+    @field_validator("password")
+    @classmethod
+    def normalize_password(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value if value else None
+
+
 class WeatherAlertCreate(BaseModel):
     risk_type: str
     level: str

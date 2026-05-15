@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import Base, SessionLocal, engine, get_db
-from .models import AlertHistory, AuditLog, IncidentEvent, InstitutionPoint, MapAnnotation, MapPoint, Municipality, MunicipalityDocument, OperationalLog, OperationalResource, PublicShare, RiverStation, User, WeatherAlert
+from .models import AlertHistory, AppSetting, AuditLog, IncidentEvent, InstitutionPoint, MapAnnotation, MapPoint, Municipality, MunicipalityDocument, OperationalLog, OperationalResource, PublicShare, RiverStation, User, WeatherAlert
 from .schemas import (
     MapAnnotationCreate,
     MapAnnotationOut,
@@ -44,6 +44,8 @@ from .schemas import (
     OperationalLogUpdate,
     LdapTestRequest,
     LdapTestResponse,
+    LdapBindPasswordStatus,
+    LdapBindPasswordUpdate,
     PasswordChangeRequest,
     ShareAccessRequest,
     LoginResponse,
@@ -125,6 +127,13 @@ Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
 
 
 with engine.begin() as conn:
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key VARCHAR(120) PRIMARY KEY,
+            value TEXT NOT NULL DEFAULT '',
+            updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+    """))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT FALSE"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_source VARCHAR(20) DEFAULT 'local'"))
     conn.execute(text("UPDATE users SET auth_source = 'local' WHERE auth_source IS NULL"))
@@ -860,6 +869,44 @@ def ldap_required_groups() -> set[str]:
     }
 
 
+LDAP_BIND_PASSWORD_SETTING_KEY = "ldap_bind_password"
+
+
+def get_app_setting(db: Session, key: str) -> str | None:
+    setting = db.get(AppSetting, key)
+    if setting is None:
+        return None
+    return setting.value
+
+
+def set_app_setting(db: Session, key: str, value: str) -> AppSetting:
+    setting = db.get(AppSetting, key)
+    if setting is None:
+        setting = AppSetting(key=key, value=value)
+        db.add(setting)
+    else:
+        setting.value = value
+        setting.updated_at = datetime.utcnow()
+    return setting
+
+
+def get_ldap_bind_password(db: Session | None = None) -> tuple[str, str]:
+    if db is not None:
+        configured = get_app_setting(db, LDAP_BIND_PASSWORD_SETTING_KEY)
+        if configured:
+            return configured, "application"
+    else:
+        local_db = SessionLocal()
+        try:
+            configured = get_app_setting(local_db, LDAP_BIND_PASSWORD_SETTING_KEY)
+            if configured:
+                return configured, "application"
+        finally:
+            local_db.close()
+    fallback = str(settings.ldap_bind_password or "")
+    return fallback, "environment" if fallback else "none"
+
+
 def ldap_query_groups(connection: Connection, user_dn: str) -> set[str]:
     base_dn = str(settings.ldap_group_base_dn or "").strip()
     if not base_dn:
@@ -908,7 +955,7 @@ def authenticate_ldap_user(username: str, password: str) -> dict | None:
                 }
 
         bind_user = str(settings.ldap_bind_dn or "").strip() or None
-        bind_password = str(settings.ldap_bind_password or "")
+        bind_password, _ = get_ldap_bind_password()
         with Connection(server, user=bind_user, password=bind_password, auto_bind=True) as search_conn:
             if not settings.ldap_user_base_dn:
                 raise HTTPException(500, "LDAP_USER_BASE_DN doit etre configure")
@@ -999,7 +1046,7 @@ def test_ldap_directory_connection() -> dict:
     try:
         server = Server(settings.ldap_url, get_info=ALL, connect_timeout=5)
         bind_user = str(settings.ldap_bind_dn or "").strip() or None
-        bind_password = str(settings.ldap_bind_password or "")
+        bind_password, _ = get_ldap_bind_password()
         with Connection(server, user=bind_user, password=bind_password, auto_bind=True) as conn:
             add_check("Bind", True, bind_user or "bind anonyme")
             if settings.ldap_user_base_dn:
@@ -1541,6 +1588,29 @@ async def test_ldap(payload: LdapTestRequest, _: User = Depends(require_roles("a
         "detail": str(result.get("detail") or ""),
         "checks": result.get("checks") or [],
     }
+
+
+@app.get("/auth/ldap/bind-password", response_model=LdapBindPasswordStatus)
+def get_ldap_bind_password_status(db: Session = Depends(get_db), _: User = Depends(require_roles("admin"))):
+    password, source = get_ldap_bind_password(db)
+    return {"configured": bool(password), "source": source}
+
+
+@app.put("/auth/ldap/bind-password", response_model=LdapBindPasswordStatus)
+def update_ldap_bind_password(
+    payload: LdapBindPasswordUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles("admin")),
+):
+    if payload.clear:
+        set_app_setting(db, LDAP_BIND_PASSWORD_SETTING_KEY, "")
+    elif payload.password:
+        set_app_setting(db, LDAP_BIND_PASSWORD_SETTING_KEY, payload.password)
+    else:
+        raise HTTPException(400, "Mot de passe LDAP requis")
+    db.commit()
+    password, source = get_ldap_bind_password(db)
+    return {"configured": bool(password), "source": source}
 
 
 @app.patch("/auth/users/{user_id}", response_model=UserOut)

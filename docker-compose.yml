@@ -51,7 +51,6 @@ services:
       LDAP_ENABLED: ${LDAP_ENABLED:-true}
       LDAP_URL: ${LDAP_URL:-ldap://lldap:3890}
       LDAP_BIND_DN: ${LDAP_BIND_DN:-uid=admin,ou=people,dc=apc38,dc=local}
-      LDAP_BIND_PASSWORD: ${LDAP_BIND_PASSWORD:-@6jjatvoWwhgdW3Ht&Hyd2z8z8py}
       LDAP_USER_BASE_DN: ${LDAP_USER_BASE_DN:-ou=people,dc=apc38,dc=local}
       LDAP_USER_FILTER: "(|(uid={username})(mail={username}))"
       LDAP_USER_DN_TEMPLATE: ${LDAP_USER_DN_TEMPLATE:-}

@@ -1288,6 +1288,15 @@
           </form>
           <p id="users-success" class="tag"></p>
           <p id="users-error" class="error"></p>
+          <form id="ldap-bind-password-form" class="form" data-admin-only autocomplete="off">
+            <h4>Mot de passe de service LDAP</h4>
+            <label>Mot de passe de configuration LDAP<input name="password" type="password" autocomplete="new-password" placeholder="Nouvelle valeur" /></label>
+            <div class="filter-tool-row">
+              <button type="submit">Enregistrer le mot de passe LDAP</button>
+              <button id="ldap-bind-password-clear-btn" type="button" class="ghost">Effacer</button>
+            </div>
+            <p id="ldap-bind-password-status" class="muted"></p>
+          </form>
           <form id="ldap-test-form" class="form" data-admin-only>
             <h4>Test LDAP</h4>
             <label>Identifiant LDAP<input name="username" autocomplete="username" placeholder="laisser vide pour tester seulement la connexion" /></label>

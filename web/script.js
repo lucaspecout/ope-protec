@@ -13221,6 +13221,30 @@ async function loadUsers(preloaded = null) {
   }).join('') || '<tr><td colspan="8">Aucun utilisateur.</td></tr>');
 }
 
+function renderLdapBindPasswordStatus(status) {
+  const node = document.getElementById('ldap-bind-password-status');
+  if (!node) return;
+  const sourceLabels = {
+    application: 'application',
+    environment: 'variable d environnement',
+    none: 'aucune source',
+  };
+  const source = sourceLabels[status?.source] || status?.source || 'inconnue';
+  node.textContent = status?.configured
+    ? `Mot de passe LDAP configure (${source}).`
+    : 'Aucun mot de passe LDAP configure.';
+}
+
+async function loadLdapBindPasswordStatus() {
+  if (currentUser?.role !== 'admin') return;
+  try {
+    renderLdapBindPasswordStatus(await api('/auth/ldap/bind-password', { bypassCache: true, cacheTtlMs: 0 }));
+  } catch (error) {
+    const node = document.getElementById('ldap-bind-password-status');
+    if (node) node.textContent = sanitizeErrorMessage(error.message);
+  }
+}
+
 async function loadOperationsBootstrap(forceRefresh = false) {
   const suffix = forceRefresh ? '?refresh=true' : '';
   const payload = await api(`/operations/bootstrap${suffix}`, { cacheTtlMs: 5000 });
@@ -13241,6 +13265,7 @@ async function loadOperationsBootstrap(forceRefresh = false) {
   await loadEvents(payload.events || null);
   await loadLogs(payload.logs || []);
   if (canManageUsers()) await loadUsers(payload.users || []);
+  if (currentUser?.role === 'admin') await loadLdapBindPasswordStatus();
 
   const perf = payload.perf || {};
   const duration = Number(perf.backend_duration_ms || 0);
@@ -14236,6 +14261,42 @@ function bindAppInteractions() {
       syncUserCreateMunicipalityVisibility();
       document.getElementById('users-success').textContent = 'Utilisateur créé avec succès.';
       await loadUsers();
+    } catch (error) {
+      document.getElementById('users-error').textContent = sanitizeErrorMessage(error.message);
+    }
+  });
+
+  document.getElementById('ldap-bind-password-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    document.getElementById('users-error').textContent = '';
+    document.getElementById('users-success').textContent = '';
+    const form = new FormData(event.target);
+    const password = String(form.get('password') || '');
+    try {
+      const result = await api('/auth/ldap/bind-password', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      event.target.reset();
+      renderLdapBindPasswordStatus(result);
+      document.getElementById('users-success').textContent = 'Mot de passe LDAP enregistre.';
+    } catch (error) {
+      document.getElementById('users-error').textContent = sanitizeErrorMessage(error.message);
+    }
+  });
+
+  document.getElementById('ldap-bind-password-clear-btn')?.addEventListener('click', async () => {
+    document.getElementById('users-error').textContent = '';
+    document.getElementById('users-success').textContent = '';
+    try {
+      const result = await api('/auth/ldap/bind-password', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clear: true }),
+      });
+      renderLdapBindPasswordStatus(result);
+      document.getElementById('users-success').textContent = 'Mot de passe LDAP efface.';
     } catch (error) {
       document.getElementById('users-error').textContent = sanitizeErrorMessage(error.message);
     }
