@@ -3947,6 +3947,15 @@ async function loadBarragePoints() {
 function initMap() {
   if (leafletMap || typeof window.L === 'undefined') return;
   leafletMap = window.L.map('isere-map-leaflet', { zoomControl: true }).setView([45.2, 5.72], 9);
+  if (!leafletMap.getPane('tacticalShapePane')) {
+    const pane = leafletMap.createPane('tacticalShapePane');
+    pane.style.zIndex = 430;
+    pane.style.pointerEvents = 'none';
+  }
+  if (!leafletMap.getPane('poiPriorityPane')) {
+    const pane = leafletMap.createPane('poiPriorityPane');
+    pane.style.zIndex = 660;
+  }
   applyBasemap(document.getElementById('map-basemap-select')?.value || 'osm');
   hydroLayer = window.L.layerGroup().addTo(leafletMap);
   hydroLineLayer = window.L.layerGroup().addTo(leafletMap);
@@ -7243,6 +7252,8 @@ function mapAnnotationStyle(record = {}) {
     color: record.color || '#d7263d',
     weight: Number(record.weight || 3),
     fillOpacity: Number(record.fill_opacity ?? 0.18),
+    pane: 'tacticalShapePane',
+    interactive: false,
   };
 }
 
@@ -7257,7 +7268,7 @@ function initMapAnnotationModule() {
   if (!mapZoneImpactDrawHandler && window.L.Draw?.Polygon) {
     mapZoneImpactDrawHandler = new window.L.Draw.Polygon(leafletMap, {
       allowIntersection: false,
-      shapeOptions: { color: '#7c3aed', weight: 2, fillOpacity: 0.12 },
+      shapeOptions: { color: '#7c3aed', weight: 2, fillOpacity: 0.12, pane: 'tacticalShapePane', interactive: false },
     });
   }
   if (mapDrawControl || !window.L.Control?.Draw || !canEdit()) return;
@@ -7281,8 +7292,9 @@ function initMapAnnotationModule() {
       if (mapZoneImpactLayer) mapZoneImpactLayer.clearLayers();
       mapZoneImpactSelection = event.layer;
       if (typeof mapZoneImpactSelection.setStyle === 'function') {
-        mapZoneImpactSelection.setStyle({ color: '#7c3aed', weight: 2, fillOpacity: 0.12 });
+        mapZoneImpactSelection.setStyle({ color: '#7c3aed', weight: 2, fillOpacity: 0.12, pane: 'tacticalShapePane', interactive: false });
       }
+      mapZoneImpactSelection.options.interactive = false;
       mapZoneImpactSelection.addTo(mapZoneImpactLayer || leafletMap);
       computeZoneImpact();
       if (mapZoneImpactDrawHandler?.disable) mapZoneImpactDrawHandler.disable();
@@ -7303,7 +7315,8 @@ function initMapAnnotationModule() {
         const feature = layer.toGeoJSON();
         payload = { annotation_type: 'text', geojson: feature, text_label: textLabel || 'Repère tactique', color, weight, fill_opacity: 0.2 };
       } else {
-        if (typeof layer.setStyle === 'function') layer.setStyle({ color, weight, fillOpacity: 0.2 });
+        if (typeof layer.setStyle === 'function') layer.setStyle({ color, weight, fillOpacity: 0.2, pane: 'tacticalShapePane', interactive: false });
+        layer.options.interactive = false;
         const feature = layer.toGeoJSON();
         payload = { annotation_type: layerType, geojson: feature, text_label: textLabel, color, weight, fill_opacity: 0.2 };
       }
@@ -7340,15 +7353,19 @@ function renderMapAnnotations(showFeedback = false) {
     if (record.annotation_type === 'text') {
       const coords = record.geojson?.geometry?.coordinates || [];
       if (coords.length >= 2) {
-        window.L.marker([coords[1], coords[0]], { icon: mapTextAnnotationIcon(record) })
+        window.L.marker([coords[1], coords[0]], { icon: mapTextAnnotationIcon(record), zIndexOffset: 200 })
           .bindPopup(`<strong>Texte tactique</strong><br/>${escapeHtml(record.text_label || '-')}`)
           .addTo(mapAnnotationFeatureGroup);
       }
     } else {
-      const geo = window.L.geoJSON(record.geojson, { style });
+      const geo = window.L.geoJSON(record.geojson, {
+        style,
+        interactive: false,
+        pane: 'tacticalShapePane',
+      });
       geo.eachLayer((layer) => {
-        const description = record.text_label ? `<br/>${escapeHtml(record.text_label)}` : '';
-        layer.bindPopup(`<strong>Annotation ${escapeHtml(record.annotation_type)}</strong>${description}`);
+        layer.options.interactive = false;
+        layer.bringToBack?.();
       });
       geo.addTo(mapAnnotationFeatureGroup);
     }
@@ -7546,7 +7563,13 @@ function renderCustomPoints(showFeedback = true) {
   refreshPoiTargetOptions();
   if (!mapPointsLayer) return;
   filteredPoints.forEach((point) => {
-    const marker = window.L.marker([point.lat, point.lon], { icon: markerIconForPoint(point) });
+    const marker = window.L.marker([point.lat, point.lon], {
+      icon: markerIconForPoint(point),
+      pane: 'poiPriorityPane',
+      zIndexOffset: 1000,
+      riseOnHover: true,
+      riseOffset: 1200,
+    });
     const popupIcon = point.icon_url ? '🖼️' : (point.icon || iconForCategory(point.category));
     marker.bindPopup(`<strong>${escapeHtml(popupIcon)} ${escapeHtml(point.name)}</strong><br/>Catégorie: ${escapeHtml(point.category)}${point.icon_url ? '<br/>Type: POI avec icône personnalisée' : ''}<br/>${escapeHtml(point.notes || 'Sans note')}`);
     marker.addTo(mapPointsLayer);
@@ -8107,6 +8130,7 @@ function onMapClickRoute(event) {
 }
 
 function clearEvacuationCircle(showFeedback = true) {
+  leafletMap?.closePopup?.();
   mapEvacuationCircleMode = false;
   updateEvacuationCircleButtons();
   if (mapEvacuationCircleLayer) mapEvacuationCircleLayer.clearLayers();
@@ -8153,10 +8177,9 @@ function onMapClickEvacuationCircle(event) {
     weight: 2,
     fillColor: '#ff8787',
     fillOpacity: 0.16,
+    pane: 'tacticalShapePane',
+    interactive: false,
   }).addTo(mapEvacuationCircleLayer || leafletMap);
-  mapEvacuationCircle.bindPopup(
-    `<strong>Zone d'évacuation</strong><br>Rayon: ${(radiusMeters / 1000).toLocaleString('fr-FR')} km<br>Centre: ${escapeHtml(formatCoordinates(event.latlng.lat, event.latlng.lng))}`,
-  ).openPopup();
   mapEvacuationCircleMode = false;
   updateEvacuationCircleButtons();
   setMapFeedback(`Rond d'évacuation affiché (${(radiusMeters / 1000).toLocaleString('fr-FR')} km).`);
