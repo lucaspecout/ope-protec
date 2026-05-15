@@ -108,6 +108,20 @@ class UserPasswordResetResponse(BaseModel):
     must_change_password: bool
 
 
+class LdapTestRequest(BaseModel):
+    username: str | None = None
+    password: str | None = None
+
+
+class LdapTestResponse(BaseModel):
+    ok: bool
+    mode: str
+    detail: str
+    username: str | None = None
+    role: str | None = None
+    municipality_name: str | None = None
+
+
 class WeatherAlertCreate(BaseModel):
     risk_type: str
     level: str

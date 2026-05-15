@@ -40,6 +40,8 @@ from .schemas import (
     OperationalLogOut,
     OperationalLogStatusUpdate,
     OperationalLogUpdate,
+    LdapTestRequest,
+    LdapTestResponse,
     PasswordChangeRequest,
     ShareAccessRequest,
     LoginResponse,
@@ -955,6 +957,21 @@ def get_or_create_ldap_user(db: Session, ldap_user: dict) -> User:
     return user
 
 
+def test_ldap_directory_connection() -> dict:
+    if not settings.ldap_enabled:
+        return {"ok": False, "detail": "LDAP_ENABLED=false"}
+    try:
+        server = Server(settings.ldap_url, get_info=ALL, connect_timeout=5)
+        bind_user = str(settings.ldap_bind_dn or "").strip() or None
+        bind_password = str(settings.ldap_bind_password or "")
+        with Connection(server, user=bind_user, password=bind_password, auto_bind=True) as conn:
+            if settings.ldap_user_base_dn:
+                conn.search(settings.ldap_user_base_dn, "(objectClass=*)", search_scope=SUBTREE, attributes=["dn"], size_limit=1)
+            return {"ok": True, "detail": "Connexion LDAP OK"}
+    except Exception as exc:
+        return {"ok": False, "detail": f"Connexion LDAP impossible: {exc}"}
+
+
 def get_user_municipality_id(user: User, db: Session) -> int | None:
     if not user.municipality_name:
         return None
@@ -1433,6 +1450,30 @@ def list_users(db: Session = Depends(get_db), user: User = Depends(require_roles
     if user.role == "ope":
         users_query = users_query.filter(User.role.in_(["securite", "visiteur", "mairie"]))
     return users_query.order_by(User.created_at.desc()).all()
+
+
+@app.post("/auth/ldap/test", response_model=LdapTestResponse)
+async def test_ldap(payload: LdapTestRequest, _: User = Depends(require_roles("admin"))):
+    username = (payload.username or "").strip()
+    password = payload.password or ""
+    if username or password:
+        if not username or not password:
+            raise HTTPException(400, "Identifiant et mot de passe LDAP requis pour tester un utilisateur")
+        ldap_user = await asyncio.get_running_loop().run_in_executor(
+            None, lambda: authenticate_ldap_user(username, password)
+        )
+        if not ldap_user:
+            return {"ok": False, "mode": "user", "detail": "Authentification LDAP refusee"}
+        return {
+            "ok": True,
+            "mode": "user",
+            "detail": "Authentification LDAP OK",
+            "username": ldap_user.get("username"),
+            "role": ldap_user.get("role"),
+            "municipality_name": ldap_user.get("municipality_name"),
+        }
+    result = await asyncio.get_running_loop().run_in_executor(None, test_ldap_directory_connection)
+    return {"ok": bool(result.get("ok")), "mode": "directory", "detail": str(result.get("detail") or "")}
 
 
 @app.patch("/auth/users/{user_id}", response_model=UserOut)

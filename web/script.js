@@ -14200,6 +14200,31 @@ function bindAppInteractions() {
   });
 
   // Filtres qui n'affectent que les ressources (rendu immédiat, pas de re-fetch réseau)
+  document.getElementById('ldap-test-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const resultNode = document.getElementById('ldap-test-result');
+    const errorNode = document.getElementById('users-error');
+    if (resultNode) resultNode.textContent = 'Test LDAP en cours...';
+    if (errorNode) errorNode.textContent = '';
+    const form = new FormData(event.target);
+    try {
+      const result = await api('/auth/ldap/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: String(form.get('username') || '').trim() || null,
+          password: String(form.get('password') || '') || null,
+        }),
+      });
+      const account = result.username ? ` - ${result.username} (${roleLabel(result.role || 'visiteur')})` : '';
+      if (resultNode) resultNode.textContent = `${result.ok ? 'OK' : 'ECHEC'} - ${result.detail || ''}${account}`;
+      if (result.ok) await loadUsers();
+    } catch (error) {
+      if (resultNode) resultNode.textContent = '';
+      if (errorNode) errorNode.textContent = sanitizeErrorMessage(error.message);
+    }
+  });
+
   const RESOURCE_ONLY_FILTERS = new Set([
     'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type',
     'filter-resources-hosting-capacity', 'filter-resources-hosting-surface', 'filter-resources-hosting-accessibility',

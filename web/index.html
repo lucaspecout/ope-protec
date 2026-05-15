@@ -1288,6 +1288,13 @@
           </form>
           <p id="users-success" class="tag"></p>
           <p id="users-error" class="error"></p>
+          <form id="ldap-test-form" class="form" data-admin-only>
+            <h4>Test LDAP</h4>
+            <label>Identifiant LDAP<input name="username" autocomplete="username" placeholder="laisser vide pour tester seulement la connexion" /></label>
+            <label>Mot de passe LDAP<input name="password" type="password" autocomplete="current-password" /></label>
+            <button type="submit">Tester LDAP</button>
+            <p id="ldap-test-result" class="muted"></p>
+          </form>
           <table class="users-table">
             <thead><tr><th>Utilisateur</th><th>Source</th><th>Rôle</th><th>Commune</th><th>Créé le</th><th>Dernier accès</th><th>Statut</th><th>Actions</th></tr></thead>
             <tbody id="users-table"></tbody>
