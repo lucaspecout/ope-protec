@@ -16,6 +16,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
+from ldap3 import ALL, SUBTREE, Connection, Server
+from ldap3.core.exceptions import LDAPException
 from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 
@@ -120,6 +122,8 @@ Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
 
 with engine.begin() as conn:
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT FALSE"))
+    conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_source VARCHAR(20) DEFAULT 'local'"))
+    conn.execute(text("UPDATE users SET auth_source = 'local' WHERE auth_source IS NULL"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS municipality_name VARCHAR(120)"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP WITHOUT TIME ZONE"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_access_at TIMESTAMP WITHOUT TIME ZONE"))
@@ -821,6 +825,136 @@ def require_roles(*roles: str) -> Callable[[User], User]:
     return validator
 
 
+def ldap_escape_filter_value(value: str) -> str:
+    return (
+        value.replace("\\", r"\5c")
+        .replace("*", r"\2a")
+        .replace("(", r"\28")
+        .replace(")", r"\29")
+        .replace("\x00", r"\00")
+    )
+
+
+def ldap_role_from_groups(group_names: set[str]) -> str:
+    role = str(settings.ldap_role_default or "visiteur").strip().lower()
+    if role not in READ_ROLES:
+        role = "visiteur"
+    for item in str(settings.ldap_group_role_map or "").split(","):
+        if ":" not in item:
+            continue
+        group, mapped_role = [part.strip().lower() for part in item.split(":", 1)]
+        if group and mapped_role in READ_ROLES and group in group_names:
+            return mapped_role
+    return role
+
+
+def ldap_query_groups(connection: Connection, user_dn: str) -> set[str]:
+    base_dn = str(settings.ldap_group_base_dn or "").strip()
+    if not base_dn:
+        return set()
+    filter_template = str(settings.ldap_group_filter or "(member={user_dn})")
+    group_filter = filter_template.replace("{user_dn}", ldap_escape_filter_value(user_dn))
+    group_attr = str(settings.ldap_group_name_attr or "cn").strip() or "cn"
+    try:
+        connection.search(base_dn, group_filter, search_scope=SUBTREE, attributes=[group_attr])
+    except LDAPException:
+        return set()
+    groups: set[str] = set()
+    for entry in connection.entries:
+        value = getattr(entry, group_attr, None)
+        if value:
+            for group in value.values:
+                groups.add(str(group).strip().lower())
+    return groups
+
+
+def authenticate_ldap_user(username: str, password: str) -> dict | None:
+    if not settings.ldap_enabled:
+        return None
+    username = username.strip()
+    if not username or not password:
+        return None
+    server = Server(settings.ldap_url, get_info=ALL, connect_timeout=5)
+    user_filter = str(settings.ldap_user_filter or "(uid={username})").replace(
+        "{username}", ldap_escape_filter_value(username)
+    )
+    attrs = ["cn", "displayName", "mail", "uid"]
+    municipality_attr = str(settings.ldap_municipality_attr or "").strip()
+    if municipality_attr:
+        attrs.append(municipality_attr)
+
+    try:
+        if settings.ldap_user_dn_template:
+            user_dn = settings.ldap_user_dn_template.replace("{username}", username)
+            with Connection(server, user=user_dn, password=password, auto_bind=True):
+                return {
+                    "username": username,
+                    "role": ldap_role_from_groups(set()),
+                    "municipality_name": None,
+                }
+
+        bind_user = str(settings.ldap_bind_dn or "").strip() or None
+        bind_password = str(settings.ldap_bind_password or "")
+        with Connection(server, user=bind_user, password=bind_password, auto_bind=True) as search_conn:
+            if not settings.ldap_user_base_dn:
+                raise HTTPException(500, "LDAP_USER_BASE_DN doit etre configure")
+            search_conn.search(settings.ldap_user_base_dn, user_filter, search_scope=SUBTREE, attributes=attrs)
+            if not search_conn.entries:
+                return None
+            entry = search_conn.entries[0]
+            user_dn = entry.entry_dn
+            canonical_username = username
+            uid = getattr(entry, "uid", None)
+            if uid and uid.value:
+                canonical_username = str(uid.value).strip() or username
+            municipality_name = None
+            if municipality_attr:
+                municipality_value = getattr(entry, municipality_attr, None)
+                if municipality_value and municipality_value.value:
+                    municipality_name = str(municipality_value.value).strip() or None
+            groups = ldap_query_groups(search_conn, user_dn)
+
+        with Connection(server, user=user_dn, password=password, auto_bind=True):
+            return {
+                "username": canonical_username,
+                "role": ldap_role_from_groups(groups),
+                "municipality_name": municipality_name,
+            }
+    except LDAPException:
+        return None
+
+
+def get_or_create_ldap_user(db: Session, ldap_user: dict) -> User:
+    username = str(ldap_user.get("username") or "").strip()
+    if not username:
+        raise HTTPException(401, "Utilisateur ou mot de passe incorrect")
+    user = db.query(User).filter(User.username == username).first()
+    role = str(ldap_user.get("role") or settings.ldap_role_default or "visiteur").strip().lower()
+    if role not in READ_ROLES:
+        role = "visiteur"
+    municipality_name = ldap_user.get("municipality_name") if role == "mairie" else None
+    if user:
+        if user.auth_source != "ldap":
+            raise HTTPException(401, "Utilisateur ou mot de passe incorrect")
+        user.role = role
+        user.municipality_name = municipality_name
+        user.must_change_password = False
+        return user
+    if db.query(User).count() >= 200:
+        raise HTTPException(400, "Limite de 200 utilisateurs atteinte")
+    user = User(
+        username=username,
+        hashed_password=hash_password(secrets.token_urlsafe(32)),
+        auth_source="ldap",
+        role=role,
+        municipality_name=municipality_name,
+        must_change_password=False,
+    )
+    db.add(user)
+    db.flush()
+    return user
+
+
 def get_user_municipality_id(user: User, db: Session) -> int | None:
     if not user.municipality_name:
         return None
@@ -1327,6 +1461,8 @@ def reset_user_password(
     target = db.get(User, user_id)
     if not target:
         raise HTTPException(404, "Utilisateur introuvable")
+    if target.auth_source == "ldap":
+        raise HTTPException(400, "Le mot de passe d'un utilisateur LDAP se gere dans l'annuaire")
 
     temporary_password = payload.new_password or secrets.token_urlsafe(10)
     validate_password_strength(temporary_password)
@@ -1380,21 +1516,36 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
                 db2.close()
         asyncio.get_event_loop().run_in_executor(None, _write)
 
-    user = db.query(User).filter(User.username == form_data.username).first()
-    if not user:
-        await asyncio.sleep(0.025)
-        _audit(401, "Utilisateur inconnu")
-        raise HTTPException(401, "Utilisateur ou mot de passe incorrect")
-    hashed = user.hashed_password
+    username = form_data.username.strip()
     password_plain = form_data.password
-    ok, new_hash = await asyncio.get_running_loop().run_in_executor(
-        None, lambda: verify_and_upgrade(password_plain, hashed)
-    )
-    if not ok:
-        _audit(401, "Mot de passe incorrect")
-        raise HTTPException(401, "Utilisateur ou mot de passe incorrect")
-    if new_hash:
-        user.hashed_password = new_hash
+    user = db.query(User).filter(User.username == username).first()
+    if user and user.auth_source == "ldap":
+        ldap_user = await asyncio.get_running_loop().run_in_executor(
+            None, lambda: authenticate_ldap_user(username, password_plain)
+        )
+        if not ldap_user:
+            _audit(401, "LDAP: authentification refusee")
+            raise HTTPException(401, "Utilisateur ou mot de passe incorrect")
+        user = get_or_create_ldap_user(db, ldap_user)
+    elif user:
+        hashed = user.hashed_password
+        ok, new_hash = await asyncio.get_running_loop().run_in_executor(
+            None, lambda: verify_and_upgrade(password_plain, hashed)
+        )
+        if not ok:
+            _audit(401, "Mot de passe incorrect")
+            raise HTTPException(401, "Utilisateur ou mot de passe incorrect")
+        if new_hash:
+            user.hashed_password = new_hash
+    else:
+        ldap_user = await asyncio.get_running_loop().run_in_executor(
+            None, lambda: authenticate_ldap_user(username, password_plain)
+        )
+        if not ldap_user:
+            await asyncio.sleep(0.025)
+            _audit(401, "Utilisateur inconnu")
+            raise HTTPException(401, "Utilisateur ou mot de passe incorrect")
+        user = get_or_create_ldap_user(db, ldap_user)
     now = datetime.utcnow()
     user.last_login_at = now
     user.last_access_at = now
@@ -1417,6 +1568,8 @@ def auth_me(user: User = Depends(get_current_user), db: Session = Depends(get_db
 
 @app.post("/auth/change-password")
 def change_password(payload: PasswordChangeRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    if user.auth_source == "ldap":
+        raise HTTPException(400, "Le mot de passe LDAP se gere dans l'annuaire")
     if not verify_password(payload.current_password, user.hashed_password):
         raise HTTPException(400, "Mot de passe actuel invalide")
     validate_password_strength(payload.new_password)

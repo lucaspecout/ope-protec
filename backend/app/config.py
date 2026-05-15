@@ -37,6 +37,20 @@ class Settings(BaseSettings):
     sirene_api_base_url: str = "https://api.insee.fr/api-sirene/3.11"
     # TomTom Routing API. If configured, route estimates include live traffic.
     tomtom_api_key: str = ""
+    # LDAP / LLDAP authentication. Local users remain available when enabled.
+    ldap_enabled: bool = False
+    ldap_url: str = "ldap://lldap:3890"
+    ldap_bind_dn: str = ""
+    ldap_bind_password: str = ""
+    ldap_user_base_dn: str = ""
+    ldap_user_filter: str = "(|(uid={username})(mail={username}))"
+    ldap_user_dn_template: str = ""
+    ldap_role_default: str = "visiteur"
+    ldap_municipality_attr: str = ""
+    ldap_group_base_dn: str = ""
+    ldap_group_filter: str = "(member={user_dn})"
+    ldap_group_name_attr: str = "cn"
+    ldap_group_role_map: str = ""
 
     class Config:
         env_file = ".env"

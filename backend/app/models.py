@@ -13,6 +13,7 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(50), unique=True, index=True)
     hashed_password: Mapped[str] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(20), default="lecture")
+    auth_source: Mapped[str] = mapped_column(String(20), default="local")
     municipality_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     two_factor_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)

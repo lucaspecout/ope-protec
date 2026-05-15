@@ -53,6 +53,7 @@ class UserOut(BaseModel):
     id: int
     username: str
     role: str
+    auth_source: str = "local"
     municipality_name: str | None = None
     two_factor_enabled: bool
     must_change_password: bool
