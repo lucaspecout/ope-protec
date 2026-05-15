@@ -7510,17 +7510,51 @@ async function loadMapPoints() {
 
 
 async function saveMapPoint(payload) {
-  await api('/map/points', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  await loadMapPoints();
+  const tempId = `tmp-${Date.now()}`;
+  const optimisticPoint = {
+    ...payload,
+    id: tempId,
+    created_at: new Date().toISOString(),
+    created_by_id: currentUser?.id || 0,
+  };
+  mapPoints = [optimisticPoint, ...mapPoints];
+  renderCustomPoints(false);
+  try {
+    const createdPoint = await api('/map/points', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const coords = normalizeMapCoordinates(createdPoint?.lat, createdPoint?.lon);
+    mapPoints = mapPoints.map((point) => (
+      point.id === tempId
+        ? { ...createdPoint, lat: coords?.lat ?? payload.lat, lon: coords?.lon ?? payload.lon }
+        : point
+    ));
+    renderCustomPoints(false);
+    loadMapPoints().catch(() => {});
+    return createdPoint;
+  } catch (error) {
+    mapPoints = mapPoints.filter((point) => point.id !== tempId);
+    renderCustomPoints(false);
+    throw error;
+  }
 }
 
 async function deleteMapPoint(pointId) {
-  await api(`/map/points/${pointId}`, { method: 'DELETE' });
-  await loadMapPoints();
+  const previousPoints = mapPoints.slice();
+  mapPoints = mapPoints.filter((point) => String(point.id) !== String(pointId));
+  mapPointVisibilityOverrides.delete(Number(pointId));
+  mapPointVisibilityOverrides.delete(String(pointId));
+  renderCustomPoints(false);
+  try {
+    await api(`/map/points/${pointId}`, { method: 'DELETE' });
+    loadMapPoints().catch(() => {});
+  } catch (error) {
+    mapPoints = previousPoints;
+    renderCustomPoints(false);
+    throw error;
+  }
 }
 
 function isTacticalLayerEnabled(category = '') {
@@ -13300,6 +13334,7 @@ function bindAppInteractions() {
       const modal = document.getElementById('map-point-modal');
       if (typeof modal?.close === 'function') modal.close();
       else modal?.removeAttribute('open');
+      form.reset();
       setMapFeedback('Point opérationnel enregistré.');
     } catch (error) {
       setMapFeedback(`Enregistrement impossible: ${sanitizeErrorMessage(error.message)}`, true);
@@ -13316,6 +13351,7 @@ function bindAppInteractions() {
     if (!button) return;
     const targetId = button.getAttribute('data-remove-point');
     try {
+      button.disabled = true;
       await deleteMapPoint(targetId);
       setMapFeedback('Point opérationnel supprimé.');
     } catch (error) {
@@ -15247,12 +15283,18 @@ function _openResourceModal(resource = null) {
   document.getElementById('resource-lat').value = resource?.lat ?? '';
   document.getElementById('resource-lon').value = resource?.lon ?? '';
   const modal = document.getElementById('resource-modal');
+  if (!modal) return;
   modal.classList.remove('hidden');
   modal.hidden = false;
+  if (typeof modal.showModal === 'function' && !modal.open) modal.showModal();
+  else modal.setAttribute('open', '');
 }
 
 function _closeResourceModal() {
   const modal = document.getElementById('resource-modal');
+  if (!modal) return;
+  if (typeof modal.close === 'function' && modal.open) modal.close();
+  else modal.removeAttribute('open');
   modal.classList.add('hidden');
   modal.hidden = true;
   _editingResourceId = null;
