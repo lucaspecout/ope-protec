@@ -7629,15 +7629,60 @@ function drawMapBriefingLabel(ctx, text, x, y, options = {}) {
   ctx.restore();
 }
 
-function drawMapBriefingGeoJson(ctx, geojson, project, color = '#d7263d') {
+async function drawMapBriefingPoiSymbol(ctx, point, x, y, color) {
+  const iconUrl = String(point.icon_url || '').trim();
+  const radius = 15;
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,.38)';
+  ctx.shadowBlur = 6;
+  ctx.shadowOffsetY = 2;
+  ctx.fillStyle = '#ffffff';
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.shadowColor = 'transparent';
+
+  if (/^https?:\/\//i.test(iconUrl)) {
+    const img = await loadMapBriefingImage(iconUrl);
+    if (img) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(x, y, radius - 4, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.drawImage(img, x - radius + 4, y - radius + 4, (radius - 4) * 2, (radius - 4) * 2);
+      ctx.restore();
+      ctx.restore();
+      return;
+    }
+  }
+
+  const symbol = point.icon || iconForCategory(point.category);
+  ctx.font = '20px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",Arial,sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#17233f';
+  ctx.fillText(symbol, x, y + 1);
+  ctx.restore();
+}
+
+function drawMapBriefingGeoJson(ctx, geojson, project, color = '#d7263d', label = '') {
   const geometry = geojson?.geometry || geojson;
   if (!geometry || !project) return;
+  const projectedPoints = [];
+  const addProjectedPoint = (coord) => {
+    if (!Array.isArray(coord) || coord.length < 2) return null;
+    const point = project(Number(coord[1]), Number(coord[0]));
+    if (point) projectedPoints.push(point);
+    return point;
+  };
   const drawPath = (coords, fill) => {
     let started = false;
     ctx.beginPath();
     (coords || []).forEach((coord) => {
-      if (!Array.isArray(coord) || coord.length < 2) return;
-      const point = project(Number(coord[1]), Number(coord[0]));
+      const point = addProjectedPoint(coord);
       if (!point) return;
       if (!started) {
         ctx.moveTo(point.x, point.y);
@@ -7654,25 +7699,42 @@ function drawMapBriefingGeoJson(ctx, geojson, project, color = '#d7263d') {
     ctx.stroke();
   };
   ctx.save();
-  ctx.strokeStyle = color;
-  ctx.fillStyle = `${color}33`;
-  ctx.lineWidth = 3;
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
+  ctx.strokeStyle = '#ffffff';
+  ctx.fillStyle = 'rgba(255,255,255,.18)';
+  ctx.lineWidth = 7;
+  if (geometry.type === 'LineString') drawPath(geometry.coordinates, false);
+  if (geometry.type === 'Polygon') (geometry.coordinates || []).forEach((ring) => drawPath(ring, true));
+  if (geometry.type === 'MultiPolygon') (geometry.coordinates || []).forEach((polygon) => (polygon || []).forEach((ring) => drawPath(ring, true)));
+  ctx.strokeStyle = color;
+  ctx.fillStyle = `${color}44`;
+  ctx.lineWidth = 4;
   if (geometry.type === 'LineString') drawPath(geometry.coordinates, false);
   if (geometry.type === 'Polygon') (geometry.coordinates || []).forEach((ring) => drawPath(ring, true));
   if (geometry.type === 'MultiPolygon') (geometry.coordinates || []).forEach((polygon) => (polygon || []).forEach((ring) => drawPath(ring, true)));
   if (geometry.type === 'Point') {
     const coord = geometry.coordinates || [];
-    const point = project(Number(coord[1]), Number(coord[0]));
+    const point = addProjectedPoint(coord);
     if (point) {
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 4;
       ctx.beginPath();
-      ctx.arc(point.x, point.y, 6, 0, Math.PI * 2);
+      ctx.arc(point.x, point.y, 10, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, 4, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
   ctx.restore();
+  if (label && projectedPoints.length) {
+    const center = projectedPoints.reduce((acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }), { x: 0, y: 0 });
+    drawMapBriefingLabel(ctx, label, (center.x / projectedPoints.length) + 10, (center.y / projectedPoints.length) - 10, { color });
+  }
 }
 
 async function buildRealMapBriefingCaptureHtml() {
@@ -7723,7 +7785,7 @@ async function buildRealMapBriefingCaptureHtml() {
     return { x: point.x * outputScale, y: point.y * outputScale };
   };
 
-  mapAnnotations.forEach((annotation) => drawMapBriefingGeoJson(ctx, annotation.geojson, project, annotation.color || '#d7263d'));
+  mapAnnotations.forEach((annotation) => drawMapBriefingGeoJson(ctx, annotation.geojson, project, annotation.color || '#d7263d', annotation.text_label || ''));
 
   if (mapEvacuationCircle?.getLatLng && mapEvacuationCircle?.getRadius) {
     const center = mapEvacuationCircle.getLatLng();
@@ -7731,13 +7793,20 @@ async function buildRealMapBriefingCaptureHtml() {
     const radiusPoint = project(center.lat + (Number(mapEvacuationCircle.getRadius()) / 111320), center.lng);
     if (centerPoint && radiusPoint) {
       const radius = Math.max(8, Math.abs(radiusPoint.y - centerPoint.y));
-      ctx.fillStyle = 'rgba(255, 135, 135, .24)';
+      ctx.fillStyle = 'rgba(255, 135, 135, .34)';
       ctx.strokeStyle = '#c92a2a';
-      ctx.lineWidth = 3;
+      ctx.lineWidth = 5;
       ctx.beginPath();
       ctx.arc(centerPoint.x, centerPoint.y, radius, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([10, 7]);
+      ctx.beginPath();
+      ctx.arc(centerPoint.x, centerPoint.y, Math.max(2, radius - 4), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
       drawMapBriefingLabel(ctx, `Zone evacuation ${(Number(mapEvacuationCircle.getRadius()) / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} km`, centerPoint.x + 12, centerPoint.y - 14, { color: '#8a1c1c' });
     }
   }
@@ -7747,29 +7816,13 @@ async function buildRealMapBriefingCaptureHtml() {
     .filter((point) => isTacticalLayerEnabled(point.category))
     .filter((point) => safeBoundsContains(point.lat, point.lon));
 
-  visiblePoints.forEach((point, index) => {
+  for (const [index, point] of visiblePoints.entries()) {
     const projected = project(point.lat, point.lon);
-    if (!projected) return;
+    if (!projected) continue;
     const color = mapBriefingColor(point.category);
-    ctx.save();
-    ctx.shadowColor = 'rgba(0,0,0,.35)';
-    ctx.shadowBlur = 5;
-    ctx.shadowOffsetY = 2;
-    ctx.fillStyle = '#ffffff';
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.arc(projected.x, projected.y, 11, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-    ctx.shadowColor = 'transparent';
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.arc(projected.x, projected.y, 5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-    if (index < 60) drawMapBriefingLabel(ctx, `${mapBriefingPointLabel(point)} ${point.name || ''}`, projected.x + 14, projected.y + 1);
-  });
+    await drawMapBriefingPoiSymbol(ctx, point, projected.x, projected.y, color);
+    if (index < 60) drawMapBriefingLabel(ctx, point.name || mapBriefingPointLabel(point), projected.x + 18, projected.y + 1);
+  }
 
   const engagedResources = (Array.isArray(cachedResources) ? cachedResources : [])
     .filter((resource) => resource.status === 'engage')
