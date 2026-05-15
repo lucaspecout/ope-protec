@@ -7589,8 +7589,239 @@ function buildMapBriefingSnapshotSvg() {
   </figure>`;
 }
 
-function exportMapBriefing() {
+function loadMapBriefingImage(src) {
+  return new Promise((resolve) => {
+    if (!src) {
+      resolve(null);
+      return;
+    }
+    const img = new Image();
+    const finish = (value) => {
+      img.onload = null;
+      img.onerror = null;
+      resolve(value);
+    };
+    const timeout = window.setTimeout(() => finish(null), 2200);
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      window.clearTimeout(timeout);
+      finish(img);
+    };
+    img.onerror = () => {
+      window.clearTimeout(timeout);
+      finish(null);
+    };
+    img.src = src;
+  });
+}
+
+function drawMapBriefingLabel(ctx, text, x, y, options = {}) {
+  const value = String(text || '').trim();
+  if (!value) return;
+  ctx.save();
+  ctx.font = options.font || '700 13px Arial, sans-serif';
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = '#ffffff';
+  ctx.fillStyle = options.color || '#17233f';
+  ctx.textBaseline = 'middle';
+  ctx.strokeText(value, x, y);
+  ctx.fillText(value, x, y);
+  ctx.restore();
+}
+
+function drawMapBriefingGeoJson(ctx, geojson, project, color = '#d7263d') {
+  const geometry = geojson?.geometry || geojson;
+  if (!geometry || !project) return;
+  const drawPath = (coords, fill) => {
+    let started = false;
+    ctx.beginPath();
+    (coords || []).forEach((coord) => {
+      if (!Array.isArray(coord) || coord.length < 2) return;
+      const point = project(Number(coord[1]), Number(coord[0]));
+      if (!point) return;
+      if (!started) {
+        ctx.moveTo(point.x, point.y);
+        started = true;
+      } else {
+        ctx.lineTo(point.x, point.y);
+      }
+    });
+    if (!started) return;
+    if (fill) {
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.stroke();
+  };
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.fillStyle = `${color}33`;
+  ctx.lineWidth = 3;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  if (geometry.type === 'LineString') drawPath(geometry.coordinates, false);
+  if (geometry.type === 'Polygon') (geometry.coordinates || []).forEach((ring) => drawPath(ring, true));
+  if (geometry.type === 'MultiPolygon') (geometry.coordinates || []).forEach((polygon) => (polygon || []).forEach((ring) => drawPath(ring, true)));
+  if (geometry.type === 'Point') {
+    const coord = geometry.coordinates || [];
+    const point = project(Number(coord[1]), Number(coord[0]));
+    if (point) {
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+async function buildRealMapBriefingCaptureHtml() {
+  if (!leafletMap) return buildMapBriefingSnapshotSvg();
+  const mapEl = document.getElementById('isere-map-leaflet');
+  const mapRect = mapEl?.getBoundingClientRect?.();
+  if (!mapEl || !mapRect?.width || !mapRect?.height) return buildMapBriefingSnapshotSvg();
+
+  leafletMap.invalidateSize?.();
+  const outputScale = Math.min(2, 1200 / Math.max(1, mapRect.width));
+  const width = Math.round(mapRect.width * outputScale);
+  const height = Math.round(mapRect.height * outputScale);
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return buildMapBriefingSnapshotSvg();
+  ctx.fillStyle = '#e8eef5';
+  ctx.fillRect(0, 0, width, height);
+
+  const tiles = Array.from(mapEl.querySelectorAll('img.leaflet-tile-loaded, img.leaflet-tile'))
+    .filter((tile) => tile.src && tile.offsetParent !== null);
+  let drawnTiles = 0;
+  for (const tile of tiles) {
+    const tileRect = tile.getBoundingClientRect();
+    const img = await loadMapBriefingImage(tile.currentSrc || tile.src);
+    if (!img) continue;
+    try {
+      ctx.drawImage(
+        img,
+        (tileRect.left - mapRect.left) * outputScale,
+        (tileRect.top - mapRect.top) * outputScale,
+        tileRect.width * outputScale,
+        tileRect.height * outputScale,
+      );
+      drawnTiles += 1;
+    } catch (_) {}
+  }
+  if (!drawnTiles) return buildMapBriefingSnapshotSvg();
+
+  const bounds = leafletMap.getBounds?.();
+  const safeBoundsContains = (lat, lon) => {
+    try { return !bounds || bounds.pad(0.08).contains([lat, lon]); } catch (_) { return true; }
+  };
+  const project = (lat, lon) => {
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    const point = leafletMap.latLngToContainerPoint([lat, lon]);
+    return { x: point.x * outputScale, y: point.y * outputScale };
+  };
+
+  mapAnnotations.forEach((annotation) => drawMapBriefingGeoJson(ctx, annotation.geojson, project, annotation.color || '#d7263d'));
+
+  if (mapEvacuationCircle?.getLatLng && mapEvacuationCircle?.getRadius) {
+    const center = mapEvacuationCircle.getLatLng();
+    const centerPoint = project(center.lat, center.lng);
+    const radiusPoint = project(center.lat + (Number(mapEvacuationCircle.getRadius()) / 111320), center.lng);
+    if (centerPoint && radiusPoint) {
+      const radius = Math.max(8, Math.abs(radiusPoint.y - centerPoint.y));
+      ctx.fillStyle = 'rgba(255, 135, 135, .24)';
+      ctx.strokeStyle = '#c92a2a';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(centerPoint.x, centerPoint.y, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      drawMapBriefingLabel(ctx, `Zone evacuation ${(Number(mapEvacuationCircle.getRadius()) / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} km`, centerPoint.x + 12, centerPoint.y - 14, { color: '#8a1c1c' });
+    }
+  }
+
+  const visiblePoints = (Array.isArray(mapPoints) ? mapPoints : [])
+    .filter((point) => mapPointVisibilityOverrides.get(point.id) !== false)
+    .filter((point) => isTacticalLayerEnabled(point.category))
+    .filter((point) => safeBoundsContains(point.lat, point.lon));
+
+  visiblePoints.forEach((point, index) => {
+    const projected = project(point.lat, point.lon);
+    if (!projected) return;
+    const color = mapBriefingColor(point.category);
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,.35)';
+    ctx.shadowBlur = 5;
+    ctx.shadowOffsetY = 2;
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(projected.x, projected.y, 11, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.shadowColor = 'transparent';
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(projected.x, projected.y, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    if (index < 60) drawMapBriefingLabel(ctx, `${mapBriefingPointLabel(point)} ${point.name || ''}`, projected.x + 14, projected.y + 1);
+  });
+
+  const engagedResources = (Array.isArray(cachedResources) ? cachedResources : [])
+    .filter((resource) => resource.status === 'engage')
+    .map((resource) => ({ ...resource, coords: normalizeMapCoordinates(resource.lat, resource.lon) }))
+    .filter((resource) => resource.coords && safeBoundsContains(resource.coords.lat, resource.coords.lon))
+    .slice(0, 30);
+
+  engagedResources.forEach((resource) => {
+    const projected = project(resource.coords.lat, resource.coords.lon);
+    if (!projected) return;
+    ctx.fillStyle = '#f08c00';
+    ctx.strokeStyle = '#7c2d12';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    if (typeof ctx.roundRect === 'function') {
+      ctx.roundRect(projected.x - 8, projected.y - 8, 16, 16, 4);
+    } else {
+      ctx.rect(projected.x - 8, projected.y - 8, 16, 16);
+    }
+    ctx.fill();
+    ctx.stroke();
+    drawMapBriefingLabel(ctx, `MOYEN ${resource.name || ''}`, projected.x + 13, projected.y + 1);
+  });
+
+  const center = leafletMap.getCenter?.();
+  const zoom = leafletMap.getZoom?.();
+  const visibleSummary = [
+    `${visiblePoints.length} point(s) tactique(s) visibles`,
+    `${mapAnnotations.length} annotation(s)`,
+    `${engagedResources.length} moyen(s) engage(s) visibles`,
+    center ? `centre ${center.lat.toFixed(4)}, ${center.lng.toFixed(4)}` : '',
+    zoom != null ? `zoom ${zoom}` : '',
+  ].filter(Boolean).join(' - ');
+
+  try {
+    const png = canvas.toDataURL('image/png');
+    return `<figure class="map-capture map-capture--real"><img src="${png}" alt="Capture reelle de la carte avec points tactiques visibles"><figcaption>${escapeHtml(visibleSummary)}</figcaption></figure>`;
+  } catch (_) {
+    return buildMapBriefingSnapshotSvg();
+  }
+}
+
+async function exportMapBriefing() {
   const exportedAt = new Date().toLocaleString('fr-FR');
+  const win = window.open('', '_blank', 'width=980,height=720');
+  if (!win) {
+    setMapFeedback('Veuillez autoriser les popups pour generer le briefing carte.', true);
+    return;
+  }
+  win.document.write('<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Briefing carte CRISIS38</title></head><body><p>Capture de la carte en cours...</p></body></html>');
+  win.document.close();
+
   const tacticalCounts = tacticalLayerCounts();
   const tacticalRows = [
     ['Zones d\'évacuation', tacticalCounts.evacuation || 0],
@@ -7603,7 +7834,7 @@ function exportMapBriefing() {
   ];
   const activeResources = cachedResources.filter((r) => r.status !== 'hors_service');
   const engagedResources = cachedResources.filter((r) => r.status === 'engage');
-  const mapCaptureHtml = buildMapBriefingSnapshotSvg();
+  const mapCaptureHtml = await buildRealMapBriefingCaptureHtml();
   const rowsHtml = tacticalRows.map(([label, count]) => `<tr><td>${escapeHtml(label)}</td><td>${count}</td></tr>`).join('');
   const resourcesHtml = cachedResources.slice(0, 80).map((r) => {
     const status = _RESOURCE_STATUS_META[r.status]?.label || r.status || '-';
@@ -7612,18 +7843,14 @@ function exportMapBriefing() {
     return `<tr><td>${escapeHtml(r.name || '-')}</td><td>${escapeHtml(type)}</td><td>${escapeHtml(status)}</td><td>${escapeHtml(r.assigned_to || '-')}</td><td>${escapeHtml(location)}</td></tr>`;
   }).join('');
   const annotationsHtml = mapAnnotations.slice(0, 80).map((a) => `<li>${escapeHtml(a.annotation_type || 'annotation')} - ${escapeHtml(a.text_label || 'zone tracée')}</li>`).join('');
-  const win = window.open('', '_blank', 'width=980,height=720');
-  if (!win) {
-    setMapFeedback('Veuillez autoriser les popups pour générer le briefing carte.', true);
-    return;
-  }
+  win.document.open();
   win.document.write(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Briefing carte CRISIS38</title>
     <style>
       body{font-family:Inter,Arial,sans-serif;margin:28px;color:#17233f} h1{margin:0 0 4px} h2{margin:24px 0 8px;font-size:18px}
       .muted{color:#637087}.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:16px 0}
       .kpi{border:1px solid #d9e2f2;border-radius:8px;padding:10px;background:#f7faff}.kpi strong{display:block;font-size:22px}
       table{width:100%;border-collapse:collapse;margin-top:8px} th,td{border:1px solid #d9e2f2;padding:7px;text-align:left;font-size:13px} th{background:#eef4ff}
-      .map-capture{margin:16px 0 20px;border:1px solid #d9e2f2;border-radius:10px;overflow:hidden;background:#fff}.map-capture svg{display:block;width:100%;height:auto}.map-capture figcaption{padding:8px 10px;color:#637087;font-size:12px;border-top:1px solid #d9e2f2}.map-label{font:700 12px Inter,Arial,sans-serif;fill:#17233f;paint-order:stroke;stroke:#fff;stroke-width:4px;stroke-linejoin:round;filter:url(#label-shadow)}.map-label-kind{fill:#0b4daa}
+      .map-capture{margin:16px 0 20px;border:1px solid #d9e2f2;border-radius:10px;overflow:hidden;background:#fff}.map-capture img,.map-capture svg{display:block;width:100%;height:auto}.map-capture figcaption{padding:8px 10px;color:#637087;font-size:12px;border-top:1px solid #d9e2f2}.map-label{font:700 12px Inter,Arial,sans-serif;fill:#17233f;paint-order:stroke;stroke:#fff;stroke-width:4px;stroke-linejoin:round;filter:url(#label-shadow)}.map-label-kind{fill:#0b4daa}
       ul{margin-top:8px}.footer{margin-top:24px;font-size:12px;color:#637087}@media print{button{display:none} body{margin:16mm}}
     </style></head><body>
     <button onclick="window.print()">Exporter PDF / imprimer</button>
