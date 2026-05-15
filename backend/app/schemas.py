@@ -117,6 +117,7 @@ class LdapTestResponse(BaseModel):
     ok: bool
     mode: str
     detail: str
+    checks: list[dict[str, str | bool]] = []
     username: str | None = None
     role: str | None = None
     municipality_name: str | None = None

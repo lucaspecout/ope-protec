@@ -1292,7 +1292,10 @@
             <h4>Test LDAP</h4>
             <label>Identifiant LDAP<input name="username" autocomplete="username" placeholder="laisser vide pour tester seulement la connexion" /></label>
             <label>Mot de passe LDAP<input name="password" type="password" autocomplete="current-password" /></label>
-            <button type="submit">Tester LDAP</button>
+            <div class="filter-tool-row">
+              <button type="submit">Tester utilisateur LDAP</button>
+              <button id="ldap-server-test-btn" type="button" class="ghost">Tester serveur LDAP</button>
+            </div>
             <p id="ldap-test-result" class="muted"></p>
           </form>
           <table class="users-table">

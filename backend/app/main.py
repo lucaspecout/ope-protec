@@ -3,9 +3,11 @@ from copy import deepcopy
 from pathlib import Path
 import re
 import secrets
+import socket
 from threading import Lock, Thread
 from time import sleep
 from typing import Callable
+from urllib.parse import urlparse
 
 import asyncio
 import json
@@ -958,18 +960,48 @@ def get_or_create_ldap_user(db: Session, ldap_user: dict) -> User:
 
 
 def test_ldap_directory_connection() -> dict:
+    checks: list[dict[str, str | bool]] = []
+    def add_check(name: str, ok: bool, detail: str = "") -> None:
+        checks.append({"name": name, "ok": ok, "detail": detail})
+
     if not settings.ldap_enabled:
-        return {"ok": False, "detail": "LDAP_ENABLED=false"}
+        add_check("Activation", False, "LDAP_ENABLED=false")
+        return {"ok": False, "detail": "LDAP desactive", "checks": checks}
+
+    parsed = urlparse(settings.ldap_url)
+    host = parsed.hostname
+    port = parsed.port or (636 if parsed.scheme == "ldaps" else 389)
+    if not host:
+        add_check("URL serveur", False, f"URL invalide: {settings.ldap_url}")
+        return {"ok": False, "detail": "URL LDAP invalide", "checks": checks}
+    add_check("Configuration", True, f"{parsed.scheme or 'ldap'}://{host}:{port}")
+
+    try:
+        with socket.create_connection((host, port), timeout=4):
+            add_check("Port TCP", True, f"{host}:{port} joignable")
+    except OSError as exc:
+        add_check("Port TCP", False, f"{host}:{port} injoignable: {exc}")
+        return {"ok": False, "detail": "Serveur LDAP injoignable", "checks": checks}
+
     try:
         server = Server(settings.ldap_url, get_info=ALL, connect_timeout=5)
         bind_user = str(settings.ldap_bind_dn or "").strip() or None
         bind_password = str(settings.ldap_bind_password or "")
         with Connection(server, user=bind_user, password=bind_password, auto_bind=True) as conn:
+            add_check("Bind", True, bind_user or "bind anonyme")
             if settings.ldap_user_base_dn:
-                conn.search(settings.ldap_user_base_dn, "(objectClass=*)", search_scope=SUBTREE, attributes=["dn"], size_limit=1)
-            return {"ok": True, "detail": "Connexion LDAP OK"}
+                found = conn.search(settings.ldap_user_base_dn, "(objectClass=*)", search_scope=SUBTREE, attributes=["dn"], size_limit=1)
+                add_check("Base utilisateurs", bool(found), settings.ldap_user_base_dn)
+            else:
+                add_check("Base utilisateurs", False, "LDAP_USER_BASE_DN manquant")
+                return {"ok": False, "detail": "Base utilisateurs manquante", "checks": checks}
+            if settings.ldap_group_base_dn:
+                found_groups = conn.search(settings.ldap_group_base_dn, "(objectClass=*)", search_scope=SUBTREE, attributes=["dn"], size_limit=1)
+                add_check("Base groupes", bool(found_groups), settings.ldap_group_base_dn)
+            return {"ok": all(bool(c["ok"]) for c in checks), "detail": "Diagnostic LDAP termine", "checks": checks}
     except Exception as exc:
-        return {"ok": False, "detail": f"Connexion LDAP impossible: {exc}"}
+        add_check("LDAP", False, str(exc))
+        return {"ok": False, "detail": f"Connexion LDAP impossible: {exc}", "checks": checks}
 
 
 def get_user_municipality_id(user: User, db: Session) -> int | None:
@@ -1473,7 +1505,12 @@ async def test_ldap(payload: LdapTestRequest, _: User = Depends(require_roles("a
             "municipality_name": ldap_user.get("municipality_name"),
         }
     result = await asyncio.get_running_loop().run_in_executor(None, test_ldap_directory_connection)
-    return {"ok": bool(result.get("ok")), "mode": "directory", "detail": str(result.get("detail") or "")}
+    return {
+        "ok": bool(result.get("ok")),
+        "mode": "directory",
+        "detail": str(result.get("detail") or ""),
+        "checks": result.get("checks") or [],
+    }
 
 
 @app.patch("/auth/users/{user_id}", response_model=UserOut)
