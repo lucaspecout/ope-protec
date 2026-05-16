@@ -41,8 +41,6 @@ except ImportError:
     _requests = None  # type: ignore[assignment]
     _REQUESTS_OK = False
 
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
@@ -50,7 +48,7 @@ import redis as _redis_lib
 
 from .config import settings
 from .database import SessionLocal
-from .models import Municipality, OperationalLog, WeatherAlert
+from .models import WeatherAlert
 
 # ---------------------------------------------------------------------------
 # Cache fichier JSON – persistance sur volume Docker (/data/static)
@@ -137,100 +135,6 @@ def cleanup_old_weather_alerts(db: Session) -> int:
     result = db.execute(delete(WeatherAlert).where(WeatherAlert.created_at < cutoff))
     db.commit()
     return result.rowcount or 0
-
-
-def generate_pdf_report(db: Session, report_name: str = "rapport_veille.pdf") -> str:
-    Path(settings.report_dir).mkdir(parents=True, exist_ok=True)
-    report_path = str(Path(settings.report_dir) / report_name)
-    c = canvas.Canvas(report_path, pagesize=A4)
-    width, height = A4
-
-    latest_alert = db.query(WeatherAlert).order_by(WeatherAlert.created_at.desc()).first()
-    crisis_count = db.query(Municipality).filter(Municipality.crisis_mode.is_(True)).count()
-    logs = db.query(OperationalLog).order_by(OperationalLog.created_at.desc()).limit(20).all()
-    grenoble_weather = _fetch_grenoble_weather_snapshot()
-
-    c.setTitle("Rapport opérationnel Isère")
-    c.setFont("Helvetica-Bold", 17)
-    c.drawString(40, height - 45, "CRISIS38 · Rapport opérationnel")
-    c.setFont("Helvetica", 10)
-    c.drawString(40, height - 62, "Protection Civile de l'Isère")
-    c.drawRightString(width - 40, height - 62, f"Édité le {datetime.utcnow():%d/%m/%Y à %H:%M UTC}")
-
-    y = height - 95
-    c.setLineWidth(0.8)
-    c.rect(40, y - 45, width - 80, 45)
-    c.setFont("Helvetica-Bold", 11)
-    c.drawString(48, y - 17, "Synthèse")
-    c.setFont("Helvetica", 10)
-    c.drawString(48, y - 34, f"Vigilance: {(latest_alert.level if latest_alert else 'vert').upper()}")
-    c.drawString(210, y - 34, f"Communes en crise: {crisis_count}")
-    c.drawString(390, y - 34, "Périmètre: Isère (38)")
-
-    y -= 68
-    c.setFont("Helvetica-Bold", 11)
-    c.drawString(40, y, "Météo Grenoble (actuelle + heure par heure)")
-    y -= 12
-    c.setFont("Helvetica", 9)
-    weather_current = grenoble_weather.get("current") or "Données indisponibles"
-    c.drawString(44, y, weather_current)
-    y -= 14
-    for line in grenoble_weather.get("hourly_lines") or ["Prévision horaire indisponible"]:
-        c.drawString(50, y, f"• {line}")
-        y -= 12
-
-    y -= 8
-    c.setFont("Helvetica-Bold", 11)
-    c.drawString(40, y, "Chronologie principale")
-    y -= 12
-
-    table_x = 40
-    col_sizes = [88, 70, 78, width - 80 - (88 + 70 + 78)]
-    row_h = 18
-    c.setFont("Helvetica-Bold", 9)
-    headers = ["Horodatage", "Portée", "Niveau", "Évènement"]
-    x = table_x
-    for head, size in zip(headers, col_sizes):
-        c.rect(x, y - row_h, size, row_h)
-        c.drawString(x + 4, y - 12, head)
-        x += size
-
-    y -= row_h
-    c.setFont("Helvetica", 8.8)
-    for log in logs:
-        if y < 75:
-            c.showPage()
-            y = height - 60
-            c.setFont("Helvetica-Bold", 11)
-            c.drawString(40, y, "Chronologie principale (suite)")
-            y -= 12
-            c.setFont("Helvetica-Bold", 9)
-            x = table_x
-            for head, size in zip(headers, col_sizes):
-                c.rect(x, y - row_h, size, row_h)
-                c.drawString(x + 4, y - 12, head)
-                x += size
-            y -= row_h
-            c.setFont("Helvetica", 8.8)
-
-        when = log.event_time or log.created_at
-        scope = str(log.target_scope or "departemental")[:18]
-        level = str(log.danger_level or "vert")[:12]
-        event = f"{log.event_type or 'MCO'} · {(log.description or '')[:90]}"
-        row = [f"{when:%d/%m %H:%M}", scope, level, event]
-
-        x = table_x
-        for value, size in zip(row, col_sizes):
-            c.rect(x, y - row_h, size, row_h)
-            c.drawString(x + 4, y - 12, str(value))
-            x += size
-        y -= row_h
-
-    c.setFont("Helvetica", 9)
-    c.drawString(40, 45, "Document généré automatiquement par CRISIS38.")
-    c.drawRightString(width - 40, 45, "Signature: ____________________")
-    c.save()
-    return report_path
 
 
 _RETRYABLE_HTTP_STATUS_CODES = {429, 500, 502, 503, 504}
@@ -408,87 +312,6 @@ def _extract_html_title(raw_html: str) -> str:
         return ""
     title = _strip_html_tags(match.group(1))
     return re.sub(r"\s+", " ", title).strip()
-
-
-def _format_meteo_temperature(value: Any) -> str:
-    if value is None:
-        return "--"
-    try:
-        return f"{round(float(value))}°C"
-    except (TypeError, ValueError):
-        return "--"
-
-
-def _map_open_meteo_weather_code(code: Any) -> str:
-    labels = {
-        0: "ciel clair",
-        1: "peu nuageux",
-        2: "partiellement nuageux",
-        3: "couvert",
-        45: "brouillard",
-        48: "brouillard givrant",
-        51: "bruine légère",
-        53: "bruine",
-        55: "bruine forte",
-        61: "pluie faible",
-        63: "pluie",
-        65: "pluie forte",
-        66: "pluie verglaçante",
-        67: "pluie verglaçante forte",
-        71: "neige faible",
-        73: "neige",
-        75: "neige forte",
-        77: "grains de neige",
-        80: "averses faibles",
-        81: "averses",
-        82: "averses fortes",
-        85: "averses de neige",
-        86: "fortes averses de neige",
-        95: "orage",
-        96: "orage avec grêle",
-        99: "orage violent",
-    }
-    try:
-        return labels.get(int(code), "conditions variables")
-    except (TypeError, ValueError):
-        return "conditions variables"
-
-
-def _fetch_grenoble_weather_snapshot() -> dict[str, Any]:
-    api_url = (
-        "https://api.open-meteo.com/v1/forecast"
-        "?latitude=45.1885&longitude=5.7245"
-        "&current=temperature_2m,weather_code"
-        "&hourly=temperature_2m,weather_code"
-        "&forecast_days=1&timezone=Europe%2FParis"
-    )
-    try:
-        payload = _http_get_json(api_url, timeout=12)
-        current = payload.get("current") or {}
-        hourly = payload.get("hourly") or {}
-        hourly_times = hourly.get("time") or []
-        hourly_temps = hourly.get("temperature_2m") or []
-        hourly_codes = hourly.get("weather_code") or []
-
-        current_text = (
-            f"Maintenant: {_format_meteo_temperature(current.get('temperature_2m'))} · "
-            f"{_map_open_meteo_weather_code(current.get('weather_code'))}"
-        )
-
-        hourly_lines: list[str] = []
-        for when, temp, code in list(zip(hourly_times, hourly_temps, hourly_codes))[:8]:
-            label_hour = when[11:16] if len(when) >= 16 else when
-            hourly_lines.append(f"{label_hour}: {_format_meteo_temperature(temp)} · {_map_open_meteo_weather_code(code)}")
-
-        return {
-            "current": current_text,
-            "hourly_lines": hourly_lines,
-        }
-    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError, KeyError):
-        return {
-            "current": "Maintenant: indisponible",
-            "hourly_lines": ["Prévision horaire indisponible"],
-        }
 
 
 def _strip_html_tags(raw_html: str) -> str:
@@ -10750,70 +10573,6 @@ def _fetch_copernicus_ems_live() -> dict[str, Any]:
             "service": "GDACS · Catastrophes Europe",
             "status": "degraded",
             "source": "https://www.gdacs.org",
-            "activations_total": 0,
-            "france_total": 0,
-            "activations": [],
-            "france_activations": [],
-            "error": str(exc),
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
-
-
-# ── kept for unused reference ──────────────────────────────────────────────
-def _fetch_copernicus_ems_live_UNUSED() -> dict[str, Any]:
-    """Ancienne implémentation REST Copernicus EMS (API désactivée fin 2025)."""
-    try:
-        resp = _requests.get(
-            "https://emergency.copernicus.eu/mapping/rest/api/v1/activations",
-            timeout=15,
-            headers={"Accept": "application/json", "User-Agent": _BROWSER_UA},
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        raw_items = data if isinstance(data, list) else (data.get("items") or data.get("activations") or [])
-        activations: list[dict[str, Any]] = []
-        france_activations: list[dict[str, Any]] = []
-
-        for item in raw_items[:50]:
-            countries = item.get("countries") or item.get("country") or []
-            if isinstance(countries, str):
-                countries = [countries]
-            # Normalize: list of country names or codes
-            country_strs = [str(c).lower() for c in countries]
-            is_france = any(
-                "france" in c or c == "fr" or "french" in c
-                for c in country_strs
-            )
-            activation = {
-                "id": item.get("activationid") or item.get("id") or item.get("code"),
-                "title": item.get("title") or item.get("name") or item.get("event_name"),
-                "type": item.get("type") or item.get("event_type") or "FLOOD",
-                "countries": countries,
-                "date": (item.get("reportdate") or item.get("date") or "")[:10],
-                "lat": item.get("latitude") or item.get("lat"),
-                "lon": item.get("longitude") or item.get("lon"),
-                "france": is_france,
-                "url": item.get("url") or item.get("link"),
-            }
-            activations.append(activation)
-            if is_france:
-                france_activations.append(activation)
-
-        return {
-            "service": "Copernicus EMS",
-            "status": "online",
-            "source": "https://emergency.copernicus.eu",
-            "activations_total": len(activations),
-            "france_total": len(france_activations),
-            "activations": activations[:20],
-            "france_activations": france_activations[:10],
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
-    except Exception as exc:
-        return {
-            "service": "Copernicus EMS",
-            "status": "degraded",
-            "source": "https://emergency.copernicus.eu",
             "activations_total": 0,
             "france_total": 0,
             "activations": [],

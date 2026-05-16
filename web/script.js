@@ -15921,47 +15921,6 @@ function _renderLocalWeatherModal(data, lat, lon) {
 // FEATURE 15 — Journal d'audit
 // ════════════════════════════════════════════════════════════════════════════
 
-async function legacyLoadAuditLog() {
-  const userFilter = (document.getElementById('audit-user-filter')?.value || '').trim();
-  const typeFilter = document.getElementById('audit-type-filter')?.value || '';
-  const el = document.getElementById('audit-list');
-  if (el) el.innerHTML = '<p class="muted">Chargement…</p>';
-  let url = '/api/audit?limit=100';
-  if (userFilter) url += `&username=${encodeURIComponent(userFilter)}`;
-  if (typeFilter) url += `&resource_type=${encodeURIComponent(typeFilter)}`;
-  try {
-    const data = await api(url);
-    legacyRenderAuditLog(Array.isArray(data) ? data : []);
-  } catch (err) {
-    if (el) el.innerHTML = `<p class="error">Erreur : ${escapeHtml(sanitizeErrorMessage(err.message))}</p>`;
-  }
-}
-
-function legacyRenderAuditLog(logs) {
-  const el = document.getElementById('audit-list');
-  if (!el) return;
-  if (!logs.length) {
-    el.innerHTML = '<p class="muted" style="padding:1rem">Aucune action enregistrée.</p>';
-    return;
-  }
-  const methodColor = { POST: '#2b8a3e', PATCH: '#e9a800', PUT: '#e9a800', DELETE: '#c92a2a', GET: '#1971c2' };
-  el.innerHTML = logs.map((a) => {
-    const dt = new Date(a.created_at);
-    const dtStr = isNaN(dt) ? '' : dt.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const [method] = (a.action || '').split(' ');
-    const col = methodColor[method] || '#868e96';
-    const sc = a.status_code;
-    const scCol = sc >= 400 ? '#c92a2a' : sc >= 300 ? '#e9a800' : '#2b8a3e';
-    return `<div class="flux-row" style="gap:.5rem;padding:.4rem .75rem;align-items:center;font-size:.83rem">
-      <span style="color:${col};font-weight:700;font-size:.78rem;min-width:50px">${escapeHtml(method || '?')}</span>
-      <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(a.action)}">${escapeHtml(a.action)}</span>
-      <span class="muted" style="min-width:80px;text-align:right">${escapeHtml(a.username)}</span>
-      <span style="color:${scCol};min-width:30px;text-align:right;font-weight:600">${sc || ''}</span>
-      <span class="muted" style="min-width:110px;text-align:right">${escapeHtml(dtStr)}</span>
-    </div>`;
-  }).join('');
-}
-
 const auditState = { logs: [], selectedId: null, total: 0 };
 
 function auditModuleLabel(type = '') {

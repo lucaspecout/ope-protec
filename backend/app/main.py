@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import Base, SessionLocal, engine, get_db
-from .models import AlertHistory, AppSetting, AuditLog, IncidentEvent, InstitutionPoint, MapAnnotation, MapPoint, Municipality, MunicipalityDocument, OperationalLog, PublicShare, RiverStation, User, WeatherAlert
+from .models import AlertHistory, AppSetting, AuditLog, IncidentEvent, InstitutionPoint, MapAnnotation, MapPoint, Municipality, MunicipalityDocument, OperationalLog, RiverStation, User, WeatherAlert
 from .schemas import (
     MapAnnotationCreate,
     MapAnnotationOut,
@@ -47,7 +47,6 @@ from .schemas import (
     LdapBindPasswordStatus,
     LdapBindPasswordUpdate,
     PasswordChangeRequest,
-    ShareAccessRequest,
     LoginResponse,
     Token,
     TwoFactorToggleRequest,
@@ -102,7 +101,6 @@ from .services import (
     fetch_feux_foret_isere,
     fetch_cols_alpins_isere,
     fetch_copernicus_ems_france,
-    generate_pdf_report,
     resolve_commune_insee_code,
     vigicrues_geojson_from_stations,
     save_risks_snapshot,
@@ -2497,86 +2495,6 @@ def municipality_water_services(
     )
 
 
-@app.post("/municipalities/{municipality_id}/documents")
-def upload_municipality_docs(
-    municipality_id: int,
-    orsec_plan: UploadFile | None = File(None),
-    convention: UploadFile | None = File(None),
-    db: Session = Depends(get_db),
-    user: User = Depends(require_roles("admin", "ope")),
-):
-    municipality = ensure_municipality_scope(user, db, municipality_id)
-
-    base_dir = Path(settings.upload_dir) / "municipalities"
-    base_dir.mkdir(parents=True, exist_ok=True)
-
-    if orsec_plan:
-        safe_name = sanitize_upload_filename(orsec_plan.filename)
-        ensure_allowed_extension(safe_name)
-        orsec_path = base_dir / f"{municipality_id}_orsec_{safe_name}"
-        orsec_path.write_bytes(orsec_plan.file.read())
-        municipality.orsec_plan_file = str(orsec_path)
-
-    if convention:
-        safe_name = sanitize_upload_filename(convention.filename)
-        ensure_allowed_extension(safe_name)
-        convention_path = base_dir / f"{municipality_id}_convention_{safe_name}"
-        convention_path.write_bytes(convention.file.read())
-        municipality.convention_file = str(convention_path)
-
-    db.commit()
-    return {"status": "uploaded", "orsec_plan_file": municipality.orsec_plan_file, "convention_file": municipality.convention_file}
-
-
-@app.get("/municipalities/{municipality_id}/documents/{doc_type}")
-def get_municipality_document(
-    municipality_id: int,
-    doc_type: str,
-    db: Session = Depends(get_db),
-    user: User = Depends(require_roles(*READ_ROLES)),
-):
-    municipality = ensure_municipality_scope(user, db, municipality_id)
-
-    path = municipality.orsec_plan_file if doc_type == "orsec_plan" else municipality.convention_file if doc_type == "convention" else None
-    if not path:
-        raise HTTPException(404, "Document introuvable")
-
-    file_path = Path(path)
-    if not file_path.exists() or not file_path.is_file():
-        raise HTTPException(404, "Document introuvable")
-
-    return FileResponse(path=file_path, filename=file_path.name)
-
-
-@app.delete("/municipalities/{municipality_id}/documents/{doc_type}")
-def delete_municipality_document(
-    municipality_id: int,
-    doc_type: str,
-    db: Session = Depends(get_db),
-    user: User = Depends(require_roles("admin", "ope")),
-):
-    municipality = ensure_municipality_scope(user, db, municipality_id)
-
-    if doc_type not in {"orsec_plan", "convention"}:
-        raise HTTPException(400, "Type de document invalide")
-
-    current_path = municipality.orsec_plan_file if doc_type == "orsec_plan" else municipality.convention_file
-    if not current_path:
-        raise HTTPException(404, "Document introuvable")
-
-    file_path = Path(current_path)
-    if file_path.exists() and file_path.is_file():
-        file_path.unlink()
-
-    if doc_type == "orsec_plan":
-        municipality.orsec_plan_file = None
-    else:
-        municipality.convention_file = None
-
-    db.commit()
-    return {"status": "deleted", "id": municipality_id, "doc_type": doc_type}
-
-
 @app.get("/municipalities/{municipality_id}/files", response_model=list[MunicipalityDocumentOut])
 def list_municipality_files(
     municipality_id: int,
@@ -2932,55 +2850,6 @@ def upload_attachment(log_id: int, file: UploadFile = File(...), db: Session = D
     log.attachment_path = str(dst)
     db.commit()
     return {"path": str(dst)}
-
-
-@app.get("/reports/pdf")
-def export_report(db: Session = Depends(get_db), _: User = Depends(require_roles(*READ_ROLES))):
-    path = generate_pdf_report(db)
-    return {"report": path, "format": "pdf"}
-
-
-@app.post("/shares/{municipality_id}")
-def create_share(municipality_id: int, password: str, db: Session = Depends(get_db), _: User = Depends(require_roles(*EDIT_ROLES))):
-    municipality = db.get(Municipality, municipality_id)
-    if not municipality:
-        raise HTTPException(404, "Commune introuvable")
-    validate_password_strength(password)
-    token = secrets.token_urlsafe(24)
-    share = PublicShare(
-        token=token,
-        password_hash=hash_password(password),
-        municipality_id=municipality_id,
-        expires_at=datetime.utcnow() + timedelta(hours=24),
-    )
-    db.add(share)
-    db.commit()
-    return {"token": token, "expires_at": share.expires_at}
-
-
-@app.post("/shares/{token}/access")
-def access_share(token: str, payload: ShareAccessRequest, db: Session = Depends(get_db)):
-    share = db.query(PublicShare).filter(PublicShare.token == token, PublicShare.active.is_(True)).first()
-    if not share or share.expires_at < datetime.utcnow():
-        raise HTTPException(404, "Lien indisponible")
-    if not verify_password(payload.password, share.password_hash):
-        raise HTTPException(401, "Mot de passe invalide")
-    municipality = db.get(Municipality, share.municipality_id)
-    return {
-        "municipality": MunicipalityOut.model_validate(municipality).model_dump(),
-        "token": token,
-        "expires_at": share.expires_at,
-    }
-
-
-@app.delete("/shares/{token}")
-def revoke_share(token: str, db: Session = Depends(get_db), _: User = Depends(require_roles(*EDIT_ROLES))):
-    share = db.query(PublicShare).filter(PublicShare.token == token).first()
-    if not share:
-        raise HTTPException(404, "Lien introuvable")
-    share.active = False
-    db.commit()
-    return {"status": "revoked"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

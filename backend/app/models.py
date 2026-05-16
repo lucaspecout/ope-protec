@@ -66,8 +66,6 @@ class Municipality(Base):
     pcs_active: Mapped[bool] = mapped_column(Boolean, default=True)
     crisis_mode: Mapped[bool] = mapped_column(Boolean, default=False)
     vigilance_color: Mapped[str] = mapped_column(String(20), default="vert")
-    orsec_plan_file: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    convention_file: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 
 class MunicipalityDocument(Base):
@@ -163,19 +161,6 @@ class IncidentEvent(Base):
 
     municipality = relationship("Municipality")
     created_by = relationship("User")
-
-
-class PublicShare(Base):
-    __tablename__ = "public_shares"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    token: Mapped[str] = mapped_column(String(120), unique=True, index=True)
-    password_hash: Mapped[str] = mapped_column(String(255))
-    active: Mapped[bool] = mapped_column(Boolean, default=True)
-    expires_at: Mapped[datetime] = mapped_column(DateTime)
-    municipality_id: Mapped[int] = mapped_column(ForeignKey("municipalities.id"))
-
-    municipality = relationship("Municipality")
 
 
 class AppSetting(Base):

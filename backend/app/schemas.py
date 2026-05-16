@@ -299,8 +299,6 @@ class MunicipalityOut(BaseModel):
     pcs_active: bool
     crisis_mode: bool
     vigilance_color: str
-    orsec_plan_file: str | None = None
-    convention_file: str | None = None
 
     class Config:
         from_attributes = True
@@ -499,10 +497,6 @@ class IncidentEventStatusUpdate(BaseModel):
         if normalized not in ALLOWED_EVENT_STATUS:
             raise ValueError("Statut d'évènement invalide")
         return normalized
-
-
-class ShareAccessRequest(BaseModel):
-    password: str
 
 
 class TwoFactorToggleRequest(BaseModel):
