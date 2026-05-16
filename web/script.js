@@ -1526,7 +1526,6 @@ function canMunicipalityFiles() { return ['admin', 'ope'].includes(currentUser?.
 function canManageUsers() { return currentUser?.role === 'admin'; }
 function roleLabel(role) { return { admin: 'Admin', ope: 'Opérateur', securite: 'Sécurité', visiteur: 'Visiteur', mairie: 'Mairie' }[role] || role; }
 function canAccessPanel(panelId) {
-  if (panelId === 'resources-panel') return false;
   if (panelId === 'users-panel' || panelId === 'audit-panel') return currentUser?.role === 'admin';
   if (currentUser?.role === 'mairie') return MAIRIE_ALLOWED_PANELS.has(panelId);
   return true;
@@ -15884,8 +15883,6 @@ function auditModuleLabel(type = '') {
     municipalities: 'Communes',
     logs: 'Main courante',
     events: 'Evenements',
-    resources: 'Ressources',
-    reports: 'Rapports',
     map: 'Carte',
     interconnections: 'Interconnexions',
     audit: 'Audit',

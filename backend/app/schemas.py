@@ -4,7 +4,6 @@ from pydantic import BaseModel, EmailStr, field_validator
 
 
 ALLOWED_ROLES = {"admin", "ope", "securite", "visiteur", "mairie"}
-ALLOWED_WEATHER_LEVELS = {"vert", "jaune", "orange", "rouge"}
 ALLOWED_VIGILANCE_COLORS = {"vert", "jaune", "orange", "rouge"}
 ALLOWED_DANGER_LEVELS = {"vert", "jaune", "orange", "rouge"}
 ALLOWED_LOG_SCOPES = {"commune", "pcs", "departemental"}
@@ -137,47 +136,6 @@ class LdapBindPasswordUpdate(BaseModel):
         if value is None:
             return None
         return value if value else None
-
-
-class WeatherAlertCreate(BaseModel):
-    risk_type: str
-    level: str
-    previous_level: str
-    internal_mail_group: str | None = None
-    sent_to_internal_group: bool = False
-
-    @field_validator("risk_type")
-    @classmethod
-    def normalize_risk_type(cls, value: str) -> str:
-        sanitized = value.strip().lower()
-        if not sanitized:
-            raise ValueError("Le type de risque est obligatoire")
-        return sanitized
-
-    @field_validator("level", "previous_level")
-    @classmethod
-    def validate_alert_level(cls, value: str) -> str:
-        normalized = value.lower().strip()
-        if normalized not in ALLOWED_WEATHER_LEVELS:
-            raise ValueError("Niveau de vigilance invalide")
-        return normalized
-
-    @field_validator("internal_mail_group")
-    @classmethod
-    def normalize_internal_mail_group(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        sanitized = value.strip()
-        return sanitized or None
-
-
-class WeatherAlertOut(WeatherAlertCreate):
-    id: int
-    pcs_validated: bool
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 class MunicipalityCreate(BaseModel):

@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import Base, SessionLocal, engine, get_db
-from .models import AlertHistory, AppSetting, AuditLog, IncidentEvent, InstitutionPoint, MapAnnotation, MapPoint, Municipality, MunicipalityDocument, OperationalLog, RiverStation, User, WeatherAlert
+from .models import AlertHistory, AppSetting, AuditLog, IncidentEvent, InstitutionPoint, MapAnnotation, MapPoint, Municipality, MunicipalityDocument, OperationalLog, RiverStation, User
 from .schemas import (
     MapAnnotationCreate,
     MapAnnotationOut,
@@ -54,8 +54,6 @@ from .schemas import (
     UserPasswordResetRequest,
     UserPasswordResetResponse,
     UserUpdate,
-    WeatherAlertCreate,
-    WeatherAlertOut,
 )
 from .security import create_access_token, hash_password, verify_password, verify_and_upgrade, warmup_crypto
 from .services import (
@@ -64,7 +62,6 @@ from .services import (
     fetch_bison_fute_live_events,
     fetch_bison_fute_traffic,
     fetch_georisques_commune_risks,
-    cleanup_old_weather_alerts,
     fetch_georisques_isere_summary,
     fetch_isere_boundary_geojson,
     fetch_meteo_france_isere,
@@ -112,9 +109,6 @@ from .services import (
     fetch_rnb_buildings_bbox,
     fetch_pr_autoroutes,
     fetch_route_estimate,
-    get_static_data_status,
-    collect_all_static_data,
-    flush_service_memory_cache,
     _redis,
     _REDIS_OK,
 )
@@ -138,8 +132,6 @@ with engine.begin() as conn:
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP WITHOUT TIME ZONE"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_access_at TIMESTAMP WITHOUT TIME ZONE"))
     conn.execute(text("UPDATE users SET last_access_at = last_login_at WHERE last_access_at IS NULL AND last_login_at IS NOT NULL"))
-    conn.execute(text("ALTER TABLE weather_alerts ADD COLUMN IF NOT EXISTS internal_mail_group VARCHAR(255)"))
-    conn.execute(text("ALTER TABLE weather_alerts ADD COLUMN IF NOT EXISTS sent_to_internal_group BOOLEAN DEFAULT FALSE"))
     conn.execute(text("ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS contacts TEXT"))
     conn.execute(text("ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS insee_code VARCHAR(5)"))
     conn.execute(text("ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS postal_code VARCHAR(10)"))
@@ -199,7 +191,6 @@ with engine.begin() as conn:
         )
     """))
     conn.execute(text("ALTER TABLE map_points ADD COLUMN IF NOT EXISTS icon_url VARCHAR(512)"))
-    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_weather_alerts_created_at ON weather_alerts(created_at DESC)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_river_stations_updated_at ON river_stations(updated_at DESC)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_operational_logs_created_at ON operational_logs(created_at DESC)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_operational_logs_municipality_created_at ON operational_logs(municipality_id, created_at DESC)"))
@@ -345,7 +336,6 @@ async def audit_log_middleware(request: Request, call_next):
         loop.run_in_executor(None, _write)
     return response
 
-ALLOWED_WEATHER_TRANSITIONS = {("jaune", "orange"), ("orange", "rouge")}
 READ_ROLES = {"admin", "ope", "securite", "visiteur", "mairie"}
 EDIT_ROLES = {"admin", "ope"}
 
@@ -420,10 +410,6 @@ ALLOWED_DOC_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
 
 _map_annotations_revision_lock = Lock()
 _map_annotations_revision = 0
-_weather_cleanup_lock = Lock()
-_last_weather_cleanup_at: datetime | None = None
-_WEATHER_CLEANUP_MIN_INTERVAL = timedelta(minutes=10)
-
 # ── Alert history tracking ──────────────────────────────────────────────────
 _LEVEL_SEVERITY: dict[str, int] = {
     "inconnu": -1, "pending": -1,
@@ -522,10 +508,8 @@ def _path_resource_type(path: str) -> str:
     if "/municipalities" in path: return "municipalities"
     if "/logs" in path:         return "logs"
     if "/events" in path:       return "events"
-    if "/resources" in path:    return "resources"
     if "/map" in path:          return "map"
     if "/notifications" in path: return "notifications"
-    if "/reports" in path:      return "reports"
     if "/users" in path:        return "users"
     return "api"
 
@@ -695,21 +679,6 @@ def ensure_allowed_extension(filename: str) -> None:
         raise HTTPException(400, "Type de fichier interdit")
 
 
-def run_weather_cleanup_if_due(db: Session) -> None:
-    global _last_weather_cleanup_at
-    now = datetime.utcnow()
-    with _weather_cleanup_lock:
-        if _last_weather_cleanup_at and (now - _last_weather_cleanup_at) < _WEATHER_CLEANUP_MIN_INTERVAL:
-            return
-        _last_weather_cleanup_at = now
-
-    try:
-        cleanup_old_weather_alerts(db)
-    except Exception:
-        # Ne jamais bloquer la réponse API pour une purge opportuniste.
-        pass
-
-
 def bootstrap_default_admin() -> None:
     with Session(bind=engine) as db:
         admin = db.query(User).filter(User.username == "admin").first()
@@ -742,7 +711,6 @@ def validate_user_payload(user_payload: UserCreate | UserUpdate, actor: User | N
 
 bootstrap_default_admin()
 with Session(bind=engine) as db:
-    cleanup_old_weather_alerts(db)
     prune_audit_logs(db)
     db.commit()
 
@@ -1256,16 +1224,14 @@ def healthcheck():
 
 @app.get("/public/live")
 def public_live_status(db: Session = Depends(get_db)):
-    latest_alert = db.query(WeatherAlert).order_by(WeatherAlert.created_at.desc()).first()
     latest_station = db.query(RiverStation).order_by(RiverStation.updated_at.desc()).first()
     crisis_count = db.query(Municipality).filter(Municipality.crisis_mode.is_(True)).count()
 
-    db_meteo_level = (latest_alert.level if latest_alert else "vert").lower()
     crues_level = (latest_station.level if latest_station else "vert").lower()
 
     risks_snapshot = get_external_risks_payload(refresh=False)
     meteo = risks_snapshot.get("meteo_france") or {}
-    meteo_level = (meteo.get("level") or db_meteo_level).lower()
+    meteo_level = (meteo.get("level") or "vert").lower()
     vigicrues = risks_snapshot.get("vigicrues") or {}
     itinisere = risks_snapshot.get("itinisere") or {}
     bison_fute = risks_snapshot.get("bison_fute") or {}
@@ -1729,7 +1695,6 @@ def dashboard(db: Session = Depends(get_db), user: User = Depends(require_roles(
 
 
 def build_dashboard_payload(db: Session, user: User, external_risks: dict | None = None) -> dict:
-    latest_alert = db.query(WeatherAlert).order_by(WeatherAlert.created_at.desc()).first()
     river_level = db.query(RiverStation).order_by(RiverStation.updated_at.desc()).first()
     crisis_count = db.query(Municipality).filter(Municipality.crisis_mode.is_(True)).count()
 
@@ -1744,8 +1709,7 @@ def build_dashboard_payload(db: Session, user: User, external_risks: dict | None
     meteo = external_risks.get("meteo_france") if external_risks else None
     if not isinstance(meteo, dict) or not meteo:
         meteo = fetch_meteo_france_isere()
-    db_meteo_level = latest_alert.level if latest_alert else "vert"
-    meteo_level = meteo.get("level") or db_meteo_level
+    meteo_level = meteo.get("level") or "vert"
     crues_level = river_level.level if river_level else "vert"
     global_risk_details = compute_global_risk_details(
         meteo_level=meteo_level,
@@ -1757,7 +1721,7 @@ def build_dashboard_payload(db: Session, user: User, external_risks: dict | None
     return {
         "vigilance": meteo_level,
         "crues": crues_level,
-        "vigilance_risk_type": latest_alert.risk_type if latest_alert else "",
+        "vigilance_risk_type": "",
         "global_risk": global_risk_details["level"],
         "global_risk_score": global_risk_details["score"],
         "global_risk_percent": global_risk_details["percent"],
@@ -2158,36 +2122,6 @@ def interactive_map_finess_isere_resources(
     return fetch_finess_isere_resources(force_refresh=refresh, limit=safe_limit)
 
 
-@app.get("/api/admin/static-data/status")
-def api_static_data_status(
-    _: User = Depends(require_roles("admin")),
-):
-    """Retourne l'état des fichiers de données statiques sur le volume Docker."""
-    return get_static_data_status()
-
-
-@app.post("/api/admin/static-data/collect")
-def api_static_data_collect(
-    _: User = Depends(require_roles("admin")),
-):
-    """Force la re-collecte de toutes les données statiques (Overpass + FINESS CSV).
-    Bloquant, prévoir 2–5 min. Résultat : statut par source et comptages."""
-    return collect_all_static_data()
-
-
-@app.post("/api/admin/flush-cache/{service_key}")
-def api_flush_service_cache(
-    service_key: str,
-    _: User = Depends(require_roles("admin")),
-):
-    """Purge le cache mémoire + Redis d'un service externe et déclenche un refresh immédiat."""
-    result = flush_service_memory_cache(service_key)
-    if result.get("status") == "not_found":
-        raise HTTPException(404, f"Service inconnu : {service_key}")
-    _refresh_one_service(service_key)
-    return result
-
-
 @app.get("/api/osm/isere/barrages")
 def api_osm_barrages_isere(
     refresh: bool = False,
@@ -2295,36 +2229,6 @@ def supervision_overview(
         "crisis_municipalities": [MunicipalityOut.model_validate(c).model_dump() for c in crisis],
         "timeline": [OperationalLogOut.model_validate(log).model_dump() for log in latest_logs],
     }
-
-
-@app.post("/weather", response_model=WeatherAlertOut)
-def create_weather_alert(alert: WeatherAlertCreate, db: Session = Depends(get_db), _: User = Depends(require_roles(*EDIT_ROLES))):
-    transition = (alert.previous_level.lower(), alert.level.lower())
-    if transition not in ALLOWED_WEATHER_TRANSITIONS:
-        raise HTTPException(400, "Transitions autorisées: jaune→orange et orange→rouge")
-
-    entity = WeatherAlert(**alert.model_dump())
-    db.add(entity)
-    db.commit()
-    db.refresh(entity)
-    run_weather_cleanup_if_due(db)
-    return entity
-
-
-@app.get("/weather/history", response_model=list[WeatherAlertOut])
-def list_weather_alerts(db: Session = Depends(get_db), _: User = Depends(require_roles(*READ_ROLES))):
-    run_weather_cleanup_if_due(db)
-    return db.query(WeatherAlert).order_by(WeatherAlert.created_at.desc()).all()
-
-
-@app.post("/weather/{alert_id}/validate")
-def validate_weather(alert_id: int, db: Session = Depends(get_db), _: User = Depends(require_roles(*EDIT_ROLES))):
-    alert = db.get(WeatherAlert, alert_id)
-    if not alert:
-        raise HTTPException(404, "Alerte introuvable")
-    alert.pcs_validated = True
-    db.commit()
-    return {"status": "validated", "manual_dispatch_required": True}
 
 
 @app.post("/municipalities", response_model=MunicipalityOut)
@@ -2828,20 +2732,6 @@ def export_logs_csv(db: Session = Depends(get_db), user: User = Depends(require_
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
-
-
-@app.post("/logs/{log_id}/attachment")
-def upload_attachment(log_id: int, file: UploadFile = File(...), db: Session = Depends(get_db), _: User = Depends(require_roles(*EDIT_ROLES))):
-    safe_name = sanitize_upload_filename(file.filename)
-    ensure_allowed_extension(safe_name)
-    log = db.get(OperationalLog, log_id)
-    if not log:
-        raise HTTPException(404, "Entrée introuvable")
-    dst = Path(settings.upload_dir) / f"{log_id}_{safe_name}"
-    dst.write_bytes(file.file.read())
-    log.attachment_path = str(dst)
-    db.commit()
-    return {"path": str(dst)}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -21,20 +21,6 @@ class User(Base):
     last_access_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
-class WeatherAlert(Base):
-    __tablename__ = "weather_alerts"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    risk_type: Mapped[str] = mapped_column(String(100))
-    level: Mapped[str] = mapped_column(String(20))
-    previous_level: Mapped[str] = mapped_column(String(20), default="vert")
-    internal_mail_group: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    sent_to_internal_group: Mapped[bool] = mapped_column(Boolean, default=False)
-    source: Mapped[str] = mapped_column(String(50), default="Météo-France")
-    pcs_validated: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-
 class RiverStation(Base):
     __tablename__ = "river_stations"
 
@@ -136,7 +122,6 @@ class OperationalLog(Base):
     next_update_due: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     assigned_to: Mapped[str | None] = mapped_column(String(120), nullable=True)
     tags: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    attachment_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     municipality_id: Mapped[int | None] = mapped_column(ForeignKey("municipalities.id"), nullable=True)

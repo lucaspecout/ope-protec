@@ -10,7 +10,6 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 1440
     upload_dir: str = "/data/uploads"
     static_data_dir: str = "/data/static"
-    weather_retention_days: int = 90
     georisques_api_token: str = Field(
         default="",
         validation_alias=AliasChoices("GEORISQUES_API_TOKEN", "GEORISQUE_API_TOKEN"),

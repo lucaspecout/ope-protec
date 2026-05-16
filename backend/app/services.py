@@ -1,4 +1,4 @@
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 import csv
 from datetime import datetime, timedelta
 from copy import deepcopy
@@ -41,14 +41,10 @@ except ImportError:
     _requests = None  # type: ignore[assignment]
     _REQUESTS_OK = False
 
-from sqlalchemy import delete
-from sqlalchemy.orm import Session
-
 import redis as _redis_lib
 
 from .config import settings
 from .database import SessionLocal
-from .models import WeatherAlert
 
 # ---------------------------------------------------------------------------
 # Cache fichier JSON – persistance sur volume Docker (/data/static)
@@ -119,13 +115,6 @@ def _redis_set(key: str, data: dict[str, Any], ttl_seconds: int) -> None:
         _redis.setex(_REDIS_KEY_PREFIX + key, ttl_seconds, json.dumps(data, default=str))
     except Exception:
         pass
-
-
-def cleanup_old_weather_alerts(db: Session) -> int:
-    cutoff = datetime.utcnow() - timedelta(days=settings.weather_retention_days)
-    result = db.execute(delete(WeatherAlert).where(WeatherAlert.created_at < cutoff))
-    db.commit()
-    return result.rowcount or 0
 
 
 _RETRYABLE_HTTP_STATUS_CODES = {429, 500, 502, 503, 504}
@@ -9678,79 +9667,6 @@ def fetch_helipads_isere(force_refresh: bool = False) -> dict[str, Any]:
         return {"status": "degraded", "count": 0, "points": [], "updated_at": datetime.utcnow().isoformat() + "Z"}
 
 
-# ---------------------------------------------------------------------------
-# Gestion globale des données statiques (état + collecte forcée)
-# ---------------------------------------------------------------------------
-
-_STATIC_FILES: dict[str, str] = {
-    "institutions": _INSTITUTIONS_FILE,
-    "finess": _FINESS_FILE,
-    "barrages": "osm_barrages_isere.json",    # cohérence nom Redis → fichier
-    "montagne": "osm_montagne_isere.json",
-    "helipads": "osm_helipads_isere.json",
-}
-
-
-def get_static_data_status() -> dict[str, Any]:
-    """Retourne l'état de chaque fichier de cache statique (présence, taille, date)."""
-    result = {}
-    for key, filename in _STATIC_FILES.items():
-        p = _static_data_path(filename)
-        if p.exists():
-            try:
-                stat = p.stat()
-                data = _file_cache_load(filename) or {}
-                result[key] = {
-                    "file": str(p),
-                    "exists": True,
-                    "size_kb": round(stat.st_size / 1024, 1),
-                    "updated_at": data.get("updated_at", "?"),
-                    "count": data.get("count") or data.get("resources_total") or len(data.get("points") or data.get("resources") or []),
-                }
-            except Exception as exc:
-                result[key] = {"file": str(p), "exists": True, "error": str(exc)}
-        else:
-            result[key] = {"file": str(p), "exists": False}
-    return result
-
-
-def collect_all_static_data() -> dict[str, Any]:
-    """Force la re-collecte de toutes les données statiques depuis leurs sources.
-    Sauvegarde les résultats dans les fichiers JSON du volume Docker.
-    Cette opération peut prendre 2–5 minutes (requêtes Overpass + CSV FINESS)."""
-    from concurrent.futures import ThreadPoolExecutor, as_completed as _ac
-
-    tasks = {
-        "institutions": lambda: fetch_institutions_isere(force_refresh=True),
-        "finess": lambda: fetch_finess_isere_resources(force_refresh=True, limit=_FINESS_ISERE_MAX_LIMIT),
-        "barrages": lambda: fetch_barrages_isere(force_refresh=True),
-        "montagne": lambda: fetch_montagne_isere(force_refresh=True),
-        "helipads": lambda: fetch_helipads_isere(force_refresh=True),
-    }
-    results: dict[str, Any] = {}
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        futures = {executor.submit(fn): key for key, fn in tasks.items()}
-        for future in _ac(futures):
-            key = futures[future]
-            try:
-                data = future.result()
-                status = data.get("status", "?")
-                count = data.get("count") or data.get("resources_total") or len(data.get("points") or data.get("resources") or [])
-                results[key] = {"status": status, "count": count, "updated_at": data.get("updated_at", "?")}
-            except Exception as exc:
-                results[key] = {"status": "error", "error": str(exc)}
-
-    # Sauvegarder barrages/montagne/helipads dans leurs fichiers JSON aussi
-    for key, filename in [("barrages", _STATIC_FILES["barrages"]), ("montagne", _STATIC_FILES["montagne"]), ("helipads", _STATIC_FILES["helipads"])]:
-        redis_key = f"osm_{key}_isere" if key != "helipads" else "osm_helipads_isere"
-        data = _redis_get(redis_key)
-        if data:
-            _file_cache_save(filename, data)
-
-    results["collected_at"] = datetime.utcnow().isoformat() + "Z"
-    return results
-
-
 # ══════════════════════════════════════════════════════════════════════════════
 # COPERNICUS EMS — Cartographie d'urgence Sentinel-1 / inondations (Feature 11)
 # API : emergency.copernicus.eu/mapping/rest/api/v1/activations
@@ -9938,52 +9854,6 @@ def load_risks_snapshot() -> dict[str, Any] | None:
     """Charge le dernier snapshot complet depuis Redis.
     Retourne None si Redis est indisponible ou si aucune donnée n'a encore été sauvegardée."""
     return _redis_get(_RISKS_SNAPSHOT_KEY)
-
-
-def flush_service_memory_cache(service_key: str) -> dict[str, str]:
-    """Vide le cache mémoire et Redis d'un service. Force le prochain fetch à aller en live."""
-    _known: dict[str, tuple[dict[str, Any], Any]] = {
-        "france_bleu_isere":   (_france_bleu_cache,          _france_bleu_cache_lock),
-        "prefecture_isere":    (_prefecture_cache,            _prefecture_cache_lock),
-        "fr_alert_isere":      (_fr_alert_isere_cache,        _fr_alert_isere_cache_lock),
-        "dauphine_isere":      (_dauphine_cache,              _dauphine_cache_lock),
-        "meteo_france":        (_meteo_cache,                 _meteo_cache_lock),
-        "vigicrues":           (_vigicrues_cache,             _vigicrues_cache_lock),
-        "itinisere":           (_itinisere_cache,             _itinisere_cache_lock),
-        "bison_fute":          (_bison_cache,                 _bison_cache_lock),
-        "aprr_isere":          (_aprr_isere_cache,            _aprr_isere_cache_lock),
-        "vinci_autoroutes":    (_vinci_autoroutes_cache,      _vinci_autoroutes_cache_lock),
-        "vigieau":             (_vigieau_cache,               _vigieau_cache_lock),
-        "atmo_aura":           (_atmo_aura_cache,             _atmo_aura_cache_lock),
-        "sncf_isere":          (_sncf_isere_cache,            _sncf_isere_cache_lock),
-        "anfr_isere":          (_anfr_isere_cache,            _anfr_isere_cache_lock),
-        "arcep_isere":         (_arcep_isere_cache,           _arcep_isere_cache_lock),
-        "groundwater_isere":   (_hubeau_groundwater_cache,    _hubeau_groundwater_cache_lock),
-        "water_quality":       (_hubeau_water_quality_cache,  _hubeau_water_quality_cache_lock),
-        "water_services":      (_hubeau_water_services_cache, _hubeau_water_services_cache_lock),
-        "rnb_isere":           (_rnb_buildings_cache,         _rnb_buildings_cache_lock),
-        "apic_isere":          (_apic_isere_cache,            _apic_isere_cache_lock),
-        "isere_opendata":      (_isere_opendata_cache,        _isere_opendata_cache_lock),
-        "finess_isere":        (_finess_isere_cache,          _finess_isere_cache_lock),
-        "placegrenet":         (_placegrenet_cache,           _placegrenet_cache_lock),
-        "grenoble_metro":      (_grenoble_metro_cache,        _grenoble_metro_cache_lock),
-        "ars_aura":            (_ars_aura_cache,              _ars_aura_cache_lock),
-        "seismes_isere":       (_seismes_isere_cache,         _seismes_isere_cache_lock),
-        "feux_foret_isere":    (_feux_foret_cache,            _feux_foret_cache_lock),
-        "cols_alpins_isere":   (_cols_cache,                  _cols_cache_lock),
-        "copernicus_ems":      (_copernicus_ems_cache,        _copernicus_ems_cache_lock),
-    }
-    if service_key not in _known:
-        return {"status": "not_found", "service": service_key}
-    cache, lock = _known[service_key]
-    with lock:
-        cache["payload"] = None
-        cache["expires_at"] = datetime.min
-    redis_key = cache.get("redis_key")
-    if redis_key and _redis_client:
-        _redis_client.delete(redis_key)
-        _redis_client.delete(f"persist:{redis_key}")
-    return {"status": "flushed", "service": service_key}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
