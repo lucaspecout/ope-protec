@@ -2445,7 +2445,6 @@ function setActivePanel(panelId) {
       centerMapOnIsere();
     }, 100);
     if (token) _refreshAgentMarkers();
-    if (token) loadResources();
   }
   if (panelId === 'logs-panel') ensureLogMunicipalitiesLoaded();
   if (panelId === 'news-panel') ensureSocialFeedsRendered();
@@ -7548,24 +7547,11 @@ function buildMapBriefingSnapshotSvg() {
     }
   });
 
-  const engagedResources = (Array.isArray(cachedResources) ? cachedResources : [])
-    .filter((resource) => resource.status === 'engage')
-    .map((resource) => ({ ...resource, coords: normalizeMapCoordinates(resource.lat, resource.lon) }))
-    .filter((resource) => resource.coords && safeBoundsContains(resource.coords.lat, resource.coords.lon))
-    .slice(0, 25);
-
-  engagedResources.forEach((resource) => {
-    const projected = project(resource.coords.lat, resource.coords.lon);
-    shapes.push(`<rect x="${(projected.x - 6).toFixed(1)}" y="${(projected.y - 6).toFixed(1)}" width="12" height="12" rx="3" fill="#f08c00" stroke="#7c2d12" stroke-width="2"/>`);
-    labels.push(`<text x="${(projected.x + 10).toFixed(1)}" y="${(projected.y + 4).toFixed(1)}" class="map-label"><tspan class="map-label-kind">MOYEN</tspan> ${escapeHtml(resource.name || '')}</text>`);
-  });
-
   const center = leafletMap.getCenter?.();
   const zoom = leafletMap.getZoom?.();
   const visibleSummary = [
     `${visiblePoints.length} point(s) tactique(s) visibles`,
     `${mapAnnotations.length} annotation(s)`,
-    `${engagedResources.length} moyen(s) engage(s) visibles`,
     center ? `centre ${center.lat.toFixed(4)}, ${center.lng.toFixed(4)}` : '',
     zoom != null ? `zoom ${zoom}` : '',
   ].filter(Boolean).join(' - ');
@@ -7824,35 +7810,11 @@ async function buildRealMapBriefingCaptureHtml() {
     if (index < 60) drawMapBriefingLabel(ctx, point.name || mapBriefingPointLabel(point), projected.x + 18, projected.y + 1);
   }
 
-  const engagedResources = (Array.isArray(cachedResources) ? cachedResources : [])
-    .filter((resource) => resource.status === 'engage')
-    .map((resource) => ({ ...resource, coords: normalizeMapCoordinates(resource.lat, resource.lon) }))
-    .filter((resource) => resource.coords && safeBoundsContains(resource.coords.lat, resource.coords.lon))
-    .slice(0, 30);
-
-  engagedResources.forEach((resource) => {
-    const projected = project(resource.coords.lat, resource.coords.lon);
-    if (!projected) return;
-    ctx.fillStyle = '#f08c00';
-    ctx.strokeStyle = '#7c2d12';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    if (typeof ctx.roundRect === 'function') {
-      ctx.roundRect(projected.x - 8, projected.y - 8, 16, 16, 4);
-    } else {
-      ctx.rect(projected.x - 8, projected.y - 8, 16, 16);
-    }
-    ctx.fill();
-    ctx.stroke();
-    drawMapBriefingLabel(ctx, `MOYEN ${resource.name || ''}`, projected.x + 13, projected.y + 1);
-  });
-
   const center = leafletMap.getCenter?.();
   const zoom = leafletMap.getZoom?.();
   const visibleSummary = [
     `${visiblePoints.length} point(s) tactique(s) visibles`,
     `${mapAnnotations.length} annotation(s)`,
-    `${engagedResources.length} moyen(s) engage(s) visibles`,
     center ? `centre ${center.lat.toFixed(4)}, ${center.lng.toFixed(4)}` : '',
     zoom != null ? `zoom ${zoom}` : '',
   ].filter(Boolean).join(' - ');
@@ -7885,16 +7847,8 @@ async function exportMapBriefing() {
     ['Centres d\'accueil', tacticalCounts.centre_accueil || 0],
     ['Équipes terrain', tacticalCounts.team || 0],
   ];
-  const activeResources = cachedResources.filter((r) => r.status !== 'hors_service');
-  const engagedResources = cachedResources.filter((r) => r.status === 'engage');
   const mapCaptureHtml = await buildRealMapBriefingCaptureHtml();
   const rowsHtml = tacticalRows.map(([label, count]) => `<tr><td>${escapeHtml(label)}</td><td>${count}</td></tr>`).join('');
-  const resourcesHtml = cachedResources.slice(0, 80).map((r) => {
-    const status = _RESOURCE_STATUS_META[r.status]?.label || r.status || '-';
-    const type = _RESOURCE_TYPE_LABELS[r.resource_type] || r.resource_type || '-';
-    const location = r.location_label || [r.lat, r.lon].filter((v) => v != null).join(', ') || '-';
-    return `<tr><td>${escapeHtml(r.name || '-')}</td><td>${escapeHtml(type)}</td><td>${escapeHtml(status)}</td><td>${escapeHtml(r.assigned_to || '-')}</td><td>${escapeHtml(location)}</td></tr>`;
-  }).join('');
   const annotationsHtml = mapAnnotations.slice(0, 80).map((a) => `<li>${escapeHtml(a.annotation_type || 'annotation')} - ${escapeHtml(a.text_label || 'zone tracée')}</li>`).join('');
   win.document.open();
   win.document.write(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Briefing carte CRISIS38</title>
@@ -7911,12 +7865,11 @@ async function exportMapBriefing() {
     <div class="kpis">
       <div class="kpi"><span>Points tactiques</span><strong>${mapPoints.length}</strong></div>
       <div class="kpi"><span>Annotations</span><strong>${mapAnnotations.length}</strong></div>
-      <div class="kpi"><span>Ressources actives</span><strong>${activeResources.length}</strong></div>
-      <div class="kpi"><span>Ressources engagées</span><strong>${engagedResources.length}</strong></div>
+      <div class="kpi"><span>Calques visibles</span><strong>${tacticalRows.filter(([, count]) => count > 0).length}</strong></div>
+      <div class="kpi"><span>Capture</span><strong>OK</strong></div>
     </div>
     <h2>Capture carte</h2>${mapCaptureHtml}
     <h2>Calques actions</h2><table><thead><tr><th>Calque</th><th>Points visibles</th></tr></thead><tbody>${rowsHtml}</tbody></table>
-    <h2>Ressources opérationnelles</h2><table><thead><tr><th>Nom</th><th>Type</th><th>Statut</th><th>Affectation</th><th>Localisation</th></tr></thead><tbody>${resourcesHtml || '<tr><td colspan="5">Aucune ressource enregistrée.</td></tr>'}</tbody></table>
     <h2>Annotations tactiques</h2><ul>${annotationsHtml || '<li>Aucune annotation tactique.</li>'}</ul>
     <p class="footer">Document de briefing opérationnel. Vérifier les informations critiques auprès des sources officielles et du terrain.</p>
     </body></html>`);
@@ -13301,7 +13254,6 @@ function ensureWaterPreloadMunicipality() {
 
 async function preloadAllPanelData(forceRefresh = false) {
   const jobs = [];
-  jobs.push(loadResources());
   if (ensureWaterPreloadMunicipality()) jobs.push(loadAndRenderWaterPanel(forceRefresh));
   const contactsCity = getDefaultContactsPreloadCity();
   if (contactsCity) jobs.push(loadAndRenderContactsPanel(contactsCity, forceRefresh));
@@ -15793,215 +15745,6 @@ function renderCopernicusEmsWidget(data = {}) {
     return `<li>${icon}${typeLabel} <strong>${escapeHtml(a.title || a.id || '?')}</strong><span class="muted">${country} — ${escapeHtml(a.date || '?')}</span>${a.level ? ` <span style="color:${color};font-weight:600">(${escapeHtml(a.level)})</span>` : ''}</li>`;
   }).join('') || '<li class="muted">Aucune catastrophe active détectée en Europe.</li>');
 }
-
-// ════════════════════════════════════════════════════════════════════════════
-// FEATURE 8 — Ressources opérationnelles
-// ════════════════════════════════════════════════════════════════════════════
-
-let cachedResources = [];
-let _editingResourceId = null;
-let resourcesMapLayer = null;
-
-const _RESOURCE_TYPE_LABELS = {
-  vehicule_lsc: 'Véhicule LSC', vehicule_vttu: 'Véhicule VTTU', vehicule_vtu: 'Véhicule VTU / pick-up',
-  vehicule_pl: 'Camion / Poids lourd', vehicule_tp: 'Transport personnel',
-  radio: 'Radio / transmissions',
-  groupe_electrogene: 'Groupe électrogène', lot_eau_potable: 'Lot eau potable',
-  lot_soutien_vie: 'Lot soutien vie (VSB)', materiel_eclairage: "Mât d'éclairage",
-  equipe_secours: 'Équipe secours', equipe_logistique: 'Équipe logistique',
-  lieu_accueil: "Lieu d'accueil",
-  poste_secours: 'Poste de secours médical', autre: 'Autre matériel',
-};
-
-const _RESOURCE_STATUS_META = {
-  disponible:  { label: 'Disponible',   color: '#2b8a3e', bg: '#d3f9d8' },
-  en_alerte:   { label: 'En alerte',    color: '#e9a800', bg: '#fff3bf' },
-  engage:      { label: 'Engagé',       color: '#e67700', bg: '#ffe8cc' },
-  hors_service:{ label: 'Hors service', color: '#c92a2a', bg: '#ffe3e3' },
-};
-
-async function loadResources() {
-  try {
-    const data = await api('/resources');
-    cachedResources = Array.isArray(data) ? data : [];
-    renderResourcesList();
-    renderResourcesMapLayer();
-  } catch (err) {
-    const el = document.getElementById('operational-resources-list');
-    if (el) el.innerHTML = `<p class="error">Erreur : ${escapeHtml(sanitizeErrorMessage(err.message))}</p>`;
-  }
-}
-
-function renderResourcesList() {
-  const filterSel = document.getElementById('resource-status-filter');
-  const filterVal = filterSel?.value || 'all';
-  const filtered = filterVal === 'all' ? cachedResources : cachedResources.filter((r) => r.status === filterVal);
-
-  // Summary badges
-  const summaryEl = document.getElementById('resources-summary');
-  if (summaryEl) {
-    const counts = {};
-    cachedResources.forEach((r) => { counts[r.status] = (counts[r.status] || 0) + 1; });
-    summaryEl.innerHTML = Object.entries(_RESOURCE_STATUS_META).map(([key, meta]) => {
-      const n = counts[key] || 0;
-      return `<span style="background:${meta.bg};color:${meta.color};padding:.2rem .6rem;border-radius:.4rem;font-size:.82rem;font-weight:600">${meta.label}: ${n}</span>`;
-    }).join('');
-  }
-
-  const el = document.getElementById('operational-resources-list');
-  if (!el) return;
-  if (!filtered.length) {
-    el.innerHTML = '<p class="muted" style="padding:1rem">Aucune ressource enregistrée.</p>';
-    return;
-  }
-
-  const isEditor = currentUser?.role === 'admin' || currentUser?.role === 'ope';
-  el.innerHTML = filtered.map((r) => {
-    const meta = _RESOURCE_STATUS_META[r.status] || { label: r.status, color: '#868e96', bg: '#f1f3f5' };
-    const typeLabel = _RESOURCE_TYPE_LABELS[r.resource_type] || r.resource_type;
-    const pos = (r.lat != null && r.lon != null) ? `<span class="muted" style="font-size:.78rem">📍 ${Number(r.lat).toFixed(4)}, ${Number(r.lon).toFixed(4)}</span>` : '';
-    const editBtns = isEditor ? `
-      <button class="ghost" style="font-size:.78rem;padding:.15rem .4rem" onclick="_editResource(${r.id})" title="Modifier">✏️</button>
-      <button class="ghost" style="font-size:.78rem;padding:.15rem .4rem;color:#c92a2a" onclick="_deleteResource(${r.id})" title="Supprimer">🗑️</button>` : '';
-    return `<div class="flux-row" style="gap:.6rem;padding:.5rem .75rem;align-items:flex-start">
-      <span style="background:${meta.bg};color:${meta.color};font-size:.78rem;font-weight:700;padding:.15rem .45rem;border-radius:.35rem;white-space:nowrap;margin-top:.1rem">${meta.label}</span>
-      <div style="flex:1;min-width:0">
-        <strong>${escapeHtml(r.name)}</strong>
-        <span class="muted" style="font-size:.82rem;margin-left:.4rem">${escapeHtml(typeLabel)}</span>
-        ${r.unit ? `<span class="muted" style="font-size:.78rem;margin-left:.4rem">· ${escapeHtml(r.unit)}</span>` : ''}
-        ${r.identifier ? `<span class="muted" style="font-size:.78rem;margin-left:.4rem">· ${escapeHtml(r.identifier)}</span>` : ''}
-        ${r.assigned_to ? `<p class="muted" style="font-size:.78rem;margin:.1rem 0 0">Affectation: ${escapeHtml(r.assigned_to)}</p>` : ''}
-        ${(r.autonomy_hours != null || r.capacity != null) ? `<p class="muted" style="font-size:.78rem;margin:.1rem 0 0">${r.autonomy_hours != null ? `Autonomie ${escapeHtml(String(r.autonomy_hours))} h` : ''}${r.autonomy_hours != null && r.capacity != null ? ' · ' : ''}${r.capacity != null ? `Capacité ${escapeHtml(String(r.capacity))}` : ''}</p>` : ''}
-        ${(r.location_label || r.contact) ? `<p class="muted" style="font-size:.78rem;margin:.1rem 0 0">${r.location_label ? `Localisation: ${escapeHtml(r.location_label)}` : ''}${r.location_label && r.contact ? ' · ' : ''}${r.contact ? `Contact: ${escapeHtml(r.contact)}` : ''}</p>` : ''}
-        ${r.notes ? `<p class="muted" style="font-size:.78rem;margin:.1rem 0 0">${escapeHtml(r.notes)}</p>` : ''}
-        ${pos}
-      </div>
-      <div style="display:flex;gap:.25rem;flex-shrink:0">${editBtns}</div>
-    </div>`;
-  }).join('');
-}
-
-function renderResourcesMapLayer() {
-  if (!leafletMap) return;
-  if (resourcesMapLayer) resourcesMapLayer.clearLayers();
-  if (!resourcesMapLayer) {
-    resourcesMapLayer = L.layerGroup().addTo(leafletMap);
-  }
-  const colors = { disponible: '#2b8a3e', en_alerte: '#e9a800', engage: '#e67700', hors_service: '#c92a2a' };
-  cachedResources.filter((r) => r.lat != null && r.lon != null).forEach((r) => {
-    const col = colors[r.status] || '#868e96';
-    const icon = L.divIcon({
-      className: '',
-      html: `<div style="background:${col};color:#fff;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.4)">R</div>`,
-      iconSize: [24, 24],
-      iconAnchor: [12, 12],
-    });
-    L.marker([r.lat, r.lon], { icon })
-      .addTo(resourcesMapLayer)
-      .bindPopup(`<strong>${escapeHtml(r.name)}</strong><br>${escapeHtml(_RESOURCE_STATUS_META[r.status]?.label || r.status)}<br>${escapeHtml(_RESOURCE_TYPE_LABELS[r.resource_type] || r.resource_type)}${r.assigned_to ? `<br>Affectation: ${escapeHtml(r.assigned_to)}` : ''}${r.autonomy_hours != null ? `<br>Autonomie: ${escapeHtml(String(r.autonomy_hours))} h` : ''}${r.capacity != null ? `<br>Capacité: ${escapeHtml(String(r.capacity))}` : ''}${r.location_label ? `<br>Localisation: ${escapeHtml(r.location_label)}` : ''}${r.contact ? `<br>Contact: ${escapeHtml(r.contact)}` : ''}`);
-  });
-}
-
-function _openResourceModal(resource = null) {
-  _editingResourceId = resource ? resource.id : null;
-  document.getElementById('resource-modal-title').textContent = resource ? 'Modifier la ressource' : 'Nouvelle ressource';
-  document.getElementById('resource-name').value = resource?.name || '';
-  document.getElementById('resource-type').value = resource?.resource_type || 'vehicule_lsc';
-  document.getElementById('resource-status-input').value = resource?.status || 'disponible';
-  document.getElementById('resource-unit').value = resource?.unit || '';
-  document.getElementById('resource-identifier').value = resource?.identifier || '';
-  document.getElementById('resource-assigned-to').value = resource?.assigned_to || '';
-  document.getElementById('resource-autonomy').value = resource?.autonomy_hours ?? '';
-  document.getElementById('resource-capacity').value = resource?.capacity ?? '';
-  document.getElementById('resource-contact').value = resource?.contact || '';
-  document.getElementById('resource-location-label').value = resource?.location_label || '';
-  document.getElementById('resource-notes').value = resource?.notes || '';
-  document.getElementById('resource-lat').value = resource?.lat ?? '';
-  document.getElementById('resource-lon').value = resource?.lon ?? '';
-  const modal = document.getElementById('resource-modal');
-  if (!modal) return;
-  modal.classList.remove('hidden');
-  modal.hidden = false;
-  if (typeof modal.showModal === 'function' && !modal.open) modal.showModal();
-  else modal.setAttribute('open', '');
-}
-
-function _closeResourceModal() {
-  const modal = document.getElementById('resource-modal');
-  if (!modal) return;
-  if (typeof modal.close === 'function' && modal.open) modal.close();
-  else modal.removeAttribute('open');
-  modal.classList.add('hidden');
-  modal.hidden = true;
-  _editingResourceId = null;
-}
-
-function _editResource(id) {
-  const r = cachedResources.find((x) => x.id === id);
-  if (r) _openResourceModal(r);
-}
-
-async function _deleteResource(id) {
-  if (!confirm('Supprimer cette ressource ?')) return;
-  try {
-    await api(`/resources/${id}`, { method: 'DELETE' });
-    await loadResources();
-  } catch (err) {
-    alert(`Erreur : ${sanitizeErrorMessage(err.message)}`);
-  }
-}
-
-(function initResourcesPanel() {
-  const addBtn = document.getElementById('resource-add-btn');
-  if (addBtn) addBtn.addEventListener('click', () => _openResourceModal(null));
-
-  const closeBtn = document.getElementById('resource-modal-close');
-  const cancelBtn = document.getElementById('resource-modal-cancel');
-  if (closeBtn) closeBtn.addEventListener('click', _closeResourceModal);
-  if (cancelBtn) cancelBtn.addEventListener('click', _closeResourceModal);
-
-  const form = document.getElementById('resource-form');
-  if (form) {
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const latVal = document.getElementById('resource-lat').value;
-      const lonVal = document.getElementById('resource-lon').value;
-      const payload = {
-        name: document.getElementById('resource-name').value.trim(),
-        resource_type: document.getElementById('resource-type').value,
-        status: document.getElementById('resource-status-input').value,
-        unit: document.getElementById('resource-unit').value.trim() || null,
-        identifier: document.getElementById('resource-identifier').value.trim() || null,
-        assigned_to: document.getElementById('resource-assigned-to').value.trim() || null,
-        autonomy_hours: document.getElementById('resource-autonomy').value !== '' ? parseFloat(document.getElementById('resource-autonomy').value) : null,
-        capacity: document.getElementById('resource-capacity').value !== '' ? parseInt(document.getElementById('resource-capacity').value, 10) : null,
-        contact: document.getElementById('resource-contact').value.trim() || null,
-        location_label: document.getElementById('resource-location-label').value.trim() || null,
-        notes: document.getElementById('resource-notes').value.trim() || null,
-        lat: latVal !== '' ? parseFloat(latVal) : null,
-        lon: lonVal !== '' ? parseFloat(lonVal) : null,
-      };
-      try {
-        if (_editingResourceId) {
-          await api(`/resources/${_editingResourceId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-        } else {
-          await api('/resources', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-        }
-        _closeResourceModal();
-        await loadResources();
-      } catch (err) {
-        alert(`Erreur : ${sanitizeErrorMessage(err.message)}`);
-      }
-    });
-  }
-
-  const filterSel = document.getElementById('resource-status-filter');
-  if (filterSel) filterSel.addEventListener('change', renderResourcesList);
-
-  document.querySelectorAll('.menu-btn[data-target="resources-panel"]').forEach((b) => {
-    b.addEventListener('click', () => loadResources());
-  });
-})();
 
 // ════════════════════════════════════════════════════════════════════════════
 // FEATURE 10 — Météo hyper-locale (Open-Meteo)

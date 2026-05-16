@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import Base, SessionLocal, engine, get_db
-from .models import AlertHistory, AppSetting, AuditLog, IncidentEvent, InstitutionPoint, MapAnnotation, MapPoint, Municipality, MunicipalityDocument, OperationalLog, OperationalResource, PublicShare, RiverStation, User, WeatherAlert
+from .models import AlertHistory, AppSetting, AuditLog, IncidentEvent, InstitutionPoint, MapAnnotation, MapPoint, Municipality, MunicipalityDocument, OperationalLog, PublicShare, RiverStation, User, WeatherAlert
 from .schemas import (
     MapAnnotationCreate,
     MapAnnotationOut,
@@ -267,35 +267,6 @@ with engine.begin() as conn:
     """))
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_alert_history_triggered_at ON alert_history(triggered_at DESC)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_alert_history_service_key ON alert_history(service_key)"))
-    conn.execute(text("""
-        CREATE TABLE IF NOT EXISTS operational_resources (
-            id SERIAL PRIMARY KEY,
-            name VARCHAR(120) NOT NULL,
-            resource_type VARCHAR(60) NOT NULL DEFAULT 'autre',
-            status VARCHAR(30) NOT NULL DEFAULT 'disponible',
-            unit VARCHAR(80),
-            identifier VARCHAR(80),
-            assigned_to VARCHAR(120),
-            autonomy_hours DOUBLE PRECISION,
-            capacity INTEGER,
-            contact VARCHAR(120),
-            location_label VARCHAR(160),
-            notes TEXT,
-            lat DOUBLE PRECISION,
-            lon DOUBLE PRECISION,
-            municipality_id INTEGER REFERENCES municipalities(id) ON DELETE SET NULL,
-            created_by_id INTEGER NOT NULL REFERENCES users(id),
-            created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        )
-    """))
-    conn.execute(text("ALTER TABLE operational_resources ADD COLUMN IF NOT EXISTS identifier VARCHAR(80)"))
-    conn.execute(text("ALTER TABLE operational_resources ADD COLUMN IF NOT EXISTS assigned_to VARCHAR(120)"))
-    conn.execute(text("ALTER TABLE operational_resources ADD COLUMN IF NOT EXISTS autonomy_hours DOUBLE PRECISION"))
-    conn.execute(text("ALTER TABLE operational_resources ADD COLUMN IF NOT EXISTS capacity INTEGER"))
-    conn.execute(text("ALTER TABLE operational_resources ADD COLUMN IF NOT EXISTS contact VARCHAR(120)"))
-    conn.execute(text("ALTER TABLE operational_resources ADD COLUMN IF NOT EXISTS location_label VARCHAR(160)"))
-    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_operational_resources_status ON operational_resources(status)"))
     conn.execute(text("""
         CREATE TABLE IF NOT EXISTS audit_log (
             id SERIAL PRIMARY KEY,
@@ -3764,129 +3735,6 @@ def get_alerts_history(
         }
         for a in alerts
     ]
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# FEATURE 8 — Tableau de bord ressources opérationnelles
-# ══════════════════════════════════════════════════════════════════════════════
-
-def _resource_to_dict(r: OperationalResource) -> dict:
-    return {
-        "id": r.id,
-        "name": r.name,
-        "resource_type": r.resource_type,
-        "status": r.status,
-        "unit": r.unit,
-        "identifier": r.identifier,
-        "assigned_to": r.assigned_to,
-        "autonomy_hours": r.autonomy_hours,
-        "capacity": r.capacity,
-        "contact": r.contact,
-        "location_label": r.location_label,
-        "notes": r.notes,
-        "lat": r.lat,
-        "lon": r.lon,
-        "municipality_id": r.municipality_id,
-        "created_by": r.created_by.username if r.created_by else None,
-        "created_at": r.created_at.isoformat() + "Z",
-        "updated_at": r.updated_at.isoformat() + "Z",
-    }
-
-
-@app.get("/resources")
-def list_resources(
-    db: Session = Depends(get_db),
-    user: User = Depends(require_roles(*READ_ROLES)),
-):
-    q = db.query(OperationalResource)
-    if user.role == "mairie":
-        mid = get_user_municipality_id(user, db)
-        if mid:
-            q = q.filter(OperationalResource.municipality_id == mid)
-    return [_resource_to_dict(r) for r in q.order_by(OperationalResource.updated_at.desc()).all()]
-
-
-@app.post("/resources")
-async def create_resource(
-    request: Request,
-    db: Session = Depends(get_db),
-    user: User = Depends(require_roles("admin", "ope")),
-):
-    try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(400, "Corps JSON invalide")
-    if not str(body.get("name") or "").strip():
-        raise HTTPException(400, "Nom requis")
-    r = OperationalResource(
-        name=str(body["name"])[:120],
-        resource_type=str(body.get("resource_type") or "autre")[:60],
-        status=str(body.get("status") or "disponible")[:30],
-        unit=str(body.get("unit") or "")[:80] or None,
-        identifier=str(body.get("identifier") or "")[:80] or None,
-        assigned_to=str(body.get("assigned_to") or "")[:120] or None,
-        autonomy_hours=float(body["autonomy_hours"]) if body.get("autonomy_hours") not in (None, "") else None,
-        capacity=int(body["capacity"]) if body.get("capacity") not in (None, "") else None,
-        contact=str(body.get("contact") or "")[:120] or None,
-        location_label=str(body.get("location_label") or "")[:160] or None,
-        notes=str(body.get("notes") or "")[:1000] or None,
-        lat=float(body["lat"]) if body.get("lat") not in (None, "") else None,
-        lon=float(body["lon"]) if body.get("lon") not in (None, "") else None,
-        municipality_id=int(body["municipality_id"]) if body.get("municipality_id") else None,
-        created_by_id=user.id,
-    )
-    db.add(r)
-    db.commit()
-    db.refresh(r)
-    return _resource_to_dict(r)
-
-
-@app.patch("/resources/{resource_id}")
-async def update_resource(
-    resource_id: int,
-    request: Request,
-    db: Session = Depends(get_db),
-    _: User = Depends(require_roles("admin", "ope")),
-):
-    r = db.get(OperationalResource, resource_id)
-    if not r:
-        raise HTTPException(404, "Ressource introuvable")
-    try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(400, "Corps JSON invalide")
-    for field in ("name", "resource_type", "status", "unit", "identifier", "assigned_to", "contact", "location_label", "notes"):
-        if field in body:
-            setattr(r, field, body[field])
-    if "autonomy_hours" in body:
-        r.autonomy_hours = float(body["autonomy_hours"]) if body["autonomy_hours"] not in (None, "") else None
-    if "capacity" in body:
-        r.capacity = int(body["capacity"]) if body["capacity"] not in (None, "") else None
-    if "lat" in body:
-        r.lat = float(body["lat"]) if body["lat"] not in (None, "") else None
-    if "lon" in body:
-        r.lon = float(body["lon"]) if body["lon"] not in (None, "") else None
-    if "municipality_id" in body:
-        r.municipality_id = int(body["municipality_id"]) if body["municipality_id"] else None
-    r.updated_at = datetime.utcnow()
-    db.commit()
-    db.refresh(r)
-    return _resource_to_dict(r)
-
-
-@app.delete("/resources/{resource_id}")
-def delete_resource(
-    resource_id: int,
-    db: Session = Depends(get_db),
-    _: User = Depends(require_roles("admin", "ope")),
-):
-    r = db.get(OperationalResource, resource_id)
-    if not r:
-        raise HTTPException(404, "Ressource introuvable")
-    db.delete(r)
-    db.commit()
-    return {"deleted": resource_id}
-
 
 
 # ══════════════════════════════════════════════════════════════════════════════

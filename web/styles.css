@@ -1363,53 +1363,6 @@ details[open] > .filter-group__title::after { transform: rotate(90deg); }
   font-size: .78rem;
   font-weight: 650;
 }
-.resources-panel-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-  flex-wrap: wrap;
-  margin-bottom: .85rem;
-}
-.resources-panel-actions {
-  display: flex;
-  gap: .5rem;
-  align-items: center;
-  flex-wrap: wrap;
-}
-.resources-panel-actions select { min-width: 190px; margin: 0; }
-.resources-summary {
-  display: flex;
-  gap: .45rem;
-  flex-wrap: wrap;
-  margin-bottom: .75rem;
-}
-.resources-table-wrap {
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  overflow: auto;
-  background: #fff;
-}
-.resources-table {
-  width: 100%;
-  border-collapse: collapse;
-  min-width: 860px;
-}
-.resources-table th,
-.resources-table td {
-  padding: .58rem .65rem;
-  border-bottom: 1px solid #e5edf8;
-  text-align: left;
-  vertical-align: top;
-  font-size: .86rem;
-}
-.resources-table th {
-  background: #f1f6ff;
-  color: var(--primary);
-  font-size: .78rem;
-  text-transform: uppercase;
-  letter-spacing: .04em;
-}
 .hosting-details {
   display: grid;
   gap: .24rem;
