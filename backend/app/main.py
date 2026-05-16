@@ -129,13 +129,32 @@ with engine.begin() as conn:
             updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
         )
     """))
+    conn.execute(text("ALTER TABLE users ALTER COLUMN username TYPE VARCHAR(120)"))
+    conn.execute(text("ALTER TABLE users ALTER COLUMN hashed_password TYPE VARCHAR(255)"))
+    conn.execute(text("ALTER TABLE users ALTER COLUMN role TYPE VARCHAR(20)"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT FALSE"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_source VARCHAR(20) DEFAULT 'local'"))
+    conn.execute(text("ALTER TABLE users ALTER COLUMN auth_source TYPE VARCHAR(20)"))
     conn.execute(text("UPDATE users SET auth_source = 'local' WHERE auth_source IS NULL"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS municipality_name VARCHAR(120)"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP WITHOUT TIME ZONE"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_access_at TIMESTAMP WITHOUT TIME ZONE"))
     conn.execute(text("UPDATE users SET last_access_at = last_login_at WHERE last_access_at IS NULL AND last_login_at IS NOT NULL"))
+    conn.execute(text("""
+        DO $$
+        DECLARE constraint_record record;
+        BEGIN
+            FOR constraint_record IN
+                SELECT conname
+                FROM pg_constraint
+                WHERE conrelid = 'users'::regclass
+                  AND contype = 'c'
+                  AND pg_get_constraintdef(oid) ILIKE '%role%'
+            LOOP
+                EXECUTE format('ALTER TABLE users DROP CONSTRAINT %I', constraint_record.conname);
+            END LOOP;
+        END $$;
+    """))
     conn.execute(text("ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS contacts TEXT"))
     conn.execute(text("ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS insee_code VARCHAR(5)"))
     conn.execute(text("ALTER TABLE municipalities ADD COLUMN IF NOT EXISTS postal_code VARCHAR(10)"))
@@ -825,6 +844,14 @@ LDAP_BIND_PASSWORD_SETTING_KEY = "ldap_bind_password"
 
 class LdapAuthenticationUnavailable(RuntimeError):
     pass
+
+
+def sql_error_detail(exc: SQLAlchemyError) -> str:
+    original = getattr(exc, "orig", None)
+    message = str(original or exc).splitlines()[0].strip()
+    if not message:
+        message = exc.__class__.__name__
+    return f"{exc.__class__.__name__}: {message[:240]}"
 
 
 def get_app_setting(db: Session, key: str) -> str | None:
@@ -1700,8 +1727,9 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
     except SQLAlchemyError as exc:
         db.rollback()
         logger.exception("Database error during login for %s", username)
-        _audit(500, f"Erreur base de donnees: {exc.__class__.__name__}")
-        raise HTTPException(500, "Erreur base de donnees pendant la connexion") from exc
+        detail = sql_error_detail(exc)
+        _audit(500, f"Erreur base de donnees: {detail}")
+        raise HTTPException(500, f"Erreur base de donnees pendant la connexion ({detail})") from exc
     _audit(200)
     return {
         "access_token": create_access_token(user.username),
