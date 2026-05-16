@@ -14,7 +14,7 @@ import asyncio
 import json
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -22,6 +22,7 @@ from jose import JWTError, jwt
 from ldap3 import ALL, SUBTREE, Connection, Server
 from ldap3.core.exceptions import LDAPException
 from sqlalchemy import func, or_, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from .config import settings
@@ -295,7 +296,18 @@ def prune_audit_logs(db: Session) -> None:
 
 @app.middleware("http")
 async def audit_log_middleware(request: Request, call_next):
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        logger.exception("Unhandled API error on %s %s", request.method, request.url.path)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": "Erreur interne du serveur",
+                "path": request.url.path,
+                "error": exc.__class__.__name__,
+            },
+        )
     method = request.method
     path = request.url.path
     should_log = (
@@ -1683,8 +1695,14 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
     now = datetime.utcnow()
     user.last_login_at = now
     user.last_access_at = now
-    db.commit()
-    db.refresh(user)
+    try:
+        db.commit()
+        db.refresh(user)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.exception("Database error during login for %s", username)
+        _audit(500, f"Erreur base de donnees: {exc.__class__.__name__}")
+        raise HTTPException(500, "Erreur base de donnees pendant la connexion") from exc
     _audit(200)
     return {
         "access_token": create_access_token(user.username),
