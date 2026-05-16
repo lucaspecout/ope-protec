@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from copy import deepcopy
+import logging
 from pathlib import Path
 import re
 import secrets
@@ -112,6 +113,8 @@ from .services import (
     _redis,
     _REDIS_OK,
 )
+
+logger = logging.getLogger(__name__)
 
 Base.metadata.create_all(bind=engine)
 Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
@@ -808,6 +811,10 @@ def ldap_required_groups() -> set[str]:
 LDAP_BIND_PASSWORD_SETTING_KEY = "ldap_bind_password"
 
 
+class LdapAuthenticationUnavailable(RuntimeError):
+    pass
+
+
 def get_app_setting(db: Session, key: str) -> str | None:
     setting = db.get(AppSetting, key)
     if setting is None:
@@ -869,16 +876,17 @@ def authenticate_ldap_user(username: str, password: str) -> dict | None:
     username = username.strip()
     if not username or not password:
         return None
-    server = Server(settings.ldap_url, get_info=ALL, connect_timeout=5)
-    user_filter = str(settings.ldap_user_filter or "(uid={username})").replace(
-        "{username}", ldap_escape_filter_value(username)
-    )
-    attrs = ["uid", "mail"]
-    municipality_attr = str(settings.ldap_municipality_attr or "").strip()
-    if municipality_attr:
-        attrs.append(municipality_attr)
 
     try:
+        server = Server(settings.ldap_url, get_info=ALL, connect_timeout=5)
+        user_filter = str(settings.ldap_user_filter or "(uid={username})").replace(
+            "{username}", ldap_escape_filter_value(username)
+        )
+        attrs = ["uid", "mail"]
+        municipality_attr = str(settings.ldap_municipality_attr or "").strip()
+        if municipality_attr:
+            attrs.append(municipality_attr)
+
         if settings.ldap_user_dn_template:
             user_dn = settings.ldap_user_dn_template.replace("{username}", username)
             with Connection(server, user=user_dn, password=password, auto_bind=True):
@@ -894,7 +902,7 @@ def authenticate_ldap_user(username: str, password: str) -> dict | None:
         bind_password, _ = get_ldap_bind_password()
         with Connection(server, user=bind_user, password=bind_password, auto_bind=True) as search_conn:
             if not settings.ldap_user_base_dn:
-                raise HTTPException(500, "LDAP_USER_BASE_DN doit etre configure")
+                raise LdapAuthenticationUnavailable("LDAP_USER_BASE_DN doit etre configure")
             search_conn.search(settings.ldap_user_base_dn, user_filter, search_scope=SUBTREE, attributes=attrs)
             if not search_conn.entries:
                 return None
@@ -920,8 +928,14 @@ def authenticate_ldap_user(username: str, password: str) -> dict | None:
                 "role": ldap_role_from_groups(groups),
                 "municipality_name": municipality_name,
             }
-    except LDAPException:
+    except LdapAuthenticationUnavailable:
+        raise
+    except LDAPException as exc:
+        logger.warning("LDAP authentication refused or unavailable for %s: %s", username, exc)
         return None
+    except Exception as exc:
+        logger.exception("Unexpected LDAP authentication error for %s", username)
+        raise LdapAuthenticationUnavailable("Erreur LDAP inattendue") from exc
 
 
 def get_or_create_ldap_user(db: Session, ldap_user: dict) -> User:
@@ -1499,9 +1513,12 @@ async def test_ldap(payload: LdapTestRequest, _: User = Depends(require_roles("a
     if username or password:
         if not username or not password:
             raise HTTPException(400, "Identifiant et mot de passe LDAP requis pour tester un utilisateur")
-        ldap_user = await asyncio.get_running_loop().run_in_executor(
-            None, lambda: authenticate_ldap_user(username, password)
-        )
+        try:
+            ldap_user = await asyncio.get_running_loop().run_in_executor(
+                None, lambda: authenticate_ldap_user(username, password)
+            )
+        except LdapAuthenticationUnavailable as exc:
+            return {"ok": False, "mode": "user", "detail": str(exc)}
         if not ldap_user:
             return {"ok": False, "mode": "user", "detail": "Authentification LDAP refusee"}
         return {
@@ -1629,9 +1646,13 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
     password_plain = form_data.password
     user = db.query(User).filter(User.username == username).first()
     if user and user.auth_source == "ldap":
-        ldap_user = await asyncio.get_running_loop().run_in_executor(
-            None, lambda: authenticate_ldap_user(username, password_plain)
-        )
+        try:
+            ldap_user = await asyncio.get_running_loop().run_in_executor(
+                None, lambda: authenticate_ldap_user(username, password_plain)
+            )
+        except LdapAuthenticationUnavailable as exc:
+            _audit(503, str(exc))
+            raise HTTPException(503, str(exc)) from exc
         if not ldap_user:
             _audit(401, "LDAP: authentification refusee")
             raise HTTPException(401, "Utilisateur ou mot de passe incorrect")
@@ -1647,9 +1668,13 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
         if new_hash:
             user.hashed_password = new_hash
     else:
-        ldap_user = await asyncio.get_running_loop().run_in_executor(
-            None, lambda: authenticate_ldap_user(username, password_plain)
-        )
+        try:
+            ldap_user = await asyncio.get_running_loop().run_in_executor(
+                None, lambda: authenticate_ldap_user(username, password_plain)
+            )
+        except LdapAuthenticationUnavailable as exc:
+            _audit(503, str(exc))
+            raise HTTPException(503, str(exc)) from exc
         if not ldap_user:
             await asyncio.sleep(0.025)
             _audit(401, "Utilisateur inconnu")
