@@ -1729,6 +1729,11 @@ function buildLoginDebugDetails(error, username = '') {
   }
 
   lines.push('Conseils: vérifier docker compose up -d, l\'écoute backend sur 0.0.0.0:1182, et le reverse proxy.');
+  if (error?.payload && typeof error.payload === 'object') {
+    if (error.payload.error) lines.push(`Erreur backend: ${String(error.payload.error)}`);
+    if (error.payload.path) lines.push(`Route backend: ${String(error.payload.path)}`);
+  }
+
   return lines.join('\n');
 }
 
@@ -1772,7 +1777,10 @@ function renderApiResyncClock() {
 function normalizeApiErrorMessage(payload, status) {
   if (!payload) return `Erreur API (${status})`;
   const detail = payload.detail ?? payload.message;
-  if (typeof detail === 'string' && detail.trim()) return detail;
+  if (typeof detail === 'string' && detail.trim()) {
+    const errorName = String(payload.error || '').trim();
+    return errorName && !detail.includes(errorName) ? `${detail} (${errorName})` : detail;
+  }
   if (Array.isArray(detail)) {
     const lines = detail.map((item) => {
       if (typeof item === 'string') return item;
@@ -1928,7 +1936,7 @@ async function requestApiAcrossOrigins(path, fetchOptions = {}, {
         if (!response.ok) {
           const message = normalizeApiErrorMessage(payload, response.status);
           if (response.status === 401 && logoutOn401) logout();
-          throw createApiError(message, response.status);
+          throw createApiError(message, response.status, { payload });
         }
         preferredApiOrigin = origin;
         apiOriginFailures.delete(origin);

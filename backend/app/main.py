@@ -303,7 +303,7 @@ async def audit_log_middleware(request: Request, call_next):
         return JSONResponse(
             status_code=500,
             content={
-                "detail": "Erreur interne du serveur",
+                "detail": f"Erreur interne du serveur ({exc.__class__.__name__})",
                 "path": request.url.path,
                 "error": exc.__class__.__name__,
             },
@@ -977,7 +977,6 @@ def get_or_create_ldap_user(db: Session, ldap_user: dict) -> User:
         must_change_password=False,
     )
     db.add(user)
-    db.flush()
     return user
 
 
