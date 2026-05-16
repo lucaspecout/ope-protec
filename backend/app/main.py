@@ -133,6 +133,10 @@ with engine.begin() as conn:
     conn.execute(text("ALTER TABLE users ALTER COLUMN hashed_password TYPE VARCHAR(255)"))
     conn.execute(text("ALTER TABLE users ALTER COLUMN role TYPE VARCHAR(20)"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT FALSE"))
+    conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_enabled BOOLEAN DEFAULT FALSE"))
+    conn.execute(text("UPDATE users SET two_factor_enabled = FALSE WHERE two_factor_enabled IS NULL"))
+    conn.execute(text("ALTER TABLE users ALTER COLUMN two_factor_enabled SET DEFAULT FALSE"))
+    conn.execute(text("ALTER TABLE users ALTER COLUMN two_factor_enabled SET NOT NULL"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_source VARCHAR(20) DEFAULT 'local'"))
     conn.execute(text("ALTER TABLE users ALTER COLUMN auth_source TYPE VARCHAR(20)"))
     conn.execute(text("UPDATE users SET auth_source = 'local' WHERE auth_source IS NULL"))
@@ -1002,6 +1006,7 @@ def get_or_create_ldap_user(db: Session, ldap_user: dict) -> User:
         role=role,
         municipality_name=municipality_name,
         must_change_password=False,
+        two_factor_enabled=False,
     )
     db.add(user)
     return user
