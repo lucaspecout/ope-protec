@@ -23,17 +23,8 @@ class Settings(BaseSettings):
     db_pool_timeout_seconds: int = 30
     db_pool_recycle_seconds: int = 1800
     external_fetch_workers: int = 18
-    # RTE data.rte-france.com — base64(client_id:client_secret)
-    rte_ecowatt_b64: str = ""
-    rte_consumption_b64: str = ""
     # NASA FIRMS — clé gratuite sur https://firms.modaps.eosdis.nasa.gov/api/map_key/
     firms_map_key: str = ""
-    # Ma Sécurité — accès restreint, endpoint fourni par la documentation partenaire.
-    ma_securite_api_key: str = ""
-    ma_securite_api_url: str = ""
-    # INSEE SIRENE open data — jeton "ouvert avec compte".
-    sirene_api_token: str = ""
-    sirene_api_base_url: str = "https://api.insee.fr/api-sirene/3.11"
     # TomTom Routing API. If configured, route estimates include live traffic.
     tomtom_api_key: str = ""
     # LDAP / LLDAP authentication. Local users remain available when enabled.

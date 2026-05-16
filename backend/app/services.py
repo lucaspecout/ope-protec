@@ -121,15 +121,6 @@ def _redis_set(key: str, data: dict[str, Any], ttl_seconds: int) -> None:
         pass
 
 
-def _redis_delete(key: str) -> None:
-    if not _REDIS_OK or _redis is None:
-        return
-    try:
-        _redis.delete(_REDIS_KEY_PREFIX + key)
-    except Exception:
-        pass
-
-
 def cleanup_old_weather_alerts(db: Session) -> int:
     cutoff = datetime.utcnow() - timedelta(days=settings.weather_retention_days)
     result = db.execute(delete(WeatherAlert).where(WeatherAlert.created_at < cutoff))
@@ -151,14 +142,6 @@ def _is_retryable_network_error(exc: Exception) -> bool:
         reason = str(exc.reason).lower() if getattr(exc, "reason", None) is not None else ""
         return any(token in reason for token in ("timed out", "timeout", "temporary", "reset", "refused", "unreachable"))
     return False
-
-
-def _make_permissive_ssl_context() -> ssl.SSLContext:
-    """Contexte SSL assoupli pour les serveurs gouv avec config TLS stricte.
-    Maintient la vérification des certificats mais élargit les suites de chiffrement."""
-    ctx = ssl.create_default_context()
-    ctx.set_ciphers("DEFAULT:@SECLEVEL=1")
-    return ctx
 
 
 def _make_legacy_ssl_context() -> ssl.SSLContext:
@@ -292,18 +275,6 @@ _BROWSER_UA = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/124.0.0.0 Safari/537.36"
 )
-
-
-def _http_get_text_quick(url: str, timeout: int = 8) -> str:
-    """Scraping rapide sans retry, User-Agent navigateur. Pour sites tiers peu fiables."""
-    request = Request(url, headers={
-        "User-Agent": _BROWSER_UA,
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "fr-FR,fr;q=0.9",
-        "Connection": "keep-alive",
-    })
-    payload = _http_get_with_retries(request=request, timeout=timeout, retries=0)
-    return payload.decode("utf-8", errors="ignore")
 
 
 def _extract_html_title(raw_html: str) -> str:
@@ -514,13 +485,10 @@ _DAUPHINE_CACHE_TTL_SECONDS = 300
 _VIGIEAU_CACHE_TTL_SECONDS = 900
 _ATMO_AURA_CACHE_TTL_SECONDS = 900
 _SNCF_ISERE_CACHE_TTL_SECONDS = 180
-_RTE_ELECTRICITY_CACHE_TTL_SECONDS = 1800  # Ecowatt = signal journalier ; 30 min pour récupérer les vraies données sans surcharger l'API
 _FINESS_ISERE_CACHE_TTL_SECONDS = 43200
 _FINESS_ISERE_MAX_LIMIT = 20000
 _FINESS_ISERE_STABLE_CSV_URL = "https://static.data.gouv.fr/resources/finess-extraction-du-fichier-des-etablissements/20260312-094547/etalab-cs1100507-stock-20260311-0343.csv"
 _ISERE_OPENDATA_CACHE_TTL_SECONDS = 1800
-_MA_SECURITE_CACHE_TTL_SECONDS = 300
-_SIRENE_OPEN_DATA_CACHE_TTL_SECONDS = 1800
 _ANNUAIRE_ADMINISTRATION_CACHE_TTL_SECONDS = 21600
 _ANFR_ISERE_CACHE_TTL_SECONDS = 43200
 _ARCEP_ISERE_CACHE_TTL_SECONDS = 900
@@ -531,7 +499,6 @@ _RNB_BUILDINGS_CACHE_TTL_SECONDS = 21600
 _APIC_ISERE_CACHE_TTL_SECONDS = 300
 _VIGICRUES_FLASH_ISERE_CACHE_TTL_SECONDS = 300
 _ISERE_BOUNDARY_CACHE_TTL_SECONDS = 21600
-_AURA_AIRCRAFT_CACHE_TTL_SECONDS = 45
 
 _vigicrues_cache_lock = Lock()
 _vigicrues_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "vigicrues"}
@@ -570,17 +537,8 @@ _atmo_aura_cache_lock = Lock()
 _atmo_aura_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "atmo_aura"}
 _sncf_isere_cache_lock = Lock()
 _sncf_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "sncf_isere"}
-_rte_electricity_cache_lock = Lock()
-_rte_electricity_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "rte_electricity"}
-# Cache des tokens OAuth2 RTE (valides ~2h, on les renouvelle 5min avant expiry)
-_rte_oauth_tokens: dict[str, dict[str, Any]] = {}
-_rte_oauth_lock = Lock()
 _finess_isere_cache_lock = Lock()
 _finess_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "finess_isere"}
-_ma_securite_cache_lock = Lock()
-_ma_securite_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "ma_securite"}
-_sirene_open_data_cache_lock = Lock()
-_sirene_open_data_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "sirene_open_data"}
 _annuaire_administration_cache_lock = Lock()
 _annuaire_administration_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "annuaire_administration_isere"}
 _finess_isere_communes_lock = Lock()
@@ -1373,8 +1331,6 @@ _apic_isere_cache_lock = Lock()
 _apic_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "apic_isere"}
 _vigicrues_flash_isere_cache_lock = Lock()
 _vigicrues_flash_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "vigicrues_flash"}
-_aura_aircraft_cache_lock = Lock()
-_aura_aircraft_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "aura_aircraft"}
 _isere_aval_polyline_cache_lock = Lock()
 _isere_aval_polyline_cache: dict[str, Any] = {"points": None, "expires_at": datetime.min}
 _ISERE_AVAL_GRENOBLE_CUTOFF_LON = 5.67526671768763
@@ -4619,225 +4575,6 @@ def fetch_sncf_isere_alerts(force_refresh: bool = False) -> dict[str, Any]:
     )
 
 
-def _rte_electricity_risk_level(supply_margin_mw: int | float | None) -> str:
-    if supply_margin_mw is None:
-        return "inconnu"
-    if supply_margin_mw >= 1000:
-        return "vert"
-    if supply_margin_mw >= 300:
-        return "jaune"
-    if supply_margin_mw >= 0:
-        return "orange"
-    return "rouge"
-
-
-def _rte_get_oauth_token(b64_creds: str, cache_key: str) -> str:
-    """Récupère (ou renouvelle) un token OAuth2 RTE.
-    Priorité : Redis (partagé entre workers) → mémoire locale → fetch réseau.
-    Les tokens RTE sont valides 2h ; on les renouvelle 10min avant expiry."""
-    redis_key = f"rte_oauth_token:{cache_key}"
-
-    # 1. Redis — partagé entre tous les workers Gunicorn
-    if _REDIS_OK and _redis is not None:
-        try:
-            cached_token = _redis.get(redis_key)
-            if cached_token:
-                return cached_token.decode() if isinstance(cached_token, bytes) else str(cached_token)
-        except Exception:
-            pass
-
-    # 2. Mémoire locale (fallback si Redis KO)
-    with _rte_oauth_lock:
-        cached = _rte_oauth_tokens.get(cache_key)
-        if cached and datetime.utcnow() < cached["expires_at"]:
-            return str(cached["token"])
-
-    if not (_REQUESTS_OK and _requests is not None):
-        raise RuntimeError("requests non disponible pour l'auth RTE")
-
-    resp = _requests.post(
-        "https://digital.iservices.rte-france.com/token/oauth/",
-        headers={
-            "Authorization": f"Basic {b64_creds}",
-            "Content-Type": "application/x-www-form-urlencoded",
-        },
-        data="grant_type=client_credentials",
-        timeout=15,
-        verify=True,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    token = str(data["access_token"])
-    expires_in = int(data.get("expires_in", 7200))
-    ttl = max(expires_in - 600, 300)  # renouvelle 10min avant expiry
-
-    # Stocker dans Redis (partagé) et en mémoire locale
-    if _REDIS_OK and _redis is not None:
-        try:
-            _redis.setex(redis_key, ttl, token)
-        except Exception:
-            pass
-    with _rte_oauth_lock:
-        _rte_oauth_tokens[cache_key] = {
-            "token": token,
-            "expires_at": datetime.utcnow() + timedelta(seconds=ttl),
-        }
-    return token
-
-
-def _fetch_rte_isere_electricity_live() -> dict[str, Any]:
-    from app.config import settings as _settings  # import local pour éviter le circular
-
-    _RTE_BASE = "https://digital.iservices.rte-france.com"
-    ecowatt_b64 = (_settings.rte_ecowatt_b64 or "").strip()
-    consumption_b64 = (_settings.rte_consumption_b64 or "").strip()
-
-    if not ecowatt_b64:
-        return {
-            "service": "RTE · Ecowatt & Consommation",
-            "status": "degraded",
-            "department": "France (national)",
-            "scope": "Signal Ecowatt RTE",
-            "source": "https://data.rte-france.com",
-            "level": "inconnu",
-            "error": "RTE_ECOWATT_B64 non configuré",
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
-
-    errors: list[str] = []
-
-    # ── 1. Signal Ecowatt (vert / orange / rouge) ──────────────────────────
-    # Le 429 propage jusqu'à _refresh_one_service qui conservera alors le slot précédent.
-    ecowatt_level = "inconnu"
-    ecowatt_message = ""
-    ecowatt_today: dict[str, Any] = {}
-    token = _rte_get_oauth_token(ecowatt_b64, "ecowatt")
-    resp_ecowatt = _requests.get(
-        f"{_RTE_BASE}/open_api/ecowatt/v5/signals",
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=15,
-        verify=True,
-    )
-    if resp_ecowatt.status_code == 429:
-        retry_after = max(int(resp_ecowatt.headers.get("Retry-After", 120)), 60)
-        # Priorité 1 : retourner le cache stale s'il contient de vraies données Ecowatt
-        with _rte_electricity_cache_lock:
-            stale = _rte_electricity_cache.get("payload")
-        _ecowatt_is_real = lambda p: isinstance(p, dict) and isinstance(p.get("ecowatt"), dict)
-        if stale and stale.get("status") == "online" and _ecowatt_is_real(stale):
-            return stale
-        # Priorité 2 : fallback dégradé avec TTL court pour réessayer rapidement
-        fallback = {
-            "service": "RTE · Ecowatt & Consommation",
-            "status": "degraded",
-            "department": "France (national)",
-            "scope": "Signal Ecowatt RTE",
-            "source": "https://data.rte-france.com",
-            "level": "inconnu",
-            "ecowatt": {},
-            "ecowatt_message": "Données temporairement indisponibles (limite API RTE)",
-            "consumption_mw": None,
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
-        short_ttl = min(retry_after + 30, 300)  # max 5 min d'attente
-        redis_key = _rte_electricity_cache.get("redis_key")
-        if redis_key:
-            _redis_set(redis_key, fallback, short_ttl)
-        with _rte_electricity_cache_lock:
-            _rte_electricity_cache["payload"] = deepcopy(fallback)
-            _rte_electricity_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=short_ttl)
-        return fallback
-    resp_ecowatt.raise_for_status()
-    signals = resp_ecowatt.json().get("signals") or []
-    if signals:
-        today_sig = signals[0]
-        dval = int(today_sig.get("dvalue") or 1)
-        ecowatt_level = {1: "vert", 2: "orange", 3: "rouge"}.get(dval, "inconnu")
-        ecowatt_message = str(today_sig.get("message") or "")
-        ecowatt_today = {
-            "jour": today_sig.get("Jour") or today_sig.get("jour"),
-            "dvalue": dval,
-            "level": ecowatt_level,
-            "message": ecowatt_message,
-            "generation_forecast_mw": today_sig.get("GenerationForecast"),
-        }
-
-    # ── 2. Consommation nationale temps réel ───────────────────────────────
-    consumption_mw: int | None = None
-    consumption_observed_at: str | None = None
-    if consumption_b64:
-        try:
-            from datetime import timezone as _tz
-            token2 = _rte_get_oauth_token(consumption_b64, "consumption")
-            resp2 = _requests.get(
-                f"{_RTE_BASE}/open_api/consumption/v1/short_term",
-                headers={"Authorization": f"Bearer {token2}"},
-                timeout=15,
-                verify=True,
-            )
-            resp2.raise_for_status()
-            short_terms = resp2.json().get("short_term") or []
-            # Prendre la valeur non-nulle la plus récente (max start_date) qui ne soit
-            # pas dans le futur et pas vieille de plus de 4h.
-            now_utc = datetime.utcnow()
-            best_value: int | None = None
-            best_dt: str | None = None
-            best_ts: datetime | None = None
-            for bloc in short_terms:
-                for val in (bloc.get("values") or []):
-                    try:
-                        start = val.get("start_date") or ""
-                        v = val.get("value")
-                        if v is None or not start:
-                            continue
-                        ts = datetime.fromisoformat(start.replace("Z", "+00:00"))
-                        ts_utc = ts.astimezone(_tz.utc).replace(tzinfo=None)
-                        # Ignorer les valeurs futures et les valeurs trop anciennes (>4h)
-                        if ts_utc > now_utc:
-                            continue
-                        if (now_utc - ts_utc).total_seconds() > 4 * 3600:
-                            continue
-                        if best_ts is None or ts_utc > best_ts:
-                            best_value = int(v)
-                            best_dt = start
-                            best_ts = ts_utc
-                    except Exception:
-                        pass
-            consumption_mw = best_value
-            consumption_observed_at = best_dt
-        except Exception as exc:
-            errors.append(f"Consumption: {exc}")
-
-    status = "online" if ecowatt_level != "inconnu" else "degraded"
-
-    result: dict[str, Any] = {
-        "service": "RTE · Ecowatt & Consommation",
-        "status": status,
-        "department": "France (national)",
-        "scope": "Signal Ecowatt RTE + Consommation nationale temps réel",
-        "source": f"{_RTE_BASE}/open_api/ecowatt/v5/signals",
-        "level": ecowatt_level,
-        "ecowatt": ecowatt_today,
-        "updated_at": datetime.utcnow().isoformat() + "Z",
-    }
-    if consumption_mw is not None:
-        result["consumption_mw"] = consumption_mw
-        result["observed_at"] = consumption_observed_at
-    if errors:
-        result["warnings"] = errors
-    return result
-
-
-def fetch_rte_isere_electricity_status(force_refresh: bool = False) -> dict[str, Any]:
-    return _cached_external_payload(
-        cache=_rte_electricity_cache,
-        lock=_rte_electricity_cache_lock,
-        ttl_seconds=_RTE_ELECTRICITY_CACHE_TTL_SECONDS,
-        force_refresh=force_refresh,
-        loader=_fetch_rte_isere_electricity_live,
-    )
-
-
 def _extract_city_from_finess_address_line(value: str) -> tuple[str | None, str | None]:
     blob = re.sub(r"\s+", " ", (value or "").strip())
     if not blob:
@@ -5438,330 +5175,6 @@ def fetch_isere_opendata_resilience(force_refresh: bool = False, limit: int = 80
         cache=_isere_opendata_cache,
         lock=_isere_opendata_cache_lock,
         ttl_seconds=_ISERE_OPENDATA_CACHE_TTL_SECONDS,
-        force_refresh=force_refresh,
-        loader=loader,
-    )
-
-
-_ISERE_MA_SECURITE_KEYWORDS = (
-    "isere",
-    "isère",
-    "38",
-    "grenoble",
-    "voiron",
-    "vienne",
-    "bourgoin",
-    "bourgoin-jallieu",
-    "la tour-du-pin",
-    "saint-marcellin",
-    "pont-de-claix",
-    "meylan",
-    "echirolles",
-    "échirolles",
-    "fontaine",
-)
-
-
-def _extract_first_list(payload: Any) -> list[Any]:
-    if isinstance(payload, list):
-        return payload
-    if not isinstance(payload, dict):
-        return []
-    for key in ("items", "results", "data", "content", "actualites", "news"):
-        value = payload.get(key)
-        if isinstance(value, list):
-            return value
-        if isinstance(value, dict):
-            for nested_key in ("items", "results", "content", "data"):
-                nested_value = value.get(nested_key)
-                if isinstance(nested_value, list):
-                    return nested_value
-    return []
-
-
-def _normalize_ma_securite_item(item: Any) -> dict[str, Any] | None:
-    if not isinstance(item, dict):
-        return None
-    title = str(item.get("title") or item.get("titre") or item.get("headline") or item.get("name") or "").strip()
-    description = str(item.get("message") or item.get("description") or item.get("content") or item.get("texte") or "").strip()
-    locality = str(item.get("locality") or item.get("localite") or item.get("location") or item.get("ville") or item.get("commune") or "").strip()
-    theme = str(item.get("theme") or item.get("thematique") or item.get("category") or item.get("rubrique") or "").strip()
-    published_at = str(
-        item.get("created_at")
-        or item.get("dateCreation")
-        or item.get("published_at")
-        or item.get("date")
-        or item.get("createdAt")
-        or ""
-    ).strip()
-    link = str(item.get("url") or item.get("link") or item.get("href") or "").strip()
-    image = str(item.get("image") or item.get("image_url") or item.get("illustration") or "").strip()
-    blob = " ".join(part for part in (title, description, locality, theme) if part).lower()
-    if not blob or not any(token in blob for token in _ISERE_MA_SECURITE_KEYWORDS):
-        return None
-    return {
-        "title": title or "Actualité Ma Sécurité",
-        "description": description[:500],
-        "locality": locality,
-        "theme": theme,
-        "published_at": published_at,
-        "link": link,
-        "image": image,
-    }
-
-
-def _fetch_ma_securite_isere_live(limit: int = 12) -> dict[str, Any]:
-    source = str(settings.ma_securite_api_url or "").strip()
-    api_key = str(settings.ma_securite_api_key or "").strip()
-    doc_url = "https://www.data.gouv.fr/dataservices/api-ma-securite"
-    if not api_key:
-        return {
-            "service": "Ma Sécurité",
-            "status": "degraded",
-            "source": doc_url,
-            "items": [],
-            "items_total": 0,
-            "error": "Clé API Ma Sécurité non configurée",
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
-    if not source:
-        return {
-            "service": "Ma Sécurité",
-            "status": "degraded",
-            "source": doc_url,
-            "items": [],
-            "items_total": 0,
-            "error": "Endpoint API Ma Sécurité non configuré",
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
-
-    safe_limit = max(1, min(limit, 30))
-    params = {"department": "38", "departement": "38", "limit": safe_limit, "size": safe_limit}
-    final_source = source.format(department="38", departement="38", limit=safe_limit)
-    if "?" not in final_source:
-        final_source = f"{final_source}?{urlencode(params)}"
-    headers = {
-        "Accept": "application/json",
-        "User-Agent": _BROWSER_UA,
-        "Authorization": f"Bearer {api_key}",
-        "X-API-Key": api_key,
-        "apikey": api_key,
-    }
-    payload = _http_get_json(final_source, timeout=20, headers=headers)
-    raw_items = _extract_first_list(payload)
-    items = [normalized for normalized in (_normalize_ma_securite_item(item) for item in raw_items) if normalized]
-    items.sort(key=lambda row: str(row.get("published_at") or ""), reverse=True)
-    total_raw = payload.get("total") if isinstance(payload, dict) else None
-    try:
-        items_total = int(total_raw)
-    except (TypeError, ValueError):
-        items_total = len(items)
-    return {
-        "service": "Ma Sécurité",
-        "status": "online",
-        "source": final_source,
-        "items": items[:safe_limit],
-        "items_total": items_total,
-        "updated_at": datetime.utcnow().isoformat() + "Z",
-    }
-
-
-def fetch_ma_securite_isere(force_refresh: bool = False, limit: int = 12) -> dict[str, Any]:
-    safe_limit = max(1, min(limit, 30))
-
-    def loader() -> dict[str, Any]:
-        try:
-            return _fetch_ma_securite_isere_live(limit=safe_limit)
-        except Exception as exc:
-            return {
-                "service": "Ma Sécurité",
-                "status": "degraded",
-                "source": str(settings.ma_securite_api_url or "https://www.data.gouv.fr/dataservices/api-ma-securite"),
-                "items": [],
-                "items_total": 0,
-                "error": str(exc),
-                "updated_at": datetime.utcnow().isoformat() + "Z",
-            }
-
-    return _cached_external_payload(
-        cache=_ma_securite_cache,
-        lock=_ma_securite_cache_lock,
-        ttl_seconds=_MA_SECURITE_CACHE_TTL_SECONDS,
-        force_refresh=force_refresh,
-        loader=loader,
-    )
-
-
-def _sirene_parse_total(payload: dict[str, Any]) -> int:
-    for candidate in (
-        payload.get("total"),
-        payload.get("total_results"),
-        payload.get("nombre"),
-        (payload.get("header") or {}).get("total"),
-    ):
-        try:
-            return int(candidate)
-        except (TypeError, ValueError):
-            continue
-    return 0
-
-
-def _sirene_build_label(item: dict[str, Any]) -> str:
-    unite = item.get("uniteLegale") or {}
-    for candidate in (
-        item.get("enseigne1Etablissement"),
-        item.get("enseigne2Etablissement"),
-        item.get("enseigne3Etablissement"),
-        unite.get("denominationUniteLegale"),
-        " ".join(
-            part
-            for part in (
-                str(unite.get("prenom1UniteLegale") or "").strip(),
-                str(unite.get("nomUniteLegale") or "").strip(),
-            )
-            if part
-        ).strip(),
-    ):
-        text = str(candidate or "").strip()
-        if text:
-            return text
-    return "Établissement actif"
-
-
-def _sirene_normalize_item(item: Any) -> dict[str, Any] | None:
-    if not isinstance(item, dict):
-        return None
-    unite = item.get("uniteLegale") or {}
-    periods = unite.get("periodesUniteLegale")
-    period = periods[0] if isinstance(periods, list) and periods and isinstance(periods[0], dict) else {}
-    commune = str(item.get("libelleCommuneEtablissement") or "").strip()
-    postal_code = str(item.get("codePostalEtablissement") or "").strip()
-    if not postal_code.startswith("38"):
-        return None
-    activity_code = str(
-        item.get("activitePrincipaleRegistreMetiersEtablissement")
-        or item.get("activitePrincipaleEtablissement")
-        or unite.get("activitePrincipaleUniteLegale")
-        or period.get("activitePrincipaleUniteLegale")
-        or ""
-    ).strip()
-    return {
-        "name": _sirene_build_label(item),
-        "siret": str(item.get("siret") or "").strip(),
-        "commune": commune,
-        "postal_code": postal_code,
-        "naf_code": activity_code,
-        "employee_range": str(item.get("trancheEffectifsEtablissement") or unite.get("trancheEffectifsUniteLegale") or "").strip(),
-    }
-
-
-def _fetch_sirene_open_data_isere_live(limit: int = 100) -> dict[str, Any]:
-    token = str(settings.sirene_api_token or "").strip()
-    base_url = str(settings.sirene_api_base_url or "").rstrip("/")
-    doc_url = "https://www.data.gouv.fr/dataservices/api-sirene-open-data"
-    if not token:
-        return {
-            "service": "Sirene open data",
-            "status": "degraded",
-            "source": doc_url,
-            "items": [],
-            "items_total": 0,
-            "establishments_total": 0,
-            "top_communes": [],
-            "top_sectors": [],
-            "error": "Jeton API Sirene non configuré",
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
-    if not base_url:
-        return {
-            "service": "Sirene open data",
-            "status": "degraded",
-            "source": doc_url,
-            "items": [],
-            "items_total": 0,
-            "establishments_total": 0,
-            "top_communes": [],
-            "top_sectors": [],
-            "error": "Base URL API Sirene non configurée",
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
-
-    safe_limit = max(20, min(limit, 100))
-    query = "etatAdministratifEtablissement:A AND codePostalEtablissement:38*"
-    endpoint = f"{base_url}/siret?{urlencode({'q': query, 'nombre': safe_limit})}"
-    payload = _http_get_json(
-        endpoint,
-        timeout=20,
-        headers={
-            "Accept": "application/json",
-            "User-Agent": _BROWSER_UA,
-            "Authorization": f"Bearer {token}",
-        },
-    )
-    raw_items = payload.get("etablissements") if isinstance(payload, dict) else []
-    raw_items = raw_items if isinstance(raw_items, list) else []
-    items = [normalized for normalized in (_sirene_normalize_item(item) for item in raw_items) if normalized]
-
-    commune_counts: dict[str, int] = {}
-    sector_counts: dict[str, int] = {}
-    for item in items:
-        commune = str(item.get("commune") or "").strip()
-        sector = str(item.get("naf_code") or "").strip()
-        if commune:
-            commune_counts[commune] = commune_counts.get(commune, 0) + 1
-        if sector:
-            sector_counts[sector] = sector_counts.get(sector, 0) + 1
-
-    top_communes = [
-        {"commune": name, "count": count}
-        for name, count in sorted(commune_counts.items(), key=lambda row: (-row[1], row[0]))[:6]
-    ]
-    top_sectors = [
-        {"naf_code": code, "count": count}
-        for code, count in sorted(sector_counts.items(), key=lambda row: (-row[1], row[0]))[:6]
-    ]
-
-    total = _sirene_parse_total(payload if isinstance(payload, dict) else {})
-    if total <= 0:
-        total = len(items)
-
-    return {
-        "service": "Sirene open data",
-        "status": "online",
-        "source": endpoint,
-        "items": items[:8],
-        "items_total": len(items),
-        "establishments_total": total,
-        "top_communes": top_communes,
-        "top_sectors": top_sectors,
-        "updated_at": datetime.utcnow().isoformat() + "Z",
-    }
-
-
-def fetch_sirene_open_data_isere(force_refresh: bool = False, limit: int = 100) -> dict[str, Any]:
-    safe_limit = max(20, min(limit, 100))
-
-    def loader() -> dict[str, Any]:
-        try:
-            return _fetch_sirene_open_data_isere_live(limit=safe_limit)
-        except Exception as exc:
-            return {
-                "service": "Sirene open data",
-                "status": "degraded",
-                "source": "https://www.data.gouv.fr/dataservices/api-sirene-open-data",
-                "items": [],
-                "items_total": 0,
-                "establishments_total": 0,
-                "top_communes": [],
-                "top_sectors": [],
-                "error": str(exc),
-                "updated_at": datetime.utcnow().isoformat() + "Z",
-            }
-
-    return _cached_external_payload(
-        cache=_sirene_open_data_cache,
-        lock=_sirene_open_data_cache_lock,
-        ttl_seconds=_SIRENE_OPEN_DATA_CACHE_TTL_SECONDS,
         force_refresh=force_refresh,
         loader=loader,
     )
@@ -6734,81 +6147,6 @@ def fetch_bison_fute_live_events(
 
     live["categories"] = sorted({str((event or {}).get("category") or "info") for event in events})
     return live
-
-
-def _fetch_aura_live_aircraft_raw() -> dict[str, Any]:
-    source_adsbexchange = "https://globe.adsbexchange.com/"
-    source_opensky = "https://opensky-network.org/api/states/all"
-    bbox = {"lamin": 44.0, "lomin": 3.0, "lamax": 46.7, "lomax": 7.3}
-    query = urlencode(bbox)
-
-    try:
-        payload = _http_get_json(f"{source_opensky}?{query}", timeout=14)
-        states = payload.get("states") if isinstance(payload, dict) else []
-        if not isinstance(states, list):
-            states = []
-
-        aircraft: list[dict[str, Any]] = []
-        for row in states:
-            if not isinstance(row, list) or len(row) < 14:
-                continue
-            lon = row[5]
-            lat = row[6]
-            if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
-                continue
-            aircraft.append(
-                {
-                    "icao24": str(row[0] or "").strip(),
-                    "callsign": str(row[1] or "").strip(),
-                    "origin_country": str(row[2] or "").strip(),
-                    "last_contact": row[4],
-                    "lon": float(lon),
-                    "lat": float(lat),
-                    "baro_altitude_m": row[7],
-                    "on_ground": bool(row[8]),
-                    "velocity_ms": row[9],
-                    "heading_deg": row[10],
-                    "vertical_rate_ms": row[11],
-                    "geo_altitude_m": row[13],
-                }
-            )
-
-        return {
-            "service": "Trafic aérien AURA",
-            "status": "online",
-            "source": source_adsbexchange,
-            "provider": "OpenSky Network",
-            "provider_source": source_opensky,
-            "region": "Auvergne-Rhône-Alpes",
-            "bbox": bbox,
-            "aircraft_total": len(aircraft),
-            "aircraft": aircraft,
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
-    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
-        return {
-            "service": "Trafic aérien AURA",
-            "status": "degraded",
-            "source": source_adsbexchange,
-            "provider": "OpenSky Network",
-            "provider_source": source_opensky,
-            "region": "Auvergne-Rhône-Alpes",
-            "bbox": bbox,
-            "aircraft_total": 0,
-            "aircraft": [],
-            "error": str(exc),
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
-
-
-def fetch_aura_live_aircraft(force_refresh: bool = False) -> dict[str, Any]:
-    return _cached_external_payload(
-        cache=_aura_aircraft_cache,
-        lock=_aura_aircraft_cache_lock,
-        ttl_seconds=_AURA_AIRCRAFT_CACHE_TTL_SECONDS,
-        force_refresh=force_refresh,
-        loader=_fetch_aura_live_aircraft_raw,
-    )
 
 
 def _vigieau_level_rank(level: str) -> int:
@@ -9611,15 +8949,6 @@ def fetch_ter_aura_disruptions(force_refresh: bool = False) -> dict[str, Any]:
     )
 
 
-# ---------------------------------------------------------------------------
-# (M TAG fusionné dans M Réseau — voir fetch_mreseau_disruptions)
-# ---------------------------------------------------------------------------
-
-def fetch_mtag_grenoble_disruptions(force_refresh: bool = False) -> dict[str, Any]:
-    """Alias conservé pour compatibilité — délègue à fetch_mreseau_disruptions."""
-    return fetch_mreseau_disruptions(force_refresh=force_refresh)
-
-
 # ─── 5. Cars Région AURA · Transports interrégionaux ─────────────────────────
 _CARS_REGION_CACHE_TTL = 300
 _cars_region_cache_lock = Lock()
@@ -10629,7 +9958,6 @@ def flush_service_memory_cache(service_key: str) -> dict[str, str]:
         "sncf_isere":          (_sncf_isere_cache,            _sncf_isere_cache_lock),
         "anfr_isere":          (_anfr_isere_cache,            _anfr_isere_cache_lock),
         "arcep_isere":         (_arcep_isere_cache,           _arcep_isere_cache_lock),
-        "ma_securite":         (_ma_securite_cache,           _ma_securite_cache_lock),
         "groundwater_isere":   (_hubeau_groundwater_cache,    _hubeau_groundwater_cache_lock),
         "water_quality":       (_hubeau_water_quality_cache,  _hubeau_water_quality_cache_lock),
         "water_services":      (_hubeau_water_services_cache, _hubeau_water_services_cache_lock),
@@ -11348,79 +10676,6 @@ def _col_status_from_weather(temp_c, snow_cm, precip, wind_kmh):
     if wind_kmh is not None and wind_kmh > 80:
         return {"statut": "vent fort", "couleur": "jaune", "detail": f"Rafales {wind_kmh:.0f} km/h"}
     return {"statut": "ouvert", "couleur": "vert", "detail": f"{temp_c:.0f}°C · conditions normales"}
-
-
-def _fetch_cols_alpins_live() -> dict[str, Any]:
-    cols_out: list[dict[str, Any]] = []
-    first_error: str | None = None
-    official_cols_features: list[dict[str, Any]] = []
-    try:
-        official_cols_features = _fetch_itinisere_cols_layer()
-    except Exception as exc:
-        first_error = f"itinisere_layer: {exc}"
-    try:
-        itinisere_payload = fetch_itinisere_disruptions(limit=120, force_refresh=False)
-    except Exception as exc:
-        if first_error is None:
-            first_error = f"itinisere_events: {exc}"
-        itinisere_payload = {}
-    itinisere_events = itinisere_payload.get("events") if isinstance(itinisere_payload, dict) else []
-    if not isinstance(itinisere_events, list):
-        itinisere_events = []
-    for col in _COLS_ALPINS:
-        temp = snow = precip = wind = None
-        ok = False
-        try:
-            payload = _http_get_json(
-                "https://api.open-meteo.com/v1/forecast"
-                f"?latitude={quote_plus(str(col['lat']))}"
-                f"&longitude={quote_plus(str(col['lon']))}"
-                "&current=temperature_2m,precipitation,snow_depth,wind_speed_10m"
-                "&wind_speed_unit=kmh"
-                "&timezone=Europe%2FParis",
-                timeout=12,
-            )
-            current = payload.get("current") if isinstance(payload, dict) else {}
-            if isinstance(current, dict):
-                temp = current.get("temperature_2m")
-                snow_m = current.get("snow_depth")
-                snow = round(snow_m * 100, 1) if snow_m is not None else None
-                precip = current.get("precipitation")
-                wind = current.get("wind_speed_10m")
-                ok = temp is not None
-        except Exception as exc:
-            if first_error is None:
-                first_error = str(exc)
-
-        official_feature = next(
-            (feature for feature in official_cols_features if isinstance(feature, dict) and _match_itinisere_col_feature(col["nom"], feature)),
-            None,
-        )
-        status = _col_status_from_itinisere_feature(official_feature or {}) if official_feature else None
-        matched_event = next((evt for evt in itinisere_events if isinstance(evt, dict) and _match_col_event(col["nom"], evt)), None)
-        if status is None and matched_event:
-            status = _col_status_from_itinisere_event(matched_event or {})
-        if status is None and ok and temp is not None:
-            status = _col_status_from_weather(temp, snow, precip, wind)
-        if status is None:
-            status = {"statut": "inconnu", "couleur": "gris", "detail": "Météo indisponible"}
-            temp = snow = precip = wind = None
-        cols_out.append({**col, **status, "temperature": temp, "enneigement_cm": snow, "precipitations": precip, "vent_kmh": wind})
-
-    nb_dangereux = sum(1 for c in cols_out if c["couleur"] in ("orange", "rouge"))
-    source = _ITINISERE_COLS_LAYER_URL if official_cols_features else "https://www.itinisere.fr"
-    result: dict[str, Any] = {
-        "service": "Cols alpins Isère",
-        "status": "online" if official_cols_features else "degraded",
-        "source": source,
-        "cols": cols_out,
-        "cols_total": len(cols_out),
-        "dangereux_total": nb_dangereux,
-        "updated_at": datetime.utcnow().isoformat() + "Z",
-    }
-    if first_error:
-        result["_debug_first_error"] = first_error
-    return result
 
 
 def _fetch_cols_alpins_live_fast() -> dict[str, Any]:

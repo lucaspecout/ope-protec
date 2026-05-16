@@ -15,7 +15,6 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(20), default="lecture")
     auth_source: Mapped[str] = mapped_column(String(20), default="local")
     municipality_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    two_factor_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

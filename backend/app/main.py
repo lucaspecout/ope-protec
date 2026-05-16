@@ -49,7 +49,6 @@ from .schemas import (
     PasswordChangeRequest,
     LoginResponse,
     Token,
-    TwoFactorToggleRequest,
     UserCreate,
     UserOut,
     UserPasswordResetRequest,
@@ -1721,13 +1720,6 @@ def change_password(payload: PasswordChangeRequest, db: Session = Depends(get_db
     user.must_change_password = False
     db.commit()
     return {"status": "password_updated"}
-
-
-@app.post("/auth/me/2fa")
-def toggle_2fa(payload: TwoFactorToggleRequest, db: Session = Depends(get_db), user: User = Depends(get_active_user)):
-    user.two_factor_enabled = payload.enabled
-    db.commit()
-    return {"two_factor_enabled": user.two_factor_enabled, "mode": "optionnel"}
 
 
 @app.get("/dashboard")

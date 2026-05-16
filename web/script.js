@@ -1096,13 +1096,6 @@ const ITINISERE_KNOWN_LOCATIONS = {
   'bresson': { lat: 45.1248, lon: 5.7380 },
   'brié-et-angonnes': { lat: 45.1232, lon: 5.7735 },
 };
-const BISON_CORRIDORS = [
-  { name: 'A43 · Axe Lyon ⇄ Chambéry', points: [[45.5866, 5.2732], [45.7257, 5.9191]] },
-  { name: 'A48 · Axe Grenoble ⇄ Lyon', points: [[45.1885, 5.7245], [45.5866, 5.2732]] },
-  { name: 'A41 · Axe Grenoble ⇄ Savoie', points: [[45.1885, 5.7245], [45.3656, 5.9494]] },
-  { name: 'A49 · Axe Grenoble ⇄ Valence', points: [[45.1885, 5.7245], [45.0541, 5.0536]] },
-  { name: 'N85 · Route Napoléon', points: [[45.1885, 5.7245], [44.9134, 5.7861]] },
-];
 const BISON_FUTE_CAMERAS = [
   { name: 'Meylan N87 PR10+590', road: 'N87', lat: 45.201217282265034, lon: 5.7812657653824875, manager: 'DIR Centre-Est', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/nce_27.mp4' },
   { name: 'Eybens N87 PR4+200', road: 'N87', lat: 45.15652758486637, lon: 5.7475476745737355, manager: 'DIR Centre-Est', streamUrl: 'https://www.bison-fute.gouv.fr/camera-upload/nce_31.mp4' },
@@ -1214,17 +1207,6 @@ function stationStatusLevel(station = {}) {
   const status = normalizeLevel(station.control_status || station.status || '');
   if (['vert', 'jaune', 'orange', 'rouge'].includes(status)) return status;
   return normalizeLevel(station.level || 'vert');
-}
-
-function formatLogLine(log = {}) {
-  const municipality = log.municipality_id ? ` · ${escapeHtml(getMunicipalityName(log.municipality_id))}` : '';
-  const place = log.location ? ` · 📍 ${escapeHtml(log.location)}` : '';
-  const source = log.source ? ` · Source: ${escapeHtml(log.source)}` : '';
-  const owner = log.assigned_to ? ` · 👤 ${escapeHtml(log.assigned_to)}` : '';
-  const next = log.next_update_due ? ` · ⏱️ MAJ ${safeDateToLocale(log.next_update_due)}` : '';
-  const actions = log.actions_taken ? `<div class="muted">Actions: ${escapeHtml(log.actions_taken)}</div>` : '';
-  const deleteAction = canEdit() ? `<div class="map-inline-actions"><button type="button" class="ghost inline-action" data-log-edit="${log.id}">Modifier</button><button type="button" class="ghost inline-action danger" data-log-delete="${log.id}">Supprimer MCO</button></div>` : '';
-  return `<li><strong>${safeDateToLocale(log.event_time || log.created_at)}</strong> ·<span class="badge neutral">${formatLogScope(log)}${municipality}</span> ${log.danger_emoji || LOG_LEVEL_EMOJI[normalizeLevel(log.danger_level)] || '🟢'} <strong style="color:${levelColor(log.danger_level)}">${escapeHtml(log.event_type || 'MCO')}</strong> · <span class="muted">${escapeHtml(getEventTitle(log.event_id))}</span>${place}${owner}${source}${next}<div>${escapeHtml(log.description || '')}</div>${actions}${deleteAction}</li>`;
 }
 
 function formatLogScope(log = {}) {
@@ -1817,9 +1799,7 @@ function normalizeApiErrorMessage(payload, status) {
 // Données toujours servies par le serveur — aucun cache navigateur.
 function saveSnapshot(key, payload) {} // no-op intentionnel
 function readSnapshot(key) { return null; }
-function readSnapshotWithMetadata(key) { return null; }
 function readFreshSnapshot(key, ttlMs) { return null; }
-function hydrateUiFromLocalCache() {}
 
 function clonePayload(payload) {
   if (payload == null) return payload;
@@ -4885,15 +4865,6 @@ function shouldDisplayBaseResourceType(type = '', resource = null) {
   return true;
 }
 
-function legacyFormatHostingDetailsHtml(resource = {}) {
-  if (!HOSTING_RESOURCE_TYPES.has(String(resource.type || ''))) return '';
-  const parts = [];
-  if (resource.capacity) parts.push(`Capacité: ${Number(resource.capacity).toLocaleString('fr-FR')} pers.`);
-  if (resource.surface_m2) parts.push(`Surface: ${Number(resource.surface_m2).toLocaleString('fr-FR')} m²`);
-  if (resource.capacity_source) parts.push(String(resource.capacity_source));
-  return parts.length ? `<br><span class="muted">${escapeHtml(parts.join(' · '))}</span>` : '';
-}
-
 function normalizeYesNo(value) {
   const text = String(value ?? '').trim().toLowerCase();
   if (!text) return null;
@@ -5884,10 +5855,6 @@ function formatApiJson(payload) {
   return escapeHtml(JSON.stringify(payload, null, 2));
 }
 
-function serviceErrorLabel(service) {
-  return service?.error || (service?.status && service.status !== 'online' ? 'Service indisponible ou dégradé.' : 'Aucune erreur détectée.');
-}
-
 const MAP_POINT_ICONS = {
   incident: '🚨',
   evacuation: '🏃',
@@ -5965,15 +5932,6 @@ function normalizeTrafficSeverity(level) {
   const raw = String(level || '').trim().toLowerCase();
   if (['rouge', 'orange', 'jaune', 'vert'].includes(raw)) return raw;
   return normalizeLevel(raw || 'vert');
-}
-
-function trafficLevelColor(level) {
-  const normalized = normalizeTrafficSeverity(level);
-  return ({ rouge: '#d9480f', orange: '#f08c00', jaune: '#f59f00', vert: '#2f9e44' }[normalized] || '#2f9e44');
-}
-
-function trafficLevelEmoji(level) {
-  return ({ vert: '🟢', jaune: '🟡', orange: '🟠', rouge: '🔴' })[normalizeTrafficSeverity(level)] || '⚪';
 }
 
 function trafficMarkerIcon(kind = 'incident', category = '', text = '') {
@@ -6999,7 +6957,6 @@ async function loadPrFromApi() {
   return null;
 }
 
-async function loadPrFromIgnWfs() { return loadPrFromApi(); }
 
 function _drawPrMarkers(coords, sourceLabel) {
   if (!prAutorouteLayer || typeof window.L === 'undefined') return;
@@ -15719,9 +15676,6 @@ function _updateNotifBtn() {
   _updateNotifBtn();
   btn.addEventListener('click', requestNotificationPermission);
 })();
-
-// Hook into SSE handler — call after mergeExternalRisksSnapshot
-const _origSSEMerge = typeof mergeExternalRisksSnapshot === 'function' ? mergeExternalRisksSnapshot : null;
 
 // ════════════════════════════════════════════════════════════════════════════
 // FEATURE 11 — Copernicus EMS widget

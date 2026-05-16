@@ -55,7 +55,6 @@ class UserOut(BaseModel):
     role: str
     auth_source: str = "local"
     municipality_name: str | None = None
-    two_factor_enabled: bool
     must_change_password: bool
     created_at: datetime
     last_login_at: datetime | None = None
@@ -497,10 +496,6 @@ class IncidentEventStatusUpdate(BaseModel):
         if normalized not in ALLOWED_EVENT_STATUS:
             raise ValueError("Statut d'évènement invalide")
         return normalized
-
-
-class TwoFactorToggleRequest(BaseModel):
-    enabled: bool
 
 
 class MunicipalityDocumentOut(BaseModel):
