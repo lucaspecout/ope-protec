@@ -1532,7 +1532,7 @@ async def stream_external_risks(request: Request, token: str = Query(...), db: S
 
 
 @app.post("/auth/register", response_model=UserOut)
-def register(user: UserCreate, db: Session = Depends(get_db), creator: User = Depends(require_roles("admin", "ope"))):
+def register(user: UserCreate, db: Session = Depends(get_db), creator: User = Depends(require_roles("admin"))):
     role, municipality_name = validate_user_payload(user, actor=creator)
     validate_password_strength(user.password)
 
@@ -1554,11 +1554,8 @@ def register(user: UserCreate, db: Session = Depends(get_db), creator: User = De
 
 
 @app.get("/auth/users", response_model=list[UserOut])
-def list_users(db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "ope"))):
-    users_query = db.query(User)
-    if user.role == "ope":
-        users_query = users_query.filter(User.role.in_(["securite", "visiteur", "mairie"]))
-    return users_query.order_by(User.created_at.desc()).all()
+def list_users(db: Session = Depends(get_db), _: User = Depends(require_roles("admin"))):
+    return db.query(User).order_by(User.created_at.desc()).all()
 
 
 @app.post("/auth/ldap/test", response_model=LdapTestResponse)

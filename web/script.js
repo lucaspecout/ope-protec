@@ -92,7 +92,6 @@ const PANEL_TITLES = {
   'map-panel': 'Carte stratégique Isère',
   'users-panel': 'Gestion des utilisateurs',
   'notifications-panel': 'Notifications Discord',
-  'resources-panel': 'Ressources opérationnelles',
   'audit-panel': "Journal d'audit",
 };
 
@@ -1542,9 +1541,11 @@ function setVisibility(node, visible) {
 function canEdit() { return ['admin', 'ope'].includes(currentUser?.role); }
 function canCreateMapPoints() { return ['admin', 'ope'].includes(currentUser?.role); }
 function canMunicipalityFiles() { return ['admin', 'ope'].includes(currentUser?.role); }
-function canManageUsers() { return ['admin', 'ope'].includes(currentUser?.role); }
+function canManageUsers() { return currentUser?.role === 'admin'; }
 function roleLabel(role) { return { admin: 'Admin', ope: 'Opérateur', securite: 'Sécurité', visiteur: 'Visiteur', mairie: 'Mairie' }[role] || role; }
 function canAccessPanel(panelId) {
+  if (panelId === 'resources-panel') return false;
+  if (panelId === 'users-panel' || panelId === 'audit-panel') return currentUser?.role === 'admin';
   if (currentUser?.role === 'mairie') return MAIRIE_ALLOWED_PANELS.has(panelId);
   return true;
 }
@@ -2470,7 +2471,6 @@ function setActivePanel(panelId) {
     _notifLoad();
     _notifLoadLog();
   }
-  if (panelId === 'resources-panel' && token) loadResources();
 }
 
 function ensureSocialFeedsRendered() { /* social feeds removed */ }
