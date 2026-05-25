@@ -360,6 +360,7 @@ class OperationalLogUpdate(BaseModel):
     danger_emoji: str = "🟢"
     target_scope: str = "departemental"
     status: str = "nouveau"
+    event_time: datetime | None = None
     location: str | None = None
     source: str | None = None
     actions_taken: str | None = None

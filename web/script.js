@@ -1276,6 +1276,7 @@ function fillLogFormFromEntry(log = {}) {
   form.elements.location.value = log.location || '';
   form.elements.source.value = log.source || '';
   form.elements.assigned_to.value = log.assigned_to || '';
+  form.elements.event_time.value = log.event_time ? toDatetimeLocal(log.event_time) : '';
   form.elements.next_update_due.value = log.next_update_due ? toDatetimeLocal(log.next_update_due) : '';
   form.elements.description.value = log.description || '';
   form.elements.actions_taken.value = log.actions_taken || '';
@@ -10113,12 +10114,28 @@ function safeDateToLocale(value, options = {}) {
     : '-';
 }
 
+function parseMcoTimestamp(value) {
+  if (!value) return new Date(0);
+  const s = String(value);
+  if (s.includes('T') && !/[Z+\-]\d{2}:?\d{2}$/.test(s) && !s.endsWith('Z')) {
+    return new Date(s);
+  }
+  return new Date(value);
+}
+
+function formatMcoTimestamp(value, options = {}) {
+  const timestamp = parseMcoTimestamp(value);
+  return Number.isFinite(timestamp.getTime()) && timestamp.getTime() > 0
+    ? timestamp.toLocaleString('fr-FR', options)
+    : '-';
+}
+
 /**
  * Retourne un horodatage relatif lisible : "il y a 5 min", "il y a 2h", "hier"…
  * Utilisé dans la MCO pour rendre les entrées récentes immédiatement lisibles.
  */
 function timeAgo(value) {
-  const date = parseUtcTimestamp(value);
+  const date = parseMcoTimestamp(value);
   if (!Number.isFinite(date.getTime()) || date.getTime() <= 0) return '';
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
   if (seconds < 30)  return 'à l\'instant';
@@ -10132,7 +10149,7 @@ function timeAgo(value) {
 }
 
 function toDatetimeLocal(value) {
-  const date = new Date(value || 0);
+  const date = parseMcoTimestamp(value || 0);
   if (!Number.isFinite(date.getTime()) || date.getTime() <= 0) return '';
   const offset = date.getTimezoneOffset();
   const localDate = new Date(date.getTime() - (offset * 60000));
@@ -12841,7 +12858,7 @@ function buildLogTableRow(log = {}) {
   const level = normalizeLevel(log.danger_level || 'vert');
   const emoji = log.danger_emoji || LOG_LEVEL_EMOJI[level] || '🟢';
   const logTimestamp = log.event_time || log.created_at;
-  const timeAbsolute = new Date(logTimestamp).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+  const timeAbsolute = formatMcoTimestamp(logTimestamp, { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
   const timeRel = timeAgo(logTimestamp);
 
   const municipality = log.municipality_id ? escapeHtml(getMunicipalityName(log.municipality_id)) : '';
@@ -12880,7 +12897,7 @@ function generateMcoEventPdf() {
 
   const logs = [...cachedLogs]
     .filter((log) => String(log.event_id || '') === String(event.id))
-    .sort((a, b) => parseUtcTimestamp(a.event_time || a.created_at).getTime() - parseUtcTimestamp(b.event_time || b.created_at).getTime());
+    .sort((a, b) => parseMcoTimestamp(a.event_time || a.created_at).getTime() - parseMcoTimestamp(b.event_time || b.created_at).getTime());
 
   const isClosed = String(event.status || '').toLowerCase() === 'clos';
   const locality = event.municipality_id ? getMunicipalityName(event.municipality_id) : 'Départemental';
@@ -12892,11 +12909,11 @@ function generateMcoEventPdf() {
   const levelColor = levelColors[levelNorm] || '#2b8a3e';
   const levelBgColor = levelBg[levelNorm] || '#f0fff4';
 
-  const created = event.created_at ? new Date(event.created_at).toLocaleString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+  const created = event.created_at ? formatMcoTimestamp(event.created_at, { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
   const exportedAt = new Date().toLocaleString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
   const durationMs = logs.length >= 2
-    ? parseUtcTimestamp(logs[logs.length - 1].event_time || logs[logs.length - 1].created_at).getTime() - parseUtcTimestamp(logs[0].event_time || logs[0].created_at).getTime()
+    ? parseMcoTimestamp(logs[logs.length - 1].event_time || logs[logs.length - 1].created_at).getTime() - parseMcoTimestamp(logs[0].event_time || logs[0].created_at).getTime()
     : null;
   const durationText = durationMs !== null ? (() => {
     const h = Math.floor(durationMs / 3600000);
@@ -12910,8 +12927,7 @@ function generateMcoEventPdf() {
     const level = normalizeLevel(log.danger_level || 'vert');
     const emoji = log.danger_emoji || LOG_LEVEL_EMOJI[level] || '🟢';
     const dotColor = entryDotColor[level] || '#2b8a3e';
-    const ts = parseUtcTimestamp(log.event_time || log.created_at);
-    const timeStr = ts.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const timeStr = formatMcoTimestamp(log.event_time || log.created_at, { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
     const scope = formatLogScope(log);
     const municipality = log.municipality_id ? getMunicipalityName(log.municipality_id) : '';
     const scopeLabel = municipality ? `${scope} · ${escapeHtml(municipality)}` : scope;
@@ -13064,7 +13080,7 @@ function renderLogsList() {
     filtered = [];
   }
 
-  filtered.sort((a, b) => parseUtcTimestamp(b.event_time || b.created_at).getTime() - parseUtcTimestamp(a.event_time || a.created_at).getTime());
+  filtered.sort((a, b) => parseMcoTimestamp(b.event_time || b.created_at).getTime() - parseMcoTimestamp(a.event_time || a.created_at).getTime());
 
   setText('logs-count', String(filtered.length));
   setHtml('logs-table-stream', filtered.map((log) => buildLogTableRow(log)).join('')

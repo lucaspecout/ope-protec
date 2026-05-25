@@ -2754,6 +2754,7 @@ def update_log(
 
     payload["event_type"] = payload.get("event_type") or "MCO"
     payload["description"] = payload.get("description") or ""
+    payload["event_time"] = payload.get("event_time") or entry.event_time
 
     for key, value in payload.items():
         setattr(entry, key, value)
