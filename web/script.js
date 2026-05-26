@@ -2132,6 +2132,7 @@ function initMobileNav() {
       if (submitBtn) submitBtn.disabled = true;
       const created = await api('/events', {
         method: 'POST',
+        highPriority: true,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: String(form.get('title') || '').trim(),
@@ -2144,7 +2145,7 @@ function initMobileNav() {
       closeMobileMcoSheet();
       // Sélectionner le nouvel événement et aller sur la main courante
       if (created?.id) selectedOperationalEventId = String(created.id);
-      await loadEvents();
+      upsertCachedEvent(created);
       setActivePanel('logs-panel');
     } catch (err) {
       errorEl.textContent = sanitizeErrorMessage(err.message);
@@ -13116,6 +13117,62 @@ async function loadEvents(preloaded = null) {
   updateMenuEventsBadge();
 }
 
+function refreshMcoViews() {
+  populateEventOptions(cachedEvents);
+  renderEventsList();
+  updateEventDetailPanel();
+  renderLogsList();
+  renderSituationOverview();
+  updateMenuEventsBadge();
+}
+
+function upsertCachedEvent(event) {
+  if (!event || event.id == null) return;
+  const id = String(event.id);
+  const existing = Array.isArray(cachedEvents) ? cachedEvents : [];
+  const index = existing.findIndex((item) => String(item.id) === id);
+  cachedEvents = index >= 0
+    ? existing.map((item, itemIndex) => itemIndex === index ? { ...item, ...event } : item)
+    : [event, ...existing];
+  cachedEvents = sortOperationalEvents(cachedEvents).slice(0, 300);
+  saveSnapshot(STORAGE_KEYS.eventsSnapshot, cachedEvents);
+  refreshMcoViews();
+}
+
+function removeCachedEvent(eventId) {
+  const id = String(eventId || '');
+  cachedEvents = (Array.isArray(cachedEvents) ? cachedEvents : [])
+    .filter((event) => String(event.id) !== id);
+  cachedLogs = (Array.isArray(cachedLogs) ? cachedLogs : [])
+    .filter((log) => String(log.event_id || '') !== id);
+  saveSnapshot(STORAGE_KEYS.eventsSnapshot, cachedEvents);
+  saveSnapshot(STORAGE_KEYS.logsSnapshot, cachedLogs);
+  refreshMcoViews();
+}
+
+function upsertCachedLog(log) {
+  if (!log || log.id == null) return;
+  const id = String(log.id);
+  const existing = Array.isArray(cachedLogs) ? cachedLogs : [];
+  const index = existing.findIndex((item) => String(item.id) === id);
+  cachedLogs = index >= 0
+    ? existing.map((item, itemIndex) => itemIndex === index ? { ...item, ...log } : item)
+    : [log, ...existing];
+  cachedLogs = cachedLogs
+    .sort((a, b) => parseMcoTimestamp(b.created_at || b.event_time).getTime() - parseMcoTimestamp(a.created_at || a.event_time).getTime())
+    .slice(0, 200);
+  saveSnapshot(STORAGE_KEYS.logsSnapshot, cachedLogs);
+  refreshMcoViews();
+}
+
+function removeCachedLog(logId) {
+  const id = String(logId || '');
+  cachedLogs = (Array.isArray(cachedLogs) ? cachedLogs : [])
+    .filter((log) => String(log.id) !== id);
+  saveSnapshot(STORAGE_KEYS.logsSnapshot, cachedLogs);
+  refreshMcoViews();
+}
+
 async function exportLogsCsv() {
   const response = await queueApiRequest(() => fetchWithTimeout('/logs/export/csv', { headers: { Authorization: `Bearer ${token}` } }));
   if (!response.ok) throw new Error(`Export impossible (${response.status})`);
@@ -14054,28 +14111,33 @@ function bindAppInteractions() {
       if (eventStatusButton) {
         const eventId = eventStatusButton.getAttribute('data-event-status');
         const status = eventStatusButton.getAttribute('data-event-next');
-        await api(`/events/${eventId}`, {
+        const updatedEvent = await api(`/events/${eventId}`, {
           method: 'PATCH',
+          highPriority: true,
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ status }),
         });
-        await loadEvents();
+        upsertCachedEvent(updatedEvent);
+        return;
       }
 
       if (deleteButton) {
         const logId = deleteButton.getAttribute('data-log-delete');
         const confirmed = window.confirm('Supprimer cette entrée de main courante ?');
         if (!confirmed) return;
-        await api(`/logs/${logId}`, { method: 'DELETE' });
+        await api(`/logs/${logId}`, { method: 'DELETE', highPriority: true });
+        removeCachedLog(logId);
+        return;
       }
 
       if (deleteEventButton) {
         const eventId = deleteEventButton.getAttribute('data-event-delete');
         const confirmed = window.confirm('Supprimer cet évènement et toutes ses entrées MCO ?');
         if (!confirmed) return;
-        await api(`/events/${eventId}`, { method: 'DELETE' });
+        await api(`/events/${eventId}`, { method: 'DELETE', highPriority: true });
         if (String(selectedOperationalEventId) === String(eventId)) selectedOperationalEventId = null;
-        await loadEvents();
+        removeCachedEvent(eventId);
+        return;
       }
 
       if (editButton) {
@@ -14622,6 +14684,33 @@ function startHomeLiveRefresh() {
   homeLiveTimer = setInterval(loadHomeLiveStatus, HOME_LIVE_REFRESH_MS);
 }
 
+function hydrateAppFromSnapshots() {
+  const dashboard = readSnapshot(STORAGE_KEYS.dashboardSnapshot);
+  if (dashboard && typeof dashboard === 'object') {
+    cachedDashboardSnapshot = dashboard;
+    renderDashboard(dashboard);
+  }
+
+  const externalRisks = readSnapshot(STORAGE_KEYS.externalRisksSnapshot);
+  if (externalRisks && typeof externalRisks === 'object') {
+    cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, externalRisks);
+    renderExternalRisks(cachedExternalRisksSnapshot);
+    renderApiInterconnections(cachedExternalRisksSnapshot);
+  }
+
+  const events = readSnapshot(STORAGE_KEYS.eventsSnapshot);
+  if (Array.isArray(events)) cachedEvents = events;
+
+  const logs = readSnapshot(STORAGE_KEYS.logsSnapshot);
+  if (Array.isArray(logs)) cachedLogs = logs;
+
+  if (Array.isArray(cachedEvents) && cachedEvents.length && !selectedOperationalEventId) {
+    const firstOpen = sortOperationalEvents(cachedEvents).find((event) => String(event.status || '').toLowerCase() !== 'clos');
+    if (firstOpen) selectedOperationalEventId = String(firstOpen.id);
+  }
+  refreshMcoViews();
+}
+
 async function initializeAuthenticatedSession({ runRefreshInBackground = false } = {}) {
   document.getElementById('current-role').textContent = roleLabel(currentUser.role);
   document.getElementById('current-commune').textContent = currentUser.municipality_name || 'Toutes';
@@ -14635,6 +14724,7 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
   _updateNotifBtn();
   showApp();
   buildServiceCards();
+  hydrateAppFromSnapshots();
   initMobileNav();
   initMobileGeoLocate();
   startAgentMarkersPolling();
@@ -14934,15 +15024,18 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
       event_time: form.get('event_time') || new Date().toISOString(),
     };
     const editingLogId = event.target.dataset.editLogId;
+    let savedLog = null;
     if (editingLogId) {
-      await api(`/logs/${editingLogId}`, {
+      savedLog = await api(`/logs/${editingLogId}`, {
         method: 'PUT',
+        highPriority: true,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
     } else {
-      await api('/logs', {
+      savedLog = await api('/logs', {
         method: 'POST',
+        highPriority: true,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
@@ -14951,7 +15044,7 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
     resetLogFormState();
     if (errorTarget) errorTarget.textContent = '';
     syncLogScopeFields();
-    await loadLogs();
+    upsertCachedLog(savedLog);
   } catch (error) {
     if (errorTarget) errorTarget.textContent = sanitizeErrorMessage(error.message);
   }
@@ -14965,6 +15058,7 @@ document.getElementById('event-form')?.addEventListener('submit', async (event) 
   try {
     const createdEvent = await api('/events', {
       method: 'POST',
+      highPriority: true,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title: form.get('title'),
@@ -14976,7 +15070,7 @@ document.getElementById('event-form')?.addEventListener('submit', async (event) 
     event.target.reset();
     if (errorTarget) errorTarget.textContent = '';
     selectedOperationalEventId = createdEvent?.id ? String(createdEvent.id) : selectedOperationalEventId;
-    await loadEvents();
+    upsertCachedEvent(createdEvent);
   } catch (error) {
     if (errorTarget) errorTarget.textContent = sanitizeErrorMessage(error.message);
   }
@@ -14994,11 +15088,10 @@ document.getElementById('event-form')?.addEventListener('submit', async (event) 
 })();
 
 (async function bootstrap() {
-  // Purger les anciens caches navigateur — toutes les données viennent du serveur.
+  // Purger seulement les caches statiques/volumineux. Les snapshots opérationnels
+  // restent disponibles pour afficher l'accueil immédiatement pendant le refresh.
   [
-    'mapPointsCache', 'municipalitiesCache', 'eventsSnapshot', 'logsSnapshot',
-    'usersSnapshot', 'dashboardSnapshot', 'externalRisksSnapshot',
-    'apiInterconnectionsSnapshot', 'homeLiveSnapshot', 'serviceStatusHistory',
+    'mapPointsCache', 'municipalitiesCache',
     'staticInstitutionsCacheV3', 'staticFinessCacheV3', 'staticTelecomCacheV1',
     'staticMontagneCacheV1', 'staticHelipadCacheV1', 'staticBarrageCacheV1',
   ].forEach((k) => { try { localStorage.removeItem(k); } catch (_) {} });
