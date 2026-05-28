@@ -2894,6 +2894,19 @@ def _extract_service_level(key: str, data: dict) -> str:
     return raw if raw in _LEVEL_ORDER else "vert"
 
 
+def _latest_news_fingerprint(data: dict) -> tuple[str | None, dict | None]:
+    """Retourne une signature stable de la dernière actualité d'un flux presse/RSS."""
+    items = data.get("items") or data.get("articles") or []
+    if not items:
+        return None, None
+    latest = items[0] if isinstance(items[0], dict) else {}
+    title = str(latest.get("title") or latest.get("headline") or "").strip()
+    link = str(latest.get("link") or latest.get("url") or "").strip()
+    published = str(latest.get("published_at") or latest.get("date") or latest.get("pubDate") or "").strip()
+    fingerprint = "|".join(part for part in (link, published, title) if part)
+    return (fingerprint or None), latest
+
+
 def _build_discord_embed(service_key: str, level: str, data: dict, reason: str = "") -> dict:
     """Construit le payload Discord (embed riche) pour une alerte."""
     label = _SERVICE_LABELS.get(service_key, service_key)
@@ -2913,6 +2926,7 @@ def _build_discord_embed(service_key: str, level: str, data: dict, reason: str =
     if reason:
         desc_map = {
             "nouvelle alerte": "🆕 Nouvelle alerte déclenchée",
+            "nouvelle actualité": "🆕 Nouvelle actualité détectée",
             "retour alerte après retour au vert": "🔁 Alerte réapparue après retour au vert",
         }
         desc_reason = desc_map.get(reason) or f"📢 {reason.capitalize()}"
@@ -3228,6 +3242,7 @@ def _check_and_send_notifications(service_key: str, data: dict) -> None:
     - Même niveau déjà notifié → envoie seulement si cooldown expiré
     - Alerte revenue au vert puis réapparue → envoie immédiatement (reset détecté)
     - De-escalade (rouge → orange, toujours ≥ seuil) → envoie après cooldown
+    - Préfecture : envoie uniquement quand la dernière actualité change
 
     Clés Redis utilisées :
     - notif:state:{rule_id}:{service_key} → JSON {"notified_level":"orange","seen_below":false,"notified_at":"..."}
@@ -3267,6 +3282,51 @@ def _check_and_send_notifications(service_key: str, data: dict) -> None:
                             state = json.loads(raw.decode() if isinstance(raw, bytes) else raw)
                         except Exception:
                             state = {}
+
+                if service_key == "prefecture_isere":
+                    latest_fingerprint, latest_item = _latest_news_fingerprint(data)
+                    if not latest_fingerprint:
+                        continue
+
+                    previous_fingerprint = str(state.get("latest_fingerprint") or "")
+                    if not previous_fingerprint:
+                        if _REDIS_OK and _redis is not None:
+                            _redis.setex(state_key, 30 * 86400, json.dumps({
+                                **state,
+                                "latest_fingerprint": latest_fingerprint,
+                                "latest_title": (latest_item or {}).get("title") or (latest_item or {}).get("headline") or "",
+                                "last_seen_at": now_utc.isoformat(),
+                            }))
+                        continue
+
+                    if previous_fingerprint == latest_fingerprint:
+                        continue
+
+                    reason = "nouvelle actualité"
+                    embed_payload = _build_discord_embed(service_key, "jaune", data, reason=reason)
+                    ok, detail = _send_discord_webhook(webhook_url, embed_payload)
+                    log_entry = {
+                        "rule_id": rule_id,
+                        "rule_name": rule.get("name", ""),
+                        "service": service_key,
+                        "label": _SERVICE_LABELS.get(service_key, service_key),
+                        "level": "jaune",
+                        "reason": reason,
+                        "sent_at": now_utc.isoformat() + "Z",
+                        "success": ok,
+                        "detail": detail,
+                    }
+                    _save_notif_log(log_entry)
+
+                    if _REDIS_OK and _redis is not None:
+                        _redis.setex(state_key, 30 * 86400, json.dumps({
+                            **state,
+                            "latest_fingerprint": latest_fingerprint,
+                            "latest_title": (latest_item or {}).get("title") or (latest_item or {}).get("headline") or "",
+                            "notified_at": now_utc.isoformat(),
+                            "last_seen_at": now_utc.isoformat(),
+                        }))
+                    continue
 
                 notified_level = str(state.get("notified_level") or "vert")
                 seen_below = bool(state.get("seen_below", True))  # True = était sous le seuil

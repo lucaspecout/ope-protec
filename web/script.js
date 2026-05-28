@@ -15169,7 +15169,7 @@ const _NOTIF_SERVICES = [
   { key: 'ter_aura',              label: 'TER SNCF · AURA',            icon: '🚄', cat: 'Transport' },
   { key: 'mreseau',               label: 'M Réseau · Grenoble',        icon: '🚊', cat: 'Transport' },
   { key: 'cars_region_aura',      label: 'Cars Région · AURA',         icon: '🚐', cat: 'Transport' },
-  { key: 'prefecture_isere',      label: 'Préfecture Isère',           icon: '🏛️', cat: 'Actualités' },
+  { key: 'prefecture_isere',      label: 'Préfecture Isère',           icon: '🏛️', cat: 'Actualités', notifyOnNew: true },
   { key: 'france_bleu_isere',     label: 'France Bleu Isère',          icon: '📻', cat: 'Actualités' },
 ];
 
@@ -15224,15 +15224,16 @@ function _notifRuleCardHtml(rule) {
   const svcRows = _NOTIF_SERVICES.map(svc => {
     const cfg = svcs[svc.key] || {};
     const checked = cfg.enabled ? 'checked' : '';
-    const optionsHtml = _NOTIF_LEVELS.map(l =>
-      `<option value="${l.value}" ${cfg.threshold === l.value ? 'selected' : ''}>${l.label}</option>`
-    ).join('');
+    const thresholdCell = svc.notifyOnNew
+      ? `<span style="display:inline-flex;align-items:center;gap:.3rem;font-size:.78rem;padding:.2rem .45rem;border-radius:999px;background:#edf3ff;color:#1a3568;font-weight:600">🆕 Nouvelle actualité</span>
+         <input type="hidden" data-svc-key="${escapeHtml(svc.key)}" class="nrs-threshold" value="jaune" />`
+      : `<select data-svc-key="${escapeHtml(svc.key)}" class="nrs-threshold"
+          style="font-size:.78rem;padding:.2rem .35rem;border:1.5px solid #d1d9e0;border-radius:6px;background:#fff">${_NOTIF_LEVELS.map(l =>
+            `<option value="${l.value}" ${cfg.threshold === l.value ? 'selected' : ''}>${l.label}</option>`
+          ).join('')}</select>`;
     return `<tr>
       <td style="padding:.35rem .5rem;font-size:.83rem">${svc.icon} ${escapeHtml(svc.label)}</td>
-      <td style="padding:.35rem .5rem">
-        <select data-svc-key="${escapeHtml(svc.key)}" class="nrs-threshold"
-          style="font-size:.78rem;padding:.2rem .35rem;border:1.5px solid #d1d9e0;border-radius:6px;background:#fff">${optionsHtml}</select>
-      </td>
+      <td style="padding:.35rem .5rem">${thresholdCell}</td>
       <td style="padding:.35rem .5rem;text-align:center">
         <input type="checkbox" data-svc-key="${escapeHtml(svc.key)}" class="nrs-svc-chk" ${checked} />
       </td>
