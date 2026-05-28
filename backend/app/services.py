@@ -1218,7 +1218,7 @@ def _fetch_geodae_isere_live(limit: int = 5000) -> dict[str, Any]:
     working_total = 0
     outside_24h_total = 0
     page = 1
-    page_size = min(500, safe_limit)
+    page_size = min(200, safe_limit)
     while len(points) < safe_limit:
         query = urlencode({
             "c_com_insee__contains": "38",
