@@ -13,6 +13,7 @@ const STORAGE_KEYS = {
   homeLiveSnapshot: 'homeLiveSnapshot',
   staticInstitutionsCache: 'staticInstitutionsCacheV3',
   staticFinessCache: 'staticFinessCacheV3',
+  staticDaeCache: 'staticDaeCacheV1',
   staticTelecomCache: 'staticTelecomCacheV1',
   staticMontagneCache: 'staticMontagneCacheV1',
   staticHelipadCache: 'staticHelipadCacheV1',
@@ -74,6 +75,8 @@ const FLUX_SERVICES = [
   { key: 'arcep_isere',            label: 'ARCEP · Sites mobiles',     icon: '📶', category: 'Télécom',       interval: 600,   metric: (d) => `${d.outages_total ?? 0} indisponibilité(s)` },
   { key: 'isere_opendata',         label: 'Isère OpenData · Résilience', icon: '📊', category: 'Données',    interval: 1800,  metric: (d) => `${d.totals?.schools ?? 0} écoles · ${d.totals?.health_centers ?? 0} santé · ${d.totals?.food_aid_points ?? 0} aide alim.` },
   { key: 'finess_isere',           label: 'FINESS · Établissements santé', icon: '🏥', category: 'Santé',    interval: 21600, metric: (d) => `${d.resources_total ?? 0} établissement(s)` },
+  { key: 'geodae_isere',           label: "Geo'DAE - Defibrillateurs", icon: 'DAE', category: 'Sante', interval: 21600, metric: (d) => `${d.resources_total ?? 0} DAE - ${d.available_24h_total ?? 0} 24h/24` },
+  { key: 'enedis_outage_quality',  label: 'Enedis - Coupures BT', icon: 'E', category: 'Energie', interval: 21600, metric: (d) => d.bt_duration?.total_minutes != null ? `${d.latest_year || ''} - ${d.bt_duration.total_minutes} min/client` : 'Indicateur annuel' },
 ];
 const AUTOROUTES_ISERE_ROADS = Object.freeze(['A41', 'A43', 'A48', 'A49', 'A51', 'A480']);
 const AUTOROUTES_ISERE_ROAD_SET = new Set(AUTOROUTES_ISERE_ROADS);
@@ -134,6 +137,7 @@ const RESOURCE_TYPE_META = {
   site_sensible_custom: { label: 'Site sensible (ajouté)', icon: '⚠️' },
   anfr_antenna: { label: 'Antenne ANFR', icon: '📡' },
   arcep_mobile_outage: { label: 'Site mobile indisponible (ARCEP)', icon: '🔴' },
+  defibrillateur: { label: 'Defibrillateur automatise externe', icon: '⚡' },
 };
 
 const RESOURCE_POINTS = [
@@ -379,6 +383,8 @@ let verifiedHostingLoaded = false;
 let finessPointsCache = [];
 let finessLoaded = false;
 let finessTypeCounts = {};
+let daePointsCache = [];
+let daeLoaded = false;
 let iserePopulationPointsCache = [];
 let iserePopulationLoaded = false;
 let iserePopulationByInseeCache = new Map();
@@ -888,6 +894,7 @@ const SCHOOL_RESOURCE_TYPES = new Set(['ecole_primaire', 'college', 'lycee', 'un
 const SECURITY_RESOURCE_TYPES = new Set(['gendarmerie', 'commissariat_police_nationale', 'police_municipale']);
 const FIRE_RESOURCE_TYPES = new Set(['caserne_pompier', 'caserne']);
 const HEALTH_RESOURCE_TYPES = new Set(['hopital', 'hopital_public', 'hopital_prive', 'chu', 'clinique', 'medecin', 'ehpad']);
+const DAE_RESOURCE_TYPES = new Set(['defibrillateur']);
 const HEALTH_URGENT_CARE_TYPES = new Set(['chu', 'hopital', 'hopital_public', 'hopital_prive', 'clinique']);
 const FINESS_DYNAMIC_RESOURCE_TYPES = new Set();
 const RISK_RESOURCE_TYPES = new Set(['lieu_risque', 'centrale_nucleaire', 'energie', 'site_sensible_custom']);
@@ -4270,6 +4277,7 @@ async function resetMapFilters() {
   const cameras = document.getElementById('filter-cameras');
   const googleFlow = document.getElementById('filter-google-traffic-flow');
   const healthResources = document.getElementById('filter-resources-health');
+  const daeResources = document.getElementById('filter-resources-dae');
   const commandResources = document.getElementById('filter-resources-command');
   const hostingResources = document.getElementById('filter-resources-hosting');
   const hostingSanitary = document.getElementById('filter-resources-hosting-sanitary');
@@ -4287,6 +4295,7 @@ async function resetMapFilters() {
   if (trafficIncidents) trafficIncidents.checked = true;
   if (cameras) cameras.checked = true;
   if (healthResources) healthResources.checked = false;
+  if (daeResources) daeResources.checked = false;
   if (commandResources) commandResources.checked = true;
   if (hostingResources) hostingResources.checked = false;
   if (hostingSanitary) hostingSanitary.checked = false;
@@ -4840,6 +4849,7 @@ function shouldDisplayBaseResourceType(type = '', resource = null) {
     return securityTypeFilter === 'all' || securityTypeFilter === type;
   }
   if (FIRE_RESOURCE_TYPES.has(type)) return document.getElementById('filter-resources-fire')?.checked ?? false;
+  if (DAE_RESOURCE_TYPES.has(type)) return document.getElementById('filter-resources-dae')?.checked ?? false;
   if (RISK_RESOURCE_TYPES.has(type)) {
     const risksEnabled = document.getElementById('filter-resources-risks')?.checked ?? false;
     const risksTypeFilter = document.getElementById('filter-resources-risks-type')?.value || 'all';
@@ -5086,6 +5096,47 @@ async function loadFinessIsereResources() {
   return finessPointsCache;
 }
 
+async function loadDaeIsereResources() {
+  if (daeLoaded) return daePointsCache;
+  const cached = readFreshSnapshot(STORAGE_KEYS.staticDaeCache, STATIC_POINTS_CACHE_TTL_MS);
+  if (Array.isArray(cached) && cached.length > 0) {
+    daePointsCache = cached;
+    daeLoaded = true;
+    return daePointsCache;
+  }
+  try {
+    const payload = await api('/api/geodae/isere/defibrillators?limit=20000', { cacheTtlMs: 6 * 60 * 60 * 1000 });
+    const resources = Array.isArray(payload?.resources) ? payload.resources : [];
+    daePointsCache = filterIserePoints(resources)
+      .map((resource) => {
+        const lat = Number(resource?.lat);
+        const lon = Number(resource?.lon);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+        return {
+          id: String(resource?.id || `geodae-${Math.random().toString(36).slice(2)}`),
+          name: String(resource?.name || 'Defibrillateur automatise externe'),
+          type: 'defibrillateur',
+          lat,
+          lon,
+          active: true,
+          address: String(resource?.address || resource?.city || 'Adresse non renseignee'),
+          priority: String(resource?.priority || 'vital'),
+          info: String(resource?.info || "Source Geo'DAE data.gouv.fr"),
+          source: String(resource?.source || 'https://www.data.gouv.fr/fr/datasets/geodae-base-nationale-des-defibrillateurs/'),
+          details: resource?.details && typeof resource.details === 'object' ? resource.details : null,
+          dynamic: true,
+        };
+      })
+      .filter(Boolean);
+    if (daePointsCache.length > 0) saveSnapshot(STORAGE_KEYS.staticDaeCache, daePointsCache);
+  } catch {
+    const stale = readSnapshot(STORAGE_KEYS.staticDaeCache);
+    daePointsCache = Array.isArray(stale) ? stale : [];
+  }
+  daeLoaded = true;
+  return daePointsCache;
+}
+
 function slugifyFinessCategory(value = '') {
   return value
     .normalize('NFD')
@@ -5195,6 +5246,30 @@ function formatFinessDetailsHtml(resource = {}) {
     ['Date ouverture', details.date_ouverture],
     ['Date autorisation', details.date_autorisation],
     ['Date maj FINESS', details.date_maj],
+  ]
+    .filter(([, value]) => String(value || '').trim())
+    .map(([label, value]) => `<li><strong>${escapeHtml(label)}:</strong> ${escapeHtml(String(value))}</li>`)
+    .join('');
+  return entries ? `<ul class="popup-details-list">${entries}</ul>` : '';
+}
+
+function formatDaeDetailsHtml(resource = {}) {
+  if (String(resource?.type || '') !== 'defibrillateur') return '';
+  const details = resource?.details && typeof resource.details === 'object' ? resource.details : {};
+  const access24h = details.access_24h === true ? 'Oui' : details.access_24h === false ? 'Non' : '';
+  const entries = [
+    ['Commune', details.commune],
+    ['Acces', details.access_type],
+    ['Accessible 24h/24', access24h],
+    ['Jours', details.available_days],
+    ['Horaires', details.available_hours],
+    ['Emplacement', details.access_detail],
+    ['Etage', details.floor],
+    ['Etat', details.state],
+    ['Fonctionnement', resource.info],
+    ['Derniere maintenance', details.last_maintenance],
+    ['MAJ donnees', details.data_updated_at],
+    ['Exploitant', details.operator],
   ]
     .filter(([, value]) => String(value || '').trim())
     .map(([label, value]) => `<li><strong>${escapeHtml(label)}:</strong> ${escapeHtml(String(value))}</li>`)
@@ -5477,7 +5552,7 @@ function getDisplayedResources() {
     .filter((r) => !query || `${r.name} ${r.address}`.toLowerCase().includes(query))
     .map((r) => ({ ...r, dynamic: false }));
   const osmNonHostingInstitutions = institutionPointsCache.filter((r) => !HOSTING_RESOURCE_TYPES.has(String(r.type || '')));
-  const dynamicResources = [...osmNonHostingInstitutions, ...verifiedHostingPointsCache, ...finessPointsCache, ...telecomPointsCache]
+  const dynamicResources = [...osmNonHostingInstitutions, ...verifiedHostingPointsCache, ...finessPointsCache, ...daePointsCache, ...telecomPointsCache]
     .filter((r) => r.type)
     // Exclure les doublons avec les données statiques hébergement (même id)
     .filter((r) => !hostingStatic.some((h) => h.id === r.id))
@@ -5500,7 +5575,7 @@ function getResourcesForZoneImpact() {
     .filter((resource) => !HOSTING_RESOURCE_TYPES.has(String(resource.type || '')))
     .map((resource) => ({ ...resource, dynamic: false }));
   const osmNonHostingInstitutions = institutionPointsCache.filter((r) => !HOSTING_RESOURCE_TYPES.has(String(r.type || '')));
-  const dynamicResources = [...osmNonHostingInstitutions, ...verifiedHostingPointsCache, ...finessPointsCache, ...telecomPointsCache]
+  const dynamicResources = [...osmNonHostingInstitutions, ...verifiedHostingPointsCache, ...finessPointsCache, ...daePointsCache, ...telecomPointsCache]
     .filter((r) => !hostingStatic.some((h) => h.id === r.id));
   return [...staticResources, ...dynamicResources];
 }
@@ -5517,11 +5592,12 @@ function syncTelecomFilterState() {
 // ─── Flags anti double-lancement des loaders statiques ───────────────────────
 let _institutionsLoadInFlight = false;
 let _finessLoadInFlight = false;
+let _daeLoadInFlight = false;
 let _telecomLoadInFlight = false;
 
 /** Retourne true si au moins un loader de données statiques est encore en cours. */
 function _staticDataLoading() {
-  return _institutionsLoadInFlight || _finessLoadInFlight || _telecomLoadInFlight;
+  return _institutionsLoadInFlight || _finessLoadInFlight || _daeLoadInFlight || _telecomLoadInFlight;
 }
 
 /**
@@ -5549,6 +5625,7 @@ function _drawResourceMarkers() {
       <span class="muted">${meta.label} · ${statusLabel} · ${priorityLabel[r.priority] || 'standard'}</span><br/>
       <span class="muted">${escapeHtml(r.info || 'Aucune information complémentaire.')}</span><br/>
       ${formatHostingDetailsHtml(r)}
+      ${formatDaeDetailsHtml(r)}
       <a href="${escapeHtml(r.source || '#')}" target="_blank" rel="noreferrer">Source</a>
       ${toggleButton}
     </li>`;
@@ -5572,7 +5649,7 @@ function _drawResourceMarkers() {
     window.L.marker([coords.lat, coords.lon], {
       icon: window.L.divIcon({ className: 'map-resource-icon-wrap', html: markerHtml, iconSize: [24, 24], iconAnchor: [12, 12] }),
     })
-      .bindPopup(`<strong>${meta.icon} ${r.name}</strong><br>Type: ${meta.label}<br>Niveau: ${priorityLabel[r.priority] || 'standard'}<br>Adresse: ${r.address}<br>${escapeHtml(r.info || '')}${formatHostingDetailsHtml(r)}${formatFinessDetailsHtml(r)}<br><a href="${escapeHtml(r.source || '#')}" target="_blank" rel="noreferrer">Source publique</a>`)
+      .bindPopup(`<strong>${meta.icon} ${r.name}</strong><br>Type: ${meta.label}<br>Niveau: ${priorityLabel[r.priority] || 'standard'}<br>Adresse: ${r.address}<br>${escapeHtml(r.info || '')}${formatHostingDetailsHtml(r)}${formatFinessDetailsHtml(r)}${formatDaeDetailsHtml(r)}<br><a href="${escapeHtml(r.source || '#')}" target="_blank" rel="noreferrer">Source publique</a>`)
       .addTo(resourceLayer);
   });
 
@@ -5689,6 +5766,12 @@ function _ensureStaticDataLoaded() {
     loadFinessIsereResources()
       .then(() => { _finessLoadInFlight = false; _drawResourceMarkers(); })
       .catch(() => { _finessLoadInFlight = false; });
+  }
+  if (!daeLoaded && !_daeLoadInFlight) {
+    _daeLoadInFlight = true;
+    loadDaeIsereResources()
+      .then(() => { _daeLoadInFlight = false; _drawResourceMarkers(); })
+      .catch(() => { _daeLoadInFlight = false; });
   }
   if (!telecomLoaded && !_telecomLoadInFlight) {
     _telecomLoadInFlight = true;
@@ -11897,6 +11980,8 @@ const SVC_CARD_META = {
   arcep_isere:           { statusId: 'arcep-status',           infoId: 'arcep-info',           url: 'https://www.data.gouv.fr/fr/datasets/sites-indisponibles/' },
   isere_opendata:        { statusId: 'opendata-status',        infoId: 'opendata-info',        url: 'https://opendata.isere.fr' },
   finess_isere:          { statusId: 'finess-status',          infoId: 'finess-info',          url: 'https://www.data.gouv.fr/datasets/finess-extraction-du-fichier-des-etablissements' },
+  geodae_isere:          { statusId: 'geodae-status',          infoId: 'geodae-info',          url: 'https://www.data.gouv.fr/fr/datasets/geodae-base-nationale-des-defibrillateurs/' },
+  enedis_outage_quality: { statusId: 'enedis-outage-status',   infoId: 'enedis-outage-info',   url: 'https://opendata.enedis.fr/datasets/duree-moyenne-de-coupure-bt/' },
   ter_aura:              { statusId: 'ter-aura-status',        infoId: 'ter-aura-info',        url: 'https://www.ter.sncf.com/auvergne-rhone-alpes/se-deplacer/info-trafic' },
   mreseau:               { statusId: 'mreseau-status',         infoId: 'mreseau-info',         url: 'https://www.reso-m.fr/55-infotrafic.htm' },
   cars_region_aura:      { statusId: 'cars-region-status',     infoId: 'cars-region-info',     url: 'https://www.laregionvoustransporte.fr/fr/votre-region/infos-trafic' },
@@ -14341,11 +14426,11 @@ function bindAppInteractions() {
     'filter-resources-security', 'filter-resources-security-type',
     'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type',
     'filter-resources-transport', 'filter-resources-transport-type',
-    'filter-resources-health', 'filter-resources-health-type',
+    'filter-resources-health', 'filter-resources-health-type', 'filter-resources-dae',
     'filter-resources-telecom', 'filter-resources-telecom-type',
     'filter-resources-active', 'filter-resources-protcivile',
   ]);
-  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type', 'filter-resources-hosting-capacity', 'filter-resources-hosting-surface', 'filter-resources-hosting-accessibility', 'filter-resources-hosting-sanitary', 'filter-resources-hosting-heating', 'filter-resources-hosting-parking', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-resources-protcivile', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras', 'filter-autoroutes', 'filter-autoroutes-type', 'filter-pr-autoroutes'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type', 'filter-resources-hosting-capacity', 'filter-resources-hosting-surface', 'filter-resources-hosting-accessibility', 'filter-resources-hosting-sanitary', 'filter-resources-hosting-heating', 'filter-resources-hosting-parking', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-dae', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-resources-protcivile', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras', 'filter-autoroutes', 'filter-autoroutes-type', 'filter-pr-autoroutes'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       if (RESOURCE_ONLY_FILTERS.has(id)) {
         // Rendu immédiat depuis le cache

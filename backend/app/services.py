@@ -477,6 +477,10 @@ _SNCF_ISERE_CACHE_TTL_SECONDS = 180
 _FINESS_ISERE_CACHE_TTL_SECONDS = 43200
 _FINESS_ISERE_MAX_LIMIT = 20000
 _FINESS_ISERE_STABLE_CSV_URL = "https://static.data.gouv.fr/resources/finess-extraction-du-fichier-des-etablissements/20260312-094547/etalab-cs1100507-stock-20260311-0343.csv"
+_GEODAE_ISERE_CACHE_TTL_SECONDS = 21600
+_GEODAE_ISERE_MAX_LIMIT = 20000
+_GEODAE_CSV_URL = "https://www.data.gouv.fr/api/1/datasets/r/edb6a9e1-2f16-4bbf-99e7-c3eb6b90794c"
+_ENEDIS_OUTAGE_QUALITY_CACHE_TTL_SECONDS = 21600
 _ISERE_OPENDATA_CACHE_TTL_SECONDS = 1800
 _ANNUAIRE_ADMINISTRATION_CACHE_TTL_SECONDS = 21600
 _ANFR_ISERE_CACHE_TTL_SECONDS = 43200
@@ -528,6 +532,10 @@ _sncf_isere_cache_lock = Lock()
 _sncf_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "sncf_isere"}
 _finess_isere_cache_lock = Lock()
 _finess_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "finess_isere"}
+_geodae_isere_cache_lock = Lock()
+_geodae_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "geodae_isere"}
+_enedis_outage_quality_cache_lock = Lock()
+_enedis_outage_quality_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "enedis_outage_quality"}
 _annuaire_administration_cache_lock = Lock()
 _annuaire_administration_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "annuaire_administration_isere"}
 _finess_isere_communes_lock = Lock()
@@ -1121,6 +1129,254 @@ def fetch_verified_hosting_isere(force_refresh: bool = False, limit: int = 2000)
         _verified_hosting_isere_cache["payload"] = result
         _verified_hosting_isere_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_VERIFIED_HOSTING_ISERE_CACHE_TTL_SECONDS)
     return result
+
+
+def _geodae_bool(value: Any) -> bool | None:
+    text = str(value or "").strip().lower()
+    if text in {"t", "true", "1", "oui", "yes"}:
+        return True
+    if text in {"f", "false", "0", "non", "no"}:
+        return False
+    return None
+
+
+def _geodae_address(row: dict[str, Any]) -> str:
+    parts = [
+        row.get("c_adr_num"),
+        row.get("c_adr_voie"),
+        row.get("c_com_cp"),
+        row.get("c_com_nom"),
+    ]
+    return re.sub(r"\s+", " ", " ".join(str(part).strip() for part in parts if str(part or "").strip())).strip()
+
+
+def _geodae_row_to_point(row: dict[str, Any]) -> dict[str, Any] | None:
+    insee = str(row.get("c_com_insee") or "").strip()
+    postcode = str(row.get("c_com_cp") or "").strip()
+    if not (insee.startswith("38") or postcode.startswith("38")):
+        return None
+    try:
+        lat = float(str(row.get("c_lat_coor1") or "").replace(",", "."))
+        lon = float(str(row.get("c_long_coor1") or "").replace(",", "."))
+    except (TypeError, ValueError):
+        return None
+    if not _is_isere_coordinate(lat, lon):
+        return None
+
+    dae_status = str(row.get("c_etat_fonct") or "").strip()
+    access_type = str(row.get("c_acc") or "").strip()
+    access_24h = _geodae_bool(row.get("c_acc_acc"))
+    days = str(row.get("c_disp_j") or "").strip("{} ").replace(",", ", ")
+    hours = str(row.get("c_disp_h") or "").strip("{} ").replace('""', '"')
+    details = {
+        "gid": str(row.get("gid") or "").strip(),
+        "commune": str(row.get("c_com_nom") or "").strip(),
+        "insee": insee,
+        "postcode": postcode,
+        "access_type": access_type,
+        "access_24h": access_24h,
+        "floor": str(row.get("c_acc_etg") or "").strip(),
+        "access_detail": str(row.get("c_acc_complt") or "").strip(),
+        "available_days": days,
+        "available_hours": hours,
+        "installed_at": str(row.get("c_date_instal") or "").strip(),
+        "maintenance_frequency": str(row.get("c_freq_mnt") or "").strip(),
+        "last_maintenance": str(row.get("c_dermnt") or "").strip(),
+        "operator": str(row.get("c_expt_rais") or "").strip(),
+        "data_updated_at": str(row.get("c__edit_datemaj") or row.get("c_maj_don") or "").strip(),
+        "state": str(row.get("c_etat") or "").strip(),
+    }
+    access_label = "24h/24" if access_24h is True else (hours or "horaires non renseignes")
+    location_detail = details["access_detail"] or details["floor"]
+    info_parts = [
+        "Source Geo'DAE data.gouv.fr",
+        dae_status or "etat non renseigne",
+        access_type,
+        access_label,
+        location_detail,
+    ]
+    return {
+        "id": f"geodae-{details['gid'] or row.get('c_gid') or len(str(row))}",
+        "name": str(row.get("c_nom") or "Defibrillateur automatise externe").strip(),
+        "type": "defibrillateur",
+        "lat": lat,
+        "lon": lon,
+        "active": True,
+        "address": _geodae_address(row) or details["commune"] or "Adresse non renseignee",
+        "priority": "critical" if access_24h is True else "vital",
+        "source": "https://www.data.gouv.fr/fr/datasets/geodae-base-nationale-des-defibrillateurs/",
+        "info": " | ".join(part for part in info_parts if part)[:300],
+        "city": details["commune"],
+        "postal_code": postcode,
+        "dynamic": True,
+        "details": details,
+    }
+
+
+def _fetch_geodae_isere_live(limit: int = 5000) -> dict[str, Any]:
+    safe_limit = max(1, min(int(limit or 5000), _GEODAE_ISERE_MAX_LIMIT))
+    request = Request(_GEODAE_CSV_URL, headers={"User-Agent": "ope-protec/1.0"})
+    points: list[dict[str, Any]] = []
+    total_isere = 0
+    working_total = 0
+    outside_24h_total = 0
+    with urlopen(request, timeout=120) as response:
+        text_stream = io.TextIOWrapper(response, encoding="utf-8-sig", errors="ignore", newline="")
+        reader = csv.DictReader(text_stream, delimiter=";")
+        for row in reader:
+            postcode = str(row.get("c_com_cp") or "").strip()
+            insee = str(row.get("c_com_insee") or "").strip()
+            if not (postcode.startswith("38") or insee.startswith("38")):
+                continue
+            total_isere += 1
+            if "fonctionnement" in str(row.get("c_etat_fonct") or "").lower():
+                working_total += 1
+            if _geodae_bool(row.get("c_acc_acc")) is True:
+                outside_24h_total += 1
+            if len(points) >= safe_limit:
+                continue
+            point = _geodae_row_to_point(row)
+            if point:
+                points.append(point)
+
+    return {
+        "status": "online",
+        "source": "Geo'DAE - Base Nationale des Defibrillateurs",
+        "dataset_url": "https://www.data.gouv.fr/fr/datasets/geodae-base-nationale-des-defibrillateurs/",
+        "csv_url": _GEODAE_CSV_URL,
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+        "dae_total": total_isere,
+        "working_total": working_total,
+        "available_24h_total": outside_24h_total,
+        "resources_total": len(points),
+        "resources": points,
+    }
+
+
+_GEODAE_FILE = "geodae_isere.json"
+
+
+def fetch_geodae_isere_defibrillators(force_refresh: bool = False, limit: int = 5000) -> dict[str, Any]:
+    safe_limit = max(1, min(int(limit or 5000), _GEODAE_ISERE_MAX_LIMIT))
+    if not force_refresh:
+        with _geodae_isere_cache_lock:
+            cached_payload = _geodae_isere_cache.get("payload")
+            if cached_payload and datetime.utcnow() < (_geodae_isere_cache.get("expires_at") or datetime.min):
+                return deepcopy(cached_payload)
+        file_data = _file_cache_load(_GEODAE_FILE)
+        if file_data and file_data.get("resources"):
+            resources = file_data.get("resources") or []
+            if len(resources) > safe_limit:
+                file_data = dict(file_data)
+                file_data["resources"] = resources[:safe_limit]
+                file_data["resources_total"] = len(file_data["resources"])
+            with _geodae_isere_cache_lock:
+                _geodae_isere_cache["payload"] = file_data
+                _geodae_isere_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_GEODAE_ISERE_CACHE_TTL_SECONDS)
+            return file_data
+
+    def loader() -> dict[str, Any]:
+        try:
+            result = _fetch_geodae_isere_live(limit=safe_limit)
+            if result.get("status") == "online" and result.get("resources"):
+                _file_cache_save(_GEODAE_FILE, result)
+            return result
+        except Exception as exc:
+            file_data = _file_cache_load(_GEODAE_FILE)
+            if file_data and file_data.get("resources"):
+                return file_data
+            return {
+                "status": "degraded",
+                "source": "Geo'DAE - Base Nationale des Defibrillateurs",
+                "dataset_url": "https://www.data.gouv.fr/fr/datasets/geodae-base-nationale-des-defibrillateurs/",
+                "updated_at": datetime.utcnow().isoformat() + "Z",
+                "dae_total": 0,
+                "working_total": 0,
+                "available_24h_total": 0,
+                "resources_total": 0,
+                "resources": [],
+                "error": str(exc),
+            }
+
+    return _cached_external_payload(
+        cache=_geodae_isere_cache,
+        lock=_geodae_isere_cache_lock,
+        ttl_seconds=_GEODAE_ISERE_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=loader,
+    )
+
+
+def _enedis_latest_record(dataset_id: str) -> dict[str, Any]:
+    query = urlencode({"order_by": "annee desc", "limit": 1})
+    payload = _http_get_json(
+        f"https://opendata.enedis.fr/api/explore/v2.1/catalog/datasets/{dataset_id}/records?{query}",
+        timeout=20,
+    )
+    rows = payload.get("results") if isinstance(payload, dict) else []
+    return rows[0] if isinstance(rows, list) and rows else {}
+
+
+def _enedis_float(row: dict[str, Any], key: str) -> float | None:
+    try:
+        return float(row.get(key))
+    except (TypeError, ValueError):
+        return None
+
+
+def fetch_enedis_outage_quality(force_refresh: bool = False) -> dict[str, Any]:
+    def loader() -> dict[str, Any]:
+        duration_bt = _enedis_latest_record("duree-moyenne-de-coupure-bt")
+        frequency_bt = _enedis_latest_record("frequence-moyenne-de-coupure-par-client-bt")
+        planned_minutes = _enedis_float(duration_bt, "duree_annuelle_moyenne_de_coupure_planifiees_par_client_minutes")
+        unplanned_minutes = _enedis_float(duration_bt, "duree_annuelle_moyenne_de_coupure_non_planifiees_par_client_minutes")
+        planned_long_outages = _enedis_float(frequency_bt, "frequence_moyenne_de_coupure_longue_planifiee_par_client_bt")
+        unplanned_long_outages = _enedis_float(frequency_bt, "frequence_moyenne_de_coupure_longue_non_planifiee_par_client_bt")
+        long_outages = (
+            round((planned_long_outages or 0) + (unplanned_long_outages or 0), 3)
+            if planned_long_outages is not None or unplanned_long_outages is not None
+            else _enedis_float(frequency_bt, "frequence_moyenne_de_coupure_longue_par_client_bt")
+        )
+        short_outages = _enedis_float(frequency_bt, "frequence_moyenne_de_coupure_breve_par_client_bt")
+        return {
+            "status": "online",
+            "source": "Open Data Enedis",
+            "source_url": "https://opendata.enedis.fr/datasets/duree-moyenne-de-coupure-bt/",
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+            "scope": "France - reseau gere par Enedis",
+            "note": "Enedis ne publie pas ici un flux temps reel de coupures locales; ces jeux exposent des indicateurs annuels de qualite d'alimentation.",
+            "latest_year": str(duration_bt.get("annee") or frequency_bt.get("annee") or ""),
+            "bt_duration": {
+                "planned_minutes": planned_minutes,
+                "unplanned_minutes": unplanned_minutes,
+                "total_minutes": (
+                    round((planned_minutes or 0) + (unplanned_minutes or 0), 3)
+                    if planned_minutes is not None or unplanned_minutes is not None else None
+                ),
+            },
+            "bt_frequency": {
+                "planned_long_outages_per_client": planned_long_outages,
+                "unplanned_long_outages_per_client": unplanned_long_outages,
+                "long_outages_per_client": long_outages,
+                "short_outages_per_client": short_outages,
+                "total_outages_per_client": (
+                    round((long_outages or 0) + (short_outages or 0), 3)
+                    if long_outages is not None or short_outages is not None else None
+                ),
+            },
+            "datasets": [
+                "https://opendata.enedis.fr/datasets/duree-moyenne-de-coupure-bt/",
+                "https://opendata.enedis.fr/datasets/frequence-moyenne-de-coupure-par-client-bt/",
+            ],
+        }
+
+    return _cached_external_payload(
+        cache=_enedis_outage_quality_cache,
+        lock=_enedis_outage_quality_cache_lock,
+        ttl_seconds=_ENEDIS_OUTAGE_QUALITY_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=loader,
+    )
 
 
 def fetch_institutions_isere(force_refresh: bool = False) -> dict[str, Any]:

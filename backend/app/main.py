@@ -78,6 +78,8 @@ from .services import (
     fetch_seismes_isere,
     fetch_mreseau_disruptions,
     fetch_finess_isere_resources,
+    fetch_geodae_isere_defibrillators,
+    fetch_enedis_outage_quality,
     fetch_isere_opendata_resilience,
     fetch_hubeau_isere_groundwater,
     fetch_hubeau_water_quality,
@@ -406,6 +408,8 @@ SERVICE_REFRESH_INTERVALS: dict[str, int] = {
     "groundwater_isere":     3600,
     "anfr_isere":           21600,   # Données quasi-statiques
     "finess_isere":         21600,
+    "geodae_isere":         21600,
+    "enedis_outage_quality": 21600,
     "france_bleu_isere":    300,    # Actualités France Bleu Isère
     "placegrenet":          300,    # Place Gre'net – actualités Grenoble/Isère
     "grenoble_metro":       300,    # Grenoble Alpes Métropole
@@ -1831,6 +1835,8 @@ def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str])
         "apic_isere": (lambda: fetch_apic_isere_alerts(force_refresh=refresh), {"status": "pending", "level": "vert", "alerts_total": 0, "alerts": []}),
         "vigicrues_flash_isere": (lambda: fetch_vigicrues_flash_isere_alerts(force_refresh=refresh), {"status": "pending", "level": "vert", "alerts_total": 0, "alerts": []}),
         "finess_isere": (lambda: fetch_finess_isere_resources(force_refresh=refresh), {"status": "pending", "resources": [], "resources_total": 0}),
+        "geodae_isere": (lambda: fetch_geodae_isere_defibrillators(force_refresh=refresh), {"status": "pending", "resources": [], "resources_total": 0}),
+        "enedis_outage_quality": (lambda: fetch_enedis_outage_quality(force_refresh=refresh), {"status": "pending", "latest_year": "", "bt_duration": {}, "bt_frequency": {}}),
         "groundwater_isere": (lambda: fetch_hubeau_isere_groundwater(force_refresh=refresh), {"status": "pending", "stations": [], "stations_total": 0, "trend_summary": {"hausse": 0, "baisse": 0, "stable": 0}}),
         "isere_opendata": (lambda: fetch_isere_opendata_resilience(force_refresh=refresh), {"status": "pending", "datasets": [], "totals": {"food_aid_points": 0, "health_centers": 0, "schools": 0}, "insights": []}),
         "aprr_isere": (lambda: fetch_aprr_isere_traffic(force_refresh=refresh), {"status": "pending", "events": [], "events_total": 0, "routes": ["A41", "A43", "A48", "A51"]}),
@@ -2195,6 +2201,24 @@ def interactive_map_finess_isere_resources(
 ):
     safe_limit = max(200, min(limit, 100000))
     return fetch_finess_isere_resources(force_refresh=refresh, limit=safe_limit)
+
+
+@app.get("/api/geodae/isere/defibrillators")
+def api_geodae_isere_defibrillators(
+    refresh: bool = False,
+    limit: int = 5000,
+    _: User = Depends(require_roles(*READ_ROLES)),
+):
+    safe_limit = max(100, min(limit, 20000))
+    return fetch_geodae_isere_defibrillators(force_refresh=refresh, limit=safe_limit)
+
+
+@app.get("/api/enedis/outage-quality")
+def api_enedis_outage_quality(
+    refresh: bool = False,
+    _: User = Depends(require_roles(*READ_ROLES)),
+):
+    return fetch_enedis_outage_quality(force_refresh=refresh)
 
 
 @app.get("/api/osm/isere/barrages")
