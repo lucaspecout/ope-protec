@@ -480,7 +480,7 @@ _FINESS_ISERE_STABLE_CSV_URL = "https://static.data.gouv.fr/resources/finess-ext
 _GEODAE_ISERE_CACHE_TTL_SECONDS = 21600
 _GEODAE_ISERE_MAX_LIMIT = 20000
 _GEODAE_CSV_URL = "https://www.data.gouv.fr/api/1/datasets/r/edb6a9e1-2f16-4bbf-99e7-c3eb6b90794c"
-_ENEDIS_OUTAGE_QUALITY_CACHE_TTL_SECONDS = 21600
+_GEODAE_TABULAR_API_URL = "https://tabular-api.data.gouv.fr/api/resources/edb6a9e1-2f16-4bbf-99e7-c3eb6b90794c/data/"
 _ISERE_OPENDATA_CACHE_TTL_SECONDS = 1800
 _ANNUAIRE_ADMINISTRATION_CACHE_TTL_SECONDS = 21600
 _ANFR_ISERE_CACHE_TTL_SECONDS = 43200
@@ -534,8 +534,6 @@ _finess_isere_cache_lock = Lock()
 _finess_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "finess_isere"}
 _geodae_isere_cache_lock = Lock()
 _geodae_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "geodae_isere"}
-_enedis_outage_quality_cache_lock = Lock()
-_enedis_outage_quality_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "enedis_outage_quality"}
 _annuaire_administration_cache_lock = Lock()
 _annuaire_administration_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "annuaire_administration_isere"}
 _finess_isere_communes_lock = Lock()
@@ -1215,15 +1213,23 @@ def _geodae_row_to_point(row: dict[str, Any]) -> dict[str, Any] | None:
 
 def _fetch_geodae_isere_live(limit: int = 5000) -> dict[str, Any]:
     safe_limit = max(1, min(int(limit or 5000), _GEODAE_ISERE_MAX_LIMIT))
-    request = Request(_GEODAE_CSV_URL, headers={"User-Agent": "ope-protec/1.0"})
     points: list[dict[str, Any]] = []
     total_isere = 0
     working_total = 0
     outside_24h_total = 0
-    with urlopen(request, timeout=120) as response:
-        text_stream = io.TextIOWrapper(response, encoding="utf-8-sig", errors="ignore", newline="")
-        reader = csv.DictReader(text_stream, delimiter=";")
-        for row in reader:
+    page = 1
+    page_size = min(500, safe_limit)
+    while len(points) < safe_limit:
+        query = urlencode({
+            "c_com_insee__contains": "38",
+            "page": page,
+            "page_size": page_size,
+        })
+        payload = _http_get_json(f"{_GEODAE_TABULAR_API_URL}?{query}", timeout=30)
+        rows = payload.get("data") if isinstance(payload, dict) else []
+        if not isinstance(rows, list) or not rows:
+            break
+        for row in rows:
             postcode = str(row.get("c_com_cp") or "").strip()
             insee = str(row.get("c_com_insee") or "").strip()
             if not (postcode.startswith("38") or insee.startswith("38")):
@@ -1238,12 +1244,16 @@ def _fetch_geodae_isere_live(limit: int = 5000) -> dict[str, Any]:
             point = _geodae_row_to_point(row)
             if point:
                 points.append(point)
+        total = int(((payload.get("meta") or {}) if isinstance(payload, dict) else {}).get("total") or 0)
+        if page * page_size >= total:
+            break
+        page += 1
 
     return {
         "status": "online",
         "source": "Geo'DAE - Base Nationale des Defibrillateurs",
         "dataset_url": "https://www.data.gouv.fr/fr/datasets/geodae-base-nationale-des-defibrillateurs/",
-        "csv_url": _GEODAE_CSV_URL,
+        "api_url": _GEODAE_TABULAR_API_URL,
         "updated_at": datetime.utcnow().isoformat() + "Z",
         "dae_total": total_isere,
         "working_total": working_total,
@@ -1302,78 +1312,6 @@ def fetch_geodae_isere_defibrillators(force_refresh: bool = False, limit: int = 
         cache=_geodae_isere_cache,
         lock=_geodae_isere_cache_lock,
         ttl_seconds=_GEODAE_ISERE_CACHE_TTL_SECONDS,
-        force_refresh=force_refresh,
-        loader=loader,
-    )
-
-
-def _enedis_latest_record(dataset_id: str) -> dict[str, Any]:
-    query = urlencode({"order_by": "annee desc", "limit": 1})
-    payload = _http_get_json(
-        f"https://opendata.enedis.fr/api/explore/v2.1/catalog/datasets/{dataset_id}/records?{query}",
-        timeout=20,
-    )
-    rows = payload.get("results") if isinstance(payload, dict) else []
-    return rows[0] if isinstance(rows, list) and rows else {}
-
-
-def _enedis_float(row: dict[str, Any], key: str) -> float | None:
-    try:
-        return float(row.get(key))
-    except (TypeError, ValueError):
-        return None
-
-
-def fetch_enedis_outage_quality(force_refresh: bool = False) -> dict[str, Any]:
-    def loader() -> dict[str, Any]:
-        duration_bt = _enedis_latest_record("duree-moyenne-de-coupure-bt")
-        frequency_bt = _enedis_latest_record("frequence-moyenne-de-coupure-par-client-bt")
-        planned_minutes = _enedis_float(duration_bt, "duree_annuelle_moyenne_de_coupure_planifiees_par_client_minutes")
-        unplanned_minutes = _enedis_float(duration_bt, "duree_annuelle_moyenne_de_coupure_non_planifiees_par_client_minutes")
-        planned_long_outages = _enedis_float(frequency_bt, "frequence_moyenne_de_coupure_longue_planifiee_par_client_bt")
-        unplanned_long_outages = _enedis_float(frequency_bt, "frequence_moyenne_de_coupure_longue_non_planifiee_par_client_bt")
-        long_outages = (
-            round((planned_long_outages or 0) + (unplanned_long_outages or 0), 3)
-            if planned_long_outages is not None or unplanned_long_outages is not None
-            else _enedis_float(frequency_bt, "frequence_moyenne_de_coupure_longue_par_client_bt")
-        )
-        short_outages = _enedis_float(frequency_bt, "frequence_moyenne_de_coupure_breve_par_client_bt")
-        return {
-            "status": "online",
-            "source": "Open Data Enedis",
-            "source_url": "https://opendata.enedis.fr/datasets/duree-moyenne-de-coupure-bt/",
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-            "scope": "France - reseau gere par Enedis",
-            "note": "Enedis ne publie pas ici un flux temps reel de coupures locales; ces jeux exposent des indicateurs annuels de qualite d'alimentation.",
-            "latest_year": str(duration_bt.get("annee") or frequency_bt.get("annee") or ""),
-            "bt_duration": {
-                "planned_minutes": planned_minutes,
-                "unplanned_minutes": unplanned_minutes,
-                "total_minutes": (
-                    round((planned_minutes or 0) + (unplanned_minutes or 0), 3)
-                    if planned_minutes is not None or unplanned_minutes is not None else None
-                ),
-            },
-            "bt_frequency": {
-                "planned_long_outages_per_client": planned_long_outages,
-                "unplanned_long_outages_per_client": unplanned_long_outages,
-                "long_outages_per_client": long_outages,
-                "short_outages_per_client": short_outages,
-                "total_outages_per_client": (
-                    round((long_outages or 0) + (short_outages or 0), 3)
-                    if long_outages is not None or short_outages is not None else None
-                ),
-            },
-            "datasets": [
-                "https://opendata.enedis.fr/datasets/duree-moyenne-de-coupure-bt/",
-                "https://opendata.enedis.fr/datasets/frequence-moyenne-de-coupure-par-client-bt/",
-            ],
-        }
-
-    return _cached_external_payload(
-        cache=_enedis_outage_quality_cache,
-        lock=_enedis_outage_quality_cache_lock,
-        ttl_seconds=_ENEDIS_OUTAGE_QUALITY_CACHE_TTL_SECONDS,
         force_refresh=force_refresh,
         loader=loader,
     )

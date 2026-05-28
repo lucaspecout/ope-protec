@@ -13,7 +13,7 @@ const STORAGE_KEYS = {
   homeLiveSnapshot: 'homeLiveSnapshot',
   staticInstitutionsCache: 'staticInstitutionsCacheV3',
   staticFinessCache: 'staticFinessCacheV3',
-  staticDaeCache: 'staticDaeCacheV1',
+  staticDaeCache: 'staticDaeCacheV2',
   staticTelecomCache: 'staticTelecomCacheV1',
   staticMontagneCache: 'staticMontagneCacheV1',
   staticHelipadCache: 'staticHelipadCacheV1',
@@ -76,7 +76,6 @@ const FLUX_SERVICES = [
   { key: 'isere_opendata',         label: 'Isère OpenData · Résilience', icon: '📊', category: 'Données',    interval: 1800,  metric: (d) => `${d.totals?.schools ?? 0} écoles · ${d.totals?.health_centers ?? 0} santé · ${d.totals?.food_aid_points ?? 0} aide alim.` },
   { key: 'finess_isere',           label: 'FINESS · Établissements santé', icon: '🏥', category: 'Santé',    interval: 21600, metric: (d) => `${d.resources_total ?? 0} établissement(s)` },
   { key: 'geodae_isere',           label: "Geo'DAE - Defibrillateurs", icon: 'DAE', category: 'Sante', interval: 21600, metric: (d) => `${d.resources_total ?? 0} DAE - ${d.available_24h_total ?? 0} 24h/24` },
-  { key: 'enedis_outage_quality',  label: 'Enedis - Coupures BT', icon: 'E', category: 'Energie', interval: 21600, metric: (d) => d.bt_duration?.total_minutes != null ? `${d.latest_year || ''} - ${d.bt_duration.total_minutes} min/client` : 'Indicateur annuel' },
 ];
 const AUTOROUTES_ISERE_ROADS = Object.freeze(['A41', 'A43', 'A48', 'A49', 'A51', 'A480']);
 const AUTOROUTES_ISERE_ROAD_SET = new Set(AUTOROUTES_ISERE_ROADS);
@@ -5096,16 +5095,17 @@ async function loadFinessIsereResources() {
   return finessPointsCache;
 }
 
-async function loadDaeIsereResources() {
-  if (daeLoaded) return daePointsCache;
-  const cached = readFreshSnapshot(STORAGE_KEYS.staticDaeCache, STATIC_POINTS_CACHE_TTL_MS);
-  if (Array.isArray(cached) && cached.length > 0) {
+async function loadDaeIsereResources(forceRefresh = false) {
+  if (daeLoaded && !forceRefresh) return daePointsCache;
+  const cached = forceRefresh ? null : readFreshSnapshot(STORAGE_KEYS.staticDaeCache, STATIC_POINTS_CACHE_TTL_MS);
+  if (!forceRefresh && Array.isArray(cached) && cached.length > 0) {
     daePointsCache = cached;
     daeLoaded = true;
     return daePointsCache;
   }
   try {
-    const payload = await api('/api/geodae/isere/defibrillators?limit=20000', { cacheTtlMs: 6 * 60 * 60 * 1000 });
+    const url = `/api/geodae/isere/defibrillators?limit=20000${forceRefresh ? '&refresh=true' : ''}`;
+    const payload = await api(url, { cacheTtlMs: forceRefresh ? 0 : 10 * 60 * 1000, bypassCache: forceRefresh });
     const resources = Array.isArray(payload?.resources) ? payload.resources : [];
     daePointsCache = filterIserePoints(resources)
       .map((resource) => {
@@ -5593,6 +5593,7 @@ function syncTelecomFilterState() {
 let _institutionsLoadInFlight = false;
 let _finessLoadInFlight = false;
 let _daeLoadInFlight = false;
+let _lastDaeRefreshAttempt = 0;
 let _telecomLoadInFlight = false;
 
 /** Retourne true si au moins un loader de données statiques est encore en cours. */
@@ -5767,9 +5768,12 @@ function _ensureStaticDataLoaded() {
       .then(() => { _finessLoadInFlight = false; _drawResourceMarkers(); })
       .catch(() => { _finessLoadInFlight = false; });
   }
-  if (!daeLoaded && !_daeLoadInFlight) {
+  const daeFilterEnabled = document.getElementById('filter-resources-dae')?.checked ?? false;
+  const shouldRetryDae = daeFilterEnabled && daeLoaded && daePointsCache.length === 0 && (Date.now() - _lastDaeRefreshAttempt > 60 * 1000);
+  if ((!daeLoaded || shouldRetryDae) && !_daeLoadInFlight) {
     _daeLoadInFlight = true;
-    loadDaeIsereResources()
+    _lastDaeRefreshAttempt = Date.now();
+    loadDaeIsereResources(shouldRetryDae)
       .then(() => { _daeLoadInFlight = false; _drawResourceMarkers(); })
       .catch(() => { _daeLoadInFlight = false; });
   }
@@ -11981,7 +11985,6 @@ const SVC_CARD_META = {
   isere_opendata:        { statusId: 'opendata-status',        infoId: 'opendata-info',        url: 'https://opendata.isere.fr' },
   finess_isere:          { statusId: 'finess-status',          infoId: 'finess-info',          url: 'https://www.data.gouv.fr/datasets/finess-extraction-du-fichier-des-etablissements' },
   geodae_isere:          { statusId: 'geodae-status',          infoId: 'geodae-info',          url: 'https://www.data.gouv.fr/fr/datasets/geodae-base-nationale-des-defibrillateurs/' },
-  enedis_outage_quality: { statusId: 'enedis-outage-status',   infoId: 'enedis-outage-info',   url: 'https://opendata.enedis.fr/datasets/duree-moyenne-de-coupure-bt/' },
   ter_aura:              { statusId: 'ter-aura-status',        infoId: 'ter-aura-info',        url: 'https://www.ter.sncf.com/auvergne-rhone-alpes/se-deplacer/info-trafic' },
   mreseau:               { statusId: 'mreseau-status',         infoId: 'mreseau-info',         url: 'https://www.reso-m.fr/55-infotrafic.htm' },
   cars_region_aura:      { statusId: 'cars-region-status',     infoId: 'cars-region-info',     url: 'https://www.laregionvoustransporte.fr/fr/votre-region/infos-trafic' },
