@@ -750,6 +750,12 @@
 
             <!-- ── Panneau filtres GAUCHE ── -->
             <aside id="map-controls-panel" class="map-controls" aria-label="Filtres et outils carte">
+              <div class="map-controls-head">
+                <div>
+                  <strong>Filtres carte</strong>
+                  <span>Calques, ressources et outils terrain</span>
+                </div>
+              </div>
 
               <!-- Recherche & navigation -->
               <div class="filter-group filter-group--search">
@@ -765,7 +771,7 @@
               </div>
 
               <!-- Fond de carte -->
-              <details class="filter-group" open>
+              <details class="filter-group map-filter-group--basemap" open>
                 <summary class="filter-group__title">🗺️ Fond de carte</summary>
                 <div class="filter-group__body">
                   <select id="map-basemap-select" aria-label="Choisir le fond de carte">
@@ -780,7 +786,7 @@
               </details>
 
               <!-- Alertes & Surveillance -->
-              <details class="filter-group" open>
+              <details class="filter-group map-filter-group--alerts" open>
                 <summary class="filter-group__title">🌊 Alertes &amp; Surveillance</summary>
                 <div class="filter-group__body map-toggle-grid">
                   <label><input id="filter-hydro" type="checkbox" checked /> Vigicrues (stations crues)</label>
@@ -804,7 +810,7 @@
               </details>
 
               <!-- Montagne & Aérien -->
-              <details class="filter-group">
+              <details class="filter-group map-filter-group--mountain">
                 <summary class="filter-group__title">🏔️ Montagne &amp; Aérien</summary>
                 <div class="filter-group__body map-toggle-grid">
                   <label><input id="filter-montagne" type="checkbox" /> 🛖 Refuges de montagne</label>
@@ -818,7 +824,7 @@
               </details>
 
               <!-- Ressources opérationnelles -->
-              <details class="filter-group" open>
+              <details class="filter-group map-filter-group--resources">
                 <summary class="filter-group__title">🏢 Ressources opérationnelles</summary>
                 <div class="filter-group__body map-toggle-grid">
                   <label><input id="filter-resources-command" type="checkbox" checked /> 🛰️ Centres de commandement</label>
@@ -952,7 +958,7 @@
               </details>
 
               <!-- Trafic & Mobilité -->
-              <details class="filter-group">
+              <details class="filter-group map-filter-group--traffic" open>
                 <summary class="filter-group__title">🚦 Trafic &amp; Mobilité</summary>
                 <div class="filter-group__body map-toggle-grid">
                   <label><input id="filter-cameras" type="checkbox" checked /> 📷 Caméras terrain</label>
@@ -979,7 +985,7 @@
               </details>
 
               <!-- Outils terrain -->
-              <details class="filter-group">
+              <details class="filter-group map-filter-group--tools" open>
                 <summary class="filter-group__title">🛠️ Outils terrain</summary>
                 <div class="filter-group__body">
                   <div class="tactical-layer-grid" aria-label="Calques actions">
@@ -1060,7 +1066,7 @@
               </div>
 
               <!-- Liste ressources -->
-              <details class="filter-group">
+              <details class="filter-group map-filter-group--lists">
                 <summary class="filter-group__title">📋 Ressources affichées</summary>
                 <div class="filter-group__body">
                   <ul id="resources-list" class="list compact resources-sidebar-list"></ul>

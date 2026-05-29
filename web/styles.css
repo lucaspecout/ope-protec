@@ -4226,6 +4226,31 @@ details[open] .news-stats-toggle::before { content: '▾ '; }
   padding: .55rem;
 }
 
+#map-panel .map-controls-head {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  margin: -.55rem -.55rem .5rem;
+  padding: .65rem .65rem .55rem;
+  background: linear-gradient(180deg, #ffffff 0%, #f7fafd 100%);
+  border-bottom: 1px solid #d8e4f2;
+}
+
+#map-panel .map-controls-head strong {
+  display: block;
+  color: #10284f;
+  font-size: .92rem;
+  line-height: 1.15;
+}
+
+#map-panel .map-controls-head span {
+  display: block;
+  margin-top: .12rem;
+  color: #63758c;
+  font-size: .72rem;
+  line-height: 1.2;
+}
+
 #map-panel .map-workspace.map-workspace--collapsed .map-controls {
   width: 0;
   min-height: 0;
@@ -4234,6 +4259,8 @@ details[open] .news-stats-toggle::before { content: '▾ '; }
 }
 
 #map-panel .filter-group {
+  --group-color: #185abc;
+  --group-bg: #eef4fc;
   margin-bottom: .42rem;
   border-color: #d9e5f3;
   border-radius: 8px;
@@ -4243,8 +4270,8 @@ details[open] .news-stats-toggle::before { content: '▾ '; }
 
 #map-panel .filter-group--search {
   position: sticky;
-  top: 0;
-  z-index: 3;
+  top: 55px;
+  z-index: 4;
   padding: .1rem 0 .55rem;
   border: 0;
   border-radius: 0;
@@ -4255,18 +4282,40 @@ details[open] .news-stats-toggle::before { content: '▾ '; }
 #map-panel .filter-group__title {
   min-height: 34px;
   padding: .42rem .58rem;
-  background: #eef4fc;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--group-color) 13%, #fff), #fff);
   border-bottom-color: #d9e5f3;
-  color: #123b66;
+  color: #10284f;
   font-size: .79rem;
+  border-left: 4px solid var(--group-color);
 }
 
 #map-panel details[open] > .filter-group__title {
-  background: #e6f0fc;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--group-color) 18%, #fff), #fff);
 }
+
+#map-panel .map-filter-group--basemap { --group-color: #2563eb; }
+#map-panel .map-filter-group--alerts { --group-color: #0284c7; }
+#map-panel .map-filter-group--mountain { --group-color: #64748b; }
+#map-panel .map-filter-group--resources { --group-color: #16a34a; }
+#map-panel .map-filter-group--traffic { --group-color: #ea580c; }
+#map-panel .map-filter-group--tools { --group-color: #7c3aed; }
+#map-panel .map-filter-group--lists { --group-color: #475569; }
 
 #map-panel .filter-group__body {
   padding: .5rem;
+}
+
+#map-panel .map-filter-group--resources[open] .filter-group__body,
+#map-panel .map-filter-group--tools[open] .filter-group__body,
+#map-panel .map-filter-group--lists[open] .filter-group__body {
+  max-height: 42dvh;
+  overflow: auto;
+}
+
+#map-panel .map-filter-group--traffic[open] .filter-group__body,
+#map-panel .map-filter-group--alerts[open] .filter-group__body {
+  max-height: 34dvh;
+  overflow: auto;
 }
 
 #map-panel .map-toggle-grid {
@@ -4280,6 +4329,12 @@ details[open] .news-stats-toggle::before { content: '▾ '; }
   border: 1px solid transparent;
   border-radius: 8px;
   background: #f9fbfe;
+}
+
+#map-panel .map-toggle-grid > label:has(input:checked),
+#map-panel .filter-subgroup:has(input:checked) {
+  border-color: color-mix(in srgb, var(--group-color) 34%, #d9e5f3);
+  background: color-mix(in srgb, var(--group-color) 7%, #fff);
 }
 
 #map-panel .map-toggle-grid > label:hover,
@@ -4339,11 +4394,44 @@ details[open] .news-stats-toggle::before { content: '▾ '; }
   background: #dfe8f3;
 }
 
+#map-panel .map-canvas-wrap::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 500;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px rgba(15, 42, 78, .10), inset 0 24px 48px rgba(15, 42, 78, .06);
+}
+
 #map-panel .leaflet-map {
   height: calc(100dvh - 190px);
   min-height: 620px;
   border: 0;
   border-radius: 0;
+}
+
+#map-panel .leaflet-control-zoom {
+  border: 0;
+  box-shadow: 0 6px 18px rgba(15, 42, 78, .18);
+}
+
+#map-panel .leaflet-control-zoom a {
+  width: 34px;
+  height: 34px;
+  line-height: 34px;
+  border-color: #d6e2f0;
+  color: #10284f;
+}
+
+#map-panel .leaflet-popup-content-wrapper {
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(15, 42, 78, .22);
+}
+
+#map-panel .leaflet-popup-content {
+  margin: .72rem .82rem;
+  font-size: .82rem;
+  line-height: 1.35;
 }
 
 #map-panel .map-controls-toggle,
@@ -4393,6 +4481,10 @@ details[open] .news-stats-toggle::before { content: '▾ '; }
   background: rgba(255, 255, 255, .92);
   box-shadow: 0 6px 18px rgba(15, 42, 78, .12);
   backdrop-filter: blur(8px);
+}
+
+#map-panel .map-summary article:hover {
+  transform: translateY(-1px);
 }
 
 #map-panel .map-summary p {
