@@ -280,6 +280,7 @@ let seismesLayer = null;
 let groundwaterLayer = null;
 let feuxForetLayer = null;
 let colsAlpinsLayer = null;
+let meteoCitiesLayer = null;
 let populationHeatLayer = null;
 let userLocationMarker = null;
 let mapAddPointMode = false;
@@ -3944,6 +3945,89 @@ function renderColsAlpinsLayer() {
   });
 }
 
+function meteoCityTemperatureColor(tempC) {
+  const temp = Number(tempC);
+  if (!Number.isFinite(temp)) return '#64748b';
+  if (temp <= 0) return '#2563eb';
+  if (temp <= 8) return '#0891b2';
+  if (temp <= 18) return '#16a34a';
+  if (temp <= 28) return '#f59e0b';
+  if (temp <= 35) return '#f97316';
+  return '#dc2626';
+}
+
+function meteoCityMarkerIcon(city = {}, current = {}) {
+  const temp = Number(current.temperature_2m);
+  const tempLabel = Number.isFinite(temp) ? `${Math.round(temp)}°` : '--';
+  const color = meteoCityTemperatureColor(temp);
+  const emoji = weatherCodeEmoji(current.weathercode);
+  return window.L.divIcon({
+    className: 'meteo-city-marker-wrap',
+    html: `<div class="meteo-city-marker" style="--meteo-city-color:${escapeHtml(color)}"><span class="meteo-city-marker__temp">${escapeHtml(tempLabel)}</span><span class="meteo-city-marker__emoji">${escapeHtml(emoji)}</span></div>`,
+    iconSize: [46, 34],
+    iconAnchor: [23, 17],
+    popupAnchor: [0, -18],
+  });
+}
+
+function meteoCityPopup(city = {}, forecast = {}) {
+  const current = forecast?.current || {};
+  const temp = Number.isFinite(Number(current.temperature_2m)) ? `${Math.round(Number(current.temperature_2m))}°C` : 'n/d';
+  const felt = Number.isFinite(Number(current.apparent_temperature)) ? `${Math.round(Number(current.apparent_temperature))}°C` : 'n/d';
+  const humidity = Number.isFinite(Number(current.relative_humidity_2m)) ? `${Math.round(Number(current.relative_humidity_2m))}%` : 'n/d';
+  const wind = Number.isFinite(Number(current.wind_speed_10m)) ? `${Math.round(Number(current.wind_speed_10m))} km/h` : 'n/d';
+  const label = weatherCodeLabel(current.weathercode);
+  const emoji = weatherCodeEmoji(current.weathercode);
+  const updated = forecast?.updated_at ? new Date(forecast.updated_at) : null;
+  const updatedLabel = updated && !Number.isNaN(updated.getTime())
+    ? updated.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+    : 'n/d';
+  return `<div class="map-popup-content">
+    <p class="tag">Météo en direct · Open-Meteo</p>
+    <strong>${emoji} ${escapeHtml(city.name || 'Ville')}</strong>
+    <p style="margin:.35rem 0 0">Température : <strong>${escapeHtml(temp)}</strong> · Ressenti : <strong>${escapeHtml(felt)}</strong></p>
+    <p style="margin:.2rem 0 0">${escapeHtml(label)} · Humidité ${escapeHtml(humidity)} · Vent ${escapeHtml(wind)}</p>
+    <p class="muted" style="font-size:.74rem;margin:.35rem 0 0">Mise à jour : ${escapeHtml(updatedLabel)}</p>
+  </div>`;
+}
+
+async function renderMeteoCitiesLayer() {
+  if (!leafletMap || typeof window.L === 'undefined') return;
+  const enabled = document.getElementById('filter-meteo-cities')?.checked ?? false;
+  if (!meteoCitiesLayer) meteoCitiesLayer = window.L.layerGroup();
+  if (!enabled) {
+    meteoCitiesLayer.clearLayers();
+    if (leafletMap.hasLayer(meteoCitiesLayer)) leafletMap.removeLayer(meteoCitiesLayer);
+    return;
+  }
+
+  if (!leafletMap.hasLayer(meteoCitiesLayer)) meteoCitiesLayer.addTo(leafletMap);
+  meteoCitiesLayer.clearLayers();
+  const cities = (await getMeteoCityOptions()).slice(0, 18);
+  if (!cities.length) {
+    setMapFeedback('Aucune ville météo disponible à afficher.', true);
+    return;
+  }
+
+  const forecasts = await Promise.all(cities.map(async (city) => ({
+    city,
+    forecast: await fetchWeeklyForecastForCity(city),
+  })));
+
+  forecasts.forEach(({ city, forecast }) => {
+    if (!forecast?.current) return;
+    const coords = normalizeMapCoordinates(city.lat, city.lon);
+    if (!coords) return;
+    window.L.marker([coords.lat, coords.lon], {
+      icon: meteoCityMarkerIcon(city, forecast.current),
+      zIndexOffset: 450,
+    })
+      .bindPopup(meteoCityPopup(city, forecast))
+      .addTo(meteoCitiesLayer);
+  });
+  setMapFeedback(`Météo villes affichée : ${forecasts.filter((item) => item.forecast?.current).length} point(s).`);
+}
+
 function renderBarrageLayer() {
   if (!barrageMarkerLayer || !leafletMap) return;
   const enabled = document.getElementById('filter-barrages')?.checked ?? false;
@@ -4026,6 +4110,7 @@ function initMap() {
   groundwaterLayer = window.L.layerGroup();
   feuxForetLayer = window.L.layerGroup();
   colsAlpinsLayer = window.L.layerGroup();
+  meteoCitiesLayer = window.L.layerGroup();
   leafletMap.on('click', onMapClickEvacuationCircle);
   leafletMap.on('click', onMapClickMeasure);
   leafletMap.on('click', onMapClickRoute);
@@ -4281,6 +4366,7 @@ async function resetMapFilters() {
   });
   const hydro = document.getElementById('filter-hydro');
   const pcs = document.getElementById('filter-pcs');
+  const meteoCities = document.getElementById('filter-meteo-cities');
   const activeOnly = document.getElementById('filter-resources-active');
   const schools = document.getElementById('filter-resources-schools');
   const security = document.getElementById('filter-resources-security');
@@ -4301,6 +4387,7 @@ async function resetMapFilters() {
   const telecomResources = document.getElementById('filter-resources-telecom');
   if (hydro) hydro.checked = true;
   if (pcs) pcs.checked = true;
+  if (meteoCities) meteoCities.checked = false;
   if (activeOnly) activeOnly.checked = true;
   if (schools) schools.checked = false;
   if (security) security.checked = false;
@@ -4327,6 +4414,7 @@ async function resetMapFilters() {
   renderStations(cachedVigicruesPayload);
   renderCustomPoints();
   renderResources();
+  await renderMeteoCitiesLayer();
   await renderMunicipalitiesOnMap(cachedMunicipalities);
   await renderPopulationByCityLayer();
   await renderTrafficOnMap();
@@ -14668,7 +14756,7 @@ function bindAppInteractions() {
     'filter-resources-telecom', 'filter-resources-telecom-type',
     'filter-resources-active', 'filter-resources-protcivile',
   ]);
-  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type', 'filter-resources-hosting-capacity', 'filter-resources-hosting-surface', 'filter-resources-hosting-accessibility', 'filter-resources-hosting-sanitary', 'filter-resources-hosting-heating', 'filter-resources-hosting-parking', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-dae', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-resources-protcivile', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras', 'filter-autoroutes', 'filter-autoroutes-type', 'filter-pr-autoroutes', 'filter-tchoo-trains'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-meteo-cities', 'filter-resources-active', 'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type', 'filter-resources-hosting-capacity', 'filter-resources-hosting-surface', 'filter-resources-hosting-accessibility', 'filter-resources-hosting-sanitary', 'filter-resources-hosting-heating', 'filter-resources-hosting-parking', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-dae', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-resources-protcivile', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras', 'filter-autoroutes', 'filter-autoroutes-type', 'filter-pr-autoroutes', 'filter-tchoo-trains'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       if (RESOURCE_ONLY_FILTERS.has(id)) {
         // Rendu immédiat depuis le cache
@@ -14677,6 +14765,7 @@ function bindAppInteractions() {
       }
       // Filtres globaux (hydro, pcs, trafic, caméras) → tout re-rendre
       renderStations(cachedVigicruesPayload);
+      await renderMeteoCitiesLayer();
       await renderMunicipalitiesOnMap(cachedMunicipalities);
       renderResources();
       await renderPopulationByCityLayer();

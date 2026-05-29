@@ -2092,6 +2092,37 @@ svg text { font-size: 14px; fill: #17335f; }
 }
 .map-emoji-icon span { line-height: 1; }
 
+.meteo-city-marker-wrap {
+  background: transparent;
+  border: 0;
+}
+
+.meteo-city-marker {
+  min-width: 44px;
+  height: 30px;
+  padding: 0 6px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  background: var(--meteo-city-color, #2563eb);
+  color: #fff;
+  border: 2px solid #fff;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, .28);
+  font-weight: 800;
+}
+
+.meteo-city-marker__temp {
+  font-size: .78rem;
+  line-height: 1;
+}
+
+.meteo-city-marker__emoji {
+  font-size: .72rem;
+  line-height: 1;
+}
+
 .map-resource-icon-wrap { background: transparent; border: 0; }
 .map-resource-icon {
   width: 24px;
