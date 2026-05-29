@@ -796,6 +796,12 @@
                     🌡️ Météo villes en direct
                     <small class="filter-legend">Température actuelle · Open-Meteo</small>
                   </label>
+                  <select id="filter-meteo-layer-type" aria-label="Choisir le calque météo">
+                    <option value="temperature" selected>Température actuelle</option>
+                    <option value="heat">Ressenti / chaleur</option>
+                    <option value="wind">Vent en ville</option>
+                    <option value="pollution">Pollution / qualité de l'air</option>
+                  </select>
                   <label>
                     <input id="filter-flood-zones" type="checkbox" />
                     Zones inondables détaillées

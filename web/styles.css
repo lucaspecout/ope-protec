@@ -4451,6 +4451,13 @@ details[open] .news-stats-toggle::before { content: '▾ '; }
   min-height: 34px;
 }
 
+#map-panel #filter-meteo-layer-type {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #123b66;
+  font-weight: 700;
+}
+
 #map-panel .map-toggle-grid {
   gap: .25rem;
 }

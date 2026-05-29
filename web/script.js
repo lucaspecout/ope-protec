@@ -344,6 +344,8 @@ let cachedDashboardSnapshot = {};
 let cachedExternalRisksSnapshot = {};
 let cachedWeeklyMeteo = null;
 let weeklyMeteoInFlight = null;
+const meteoAirQualityCache = new Map();
+const meteoAirQualityInFlight = new Map();
 let selectedMeteoCityKey = ISERE_MAJOR_CITIES[0]?.key || 'grenoble';
 let selectedWaterMunicipalityId = '';
 let selectedContactsCity = '';
@@ -3956,28 +3958,111 @@ function meteoCityTemperatureColor(tempC) {
   return '#dc2626';
 }
 
-function meteoCityMarkerIcon(city = {}, current = {}) {
+function meteoWindColor(speedKmh) {
+  const speed = Number(speedKmh);
+  if (!Number.isFinite(speed)) return '#64748b';
+  if (speed < 15) return '#16a34a';
+  if (speed < 30) return '#f59e0b';
+  if (speed < 50) return '#f97316';
+  return '#dc2626';
+}
+
+function meteoPollutionColor(aqi) {
+  const value = Number(aqi);
+  if (!Number.isFinite(value)) return '#64748b';
+  if (value <= 20) return '#16a34a';
+  if (value <= 40) return '#84cc16';
+  if (value <= 60) return '#f59e0b';
+  if (value <= 80) return '#f97316';
+  return '#dc2626';
+}
+
+function meteoLayerSpec(current = {}, airQuality = {}, mode = 'temperature') {
+  if (mode === 'heat') {
+    const felt = Number(current.apparent_temperature);
+    return {
+      label: Number.isFinite(felt) ? `${Math.round(felt)}°` : '--',
+      color: meteoCityTemperatureColor(felt),
+      emoji: felt >= 30 ? '🔥' : felt <= 0 ? '❄️' : '🌡️',
+      title: 'Ressenti / chaleur',
+      value: Number.isFinite(felt) ? `${Math.round(felt)}°C ressentis` : 'n/d',
+    };
+  }
+  if (mode === 'wind') {
+    const wind = Number(current.wind_speed_10m);
+    return {
+      label: Number.isFinite(wind) ? `${Math.round(wind)}` : '--',
+      color: meteoWindColor(wind),
+      emoji: '💨',
+      title: 'Vent',
+      value: Number.isFinite(wind) ? `${Math.round(wind)} km/h` : 'n/d',
+    };
+  }
+  if (mode === 'pollution') {
+    const aqi = Number(airQuality.european_aqi);
+    return {
+      label: Number.isFinite(aqi) ? `${Math.round(aqi)}` : '--',
+      color: meteoPollutionColor(aqi),
+      emoji: '🌫️',
+      title: "Pollution / qualité de l'air",
+      value: Number.isFinite(aqi) ? `Indice européen ${Math.round(aqi)}` : 'n/d',
+    };
+  }
   const temp = Number(current.temperature_2m);
-  const tempLabel = Number.isFinite(temp) ? `${Math.round(temp)}°` : '--';
-  const color = meteoCityTemperatureColor(temp);
-  const emoji = weatherCodeEmoji(current.weathercode);
+  return {
+    label: Number.isFinite(temp) ? `${Math.round(temp)}°` : '--',
+    color: meteoCityTemperatureColor(temp),
+    emoji: weatherCodeEmoji(current.weathercode),
+    title: 'Température actuelle',
+    value: Number.isFinite(temp) ? `${Math.round(temp)}°C` : 'n/d',
+  };
+}
+
+function meteoCityMarkerIcon(city = {}, current = {}, airQuality = {}, mode = 'temperature') {
+  const spec = meteoLayerSpec(current, airQuality, mode);
   return window.L.divIcon({
     className: 'meteo-city-marker-wrap',
-    html: `<div class="meteo-city-marker" style="--meteo-city-color:${escapeHtml(color)}"><span class="meteo-city-marker__temp">${escapeHtml(tempLabel)}</span><span class="meteo-city-marker__emoji">${escapeHtml(emoji)}</span></div>`,
+    html: `<div class="meteo-city-marker" style="--meteo-city-color:${escapeHtml(spec.color)}"><span class="meteo-city-marker__temp">${escapeHtml(spec.label)}</span><span class="meteo-city-marker__emoji">${escapeHtml(spec.emoji)}</span></div>`,
     iconSize: [46, 34],
     iconAnchor: [23, 17],
     popupAnchor: [0, -18],
   });
 }
 
-function meteoCityPopup(city = {}, forecast = {}) {
+async function fetchMeteoAirQualityForCity(city = {}) {
+  const key = String(city.key || `${city.lat},${city.lon}`);
+  const cached = meteoAirQualityCache.get(key);
+  if (cached && Date.now() - cached.savedAt < 10 * 60 * 1000) return cached.payload;
+  if (meteoAirQualityInFlight.has(key)) return meteoAirQualityInFlight.get(key);
+  const url = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${encodeURIComponent(city.lat)}&longitude=${encodeURIComponent(city.lon)}&current=european_aqi,pm10,pm2_5,nitrogen_dioxide,ozone&timezone=Europe%2FParis`;
+  const promise = fetchWithTimeout(url, {}, 12000)
+    .then((response) => {
+      if (!response.ok) throw new Error(`open-meteo-air ${response.status}`);
+      return response.json();
+    })
+    .then((payload) => {
+      const current = payload?.current || {};
+      meteoAirQualityCache.set(key, { savedAt: Date.now(), payload: current });
+      return current;
+    })
+    .catch(() => ({}))
+    .finally(() => meteoAirQualityInFlight.delete(key));
+  meteoAirQualityInFlight.set(key, promise);
+  return promise;
+}
+
+function meteoCityPopup(city = {}, forecast = {}, airQuality = {}, mode = 'temperature') {
   const current = forecast?.current || {};
+  const spec = meteoLayerSpec(current, airQuality, mode);
   const temp = Number.isFinite(Number(current.temperature_2m)) ? `${Math.round(Number(current.temperature_2m))}°C` : 'n/d';
   const felt = Number.isFinite(Number(current.apparent_temperature)) ? `${Math.round(Number(current.apparent_temperature))}°C` : 'n/d';
   const humidity = Number.isFinite(Number(current.relative_humidity_2m)) ? `${Math.round(Number(current.relative_humidity_2m))}%` : 'n/d';
   const wind = Number.isFinite(Number(current.wind_speed_10m)) ? `${Math.round(Number(current.wind_speed_10m))} km/h` : 'n/d';
   const label = weatherCodeLabel(current.weathercode);
   const emoji = weatherCodeEmoji(current.weathercode);
+  const aqi = Number.isFinite(Number(airQuality.european_aqi)) ? Math.round(Number(airQuality.european_aqi)) : null;
+  const pm25 = Number.isFinite(Number(airQuality.pm2_5)) ? `${Number(airQuality.pm2_5).toFixed(1)} µg/m³` : 'n/d';
+  const pm10 = Number.isFinite(Number(airQuality.pm10)) ? `${Number(airQuality.pm10).toFixed(1)} µg/m³` : 'n/d';
   const updated = forecast?.updated_at ? new Date(forecast.updated_at) : null;
   const updatedLabel = updated && !Number.isNaN(updated.getTime())
     ? updated.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
@@ -3985,8 +4070,10 @@ function meteoCityPopup(city = {}, forecast = {}) {
   return `<div class="map-popup-content">
     <p class="tag">Météo en direct · Open-Meteo</p>
     <strong>${emoji} ${escapeHtml(city.name || 'Ville')}</strong>
+    <p style="margin:.35rem 0 0"><strong>${escapeHtml(spec.title)} :</strong> <span style="color:${escapeHtml(spec.color)};font-weight:800">${escapeHtml(spec.value)}</span></p>
     <p style="margin:.35rem 0 0">Température : <strong>${escapeHtml(temp)}</strong> · Ressenti : <strong>${escapeHtml(felt)}</strong></p>
     <p style="margin:.2rem 0 0">${escapeHtml(label)} · Humidité ${escapeHtml(humidity)} · Vent ${escapeHtml(wind)}</p>
+    ${mode === 'pollution' ? `<p style="margin:.2rem 0 0">AQI : <strong>${aqi ?? 'n/d'}</strong> · PM2.5 ${escapeHtml(pm25)} · PM10 ${escapeHtml(pm10)}</p>` : ''}
     <p class="muted" style="font-size:.74rem;margin:.35rem 0 0">Mise à jour : ${escapeHtml(updatedLabel)}</p>
   </div>`;
 }
@@ -4003,6 +4090,7 @@ async function renderMeteoCitiesLayer() {
 
   if (!leafletMap.hasLayer(meteoCitiesLayer)) meteoCitiesLayer.addTo(leafletMap);
   meteoCitiesLayer.clearLayers();
+  const mode = document.getElementById('filter-meteo-layer-type')?.value || 'temperature';
   const cities = (await getMeteoCityOptions()).slice(0, 18);
   if (!cities.length) {
     setMapFeedback('Aucune ville météo disponible à afficher.', true);
@@ -4012,20 +4100,22 @@ async function renderMeteoCitiesLayer() {
   const forecasts = await Promise.all(cities.map(async (city) => ({
     city,
     forecast: await fetchWeeklyForecastForCity(city),
+    airQuality: mode === 'pollution' ? await fetchMeteoAirQualityForCity(city) : {},
   })));
 
-  forecasts.forEach(({ city, forecast }) => {
+  forecasts.forEach(({ city, forecast, airQuality }) => {
     if (!forecast?.current) return;
     const coords = normalizeMapCoordinates(city.lat, city.lon);
     if (!coords) return;
     window.L.marker([coords.lat, coords.lon], {
-      icon: meteoCityMarkerIcon(city, forecast.current),
+      icon: meteoCityMarkerIcon(city, forecast.current, airQuality, mode),
       zIndexOffset: 450,
     })
-      .bindPopup(meteoCityPopup(city, forecast))
+      .bindPopup(meteoCityPopup(city, forecast, airQuality, mode))
       .addTo(meteoCitiesLayer);
   });
-  setMapFeedback(`Météo villes affichée : ${forecasts.filter((item) => item.forecast?.current).length} point(s).`);
+  const labels = { temperature: 'température', heat: 'ressenti chaleur', wind: 'vent', pollution: 'pollution' };
+  setMapFeedback(`Calque météo ${labels[mode] || 'météo'} affiché : ${forecasts.filter((item) => item.forecast?.current).length} ville(s).`);
 }
 
 function renderBarrageLayer() {
@@ -4357,6 +4447,7 @@ async function resetMapFilters() {
     'filter-resources-hosting-surface': '0',
     'filter-resources-hosting-accessibility': 'all',
     'filter-resources-telecom-type': 'all',
+    'filter-meteo-layer-type': 'temperature',
     'map-basemap-select': 'osm',
   };
   Object.entries(defaults).forEach(([id, value]) => {
@@ -14756,7 +14847,7 @@ function bindAppInteractions() {
     'filter-resources-telecom', 'filter-resources-telecom-type',
     'filter-resources-active', 'filter-resources-protcivile',
   ]);
-  ['filter-hydro', 'filter-pcs', 'filter-meteo-cities', 'filter-resources-active', 'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type', 'filter-resources-hosting-capacity', 'filter-resources-hosting-surface', 'filter-resources-hosting-accessibility', 'filter-resources-hosting-sanitary', 'filter-resources-hosting-heating', 'filter-resources-hosting-parking', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-dae', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-resources-protcivile', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras', 'filter-autoroutes', 'filter-autoroutes-type', 'filter-pr-autoroutes', 'filter-tchoo-trains'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-meteo-cities', 'filter-meteo-layer-type', 'filter-resources-active', 'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type', 'filter-resources-hosting-capacity', 'filter-resources-hosting-surface', 'filter-resources-hosting-accessibility', 'filter-resources-hosting-sanitary', 'filter-resources-hosting-heating', 'filter-resources-hosting-parking', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-dae', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-resources-protcivile', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras', 'filter-autoroutes', 'filter-autoroutes-type', 'filter-pr-autoroutes', 'filter-tchoo-trains'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       if (RESOURCE_ONLY_FILTERS.has(id)) {
         // Rendu immédiat depuis le cache
