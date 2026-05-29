@@ -2668,11 +2668,20 @@ async function fetchZoneStreetInsights(geometry) {
   }
 }
 
+function setZoneImpactPanelVisible(visible = false) {
+  const panel = document.getElementById('map-zone-impact-panel');
+  if (!panel) return;
+  panel.hidden = !visible;
+  panel.classList.toggle('hidden', !visible);
+}
+
 function renderZoneImpactPanel(html = '') {
   if (!html) {
+    setZoneImpactPanelVisible(false);
     setHtml('map-zone-impact-list', '<li>Aucune zone d&rsquo;analyse active.</li>');
     return;
   }
+  setZoneImpactPanelVisible(true);
   setHtml('map-zone-impact-list', html);
 }
 
@@ -3640,6 +3649,7 @@ function clearZoneImpactSelection() {
 function startZoneImpactSelection() {
   if (!leafletMap || typeof window.L === 'undefined') return;
   if (mapZoneImpactDrawHandler?.enable) mapZoneImpactDrawHandler.enable();
+  renderZoneImpactPanel('<li>Tracez une zone sur la carte pour ouvrir l&rsquo;analyse terrain.</li>');
   setMapFeedback("Tracez un rectangle ou un polygone pour analyser l'impact terrain.");
 }
 

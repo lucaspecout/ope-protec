@@ -4499,19 +4499,21 @@ details[open] .news-stats-toggle::before { content: '▾ '; }
 }
 
 #map-panel .map-zone-impact {
-  position: absolute;
-  left: .75rem;
-  bottom: .75rem;
-  z-index: 850;
-  width: min(430px, calc(100% - 1.5rem));
-  max-height: 38%;
+  position: static;
+  width: auto;
+  max-height: 340px;
   overflow: auto;
+  margin: .6rem;
   padding: .62rem .7rem;
   border-color: rgba(196, 212, 232, .92);
   border-radius: 10px;
-  background: rgba(255, 255, 255, .94);
-  box-shadow: 0 10px 26px rgba(15, 42, 78, .15);
-  backdrop-filter: blur(8px);
+  background: #fff;
+  box-shadow: 0 6px 18px rgba(15, 42, 78, .10);
+}
+
+#map-panel .map-zone-impact.hidden,
+#map-zone-impact-panel[hidden] {
+  display: none !important;
 }
 
 #map-panel .map-zone-impact h4 {
@@ -4635,7 +4637,7 @@ details[open] .news-stats-toggle::before { content: '▾ '; }
   #map-panel .map-zone-impact {
     position: static;
     width: auto;
-    max-height: none;
+    max-height: 320px;
     margin: .55rem;
   }
 
