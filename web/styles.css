@@ -4318,6 +4318,108 @@ details[open] .news-stats-toggle::before { content: '▾ '; }
   overflow: auto;
 }
 
+#map-panel .map-tool-section {
+  display: grid;
+  gap: .38rem;
+  margin-bottom: .55rem;
+  padding: .5rem;
+  border: 1px solid #ded8f4;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #fff, #fbf9ff);
+}
+
+#map-panel .map-tool-section:last-child {
+  margin-bottom: 0;
+}
+
+#map-panel .map-tool-section__title {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  color: #51318f;
+  font-size: .72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+#map-panel .map-tool-section__title::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #7c3aed;
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, .12);
+}
+
+#map-panel .map-filter-group--tools .filter-tool-row {
+  margin-top: 0 !important;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .35rem;
+}
+
+#map-panel .map-filter-group--tools .filter-tool-row .map-btn-lite,
+#map-panel .map-filter-group--tools .filter-tool-row button {
+  width: 100%;
+  min-height: 34px;
+  justify-content: center;
+  white-space: normal;
+  line-height: 1.15;
+}
+
+#map-panel .map-filter-group--tools .filter-tool-row select {
+  grid-column: 1 / -1;
+  min-height: 34px;
+}
+
+#map-panel .map-filter-group--tools .filter-tool-row input[type="color"] {
+  width: 100% !important;
+  height: 34px !important;
+}
+
+#map-panel .map-filter-group--tools .tactical-layer-grid {
+  grid-template-columns: 1fr;
+  gap: .25rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+#map-panel .map-filter-group--tools .tactical-layer-grid label {
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  gap: .38rem;
+  padding: .3rem .42rem;
+  border: 1px solid #e3ddf6;
+  border-radius: 8px;
+  background: #fff;
+  color: #2f2452;
+  font-size: .76rem;
+}
+
+#map-panel .map-filter-group--tools .tactical-layer-grid label:has(input:checked) {
+  border-color: #bca7ef;
+  background: #f3efff;
+}
+
+#map-panel .map-filter-group--tools .route-tool {
+  margin-top: 0;
+  border-color: #ded8f4;
+  background: #fff;
+}
+
+#map-panel .map-filter-group--tools .route-tool__actions {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+#map-panel .map-filter-group--tools .evacuation-radius-field {
+  grid-column: 1 / -1;
+  min-height: 34px;
+}
+
 #map-panel .map-toggle-grid {
   gap: .25rem;
 }

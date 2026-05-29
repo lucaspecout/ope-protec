@@ -988,6 +988,8 @@
               <details class="filter-group map-filter-group--tools" open>
                 <summary class="filter-group__title">🛠️ Outils terrain</summary>
                 <div class="filter-group__body">
+                  <div class="map-tool-section">
+                    <div class="map-tool-section__title">Calques tactiques</div>
                   <div class="tactical-layer-grid" aria-label="Calques actions">
                     <label><input class="tactical-layer-toggle" data-tactical-layer="evacuation" type="checkbox" checked /> Zones d'évacuation</label>
                     <label><input class="tactical-layer-toggle" data-tactical-layer="rassemblement" type="checkbox" checked /> Points de rassemblement</label>
@@ -997,12 +999,18 @@
                     <label><input class="tactical-layer-toggle" data-tactical-layer="centre_accueil" type="checkbox" checked /> Centres d'accueil</label>
                     <label><input class="tactical-layer-toggle" data-tactical-layer="team" type="checkbox" checked /> Équipes terrain</label>
                   </div>
+                  </div>
+                  <div class="map-tool-section">
+                    <div class="map-tool-section__title">Analyse &amp; briefing</div>
                   <div class="filter-tool-row">
                     <button id="map-zone-impact-start" type="button" class="ghost map-btn-lite">🧭 Analyser une zone</button>
                     <button id="map-zone-impact-clear" type="button" class="ghost map-btn-lite">🧹 Effacer analyse</button>
                     <button id="map-add-point-btn" type="button" class="ghost map-btn-lite" aria-pressed="false" data-requires-edit>➕ Créer un POI</button>
                     <button id="map-briefing-export-btn" type="button" class="ghost map-btn-lite">📄 Briefing carte</button>
                   </div>
+                  </div>
+                  <div class="map-tool-section">
+                    <div class="map-tool-section__title">Zones rapides</div>
                   <div class="filter-tool-row filter-tool-row--evacuation" style="margin-top:.4rem">
                     <label class="evacuation-radius-field" for="map-evacuation-radius-km">
                       <span>Rayon</span>
@@ -1012,6 +1020,9 @@
                     <button id="map-evacuation-circle-start" type="button" class="ghost map-btn-lite" aria-pressed="false">⭕ Zone évacuation</button>
                     <button id="map-evacuation-circle-clear" type="button" class="ghost map-btn-lite">❌ Effacer rond</button>
                   </div>
+                  </div>
+                  <div class="map-tool-section">
+                    <div class="map-tool-section__title">Mesure &amp; trajet</div>
                   <div class="filter-tool-row" style="margin-top:.4rem">
                     <button id="map-measure-start" type="button" class="ghost map-btn-lite" aria-pressed="false">📏 Mètre</button>
                     <button id="map-measure-clear" type="button" class="ghost map-btn-lite">🧽 Effacer mesure</button>
@@ -1025,6 +1036,9 @@
                     <div id="map-route-summary" class="route-tool__summary">Cliquez deux points sur la carte pour estimer un trajet.</div>
                     <div id="map-route-list" class="route-tool__list" aria-live="polite"></div>
                   </div>
+                  </div>
+                  <div class="map-tool-section" data-requires-edit>
+                    <div class="map-tool-section__title">Annotations</div>
                   <div class="filter-tool-row" style="margin-top:.4rem" data-requires-edit>
                     <input id="map-annotation-color" type="color" value="#d7263d" aria-label="Couleur annotation" style="width:36px;height:33px;padding:2px;border-radius:6px" />
                     <select id="map-annotation-weight" aria-label="Épaisseur annotation">
@@ -1034,6 +1048,9 @@
                     </select>
                     <button id="map-annotation-clear-btn" type="button" class="ghost map-btn-lite">🧽 Effacer annotations</button>
                   </div>
+                  </div>
+                  <div class="map-tool-section">
+                    <div class="map-tool-section__title">Points opérationnels</div>
                   <div class="filter-tool-row" style="margin-top:.4rem">
                     <select id="poi-target-category-filter" aria-label="Filtrer les POI par catégorie">
                       <option value="all">POI : afficher tout</option>
@@ -1053,6 +1070,7 @@
                       <option value="autre">Autres</option>
                     </select>
                     <button id="poi-target-toggle-btn" type="button" class="ghost map-btn-lite">Masquer POI</button>
+                  </div>
                   </div>
                 </div>
               </details>
