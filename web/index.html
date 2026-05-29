@@ -58,6 +58,7 @@
         <nav class="side-nav" aria-label="Menu principal">
           <button class="menu-btn" data-target="situation-panel" data-icon="📊"><span class="menu-label">Situation</span></button>
           <button class="menu-btn" data-target="services-panel" data-icon="🔌"><span class="menu-label">Services connectés</span></button>
+          <button class="menu-btn" data-target="stations-panel" data-icon="🚆"><span class="menu-label">Horaires gares</span></button>
           <button class="menu-btn" data-target="meteo-panel" data-icon="🌤️"><span class="menu-label">Météo semaine</span></button>
           <button class="menu-btn" data-target="water-panel" data-icon="🚰"><span class="menu-label">Eau potable</span></button>
           <button class="menu-btn" data-target="contacts-panel" data-icon="☎️"><span class="menu-label">Contacts Isère</span></button>
@@ -152,6 +153,27 @@
             <div id="groundwater-stations" class="svc-gw-stations"></div>
           </div>
 
+        </section>
+
+        <section id="stations-panel" class="panel view hidden" hidden>
+          <div class="panel-head stations-panel-head">
+            <div>
+              <h3>Horaires des gares de l'Isere</h3>
+              <p class="muted">Arrivees et departs SNCF en temps reel. Les retards sont signales en rouge.</p>
+            </div>
+            <div class="stations-actions">
+              <label for="stations-filter">Gare</label>
+              <select id="stations-filter" aria-label="Filtrer les horaires par gare">
+                <option value="">Toutes les gares</option>
+              </select>
+              <button id="stations-refresh-btn" type="button" class="ghost">Actualiser</button>
+            </div>
+          </div>
+          <div id="stations-summary" class="stations-summary" aria-live="polite"></div>
+          <p id="stations-error" class="error"></p>
+          <div id="stations-list" class="stations-list">
+            <p class="muted">Chargement des horaires SNCF...</p>
+          </div>
         </section>
 
         <section id="meteo-panel" class="panel view hidden" hidden>

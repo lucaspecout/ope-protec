@@ -474,6 +474,7 @@ _DAUPHINE_CACHE_TTL_SECONDS = 300
 _VIGIEAU_CACHE_TTL_SECONDS = 900
 _ATMO_AURA_CACHE_TTL_SECONDS = 900
 _SNCF_ISERE_CACHE_TTL_SECONDS = 180
+_SNCF_STATION_TIMETABLE_CACHE_TTL_SECONDS = 60
 _FINESS_ISERE_CACHE_TTL_SECONDS = 43200
 _FINESS_ISERE_MAX_LIMIT = 20000
 _FINESS_ISERE_STABLE_CSV_URL = "https://static.data.gouv.fr/resources/finess-extraction-du-fichier-des-etablissements/20260312-094547/etalab-cs1100507-stock-20260311-0343.csv"
@@ -530,6 +531,8 @@ _atmo_aura_cache_lock = Lock()
 _atmo_aura_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "atmo_aura"}
 _sncf_isere_cache_lock = Lock()
 _sncf_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "sncf_isere"}
+_sncf_station_timetable_cache_lock = Lock()
+_sncf_station_timetable_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "sncf_isere_station_timetables"}
 _finess_isere_cache_lock = Lock()
 _finess_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "finess_isere"}
 _geodae_isere_cache_lock = Lock()
@@ -4755,6 +4758,225 @@ def fetch_sncf_isere_alerts(force_refresh: bool = False) -> dict[str, Any]:
         ttl_seconds=_SNCF_ISERE_CACHE_TTL_SECONDS,
         force_refresh=force_refresh,
         loader=_fetch_sncf_isere_alerts_live,
+    )
+
+
+SNCF_ISERE_STATIONS = [
+    {"id": "grenoble", "name": "Grenoble", "lat": 45.19142, "lon": 5.71472},
+    {"id": "grenoble-universites-gieres", "name": "Grenoble Universites - Gieres", "lat": 45.1848, "lon": 5.7842},
+    {"id": "echirolles", "name": "Echirolles", "lat": 45.1512, "lon": 5.7195},
+    {"id": "pont-de-claix", "name": "Pont-de-Claix", "lat": 45.1238, "lon": 5.6995},
+    {"id": "jarrie-vizille", "name": "Jarrie - Vizille", "lat": 45.0944, "lon": 5.7562},
+    {"id": "vif", "name": "Vif", "lat": 45.0561, "lon": 5.6727},
+    {"id": "saint-georges-de-commiers", "name": "Saint-Georges-de-Commiers", "lat": 45.0381, "lon": 5.7059},
+    {"id": "monestier-de-clermont", "name": "Monestier-de-Clermont", "lat": 44.9162, "lon": 5.6321},
+    {"id": "clelles-mens", "name": "Clelles - Mens", "lat": 44.8283, "lon": 5.6172},
+    {"id": "voreppe", "name": "Voreppe", "lat": 45.2948, "lon": 5.6344},
+    {"id": "moirans", "name": "Moirans", "lat": 45.3262, "lon": 5.5682},
+    {"id": "voiron", "name": "Voiron", "lat": 45.3632, "lon": 5.5942},
+    {"id": "rives", "name": "Rives", "lat": 45.3539, "lon": 5.4976},
+    {"id": "tullins-fures", "name": "Tullins-Fures", "lat": 45.2982, "lon": 5.4862},
+    {"id": "vinay", "name": "Vinay", "lat": 45.2099, "lon": 5.4065},
+    {"id": "saint-marcellin", "name": "Saint-Marcellin", "lat": 45.1515, "lon": 5.3225},
+    {"id": "polienas", "name": "Polienas", "lat": 45.2497, "lon": 5.4747},
+    {"id": "le-grand-lemps", "name": "Le Grand-Lemps", "lat": 45.3974, "lon": 5.4203},
+    {"id": "chabons", "name": "Chabons", "lat": 45.4414, "lon": 5.4296},
+    {"id": "virieu-sur-bourbre", "name": "Virieu-sur-Bourbre", "lat": 45.4854, "lon": 5.4742},
+    {"id": "saint-andre-le-gaz", "name": "Saint-Andre-le-Gaz", "lat": 45.5448, "lon": 5.5282},
+    {"id": "bourgoin-jallieu", "name": "Bourgoin-Jallieu", "lat": 45.5844, "lon": 5.2735},
+    {"id": "l-isle-d-abeau", "name": "L'Isle-d'Abeau", "lat": 45.6204, "lon": 5.2359},
+    {"id": "la-verpilliere", "name": "La Verpilliere", "lat": 45.6365, "lon": 5.1458},
+    {"id": "saint-quentin-fallavier", "name": "Saint-Quentin-Fallavier", "lat": 45.6329, "lon": 5.1097},
+    {"id": "vienne", "name": "Vienne", "lat": 45.5259, "lon": 4.8748},
+    {"id": "estressin", "name": "Estressin", "lat": 45.5389, "lon": 4.8693},
+    {"id": "chasse-sur-rhone", "name": "Chasse-sur-Rhone", "lat": 45.5792, "lon": 4.7988},
+    {"id": "le-peage-de-roussillon", "name": "Le Peage-de-Roussillon", "lat": 45.3715, "lon": 4.7971},
+]
+
+
+def _normalize_sncf_station_name(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", str(value or "")).encode("ascii", "ignore").decode("ascii")
+    normalized = normalized.lower().replace("st ", "saint ").replace("ste ", "sainte ")
+    normalized = re.sub(r"\bgare\s+(?:de|du|des|d')?\s*", "", normalized)
+    normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+_SNCF_ISERE_STATION_INDEX = {
+    _normalize_sncf_station_name(station["name"]): station
+    for station in SNCF_ISERE_STATIONS
+}
+_SNCF_ISERE_STATION_ALIASES = {
+    "grenoble universites gieres": "grenoble universites gieres",
+    "gieres": "grenoble universites gieres",
+    "pont de claix": "pont de claix",
+    "pont de claix l etoile": "pont de claix",
+    "jarrie vizille": "jarrie vizille",
+    "tullins fures": "tullins fures",
+    "saint andre le gaz": "saint andre le gaz",
+    "st andre le gaz": "saint andre le gaz",
+    "saint quentin fallavier": "saint quentin fallavier",
+    "le peage de roussillon": "le peage de roussillon",
+    "peage de roussillon": "le peage de roussillon",
+    "l isle d abeau": "l isle d abeau",
+}
+
+
+def _match_isere_station(stop_name: str) -> dict[str, Any] | None:
+    normalized = _normalize_sncf_station_name(stop_name)
+    if not normalized:
+        return None
+    direct = _SNCF_ISERE_STATION_INDEX.get(normalized)
+    if direct:
+        return direct
+    alias = _SNCF_ISERE_STATION_ALIASES.get(normalized)
+    if alias:
+        return _SNCF_ISERE_STATION_INDEX.get(alias)
+    return None
+
+
+def _parse_sncf_dt(value: str) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _sncf_delay_minutes(aimed: str, expected: str) -> int:
+    aimed_dt = _parse_sncf_dt(aimed)
+    expected_dt = _parse_sncf_dt(expected)
+    if not aimed_dt or not expected_dt:
+        return 0
+    return int(round((expected_dt - aimed_dt).total_seconds() / 60))
+
+
+def _sncf_local_time(value: str) -> str:
+    parsed = _parse_sncf_dt(value)
+    if not parsed:
+        return ""
+    return parsed.strftime("%H:%M")
+
+
+def _sncf_call_text(call: ET.Element, name: str, namespace: dict[str, str]) -> str:
+    return (call.findtext(f"siri:{name}", default="", namespaces=namespace) or "").strip()
+
+
+def _sncf_build_timetable_entry(
+    journey: ET.Element,
+    call: ET.Element,
+    movement: str,
+    station: dict[str, Any],
+    namespace: dict[str, str],
+) -> dict[str, Any] | None:
+    aimed_key = "AimedDepartureTime" if movement == "departure" else "AimedArrivalTime"
+    expected_key = "ExpectedDepartureTime" if movement == "departure" else "ExpectedArrivalTime"
+    platform_key = "DeparturePlatformName" if movement == "departure" else "ArrivalPlatformName"
+    aimed = _sncf_call_text(call, aimed_key, namespace)
+    expected = _sncf_call_text(call, expected_key, namespace) or aimed
+    if not aimed and not expected:
+        return None
+    aimed_sort = _parse_sncf_dt(expected or aimed)
+    delay = _sncf_delay_minutes(aimed, expected)
+    train_number = journey.findtext(".//siri:TrainNumberRef", default="", namespaces=namespace) or ""
+    product = (journey.findtext("siri:ProductCategoryRef", default="", namespaces=namespace) or "").split("::")[-2:-1]
+    line = journey.findtext("siri:PublishedLineName", default="", namespaces=namespace) or journey.findtext("siri:LineRef", default="", namespaces=namespace) or ""
+    return {
+        "station_id": station["id"],
+        "station": station["name"],
+        "movement": movement,
+        "aimed_time": aimed,
+        "expected_time": expected,
+        "time": _sncf_local_time(expected or aimed),
+        "scheduled_time": _sncf_local_time(aimed),
+        "delay_minutes": delay,
+        "is_delayed": delay > 0,
+        "platform": _sncf_call_text(call, platform_key, namespace),
+        "line": line,
+        "train_number": train_number,
+        "category": product[0].replace("TRAIN_", "") if product else "",
+        "origin": journey.findtext("siri:OriginName", default="", namespaces=namespace) or "",
+        "destination": journey.findtext("siri:DestinationName", default="", namespaces=namespace) or "",
+        "_sort": aimed_sort.isoformat() if aimed_sort else "",
+    }
+
+
+def _fetch_sncf_isere_station_timetables_live() -> dict[str, Any]:
+    source = "https://proxy.transport.data.gouv.fr/resource/sncf-siri-lite-estimated-timetable"
+    try:
+        xml_payload = _http_get_text(source, timeout=28)
+        root = ET.fromstring(xml_payload)
+        namespace = {"siri": "http://www.siri.org.uk/siri"}
+        response_ts = root.findtext(".//siri:ResponseTimestamp", default="", namespaces=namespace) or ""
+        station_map: dict[str, dict[str, Any]] = {
+            station["id"]: {**station, "arrivals": [], "departures": [], "delayed_total": 0}
+            for station in SNCF_ISERE_STATIONS
+        }
+        seen: set[tuple[str, str, str, str]] = set()
+        for journey in root.findall(".//siri:EstimatedVehicleJourney", namespace):
+            calls = list(journey.findall(".//siri:RecordedCall", namespace)) + list(journey.findall(".//siri:EstimatedCall", namespace))
+            for call in calls:
+                station = _match_isere_station(_sncf_call_text(call, "StopPointName", namespace))
+                if not station:
+                    continue
+                for movement in ("arrival", "departure"):
+                    entry = _sncf_build_timetable_entry(journey, call, movement, station, namespace)
+                    if not entry:
+                        continue
+                    fingerprint = (entry["station_id"], entry["movement"], entry.get("train_number") or "", entry.get("expected_time") or entry.get("aimed_time") or "")
+                    if fingerprint in seen:
+                        continue
+                    seen.add(fingerprint)
+                    target = "arrivals" if movement == "arrival" else "departures"
+                    station_map[station["id"]][target].append(entry)
+                    if entry["is_delayed"]:
+                        station_map[station["id"]]["delayed_total"] += 1
+
+        stations = []
+        for station in station_map.values():
+            station["arrivals"].sort(key=lambda item: item.get("_sort") or "")
+            station["departures"].sort(key=lambda item: item.get("_sort") or "")
+            station["arrivals"] = [{k: v for k, v in item.items() if k != "_sort"} for item in station["arrivals"][:8]]
+            station["departures"] = [{k: v for k, v in item.items() if k != "_sort"} for item in station["departures"][:8]]
+            station["next_items_total"] = len(station["arrivals"]) + len(station["departures"])
+            if station["next_items_total"]:
+                stations.append(station)
+        stations.sort(key=lambda item: (item["name"] != "Grenoble", item["name"]))
+        delayed_total = sum(int(station.get("delayed_total") or 0) for station in stations)
+        return {
+            "service": "Horaires gares SNCF Isere",
+            "status": "online",
+            "source": source,
+            "source_label": "transport.data.gouv.fr - SIRI Lite Estimated Timetable",
+            "stations": stations,
+            "stations_total": len(stations),
+            "delayed_total": delayed_total,
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+            "feed_updated_at": response_ts,
+        }
+    except (ET.ParseError, HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError) as exc:
+        return {
+            "service": "Horaires gares SNCF Isere",
+            "status": "degraded",
+            "source": source,
+            "source_label": "transport.data.gouv.fr - SIRI Lite Estimated Timetable",
+            "stations": [],
+            "stations_total": 0,
+            "delayed_total": 0,
+            "error": str(exc),
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+
+
+def fetch_sncf_isere_station_timetables(force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_sncf_station_timetable_cache,
+        lock=_sncf_station_timetable_cache_lock,
+        ttl_seconds=_SNCF_STATION_TIMETABLE_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=_fetch_sncf_isere_station_timetables_live,
     )
 
 

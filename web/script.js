@@ -83,6 +83,7 @@ const AUTOROUTES_ISERE_ROAD_REGEX = /\bA\s?(480|49|48|51|43|41)\b/i;
 const PANEL_TITLES = {
   'situation-panel': 'Situation opérationnelle',
   'services-panel': 'Services connectés',
+  'stations-panel': 'Horaires gares Isere',
   'meteo-panel': 'Météo hebdomadaire Isère',
   'water-panel': 'Eau potable et assainissement',
   'contacts-panel': 'Contacts utiles Isère',
@@ -207,6 +208,7 @@ let currentUser = null;
 const MAIRIE_ALLOWED_PANELS = new Set([
   'situation-panel',
   'services-panel',
+  'stations-panel',
   'meteo-panel',
   'water-panel',
   'contacts-panel',
@@ -387,6 +389,8 @@ const meteoAirQualityInFlight = new Map();
 let selectedMeteoCityKey = ISERE_MAJOR_CITIES[0]?.key || 'grenoble';
 let selectedWaterMunicipalityId = '';
 let selectedContactsCity = '';
+let stationsTimetableCache = null;
+let selectedStationFilter = '';
 let waterPanelLoadSeq = 0;
 const waterPanelCache = new Map();
 let contactsPanelLoadSeq = 0;
@@ -2485,6 +2489,7 @@ function setActivePanel(panelId) {
       centerMapOnIsere();
     }, 100);
     if (token) _refreshAgentMarkers();
+    if (token && !stationsTimetableCache) loadAndRenderStationsPanel(false).catch(() => {});
   }
   if (panelId === 'logs-panel') ensureLogMunicipalitiesLoaded();
   if (panelId === 'news-panel') ensureSocialFeedsRendered();
@@ -2504,6 +2509,12 @@ function setActivePanel(panelId) {
   if (panelId === 'api-panel' && token) {
     loadApiInterconnections(false).catch((error) => {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
+    });
+  }
+  if (panelId === 'stations-panel' && token) {
+    loadAndRenderStationsPanel(false).catch((error) => {
+      const errorEl = document.getElementById('stations-error');
+      if (errorEl) errorEl.textContent = sanitizeErrorMessage(error.message);
     });
   }
   if (panelId === 'notifications-panel' && token) {
@@ -5993,10 +6004,11 @@ function _drawResourceMarkers() {
     } else {
       markerHtml = `<span class="map-resource-icon" style="background:${markerColor[r.priority] || '#2f9e44'}">${meta.icon}</span>`;
     }
+    const stationTimetableHtml = typeKey === 'transport_gare_sncf' ? stationPopupTimetableHtml(r.name) : '';
     window.L.marker([coords.lat, coords.lon], {
       icon: window.L.divIcon({ className: 'map-resource-icon-wrap', html: markerHtml, iconSize: [24, 24], iconAnchor: [12, 12] }),
     })
-      .bindPopup(`<strong>${meta.icon} ${r.name}</strong><br>Type: ${meta.label}<br>Niveau: ${priorityLabel[r.priority] || 'standard'}<br>Adresse: ${r.address}<br>${escapeHtml(r.info || '')}${formatHostingDetailsHtml(r)}${formatFinessDetailsHtml(r)}${formatDaeDetailsHtml(r)}<br><a href="${escapeHtml(r.source || '#')}" target="_blank" rel="noreferrer">Source publique</a>`)
+      .bindPopup(`<strong>${meta.icon} ${r.name}</strong><br>Type: ${meta.label}<br>Niveau: ${priorityLabel[r.priority] || 'standard'}<br>Adresse: ${r.address}<br>${escapeHtml(r.info || '')}${formatHostingDetailsHtml(r)}${formatFinessDetailsHtml(r)}${formatDaeDetailsHtml(r)}${stationTimetableHtml}<br><a href="${escapeHtml(r.source || '#')}" target="_blank" rel="noreferrer">Source publique</a>`)
       .addTo(resourceLayer);
   });
 
@@ -12467,6 +12479,146 @@ function renderWaterServicesPanel(payload = {}) {
   `).join(''));
 }
 
+function stationDelayLabel(item = {}) {
+  const delay = Number(item.delay_minutes || 0);
+  if (delay > 0) return `+${delay} min`;
+  if (delay < 0) return `${delay} min`;
+  return 'A l heure';
+}
+
+function stationDelayClass(item = {}) {
+  const delay = Number(item.delay_minutes || 0);
+  if (delay > 0) return 'stations-delay stations-delay--late';
+  if (delay < 0) return 'stations-delay stations-delay--early';
+  return 'stations-delay';
+}
+
+function renderStationMovements(items = [], movement = 'departure') {
+  if (!items.length) return '<li class="muted">Aucun horaire proche.</li>';
+  return items.slice(0, 6).map((item) => {
+    const relation = movement === 'departure'
+      ? `vers ${escapeHtml(item.destination || '-')}`
+      : `depuis ${escapeHtml(item.origin || '-')}`;
+    const platform = item.platform ? ` · voie ${escapeHtml(item.platform)}` : '';
+    const train = [item.category, item.train_number || item.line].filter(Boolean).join(' ');
+    return `<li class="${item.is_delayed ? 'is-delayed' : ''}">
+      <time>${escapeHtml(item.time || item.scheduled_time || '--:--')}</time>
+      <div>
+        <strong>${relation}</strong>
+        <span class="muted">${escapeHtml(train || 'Train')}${platform}</span>
+      </div>
+      <span class="${stationDelayClass(item)}">${escapeHtml(stationDelayLabel(item))}</span>
+    </li>`;
+  }).join('');
+}
+
+function syncStationsFilterOptions(stations = []) {
+  const select = document.getElementById('stations-filter');
+  if (!select) return;
+  const current = select.value || selectedStationFilter;
+  select.innerHTML = `<option value="">Toutes les gares</option>${stations.map((station) => `<option value="${escapeHtml(station.id)}">${escapeHtml(station.name)}</option>`).join('')}`;
+  if ([...select.options].some((option) => option.value === current)) {
+    select.value = current;
+    selectedStationFilter = current;
+  }
+}
+
+function normalizeSearchText(value = '') {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function stationPopupTimetableHtml(resourceName = '') {
+  const payload = stationsTimetableCache;
+  const stations = Array.isArray(payload?.stations) ? payload.stations : [];
+  if (!stations.length) return '<p class="muted stations-popup-note">Horaires temps reel en cours de chargement.</p>';
+  const normalizedName = normalizeSearchText(resourceName).replace(/\bgare\s+(de|du|des|d)?\s*/g, '').trim();
+  const station = stations.find((item) => {
+    const name = normalizeSearchText(item.name || '');
+    return name && (normalizedName.includes(name) || name.includes(normalizedName));
+  });
+  if (!station) return '<p class="muted stations-popup-note">Horaires non disponibles pour cette gare.</p>';
+  const nextDepartures = (station.departures || []).slice(0, 2);
+  const nextArrivals = (station.arrivals || []).slice(0, 2);
+  const delayed = Number(station.delayed_total || 0);
+  return `<div class="stations-popup">
+    <strong>Horaires SNCF</strong>
+    ${delayed > 0 ? `<span class="stations-popup-late">${delayed} retard(s)</span>` : '<span class="stations-popup-ok">A l heure</span>'}
+    <div class="stations-popup-cols">
+      <div><span>Departs</span>${nextDepartures.map((item) => `<p class="${item.is_delayed ? 'is-delayed' : ''}">${escapeHtml(item.time || '--:--')} · ${escapeHtml(item.destination || '-')}${item.is_delayed ? ` · <b>${escapeHtml(stationDelayLabel(item))}</b>` : ''}</p>`).join('') || '<p class="muted">Aucun</p>'}</div>
+      <div><span>Arrivees</span>${nextArrivals.map((item) => `<p class="${item.is_delayed ? 'is-delayed' : ''}">${escapeHtml(item.time || '--:--')} · ${escapeHtml(item.origin || '-')}${item.is_delayed ? ` · <b>${escapeHtml(stationDelayLabel(item))}</b>` : ''}</p>`).join('') || '<p class="muted">Aucune</p>'}</div>
+    </div>
+  </div>`;
+}
+
+function renderStationsPanel(payload = stationsTimetableCache) {
+  const list = document.getElementById('stations-list');
+  const summary = document.getElementById('stations-summary');
+  const errorEl = document.getElementById('stations-error');
+  if (!list) return;
+  const stations = Array.isArray(payload?.stations) ? payload.stations : [];
+  syncStationsFilterOptions(stations);
+  const filtered = selectedStationFilter ? stations.filter((station) => station.id === selectedStationFilter) : stations;
+  const delayedTotal = filtered.reduce((sum, station) => sum + Number(station.delayed_total || 0), 0);
+  const nextTotal = filtered.reduce((sum, station) => sum + Number(station.next_items_total || 0), 0);
+  if (summary) {
+    summary.innerHTML = `
+      <article><strong>${filtered.length}</strong><span>gare(s)</span></article>
+      <article><strong>${nextTotal}</strong><span>mouvements proches</span></article>
+      <article class="${delayedTotal > 0 ? 'is-delayed' : ''}"><strong>${delayedTotal}</strong><span>retard(s)</span></article>
+      <article><strong>${escapeHtml(payload?.status || '-')}</strong><span>${escapeHtml(payload?.source_label || 'SNCF temps reel')}</span></article>`;
+  }
+  if (errorEl) errorEl.textContent = payload?.error ? sanitizeErrorMessage(payload.error) : '';
+  if (!filtered.length) {
+    list.innerHTML = '<p class="muted">Aucun horaire SNCF Isere disponible pour le moment.</p>';
+    return;
+  }
+  list.innerHTML = filtered.map((station) => `
+    <article class="station-card ${Number(station.delayed_total || 0) > 0 ? 'station-card--delayed' : ''}">
+      <header>
+        <div>
+          <h4>${escapeHtml(station.name)}</h4>
+          <p class="muted">${Number(station.next_items_total || 0)} horaire(s) proche(s)</p>
+        </div>
+        <span class="${Number(station.delayed_total || 0) > 0 ? 'station-status station-status--late' : 'station-status'}">
+          ${Number(station.delayed_total || 0) > 0 ? `${Number(station.delayed_total || 0)} retard(s)` : 'A l heure'}
+        </span>
+      </header>
+      <div class="station-card__grid">
+        <section>
+          <h5>Departs</h5>
+          <ul>${renderStationMovements(station.departures || [], 'departure')}</ul>
+        </section>
+        <section>
+          <h5>Arrivees</h5>
+          <ul>${renderStationMovements(station.arrivals || [], 'arrival')}</ul>
+        </section>
+      </div>
+    </article>`).join('');
+}
+
+async function loadAndRenderStationsPanel(forceRefresh = false) {
+  const list = document.getElementById('stations-list');
+  const errorEl = document.getElementById('stations-error');
+  if (list && !stationsTimetableCache) list.innerHTML = '<p class="muted">Chargement des horaires SNCF...</p>';
+  if (errorEl) errorEl.textContent = '';
+  const suffix = forceRefresh ? '?refresh=true' : '';
+  const payload = await api(`/api/sncf/isere/station-timetables${suffix}`, {
+    bypassCache: forceRefresh,
+    cacheTtlMs: forceRefresh ? 0 : 60 * 1000,
+    timeoutMs: API_SLOW_ENDPOINT_TIMEOUT_MS,
+  });
+  stationsTimetableCache = payload;
+  renderStationsPanel(payload);
+  if (leafletMap) renderResources();
+  return payload;
+}
+
 async function loadAndRenderWaterPanel(forceRefresh = false) {
   renderWaterMunicipalitySelector();
   if (!selectedWaterMunicipalityId) {
@@ -14442,6 +14594,13 @@ function bindAppInteractions() {
     const form = event.currentTarget;
     const city = String(new FormData(form).get('city') || '').trim();
     await loadAndRenderContactsPanel(city, true);
+  });
+  document.getElementById('stations-filter')?.addEventListener('change', (event) => {
+    selectedStationFilter = String(event.target?.value || '');
+    renderStationsPanel(stationsTimetableCache);
+  });
+  document.getElementById('stations-refresh-btn')?.addEventListener('click', async () => {
+    await loadAndRenderStationsPanel(true);
   });
   const contactsInput = document.getElementById('contacts-city-search');
   if (contactsInput && currentUser?.role === 'mairie' && currentUser?.municipality_name) {

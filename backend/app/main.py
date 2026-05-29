@@ -85,6 +85,7 @@ from .services import (
     fetch_hubeau_water_services,
     fetch_rnb_isere_summary,
     fetch_sncf_isere_alerts,
+    fetch_sncf_isere_station_timetables,
     fetch_atmo_aura_isere_air_quality,
     fetch_anfr_isere_antennas,
     fetch_arcep_isere_mobile_outages,
@@ -2006,6 +2007,24 @@ def isere_refresh_one_service(
         "status": "refreshed",
         "current": snapshot.get(service_key, {}),
     }
+
+
+@app.get("/api/sncf/isere/station-timetables")
+def api_sncf_isere_station_timetables(
+    refresh: bool = False,
+    station_id: str | None = Query(None),
+    _: User = Depends(require_roles(*READ_ROLES)),
+):
+    payload = fetch_sncf_isere_station_timetables(force_refresh=refresh)
+    if station_id:
+        wanted = station_id.strip().lower()
+        stations = [
+            station
+            for station in payload.get("stations", [])
+            if str(station.get("id") or "").lower() == wanted
+        ]
+        payload = {**payload, "stations": stations, "stations_total": len(stations)}
+    return payload
 
 
 @app.get("/operations/bootstrap")
