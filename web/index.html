@@ -800,12 +800,31 @@
                     <option value="temperature" selected>Température actuelle</option>
                     <option value="heat">Ressenti / chaleur</option>
                     <option value="wind">Vent en ville</option>
+                    <option value="gust">Rafales</option>
+                    <option value="rain">Pluie actuelle</option>
+                    <option value="precipitation">Cumul pluie</option>
+                    <option value="humidity">Humidité</option>
                     <option value="pollution">Pollution / qualité de l'air</option>
                   </select>
+                  <label>
+                    <input id="filter-groundwater" type="checkbox" />
+                    💧 Nappes Hub'Eau
+                    <small class="filter-legend">Niveau, profondeur et tendance piézométrique</small>
+                  </label>
                   <label>
                     <input id="filter-flood-zones" type="checkbox" />
                     Zones inondables détaillées
                     <small class="filter-legend">Zonage PPR + surfaces TRI fréquente / moyenne / rare · Géorisques</small>
+                  </label>
+                  <label>
+                    <input id="filter-seismes" type="checkbox" />
+                    🌍 Séismes récents
+                    <small class="filter-legend">Magnitude, profondeur et localisation</small>
+                  </label>
+                  <label>
+                    <input id="filter-feux-foret" type="checkbox" />
+                    🔥 Feux de forêt
+                    <small class="filter-legend">Foyers actifs EFFIS / Copernicus</small>
                   </label>
                   <label>
                     <input id="filter-avalanche-zones" type="checkbox" />
@@ -939,11 +958,12 @@
                   </div>
 
                   <div class="filter-subgroup">
-                    <label><input id="filter-resources-telecom" type="checkbox" /> 📡 Télécom (ANFR)</label>
+                    <label><input id="filter-resources-telecom" type="checkbox" /> 📡 Télécom (ANFR / ARCEP)</label>
                     <select id="filter-resources-telecom-type" aria-label="Filtrer les ressources télécom" disabled>
                       <option value="all">Tous les types</option>
                       <option value="anfr_antenna">Antennes ANFR</option>
                       <option value="arcep_mobile_outage">Sites indisponibles ARCEP</option>
+                      <option value="telecom_white_zone">Zones blanches à vérifier</option>
                     </select>
                   </div>
 
@@ -992,6 +1012,7 @@
                   <label><input id="filter-pr-autoroutes" type="checkbox" /> 📍 Points de repère (PR km)</label>
                   <label><input id="filter-google-traffic-flow" type="checkbox" /> 🛣️ Trafic continu (style Google Maps)</label>
                   <label><input id="filter-tchoo-trains" type="checkbox" /> 🚆 Trains Carto Tchoo</label>
+                  <label><input id="filter-gtfs-trains" type="checkbox" /> 📡 Trains temps réel GTFS-RT</label>
                 </div>
               </details>
 

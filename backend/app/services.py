@@ -7588,6 +7588,8 @@ def _fetch_hubeau_isere_groundwater_live(station_limit: int = 8) -> dict[str, An
                 "name": station.get("libelle_pe") or station.get("nom_commune") or code_bss,
                 "commune": station.get("nom_commune"),
                 "insee_code": station.get("code_commune_insee"),
+                "latitude": _safe_float(station.get("latitude") or station.get("latitude_station") or station.get("lat")),
+                "longitude": _safe_float(station.get("longitude") or station.get("longitude_station") or station.get("lon")),
                 "date_measure": current.get("date_mesure"),
                 "groundwater_level_m_ngf": current.get("niveau_nappe_eau"),
                 "depth_m": current.get("profondeur_nappe"),
@@ -7617,8 +7619,8 @@ def _fetch_hubeau_isere_groundwater_live(station_limit: int = 8) -> dict[str, An
     }
 
 
-def fetch_hubeau_isere_groundwater(force_refresh: bool = False, station_limit: int = 8) -> dict[str, Any]:
-    safe_limit = max(3, min(station_limit, 20))
+def fetch_hubeau_isere_groundwater(force_refresh: bool = False, station_limit: int = 20) -> dict[str, Any]:
+    safe_limit = max(3, min(station_limit, 30))
 
     def loader() -> dict[str, Any]:
         return _fetch_hubeau_isere_groundwater_live(station_limit=safe_limit)

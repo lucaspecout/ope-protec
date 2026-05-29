@@ -1834,7 +1834,7 @@ def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str])
         "vigicrues_flash_isere": (lambda: fetch_vigicrues_flash_isere_alerts(force_refresh=refresh), {"status": "pending", "level": "vert", "alerts_total": 0, "alerts": []}),
         "finess_isere": (lambda: fetch_finess_isere_resources(force_refresh=refresh), {"status": "pending", "resources": [], "resources_total": 0}),
         "geodae_isere": (lambda: fetch_geodae_isere_defibrillators(force_refresh=refresh), {"status": "pending", "resources": [], "resources_total": 0}),
-        "groundwater_isere": (lambda: fetch_hubeau_isere_groundwater(force_refresh=refresh), {"status": "pending", "stations": [], "stations_total": 0, "trend_summary": {"hausse": 0, "baisse": 0, "stable": 0}}),
+        "groundwater_isere": (lambda: fetch_hubeau_isere_groundwater(force_refresh=refresh, station_limit=30), {"status": "pending", "stations": [], "stations_total": 0, "trend_summary": {"hausse": 0, "baisse": 0, "stable": 0}}),
         "isere_opendata": (lambda: fetch_isere_opendata_resilience(force_refresh=refresh), {"status": "pending", "datasets": [], "totals": {"food_aid_points": 0, "health_centers": 0, "schools": 0}, "insights": []}),
         "aprr_isere": (lambda: fetch_aprr_isere_traffic(force_refresh=refresh), {"status": "pending", "events": [], "events_total": 0, "routes": ["A41", "A43", "A48", "A51"]}),
         "vinci_autoroutes": (lambda: fetch_vinci_autoroutes_isere(force_refresh=refresh), {"status": "pending", "events": [], "events_total": 0, "routes": ["A40", "A41", "A42", "A43"]}),

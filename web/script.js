@@ -75,7 +75,7 @@ const FLUX_SERVICES = [
   { key: 'arcep_isere',            label: 'ARCEP · Sites mobiles',     icon: '📶', category: 'Télécom',       interval: 600,   metric: (d) => `${d.outages_total ?? 0} indisponibilité(s)` },
   { key: 'isere_opendata',         label: 'Isère OpenData · Résilience', icon: '📊', category: 'Données',    interval: 1800,  metric: (d) => `${d.totals?.schools ?? 0} écoles · ${d.totals?.health_centers ?? 0} santé · ${d.totals?.food_aid_points ?? 0} aide alim.` },
   { key: 'finess_isere',           label: 'FINESS · Établissements santé', icon: '🏥', category: 'Santé',    interval: 21600, metric: (d) => `${d.resources_total ?? 0} établissement(s)` },
-  { key: 'geodae_isere',           label: "Geo'DAE - Defibrillateurs", icon: 'DAE', category: 'Sante', interval: 21600, metric: (d) => `${d.resources_total ?? 0} DAE - ${d.available_24h_total ?? 0} 24h/24` },
+  { key: 'geodae_isere',           label: "Geo'DAE - Defibrillateurs", icon: 'DAE', category: 'Santé', interval: 21600, metric: (d) => `${d.resources_total ?? 0} DAE - ${d.available_24h_total ?? 0} 24h/24` },
 ];
 const AUTOROUTES_ISERE_ROADS = Object.freeze(['A41', 'A43', 'A48', 'A49', 'A51', 'A480']);
 const AUTOROUTES_ISERE_ROAD_SET = new Set(AUTOROUTES_ISERE_ROADS);
@@ -136,6 +136,7 @@ const RESOURCE_TYPE_META = {
   site_sensible_custom: { label: 'Site sensible (ajouté)', icon: '⚠️' },
   anfr_antenna: { label: 'Antenne ANFR', icon: '📡' },
   arcep_mobile_outage: { label: 'Site mobile indisponible (ARCEP)', icon: '🔴' },
+  telecom_white_zone: { label: 'Zone blanche potentielle', icon: '📵' },
   defibrillateur: { label: 'Defibrillateur automatise externe', icon: '⚡' },
 };
 
@@ -301,6 +302,8 @@ let prAutorouteLayer = null;
 let tchooTrainLayer = null;
 let tchooRailTileLayer = null;
 let tchooTrainTimer = null;
+let gtfsTrainLayer = null;
+let gtfsTrainCache = { savedAt: 0, vehicles: [], source: '', error: '' };
 let institutionLayer = null;
 let populationLayer = null;
 let mapTileLayer = null;
@@ -944,7 +947,7 @@ const COMMAND_RESOURCE_TYPES = new Set(['poste_commandement']);
 const PC_RESOURCE_TYPES = new Set(['protection_civile']);
 const HOSTING_RESOURCE_TYPES = new Set(['gymnase', 'complexe_sportif', 'stade', 'salle_omnisports', 'centre_culturel', 'salle_spectacle_public', 'palais_congres', 'salle_fetes']);
 const SCHOOL_HOSTING_TYPES = new Set(['ecole_primaire', 'college', 'lycee', 'universite']);
-const TELECOM_RESOURCE_TYPES = new Set(['anfr_antenna', 'arcep_mobile_outage']);
+const TELECOM_RESOURCE_TYPES = new Set(['anfr_antenna', 'arcep_mobile_outage', 'telecom_white_zone']);
 
 const ISERE_BOUNDARY_STYLE = { color: '#163a87', weight: 2, fillColor: '#63c27d', fillOpacity: 0.2 };
 const TRAFFIC_COMMUNES = [
@@ -3912,7 +3915,8 @@ function renderGroundwaterLayer() {
   groundwaterLayer.clearLayers();
   const stations = Array.isArray(cachedExternalRisksSnapshot?.groundwater_isere?.stations) ? cachedExternalRisksSnapshot.groundwater_isere.stations : [];
   stations.forEach((s) => {
-    if (!s.latitude || !s.longitude) return;
+    const coords = normalizeMapCoordinates(s.latitude ?? s.lat, s.longitude ?? s.lon);
+    if (!coords) return;
     const trend = s.trend || 'stable';
     const arrow = trend === 'hausse' ? '↑' : trend === 'baisse' ? '↓' : '→';
     const color = trend === 'hausse' ? '#1971c2' : trend === 'baisse' ? '#e03131' : '#2b8a3e';
@@ -3922,8 +3926,11 @@ function renderGroundwaterLayer() {
       iconSize: [26, 26], iconAnchor: [13, 13],
     });
     const level = s.groundwater_level_m_ngf != null ? `${Number(s.groundwater_level_m_ngf).toFixed(2)} m NGF` : '—';
-    window.L.marker([s.latitude, s.longitude], { icon })
-      .bindPopup(`<strong>🏔️ ${escapeHtml(s.name || s.bss_id || '?')}</strong><br>Niveau : ${level}<br>Tendance : ${arrow} ${trend}<br><span class="muted">${escapeHtml(s.commune || '')}</span>`)
+    const depth = s.depth_m != null ? `${Number(s.depth_m).toFixed(2)} m` : 'n/d';
+    const measured = s.date_measure ? new Date(s.date_measure) : null;
+    const measuredLabel = measured && !Number.isNaN(measured.getTime()) ? measured.toLocaleString('fr-FR') : (s.date_measure || 'n/d');
+    window.L.marker([coords.lat, coords.lon], { icon })
+      .bindPopup(`<div class="map-popup-content"><p class="tag">Hub'Eau · nappes</p><strong>💧 ${escapeHtml(s.name || s.code_bss || s.bss_id || '?')}</strong><p style="margin:.3rem 0 0">Niveau : <strong>${escapeHtml(level)}</strong> · Profondeur : <strong>${escapeHtml(depth)}</strong></p><p style="margin:.25rem 0 0">Tendance : <strong>${escapeHtml(`${arrow} ${trend}`)}</strong></p><p class="muted" style="font-size:.74rem;margin:.35rem 0 0">${escapeHtml(s.commune || '')} · mesure ${escapeHtml(String(measuredLabel))}</p></div>`)
       .addTo(groundwaterLayer);
   });
 }
@@ -4033,6 +4040,46 @@ function meteoLayerSpec(current = {}, airQuality = {}, mode = 'temperature') {
       value: Number.isFinite(wind) ? `${Math.round(wind)} km/h` : 'n/d',
     };
   }
+  if (mode === 'gust') {
+    const gust = Number(current.wind_gusts_10m);
+    return {
+      label: Number.isFinite(gust) ? `${Math.round(gust)}` : '--',
+      color: meteoWindColor(gust),
+      emoji: '🌬️',
+      title: 'Rafales',
+      value: Number.isFinite(gust) ? `${Math.round(gust)} km/h` : 'n/d',
+    };
+  }
+  if (mode === 'rain') {
+    const rain = Number(current.rain ?? current.showers ?? current.precipitation);
+    return {
+      label: Number.isFinite(rain) ? `${rain.toFixed(rain >= 10 ? 0 : 1)}` : '--',
+      color: rain >= 15 ? '#dc2626' : rain >= 6 ? '#f97316' : rain >= 1 ? '#2563eb' : '#16a34a',
+      emoji: rain >= 1 ? '🌧️' : '☁️',
+      title: 'Pluie actuelle',
+      value: Number.isFinite(rain) ? `${rain.toFixed(rain >= 10 ? 0 : 1)} mm` : 'n/d',
+    };
+  }
+  if (mode === 'precipitation') {
+    const total = Number(current.precipitation);
+    return {
+      label: Number.isFinite(total) ? `${total.toFixed(total >= 10 ? 0 : 1)}` : '--',
+      color: total >= 20 ? '#dc2626' : total >= 8 ? '#f97316' : total >= 2 ? '#2563eb' : '#16a34a',
+      emoji: '💧',
+      title: 'Cumul de précipitations',
+      value: Number.isFinite(total) ? `${total.toFixed(total >= 10 ? 0 : 1)} mm` : 'n/d',
+    };
+  }
+  if (mode === 'humidity') {
+    const humidity = Number(current.relative_humidity_2m);
+    return {
+      label: Number.isFinite(humidity) ? `${Math.round(humidity)}%` : '--',
+      color: humidity >= 90 ? '#2563eb' : humidity >= 70 ? '#0891b2' : humidity >= 35 ? '#16a34a' : '#f59e0b',
+      emoji: '💦',
+      title: 'Humidité',
+      value: Number.isFinite(humidity) ? `${Math.round(humidity)}%` : 'n/d',
+    };
+  }
   if (mode === 'pollution') {
     const aqi = Number(airQuality.european_aqi);
     return {
@@ -4093,6 +4140,9 @@ function meteoCityPopup(city = {}, forecast = {}, airQuality = {}, mode = 'tempe
   const felt = Number.isFinite(Number(current.apparent_temperature)) ? `${Math.round(Number(current.apparent_temperature))}°C` : 'n/d';
   const humidity = Number.isFinite(Number(current.relative_humidity_2m)) ? `${Math.round(Number(current.relative_humidity_2m))}%` : 'n/d';
   const wind = Number.isFinite(Number(current.wind_speed_10m)) ? `${Math.round(Number(current.wind_speed_10m))} km/h` : 'n/d';
+  const gust = Number.isFinite(Number(current.wind_gusts_10m)) ? `${Math.round(Number(current.wind_gusts_10m))} km/h` : 'n/d';
+  const rain = Number.isFinite(Number(current.rain ?? current.showers ?? current.precipitation)) ? `${Number(current.rain ?? current.showers ?? current.precipitation).toFixed(1)} mm` : 'n/d';
+  const precipitation = Number.isFinite(Number(current.precipitation)) ? `${Number(current.precipitation).toFixed(1)} mm` : 'n/d';
   const label = weatherCodeLabel(current.weathercode);
   const emoji = weatherCodeEmoji(current.weathercode);
   const aqi = Number.isFinite(Number(airQuality.european_aqi)) ? Math.round(Number(airQuality.european_aqi)) : null;
@@ -4107,7 +4157,8 @@ function meteoCityPopup(city = {}, forecast = {}, airQuality = {}, mode = 'tempe
     <strong>${emoji} ${escapeHtml(city.name || 'Ville')}</strong>
     <p style="margin:.35rem 0 0"><strong>${escapeHtml(spec.title)} :</strong> <span style="color:${escapeHtml(spec.color)};font-weight:800">${escapeHtml(spec.value)}</span></p>
     <p style="margin:.35rem 0 0">Température : <strong>${escapeHtml(temp)}</strong> · Ressenti : <strong>${escapeHtml(felt)}</strong></p>
-    <p style="margin:.2rem 0 0">${escapeHtml(label)} · Humidité ${escapeHtml(humidity)} · Vent ${escapeHtml(wind)}</p>
+    <p style="margin:.2rem 0 0">${escapeHtml(label)} · Humidité ${escapeHtml(humidity)} · Vent ${escapeHtml(wind)} · Rafales ${escapeHtml(gust)}</p>
+    <p style="margin:.2rem 0 0">Pluie : <strong>${escapeHtml(rain)}</strong> · Cumul : <strong>${escapeHtml(precipitation)}</strong></p>
     ${mode === 'pollution' ? `<p style="margin:.2rem 0 0">AQI : <strong>${aqi ?? 'n/d'}</strong> · PM2.5 ${escapeHtml(pm25)} · PM10 ${escapeHtml(pm10)}</p>` : ''}
     <p class="muted" style="font-size:.74rem;margin:.35rem 0 0">Mise à jour : ${escapeHtml(updatedLabel)}</p>
   </div>`;
@@ -4226,6 +4277,7 @@ function initMap() {
   autorouteLayer = window.L.layerGroup().addTo(leafletMap);
   prAutorouteLayer = window.L.layerGroup();
   tchooTrainLayer = window.L.layerGroup();
+  gtfsTrainLayer = window.L.layerGroup();
   institutionLayer = window.L.layerGroup().addTo(leafletMap);
   populationLayer = window.L.layerGroup().addTo(leafletMap);
   montagneLayer = window.L.layerGroup(); // ajouté à la carte uniquement si filtre activé
@@ -4503,6 +4555,10 @@ async function resetMapFilters() {
   const cameras = document.getElementById('filter-cameras');
   const googleFlow = document.getElementById('filter-google-traffic-flow');
   const tchooTrains = document.getElementById('filter-tchoo-trains');
+  const gtfsTrains = document.getElementById('filter-gtfs-trains');
+  const groundwater = document.getElementById('filter-groundwater');
+  const seismes = document.getElementById('filter-seismes');
+  const feuxForet = document.getElementById('filter-feux-foret');
   const healthResources = document.getElementById('filter-resources-health');
   const daeResources = document.getElementById('filter-resources-dae');
   const commandResources = document.getElementById('filter-resources-command');
@@ -4523,6 +4579,10 @@ async function resetMapFilters() {
   if (trafficIncidents) trafficIncidents.checked = true;
   if (cameras) cameras.checked = true;
   if (tchooTrains) tchooTrains.checked = false;
+  if (gtfsTrains) gtfsTrains.checked = false;
+  if (groundwater) groundwater.checked = false;
+  if (seismes) seismes.checked = false;
+  if (feuxForet) feuxForet.checked = false;
   if (healthResources) healthResources.checked = false;
   if (daeResources) daeResources.checked = false;
   if (commandResources) commandResources.checked = true;
@@ -4541,6 +4601,9 @@ async function resetMapFilters() {
   renderCustomPoints();
   renderResources();
   await renderMeteoCitiesLayer();
+  renderGroundwaterLayer();
+  renderSeismesLayer();
+  renderFeuxForetLayer();
   await renderMunicipalitiesOnMap(cachedMunicipalities);
   await renderPopulationByCityLayer();
   await renderTrafficOnMap();
@@ -4578,7 +4641,7 @@ function toggleMapContrast() {
 
 function fitMapToData(showFeedback = false) {
   if (!leafletMap) return;
-  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsBoundaryLayer, pcsLayer, resourceLayer, institutionLayer, populationLayer, searchLayer, customPointsLayer, mapPointsLayer, itinisereLayer, bisonLayer, bisonCameraLayer].filter(Boolean);
+  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsBoundaryLayer, pcsLayer, resourceLayer, institutionLayer, populationLayer, searchLayer, customPointsLayer, mapPointsLayer, itinisereLayer, bisonLayer, bisonCameraLayer, groundwaterLayer, seismesLayer, feuxForetLayer, gtfsTrainLayer, tchooTrainLayer].filter(Boolean);
   const bounds = window.L.latLngBounds([]);
   layers.forEach((layer) => {
     if (layer?.getBounds) {
@@ -4750,7 +4813,23 @@ function renderStations(vigicruesPayload = []) {
     incomingCodes.add(code);
     const statusLevel = stationStatusLevel(s);
     const counter = ({ vert: 'V', jaune: 'J', orange: 'O', rouge: 'R' }[statusLevel] || 'V');
-    const popupContent = `<strong>${escapeHtml(s.station || s.code)}</strong><br>${escapeHtml(s.river || '')}<br>Département: Isère (38)<br>Statut: ${escapeHtml(statusLevel)}<br>Contrôle station: ${escapeHtml(s.control_status || 'inconnu')}<br>Hauteur: ${s.height_m} m`;
+    const delta = Number.isFinite(Number(s.delta_window_m)) ? `${Number(s.delta_window_m) > 0 ? '+' : ''}${Number(s.delta_window_m).toFixed(3)} m` : 'n/d';
+    const observedDate = s.observed_at ? new Date(s.observed_at) : null;
+    const observedLabel = observedDate && !Number.isNaN(observedDate.getTime())
+      ? observedDate.toLocaleString('fr-FR')
+      : (s.observed_at || 'n/d');
+    const troncon = s.troncon || s.troncon_code || '';
+    const sourceLink = s.source_link || (s.code ? `https://www.vigicrues.gouv.fr/station/${encodeURIComponent(s.code)}` : 'https://www.vigicrues.gouv.fr');
+    const popupContent = `<div class="map-popup-content">
+      <p class="tag">Vigicrues · station hydrométrique</p>
+      <strong>${escapeHtml(s.station || s.code)}</strong>
+      <p style="margin:.3rem 0 0">${escapeHtml(s.river || 'Cours d’eau non précisé')} · Département Isère (38)</p>
+      <p style="margin:.25rem 0 0">Statut : <strong style="color:${levelColor(statusLevel)}">${escapeHtml(statusLevel)}</strong> · Contrôle : ${escapeHtml(s.control_status || 'inconnu')}</p>
+      <p style="margin:.25rem 0 0">Hauteur : <strong>${escapeHtml(String(s.height_m ?? 'n/d'))} m</strong> · Variation : <strong>${escapeHtml(delta)}</strong></p>
+      ${troncon ? `<p style="margin:.25rem 0 0">Tronçon : ${escapeHtml(troncon)}</p>` : ''}
+      <p class="muted" style="font-size:.74rem;margin:.35rem 0 0">Observation : ${escapeHtml(String(observedLabel))}</p>
+      <a href="${escapeHtml(sourceLink)}" target="_blank" rel="noreferrer">Ouvrir Vigicrues</a>
+    </div>`;
 
     if (hydroMarkersByCode.has(code)) {
       // Marqueur déjà présent : mettre à jour l'icône et le popup sans flash
@@ -5660,6 +5739,41 @@ function parseTelecomGenerations(value = '') {
   return Array.from(generations);
 }
 
+function buildTelecomWhiteZoneResources(anfrResources = [], arcepResources = []) {
+  const antennas = Array.isArray(anfrResources) ? anfrResources : [];
+  const outages = Array.isArray(arcepResources) ? arcepResources : [];
+  return ISERE_MAJOR_CITIES
+    .filter((city) => Number(city.population || 0) >= 3000 || ['bourg-oisans', 'la-mure', 'mens'].includes(city.key))
+    .map((city) => {
+      const nearestAntennaKm = antennas.reduce((best, antenna) => {
+        const distance = _haversineKm(Number(city.lat), Number(city.lon), Number(antenna.lat), Number(antenna.lon));
+        return Number.isFinite(distance) ? Math.min(best, distance) : best;
+      }, Infinity);
+      const outagesNearby = outages.filter((outage) => {
+        const distance = _haversineKm(Number(city.lat), Number(city.lon), Number(outage.lat), Number(outage.lon));
+        return Number.isFinite(distance) && distance <= 4;
+      });
+      const remoteSector = nearestAntennaKm > 7;
+      const degradedSector = outagesNearby.length >= 2;
+      if (!remoteSector && !degradedSector) return null;
+      const distanceLabel = Number.isFinite(nearestAntennaKm) ? `${nearestAntennaKm.toFixed(1)} km` : 'aucune antenne détectée';
+      return {
+        id: `white-zone-${city.key}`,
+        name: `Zone blanche à vérifier · ${city.name}`,
+        type: 'telecom_white_zone',
+        lat: city.lat,
+        lon: city.lon,
+        active: true,
+        address: city.name,
+        priority: degradedSector ? 'critical' : 'risk',
+        info: `Signal opérationnel à contrôler : antenne ANFR la plus proche ${distanceLabel}${degradedSector ? ` · ${outagesNearby.length} site(s) ARCEP indisponible(s) à moins de 4 km` : ''}.`,
+        source: 'Analyse locale OPE-Protec depuis ANFR + ARCEP',
+        dynamic: true,
+      };
+    })
+    .filter(Boolean);
+}
+
 async function loadTelecomPoints() {
   if (telecomLoaded) return telecomPointsCache;
 
@@ -5731,7 +5845,8 @@ async function loadTelecomPoints() {
       };
     }).filter(Boolean);
 
-    telecomPointsCache = [...anfrResources, ...arcepResources];
+    const whiteZoneResources = buildTelecomWhiteZoneResources(anfrResources, arcepResources);
+    telecomPointsCache = [...anfrResources, ...arcepResources, ...whiteZoneResources];
 
     // Sauvegarder en localStorage uniquement si on a de vraies données
     if (telecomPointsCache.length > 0) {
@@ -6532,6 +6647,101 @@ function renderTchooTrainLayer() {
 
   startTchooTrainTimer();
   return tchooTrainMarkers.size;
+}
+
+function gtfsTrainIcon(vehicle = {}) {
+  const bearing = Number(vehicle.bearing || 0);
+  const label = String(vehicle.route || vehicle.label || 'TR').slice(0, 5).toUpperCase();
+  return window.L.divIcon({
+    className: 'gtfs-train-icon-wrap',
+    html: `<span class="gtfs-train-icon"><span class="gtfs-train-icon__arrow" style="transform:rotate(${Number.isFinite(bearing) ? bearing.toFixed(0) : 0}deg)">▲</span><span>${escapeHtml(label)}</span></span>`,
+    iconSize: [38, 24],
+    iconAnchor: [19, 12],
+    popupAnchor: [0, -14],
+  });
+}
+
+function extractGtfsText(field) {
+  if (!field) return '';
+  if (typeof field === 'string') return field;
+  const translations = field.translation || field.translations || [];
+  if (Array.isArray(translations) && translations.length) {
+    return String(translations.find((item) => String(item?.language || '').startsWith('fr'))?.text || translations[0]?.text || '');
+  }
+  return '';
+}
+
+function normalizeGtfsVehicleEntity(entity = {}) {
+  const vehicle = entity.vehicle || entity;
+  const position = vehicle.position || {};
+  const lat = Number(position.latitude ?? position.lat);
+  const lon = Number(position.longitude ?? position.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  if (!isPointInIsere({ lat, lon })) return null;
+  const trip = vehicle.trip || {};
+  const descriptor = vehicle.vehicle || {};
+  const timestamp = Number(vehicle.timestamp || entity.timestamp || 0);
+  return {
+    id: String(entity.id || descriptor.id || trip.tripId || trip.trip_id || `${lat},${lon}`),
+    lat,
+    lon,
+    bearing: Number(position.bearing || 0),
+    speed: Number(position.speed || 0),
+    route: String(trip.routeId || trip.route_id || vehicle.route_id || '').replace(/^SNCF:|^FR:|^OCE:/i, ''),
+    label: String(descriptor.label || descriptor.id || trip.tripId || 'Train'),
+    status: String(vehicle.currentStatus || vehicle.current_status || ''),
+    timestamp: timestamp ? new Date(timestamp * 1000).toISOString() : '',
+  };
+}
+
+async function fetchGtfsRtVehicles() {
+  if (gtfsTrainCache.savedAt && Date.now() - gtfsTrainCache.savedAt < 45 * 1000) return gtfsTrainCache;
+  const candidates = [
+    'https://proxy.transport.data.gouv.fr/resource/sncf-gtfs-rt-vehicle-positions',
+    'https://proxy.transport.data.gouv.fr/resource/gtfs-rt-sncf-vehicle-positions',
+    'https://proxy.transport.data.gouv.fr/resource/isere-mobilites-gtfs-rt-vehicle-positions',
+    'https://proxy.transport.data.gouv.fr/resource/m-tag-gtfs-rt-vehicle-positions',
+  ];
+  for (const url of candidates) {
+    try {
+      const response = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } }, 12000);
+      if (!response.ok) continue;
+      const payload = await response.json();
+      const entities = Array.isArray(payload?.entity) ? payload.entity : Array.isArray(payload?.entities) ? payload.entities : [];
+      const vehicles = entities.map(normalizeGtfsVehicleEntity).filter(Boolean);
+      if (vehicles.length) {
+        gtfsTrainCache = { savedAt: Date.now(), vehicles, source: url, error: '' };
+        return gtfsTrainCache;
+      }
+    } catch {
+      // Essayer la ressource suivante.
+    }
+  }
+  gtfsTrainCache = { savedAt: Date.now(), vehicles: [], source: '', error: 'Aucun flux GTFS-RT vehicle positions exploitable en JSON via transport.data.gouv.fr' };
+  return gtfsTrainCache;
+}
+
+async function renderGtfsTrainLayer() {
+  if (!leafletMap || typeof window.L === 'undefined') return 0;
+  const show = document.getElementById('filter-gtfs-trains')?.checked ?? false;
+  if (!gtfsTrainLayer) gtfsTrainLayer = window.L.layerGroup();
+  if (!show) {
+    gtfsTrainLayer.clearLayers();
+    if (leafletMap.hasLayer(gtfsTrainLayer)) leafletMap.removeLayer(gtfsTrainLayer);
+    return 0;
+  }
+  if (!leafletMap.hasLayer(gtfsTrainLayer)) gtfsTrainLayer.addTo(leafletMap);
+  gtfsTrainLayer.clearLayers();
+  const payload = await fetchGtfsRtVehicles();
+  payload.vehicles.forEach((vehicle) => {
+    const updated = vehicle.timestamp ? new Date(vehicle.timestamp) : null;
+    const updatedLabel = updated && !Number.isNaN(updated.getTime()) ? updated.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : 'n/d';
+    window.L.marker([vehicle.lat, vehicle.lon], { icon: gtfsTrainIcon(vehicle), zIndexOffset: 620 })
+      .bindPopup(`<div class="map-popup-content"><p class="tag">GTFS-RT · position véhicule</p><strong>📡 ${escapeHtml(vehicle.label || 'Train')}</strong><p style="margin:.3rem 0 0">Ligne : <strong>${escapeHtml(vehicle.route || 'n/d')}</strong></p><p class="muted" style="font-size:.74rem;margin:.35rem 0 0">Mise à jour : ${escapeHtml(updatedLabel)}</p><a href="${escapeHtml(payload.source || 'https://transport.data.gouv.fr')}" target="_blank" rel="noreferrer">Source transport.data.gouv.fr</a></div>`)
+      .addTo(gtfsTrainLayer);
+  });
+  if (!payload.vehicles.length && payload.error) setMapFeedback(payload.error, true);
+  return payload.vehicles.length;
 }
 
 const ISERE_BOUNDS = {
@@ -7766,6 +7976,7 @@ async function renderTrafficOnMap() {
 
 
   mapStats.traffic += renderTchooTrainLayer();
+  mapStats.traffic += await renderGtfsTrainLayer();
   renderPrAutorouteLayer();
   updateMapSummary();
 }
@@ -11917,7 +12128,7 @@ async function fetchWeeklyForecastForCity(city) {
   if (cachedWeeklyMeteo?.[key]) return cachedWeeklyMeteo[key];
   if (weeklyMeteoInFlight?.[key]) return weeklyMeteoInFlight[key];
 
-  const url = `https://api.open-meteo.com/v1/forecast?latitude=${encodeURIComponent(city.lat)}&longitude=${encodeURIComponent(city.lon)}&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max,wind_speed_10m_max&hourly=temperature_2m,precipitation_probability,weathercode&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weathercode&timezone=Europe%2FParis&forecast_days=7`;
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${encodeURIComponent(city.lat)}&longitude=${encodeURIComponent(city.lon)}&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max&hourly=temperature_2m,precipitation,precipitation_probability,weathercode&current=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,rain,showers,wind_speed_10m,wind_gusts_10m,weathercode&timezone=Europe%2FParis&forecast_days=7`;
 
   weeklyMeteoInFlight = weeklyMeteoInFlight && typeof weeklyMeteoInFlight === 'object' ? weeklyMeteoInFlight : {};
   weeklyMeteoInFlight[key] = fetchWithTimeout(url, {}, 12000)
@@ -11933,13 +12144,16 @@ async function fetchWeeklyForecastForCity(city) {
         temp_max_c: daily.temperature_2m_max?.[index],
         temp_min_c: daily.temperature_2m_min?.[index],
         precip_probability_max: daily.precipitation_probability_max?.[index],
+        precipitation_sum_mm: daily.precipitation_sum?.[index],
         wind_speed_max_kmh: daily.wind_speed_10m_max?.[index],
+        wind_gust_max_kmh: daily.wind_gusts_10m_max?.[index],
       })) : [];
       const hourly = payload?.hourly || {};
       const hourlyEntries = Array.isArray(hourly.time) ? hourly.time.map((dateTime, index) => ({
         date_time: dateTime,
         weather_code: hourly.weathercode?.[index],
         temp_c: hourly.temperature_2m?.[index],
+        precipitation_mm: hourly.precipitation?.[index],
         precip_probability: hourly.precipitation_probability?.[index],
       })) : [];
       const data = {
@@ -13025,6 +13239,9 @@ function renderExternalRisks(data = {}) {
   // Redessiner couches carte avec nouvelles données
   renderColsAlpinsLayer();
   applyAvalancheZoneLayer();
+  renderGroundwaterLayer();
+  renderSeismesLayer();
+  renderFeuxForetLayer();
   renderNewsPanel(prefecture, dauphine, franceBleu, placegrenet, grenobleMétropole, arsAura, seismesIsere);
   renderSncfAlerts(sncf);
   renderApicAlerts(apic);
@@ -14882,7 +15099,7 @@ function bindAppInteractions() {
     'filter-resources-telecom', 'filter-resources-telecom-type',
     'filter-resources-active', 'filter-resources-protcivile',
   ]);
-  ['filter-hydro', 'filter-pcs', 'filter-meteo-cities', 'filter-meteo-layer-type', 'filter-resources-active', 'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type', 'filter-resources-hosting-capacity', 'filter-resources-hosting-surface', 'filter-resources-hosting-accessibility', 'filter-resources-hosting-sanitary', 'filter-resources-hosting-heating', 'filter-resources-hosting-parking', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-dae', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-resources-protcivile', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras', 'filter-autoroutes', 'filter-autoroutes-type', 'filter-pr-autoroutes', 'filter-tchoo-trains'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-meteo-cities', 'filter-meteo-layer-type', 'filter-groundwater', 'filter-seismes', 'filter-feux-foret', 'filter-resources-active', 'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type', 'filter-resources-hosting-capacity', 'filter-resources-hosting-surface', 'filter-resources-hosting-accessibility', 'filter-resources-hosting-sanitary', 'filter-resources-hosting-heating', 'filter-resources-hosting-parking', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-dae', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-resources-protcivile', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras', 'filter-autoroutes', 'filter-autoroutes-type', 'filter-pr-autoroutes', 'filter-tchoo-trains', 'filter-gtfs-trains'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       if (RESOURCE_ONLY_FILTERS.has(id)) {
         // Rendu immédiat depuis le cache
@@ -14892,6 +15109,9 @@ function bindAppInteractions() {
       // Filtres globaux (hydro, pcs, trafic, caméras) → tout re-rendre
       renderStations(cachedVigicruesPayload);
       await renderMeteoCitiesLayer();
+      renderGroundwaterLayer();
+      renderSeismesLayer();
+      renderFeuxForetLayer();
       await renderMunicipalitiesOnMap(cachedMunicipalities);
       renderResources();
       await renderPopulationByCityLayer();
