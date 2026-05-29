@@ -8143,9 +8143,12 @@ def _aprr_pr_to_coords(road: str, pr_str: str) -> tuple[float, float] | None:
         return None
 
     # Essayer d'abord les données OSM (plus précises)
+    tolerance_km = 0.15
     osm_payload = _pr_autoroutes_cache.get("payload")
     osm_pts = (osm_payload or {}).get("roads", {}).get(road)
     if osm_pts:
+        if pr_km < float(osm_pts[0]["k"]) - tolerance_km or pr_km > float(osm_pts[-1]["k"]) + tolerance_km:
+            return None
         if pr_km <= osm_pts[0]["k"]:
             return osm_pts[0]["lat"], osm_pts[0]["lon"]
         if pr_km >= osm_pts[-1]["k"]:
@@ -8160,6 +8163,9 @@ def _aprr_pr_to_coords(road: str, pr_str: str) -> tuple[float, float] | None:
     # Fallback : coordonnées statiques
     coords = _APRR_PR_ROAD_COORDS.get(road)
     if not coords:
+        return None
+
+    if pr_km < coords[0][0] - tolerance_km or pr_km > coords[-1][0] + tolerance_km:
         return None
 
     if pr_km <= coords[0][0]:

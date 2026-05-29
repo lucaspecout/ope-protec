@@ -6853,7 +6853,7 @@ function trafficPopupDetails(point = {}, sourceLabel = '', trafficType = '') {
   const restriction = point.vehicle_restriction || point.mobility || '';
   const sourceLocation = point.location_summary || '';
   const placementBasis = point.placement_basis || '';
-  const precisionEmoji = { source: '📍', exact: '📍', commune: '🏘️', mairie: '🏛️', adresse: '🏠', localité: '🗺️', 'axe+commune': '🛣️', axe: '🛣️', estimée: '⚠️' };
+  const precisionEmoji = { source: '📍', exact: '📍', pr: '📏', commune: '🏘️', mairie: '🏛️', adresse: '🏠', localité: '🗺️', 'axe+commune': '🛣️', axe: '🛣️', estimée: '⚠️' };
   const precisionKey = point.precision || 'estimée';
   const precisionIcon = precisionEmoji[precisionKey] || '⚠️';
   return `<strong>${escapeHtml(point.title || 'Évènement circulation Isère')}</strong><br/>
@@ -7177,6 +7177,20 @@ function snapTrafficPointToRoadCorridor(point = null, roads = []) {
   return best && best.distanceKm <= 5 ? best : null;
 }
 
+function snapBisonPointToRoadCorridor(point = null, roads = []) {
+  const snapped = snapTrafficPointToRoadCorridor(point, roads);
+  return snapped && snapped.distanceKm <= 1.5 ? snapped : null;
+}
+
+function extractTrafficPr(text = '') {
+  const blob = String(text || '');
+  const match = blob.match(/\bPR\s*([0-9]{1,3})(?:\s*[+.,]\s*([0-9]{1,3}))?\b/i);
+  if (!match) return '';
+  const km = String(match[1] || '').trim();
+  const meters = String(match[2] || '').trim();
+  return meters ? `${km}+${meters.padStart(3, '0')}` : km;
+}
+
 function buildItinisereMapQuery(event = {}) {
   const candidates = [
     event.address,
@@ -7322,7 +7336,16 @@ async function buildItinisereMapPoints(events = []) {
     const providedCoords = normalizeMapCoordinates(event.lat, event.lon);
     if (isBisonEvent && !providedCoords) continue;
     const trustedSourceCoords = providedCoords && !isBisonEvent && String(event.source_api || '').toLowerCase() === 'cityway';
-    const snappedProvidedCoords = providedCoords ? snapTrafficPointToRoadCorridor(providedCoords, roads) : null;
+    const prHint = event.pr || extractTrafficPr(fullText);
+    const prRoadPoint = prHint && roads.length
+      ? roads.map((road) => {
+        const resolved = _interpolatePrGeometry(road, prHint);
+        return resolved ? { ...resolved, road } : null;
+      }).find(Boolean)
+      : null;
+    const snappedProvidedCoords = providedCoords
+      ? (isBisonEvent ? snapBisonPointToRoadCorridor(providedCoords, roads) : snapTrafficPointToRoadCorridor(providedCoords, roads))
+      : null;
     if (trustedSourceCoords) {
       position = snappedProvidedCoords
         ? { lat: snappedProvidedCoords.lat, lon: snappedProvidedCoords.lon }
@@ -7332,6 +7355,14 @@ async function buildItinisereMapPoints(events = []) {
       placementBasis = snappedProvidedCoords
         ? `coordonnée source recalée sur ${snappedProvidedCoords.road}`
         : 'coordonnée fournie par la source';
+    }
+
+    // 1b. Bison/DATEX : le PR routier est plus fiable que les coordonnées source.
+    if (!position && isBisonEvent && prRoadPoint) {
+      position = { lat: prRoadPoint.lat, lon: prRoadPoint.lon };
+      anchor = `${prRoadPoint.road} · PR ${prHint}`;
+      precision = 'pr';
+      placementBasis = `PR officiel ${prHint} sur ${prRoadPoint.road}`;
     }
 
     // 2. Landmark spécifique (col, tunnel, site nommé) dans le texte complet
@@ -7430,7 +7461,7 @@ async function buildItinisereMapPoints(events = []) {
         anchor = locations[0] || `${snappedProvidedCoords.road} · secteur signalé`;
         precision = 'axe';
         placementBasis = `coordonnée source recalée sur ${snappedProvidedCoords.road}`;
-      } else {
+      } else if (!isBisonEvent) {
         position = providedCoords;
         anchor = locations[0] || roads[0] || 'Source trafic';
         precision = 'source';
@@ -7439,7 +7470,7 @@ async function buildItinisereMapPoints(events = []) {
     }
 
     // 8. Milieu du corridor routier (fallback sans commune)
-    if (!position && roads.length) {
+    if (!position && roads.length && !isBisonEvent) {
       for (const road of roads) {
         const corridor = ITINISERE_ROAD_CORRIDORS[road];
         if (!corridor || !corridor.length) continue;
@@ -7474,7 +7505,7 @@ async function buildItinisereMapPoints(events = []) {
       placementBasis = `centre de commune ${communeAnchor.communeName || 'Isère'}`;
     }
 
-    if (!position) {
+    if (!position && !isBisonEvent) {
       for (const road of roads) {
         const corridor = ITINISERE_ROAD_CORRIDORS[road];
         if (!corridor) continue;
@@ -7486,7 +7517,7 @@ async function buildItinisereMapPoints(events = []) {
       }
     }
 
-    if (!position) {
+    if (!position && !isBisonEvent) {
       for (const commune of [...communeHints, ...TRAFFIC_COMMUNES]) {
         const escaped = commune.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         if (!new RegExp(`\\b${escaped}\\b`, 'i').test(`${fullText} ${candidateLocationHints.join(' ')}`)) continue;
@@ -7789,6 +7820,8 @@ function _interpolatePrGeometry(road, prStr) {
   const km = _parsePrKm(prStr);
   const pts = (_getEffectivePrCoords()[road] || []);
   if (!Number.isFinite(km) || pts.length < 2) return null;
+  const toleranceKm = 0.15;
+  if (km < pts[0].k - toleranceKm || km > pts[pts.length - 1].k + toleranceKm) return null;
   if (km <= pts[0].k) {
     const next = pts[1];
     return { lat: pts[0].lat, lon: pts[0].lon, dx: next.lon - pts[0].lon, dy: next.lat - pts[0].lat };
@@ -7821,6 +7854,16 @@ function _resolveAutoroutePrPoint(evt) {
   return base ? [base.lat, base.lon] : null;
 }
 
+function snapPointToAutoroutePrGeometry(point = null, road = '') {
+  if (!point || !road) return null;
+  const pts = _getEffectivePrCoords()[road] || [];
+  if (pts.length < 2) return null;
+  const projected = nearestPointOnCorridor(pts.map((pt) => [pt.lat, pt.lon]), point);
+  if (!projected) return null;
+  const distanceKm = _haversineKm(point.lat, point.lon, projected.lat, projected.lon);
+  return Number.isFinite(distanceKm) && distanceKm <= 2 ? { ...projected, distanceKm } : null;
+}
+
 // Interpolation précise d'un PR depuis les données OSM backend
 function _prToLatLonOsrm(road, prStr) {
   const pts = _prApiCache?.[road];
@@ -7828,6 +7871,8 @@ function _prToLatLonOsrm(road, prStr) {
   const parts = String(prStr).split('+');
   const km = parseFloat(parts[0]) + (parts[1] ? parseFloat(parts[1]) / 1000 : 0);
   if (!Number.isFinite(km)) return null;
+  const toleranceKm = 0.15;
+  if (km < pts[0].k - toleranceKm || km > pts[pts.length - 1].k + toleranceKm) return null;
   if (km <= pts[0].k) return [pts[0].lat, pts[0].lon];
   if (km >= pts[pts.length - 1].k) return [pts[pts.length - 1].lat, pts[pts.length - 1].lon];
   for (let i = 0; i < pts.length - 1; i++) {
@@ -7882,7 +7927,14 @@ async function renderTrafficOnMap() {
       let placed = _resolveAutoroutePrPoint(evt);
       if (!placed) placed = _prToLatLonOsrm(evt.road, evt.pr);
       if (!placed && Number.isFinite(Number(evt.lat)) && Number.isFinite(Number(evt.lon))) {
-        placed = [Number(evt.lat), Number(evt.lon)];
+        const sourcePoint = { lat: Number(evt.lat), lon: Number(evt.lon) };
+        const prSnapped = snapPointToAutoroutePrGeometry(sourcePoint, evt.road);
+        if (prSnapped) {
+          placed = [prSnapped.lat, prSnapped.lon];
+        } else {
+          const corridorSnapped = snapBisonPointToRoadCorridor(sourcePoint, [evt.road]);
+          if (corridorSnapped) placed = [corridorSnapped.lat, corridorSnapped.lon];
+        }
       }
       if (!placed) return;
       const [lat, lon] = placed;
