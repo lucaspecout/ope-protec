@@ -263,6 +263,8 @@ let bisonLayer = null;
 let bisonCameraLayer = null;
 let autorouteLayer = null;
 let prAutorouteLayer = null;
+let tchooTrainLayer = null;
+let tchooTrainTimer = null;
 let institutionLayer = null;
 let populationLayer = null;
 let mapTileLayer = null;
@@ -349,6 +351,7 @@ let contactsPanelLoadSeq = 0;
 const contactsPanelCache = new Map();
 let isereBoundaryGeometry = null;
 let trafficRenderSequence = 0;
+const tchooTrainMarkers = new Map();
 let mapSearchController = null;
 let osmDetailsController = null;
 let osmDetailsMarker = null;
@@ -4002,6 +4005,7 @@ function initMap() {
   bisonCameraLayer = window.L.layerGroup().addTo(leafletMap);
   autorouteLayer = window.L.layerGroup().addTo(leafletMap);
   prAutorouteLayer = window.L.layerGroup();
+  tchooTrainLayer = window.L.layerGroup();
   institutionLayer = window.L.layerGroup().addTo(leafletMap);
   populationLayer = window.L.layerGroup().addTo(leafletMap);
   montagneLayer = window.L.layerGroup(); // ajouté à la carte uniquement si filtre activé
@@ -4275,6 +4279,7 @@ async function resetMapFilters() {
   const trafficIncidents = document.getElementById('filter-traffic-incidents');
   const cameras = document.getElementById('filter-cameras');
   const googleFlow = document.getElementById('filter-google-traffic-flow');
+  const tchooTrains = document.getElementById('filter-tchoo-trains');
   const healthResources = document.getElementById('filter-resources-health');
   const daeResources = document.getElementById('filter-resources-dae');
   const commandResources = document.getElementById('filter-resources-command');
@@ -4293,6 +4298,7 @@ async function resetMapFilters() {
   if (transportResources) transportResources.checked = false;
   if (trafficIncidents) trafficIncidents.checked = true;
   if (cameras) cameras.checked = true;
+  if (tchooTrains) tchooTrains.checked = false;
   if (healthResources) healthResources.checked = false;
   if (daeResources) daeResources.checked = false;
   if (commandResources) commandResources.checked = true;
@@ -6148,12 +6154,191 @@ function trafficDivIcon(point = {}, options = {}) {
   });
 }
 
+function tchooTrainIcon(route = {}, angle = 0) {
+  const color = route.color || '#0f172a';
+  return window.L.divIcon({
+    className: 'tchoo-train-icon-wrap',
+    html: `<span class="tchoo-train-icon" style="--train-color:${escapeHtml(color)}"><span class="tchoo-train-icon__glyph" style="transform:rotate(${Number(angle || 0).toFixed(0)}deg)">▲</span></span>`,
+    iconSize: [26, 26],
+    iconAnchor: [13, 13],
+    popupAnchor: [0, -15],
+  });
+}
+
+function tchooRouteLengthKm(points = []) {
+  let total = 0;
+  for (let i = 1; i < points.length; i += 1) {
+    total += _haversineKm(points[i - 1][0], points[i - 1][1], points[i][0], points[i][1]);
+  }
+  return total;
+}
+
+function tchooPositionOnRoute(route = {}, progress = 0) {
+  const points = Array.isArray(route.points) ? route.points : [];
+  if (points.length < 2) return null;
+  const safeProgress = ((Number(progress) % 1) + 1) % 1;
+  const totalKm = tchooRouteLengthKm(points);
+  if (!Number.isFinite(totalKm) || totalKm <= 0) return { lat: points[0][0], lon: points[0][1], angle: 0 };
+  let targetKm = totalKm * safeProgress;
+  for (let i = 1; i < points.length; i += 1) {
+    const start = points[i - 1];
+    const end = points[i];
+    const segmentKm = _haversineKm(start[0], start[1], end[0], end[1]);
+    if (targetKm > segmentKm) {
+      targetKm -= segmentKm;
+      continue;
+    }
+    const ratio = segmentKm > 0 ? targetKm / segmentKm : 0;
+    const lat = start[0] + (end[0] - start[0]) * ratio;
+    const lon = start[1] + (end[1] - start[1]) * ratio;
+    const angle = Math.atan2(end[1] - start[1], end[0] - start[0]) * 180 / Math.PI + 90;
+    return { lat, lon, angle };
+  }
+  const last = points[points.length - 1];
+  return { lat: last[0], lon: last[1], angle: 0 };
+}
+
+function tchooTrainPosition(train = {}, now = Date.now()) {
+  const route = TCHOO_TRAIN_ROUTES.find((item) => item.id === train.routeId);
+  if (!route) return null;
+  const cycle = Math.max(60_000, Number(route.durationMs || 30 * 60 * 1000));
+  let progress = ((now % cycle) / cycle + Number(train.offset || 0)) % 1;
+  if (Number(train.direction || 1) < 0) progress = 1 - progress;
+  const position = tchooPositionOnRoute(route, progress);
+  return position ? { ...position, route, progress } : null;
+}
+
+function tchooTrainPopup(train = {}, route = {}, position = {}) {
+  const percent = Number(position.progress || 0) * 100;
+  const directionLabel = Number(train.direction || 1) < 0 ? 'sens retour' : 'sens aller';
+  return `<div class="map-popup-content">
+    <p class="tag">Carto Tchoo · ${escapeHtml(route.line || 'Train')}</p>
+    <strong>🚆 ${escapeHtml(train.label || 'Train')}</strong>
+    <p class="muted" style="font-size:.78rem;margin:.25rem 0 0">${escapeHtml(route.label || '')} · ${escapeHtml(directionLabel)}</p>
+    <p style="font-size:.8rem;margin:.3rem 0 0">Position animée sur axe ferroviaire Isère (${percent.toFixed(0)}% du parcours).</p>
+    <a href="${TCHOO_TRAINS_SOURCE_URL}" target="_blank" rel="noreferrer">Ouvrir Carto Tchoo</a>
+  </div>`;
+}
+
+function updateTchooTrainPositions() {
+  if (!tchooTrainLayer || !leafletMap || !leafletMap.hasLayer(tchooTrainLayer)) return;
+  const now = Date.now();
+  TCHOO_TRAINS.forEach((train) => {
+    const position = tchooTrainPosition(train, now);
+    if (!position) return;
+    const markerState = tchooTrainMarkers.get(train.id);
+    if (!markerState) return;
+    markerState.marker.setLatLng([position.lat, position.lon]);
+    markerState.marker.setIcon(tchooTrainIcon(position.route, position.angle));
+    markerState.marker.setPopupContent(tchooTrainPopup(train, position.route, position));
+  });
+}
+
+function startTchooTrainTimer() {
+  if (tchooTrainTimer) return;
+  tchooTrainTimer = setInterval(updateTchooTrainPositions, 1200);
+}
+
+function stopTchooTrainTimer() {
+  if (!tchooTrainTimer) return;
+  clearInterval(tchooTrainTimer);
+  tchooTrainTimer = null;
+}
+
+function renderTchooTrainLayer() {
+  if (!leafletMap || typeof window.L === 'undefined') return 0;
+  const show = document.getElementById('filter-tchoo-trains')?.checked ?? false;
+  if (!tchooTrainLayer) tchooTrainLayer = window.L.layerGroup();
+  if (!show) {
+    stopTchooTrainTimer();
+    tchooTrainMarkers.clear();
+    tchooTrainLayer.clearLayers();
+    if (leafletMap.hasLayer(tchooTrainLayer)) leafletMap.removeLayer(tchooTrainLayer);
+    return 0;
+  }
+
+  if (!leafletMap.hasLayer(tchooTrainLayer)) tchooTrainLayer.addTo(leafletMap);
+  tchooTrainLayer.clearLayers();
+  tchooTrainMarkers.clear();
+
+  TCHOO_TRAIN_ROUTES.forEach((route) => {
+    window.L.polyline(route.points, {
+      color: route.color || '#0f172a',
+      weight: 3,
+      opacity: 0.42,
+      dashArray: '4 7',
+      interactive: false,
+    }).addTo(tchooTrainLayer);
+  });
+
+  const now = Date.now();
+  TCHOO_TRAINS.forEach((train) => {
+    const position = tchooTrainPosition(train, now);
+    if (!position) return;
+    const marker = window.L.marker([position.lat, position.lon], {
+      icon: tchooTrainIcon(position.route, position.angle),
+      zIndexOffset: 600,
+    });
+    marker.bindPopup(tchooTrainPopup(train, position.route, position));
+    marker.addTo(tchooTrainLayer);
+    tchooTrainMarkers.set(train.id, { marker });
+  });
+
+  startTchooTrainTimer();
+  return tchooTrainMarkers.size;
+}
+
 const ISERE_BOUNDS = {
   latMin: 44.6,
   latMax: 46.0,
   lonMin: 4.2,
   lonMax: 6.8,
 };
+
+const TCHOO_TRAINS_SOURCE_URL = 'https://carto.tchoo.net/';
+const TCHOO_TRAIN_ROUTES = Object.freeze([
+  {
+    id: 'grenoble-lyon',
+    label: 'TER Grenoble ⇄ Lyon',
+    line: 'TER AURA',
+    durationMs: 44 * 60 * 1000,
+    color: '#0f766e',
+    points: [[45.190, 5.714], [45.203, 5.687], [45.194, 5.677], [45.211, 5.665], [45.251, 5.627], [45.297, 5.585], [45.363, 5.544], [45.444, 5.490], [45.560, 5.449], [45.584, 5.273], [45.607, 5.153]],
+  },
+  {
+    id: 'grenoble-chambery',
+    label: 'TER Grenoble ⇄ Chambéry',
+    line: 'Sillon alpin nord',
+    durationMs: 36 * 60 * 1000,
+    color: '#2563eb',
+    points: [[45.190, 5.714], [45.207, 5.744], [45.219, 5.789], [45.250, 5.872], [45.285, 5.881], [45.331, 5.952], [45.383, 5.993], [45.434, 6.019], [45.486, 6.061]],
+  },
+  {
+    id: 'grenoble-valence',
+    label: 'TER Grenoble ⇄ Valence',
+    line: 'Sillon alpin sud',
+    durationMs: 58 * 60 * 1000,
+    color: '#7c3aed',
+    points: [[45.190, 5.714], [45.154, 5.703], [45.124, 5.698], [45.087, 5.682], [45.059, 5.671], [45.046, 5.632], [45.064, 5.551], [45.156, 5.529], [45.219, 5.537], [45.298, 5.486], [45.363, 5.333], [45.255, 5.193], [45.191, 5.109]],
+  },
+  {
+    id: 'grenoble-gap',
+    label: 'TER Grenoble ⇄ Clelles / Gap',
+    line: 'Ligne des Alpes',
+    durationMs: 62 * 60 * 1000,
+    color: '#c2410c',
+    points: [[45.190, 5.714], [45.154, 5.703], [45.124, 5.698], [45.095, 5.700], [45.045, 5.706], [44.986, 5.716], [44.928, 5.713], [44.829, 5.620], [44.756, 5.605]],
+  },
+]);
+
+const TCHOO_TRAINS = Object.freeze([
+  { id: 'ter17610', routeId: 'grenoble-lyon', label: 'TER 17610', direction: 1, offset: 0.04 },
+  { id: 'ter17623', routeId: 'grenoble-lyon', label: 'TER 17623', direction: -1, offset: 0.57 },
+  { id: 'ter885720', routeId: 'grenoble-chambery', label: 'TER 885720', direction: 1, offset: 0.21 },
+  { id: 'ter885733', routeId: 'grenoble-chambery', label: 'TER 885733', direction: -1, offset: 0.74 },
+  { id: 'ter17564', routeId: 'grenoble-valence', label: 'TER 17564', direction: 1, offset: 0.32 },
+  { id: 'ter17579', routeId: 'grenoble-gap', label: 'TER 17579', direction: -1, offset: 0.69 },
+]);
 
 function normalizeMapCoordinates(lat, lon) {
   let safeLat = Number(lat);
@@ -7317,6 +7502,7 @@ async function renderTrafficOnMap() {
 
 
 
+  mapStats.traffic += renderTchooTrainLayer();
   renderPrAutorouteLayer();
   updateMapSummary();
 }
@@ -14433,7 +14619,7 @@ function bindAppInteractions() {
     'filter-resources-telecom', 'filter-resources-telecom-type',
     'filter-resources-active', 'filter-resources-protcivile',
   ]);
-  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type', 'filter-resources-hosting-capacity', 'filter-resources-hosting-surface', 'filter-resources-hosting-accessibility', 'filter-resources-hosting-sanitary', 'filter-resources-hosting-heating', 'filter-resources-hosting-parking', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-dae', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-resources-protcivile', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras', 'filter-autoroutes', 'filter-autoroutes-type', 'filter-pr-autoroutes'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-resources-active', 'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type', 'filter-resources-hosting-capacity', 'filter-resources-hosting-surface', 'filter-resources-hosting-accessibility', 'filter-resources-hosting-sanitary', 'filter-resources-hosting-heating', 'filter-resources-hosting-parking', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-dae', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-resources-protcivile', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras', 'filter-autoroutes', 'filter-autoroutes-type', 'filter-pr-autoroutes', 'filter-tchoo-trains'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       if (RESOURCE_ONLY_FILTERS.has(id)) {
         // Rendu immédiat depuis le cache
@@ -14461,6 +14647,7 @@ function logout() {
   if (apiPanelTimer) clearInterval(apiPanelTimer);
   if (apiResyncTimer) clearInterval(apiResyncTimer);
   stopRouteRefreshTimer();
+  stopTchooTrainTimer();
   stopMapAnnotationsSync();
   stopExternalRisksSSE();
   finishStartupQueue();

@@ -2196,6 +2196,36 @@ svg text { font-size: 14px; fill: #17335f; }
 .traffic-type--danger { background: #ffe3e3; }
 .traffic-type--info { background: #eef2ff; }
 
+.tchoo-train-icon-wrap {
+  background: transparent;
+  border: 0;
+}
+
+.tchoo-train-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: var(--train-color, #0f172a);
+  color: #fff;
+  border: 2px solid #fff;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, .35);
+  animation: train-pulse 1.6s ease-in-out infinite;
+}
+
+.tchoo-train-icon__glyph {
+  display: block;
+  font-size: 12px;
+  line-height: 1;
+  transform-origin: 50% 50%;
+}
+
+@keyframes train-pulse {
+  0%, 100% { box-shadow: 0 2px 8px rgba(15, 23, 42, .35), 0 0 0 0 rgba(37, 99, 235, .22); }
+  50% { box-shadow: 0 2px 8px rgba(15, 23, 42, .35), 0 0 0 7px rgba(37, 99, 235, 0); }
+}
+
 .itinisere-road-dot {
   position: absolute;
   right: -8px;
