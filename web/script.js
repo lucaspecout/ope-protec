@@ -391,6 +391,211 @@ let selectedWaterMunicipalityId = '';
 let selectedContactsCity = '';
 let stationsTimetableCache = null;
 let selectedStationFilter = '';
+const STATION_OPERATIONAL_INFO = Object.freeze({
+  grenoble: {
+    sector: 'Agglomeration grenobloise',
+    role: 'Hub principal Isere pour evacuation, relai equipes et regroupement voyageurs.',
+    connections: ['TER Lyon / Valence / Chambery / Gap', 'Tram A/B, Chrono, gare routiere'],
+    attention: 'Affluence forte et parvis dense: prevoir un point de rendez-vous visible hors hall.',
+    usefulFor: ['Centre OPE', 'transfert intermodal', 'point presse / accueil familles'],
+  },
+  'grenoble-universites-gieres': {
+    sector: 'Campus / Est grenoblois',
+    role: 'Gare de desserte campus et porte est de l agglomeration.',
+    connections: ['TER Grenoble - Chambery', 'Tram B, lignes campus'],
+    attention: 'Flux etudiants importants aux heures de pointe; acces utiles cote campus.',
+    usefulFor: ['renfort campus', 'repli est agglo', 'navettes universitaires'],
+  },
+  echirolles: {
+    sector: 'Sud agglomeration',
+    role: 'Appui ferroviaire pour Echirolles, quartiers sud et acces rocade.',
+    connections: ['TER axe Grenoble - Vif / Clelles', 'Tram A, bus sud agglo'],
+    attention: 'Verifier les cheminements pietons si operation nocturne ou meteo degradee.',
+    usefulFor: ['evacuation sud agglo', 'liaison tram/train', 'renfort urbain'],
+  },
+  'pont-de-claix': {
+    sector: 'Sud industriel',
+    role: 'Point rail proche plateformes industrielles et entree vallee du Drac.',
+    connections: ['TER Grenoble - Gap', 'bus sud grenoblois'],
+    attention: 'Secteur industriel: croiser avec les risques technologiques et plans de circulation.',
+    usefulFor: ['incident industriel', 'filtrage acces sud', 'acheminement equipes'],
+  },
+  'jarrie-vizille': {
+    sector: 'Romanche / Vizille',
+    role: 'Acces rail pour Vizille, Jarrie et debut vallee de la Romanche.',
+    connections: ['TER Grenoble - Gap', 'cars vers Vizille / Oisans'],
+    attention: 'Surveillance utile en cas de crue Romanche ou contraintes routieres RN85/RD.',
+    usefulFor: ['porte Oisans', 'relai cars', 'repli vallee'],
+  },
+  vif: {
+    sector: 'Trièves nord',
+    role: 'Gare d appui entre agglomeration grenobloise et Trièves.',
+    connections: ['TER Grenoble - Gap', 'cars locaux'],
+    attention: 'Verifier disponibilite des parkings et routes de rabattement en episode neige.',
+    usefulFor: ['repli sud', 'evacuation secteur Vif', 'liaison montagne'],
+  },
+  'saint-georges-de-commiers': {
+    sector: 'Drac / Monteynard',
+    role: 'Point de jonction utile pour le sud grenoblois et secteur Monteynard.',
+    connections: ['TER Grenoble - Gap'],
+    attention: 'Anticiper les coupures routieres possibles sur axes de vallee.',
+    usefulFor: ['accueil local', 'liaison Trièves', 'appui plan neige'],
+  },
+  'monestier-de-clermont': {
+    sector: 'Trièves',
+    role: 'Gare structurante du Trièves pour operations montagne et axes RN75/A51.',
+    connections: ['TER Grenoble - Gap', 'cars Trièves'],
+    attention: 'Conditions hivernales et vent peuvent ralentir les rabattements routiers.',
+    usefulFor: ['base avancee Trièves', 'point ravitaillement', 'regroupement evacues'],
+  },
+  'clelles-mens': {
+    sector: 'Trièves sud',
+    role: 'Dernier point rail iserois majeur avant le Devoluy / Hautes-Alpes.',
+    connections: ['TER Grenoble - Gap', 'cars vers Mens'],
+    attention: 'Zone diffuse: confirmer les temps d acces terrain avant engagement.',
+    usefulFor: ['secours montagne', 'evacuation rurale', 'liaison sud departement'],
+  },
+  voreppe: {
+    sector: 'Cluse de Voreppe',
+    role: 'Point strategique entre Grenoble, Voironnais et Chartreuse.',
+    connections: ['TER Grenoble - Lyon / Valence', 'cars Voironnais'],
+    attention: 'Secteur sensible si A48/A49 perturbees; surveiller reports routiers.',
+    usefulFor: ['delestage nord agglo', 'acces Chartreuse', 'filtrage cluse'],
+  },
+  moirans: {
+    sector: 'Noeud Voironnais',
+    role: 'Noeud ferroviaire majeur entre Grenoble, Lyon et Valence.',
+    connections: ['TER Grenoble - Lyon', 'TER Grenoble - Valence', 'cars Voironnais'],
+    attention: 'Gare cle pour rupture de correspondance: prioriser information voyageurs.',
+    usefulFor: ['correspondances', 'evacuation Voironnais', 'tri des flux'],
+  },
+  voiron: {
+    sector: 'Voironnais',
+    role: 'Gare principale du bassin voironnais et relais population nord-ouest.',
+    connections: ['TER Grenoble - Lyon', 'bus / cars Pays Voironnais'],
+    attention: 'Centre-ville dense: reperer acces secours et stationnement avant operation.',
+    usefulFor: ['centre d accueil', 'relai intercommunal', 'liaison Lyon/Grenoble'],
+  },
+  rives: {
+    sector: 'Bièvre est',
+    role: 'Desserte rail pour Rives et acces plateau de Bièvre.',
+    connections: ['TER Grenoble - Lyon'],
+    attention: 'Coordonner avec les axes routiers locaux en cas de restriction A48.',
+    usefulFor: ['rabattement Bièvre', 'renfort Voironnais', 'repli local'],
+  },
+  'tullins-fures': {
+    sector: 'Vallee de l Isere',
+    role: 'Point d appui entre Voironnais, Sud-Gresivaudan et axe Valence.',
+    connections: ['TER Grenoble - Valence'],
+    attention: 'A croiser avec vigilance crues Isere et acces ponts.',
+    usefulFor: ['liaison Valence', 'secteur Tullins', 'appui inondation'],
+  },
+  vinay: {
+    sector: 'Sud-Gresivaudan',
+    role: 'Gare locale utile pour rabattement entre Saint-Marcellin et Voironnais.',
+    connections: ['TER Grenoble - Valence'],
+    attention: 'Verifier acces par RD si episode crue ou eboulement en vallee.',
+    usefulFor: ['appui rural', 'evacuation vallee', 'relais logistique'],
+  },
+  'saint-marcellin': {
+    sector: 'Sud-Gresivaudan',
+    role: 'Gare principale du bassin saint-marcellinois.',
+    connections: ['TER Grenoble - Valence', 'cars Sud-Gresivaudan'],
+    attention: 'Bon point de regroupement hors metropole; anticiper flux cars.',
+    usefulFor: ['base ouest departement', 'accueil evacues', 'liaison Valence'],
+  },
+  polienas: {
+    sector: 'Vallee de l Isere',
+    role: 'Halte de proximite entre Tullins et Vinay.',
+    connections: ['TER Grenoble - Valence'],
+    attention: 'Capacite d accueil limitee: privilegier usage local et navettes ciblees.',
+    usefulFor: ['desserte locale', 'point de navette', 'maillage vallee'],
+  },
+  'le-grand-lemps': {
+    sector: 'Bièvre',
+    role: 'Point rail pour le centre Bièvre et communes rurales proches.',
+    connections: ['TER Grenoble - Lyon'],
+    attention: 'Prevoir signaletique claire si activation comme point de rendez-vous.',
+    usefulFor: ['rabattement rural', 'appui Bièvre', 'liaison Lyon'],
+  },
+  chabons: {
+    sector: 'Bièvre nord',
+    role: 'Desserte locale sur axe Grenoble - Lyon.',
+    connections: ['TER Grenoble - Lyon'],
+    attention: 'Petite gare: confirmer eclairage, abri et capacite avant accueil prolonge.',
+    usefulFor: ['repli local', 'navette courte', 'maillage nord'],
+  },
+  'virieu-sur-bourbre': {
+    sector: 'Bourbre',
+    role: 'Gare de proximite pour la vallee de la Bourbre.',
+    connections: ['TER Grenoble - Lyon'],
+    attention: 'A surveiller avec risques de ruissellement et acces routiers locaux.',
+    usefulFor: ['appui vallee', 'liaison nord Isere', 'regroupement local'],
+  },
+  'saint-andre-le-gaz': {
+    sector: 'Noeud Nord-Isere',
+    role: 'Noeud ferroviaire important vers Lyon, Chambery et Grenoble.',
+    connections: ['TER Lyon / Grenoble / Chambery', 'cars locaux'],
+    attention: 'Correspondances multiples: traiter les ruptures de charge en priorite.',
+    usefulFor: ['tri des flux', 'evacuation nord Isere', 'relai Savoie'],
+  },
+  'bourgoin-jallieu': {
+    sector: 'Nord-Isere',
+    role: 'Gare principale du bassin berjallien, forte valeur de regroupement.',
+    connections: ['TER Lyon - Grenoble', 'reseau urbain nord Isere'],
+    attention: 'Affluence importante; separer zone accueil public et zone operations.',
+    usefulFor: ['centre nord Isere', 'liaison Lyon', 'information voyageurs'],
+  },
+  'l-isle-d-abeau': {
+    sector: 'Porte de l Isle d Abeau',
+    role: 'Desserte du secteur urbain et economique de l Isle d Abeau.',
+    connections: ['TER Lyon - Grenoble', 'bus locaux'],
+    attention: 'Coordonner avec zones d activite et axes A43.',
+    usefulFor: ['flux pendulaires', 'appui ZI', 'evacuation locale'],
+  },
+  'la-verpilliere': {
+    sector: 'Porte de l Est lyonnais',
+    role: 'Gare de rabattement pour l ouest Nord-Isere.',
+    connections: ['TER Lyon - Grenoble', 'bus locaux'],
+    attention: 'Secteur A43: utile si reports routiers ou bouchons vers Lyon.',
+    usefulFor: ['liaison Lyon', 'delestage A43', 'accueil local'],
+  },
+  'saint-quentin-fallavier': {
+    sector: 'Zone logistique A43',
+    role: 'Point rail proche grandes zones logistiques et industriels Nord-Isere.',
+    connections: ['TER Lyon - Grenoble'],
+    attention: 'Croiser avec risques industriels, poids lourds et plans de circulation.',
+    usefulFor: ['incident logistique', 'relai ouest Isere', 'acheminement equipes'],
+  },
+  vienne: {
+    sector: 'Vallee du Rhone',
+    role: 'Gare principale du secteur viennois, interface Isere/Rhone.',
+    connections: ['TER Lyon - Valence', 'bus urbains / cars'],
+    attention: 'Coordination interdepartementale utile avec Rhone et axes A7/RN7.',
+    usefulFor: ['liaison Rhone', 'accueil bassin viennois', 'evacuation vallee'],
+  },
+  estressin: {
+    sector: 'Nord de Vienne',
+    role: 'Halte de proximite pour quartiers nord et zone viennoise.',
+    connections: ['TER Lyon - Valence'],
+    attention: 'Usage plutot local; verifier correspondances avec bus urbains.',
+    usefulFor: ['desserte locale', 'repli quartier nord', 'maillage Vienne'],
+  },
+  'chasse-sur-rhone': {
+    sector: 'Confluence Rhone / Gier',
+    role: 'Gare en limite departementale, utile pour coordination sud lyonnais.',
+    connections: ['TER Lyon - Valence'],
+    attention: 'Secteur industriel et autoroutier: croiser avec risques technologiques.',
+    usefulFor: ['interface Rhone', 'liaison A7', 'incident industriel'],
+  },
+  'le-peage-de-roussillon': {
+    sector: 'Roussillonnais',
+    role: 'Gare structurante du sud viennois et vallee du Rhone iseroise.',
+    connections: ['TER Lyon - Valence', 'cars Roussillonnais'],
+    attention: 'Zone industrielle proche: verifier perimetres de securite si alerte.',
+    usefulFor: ['base Rhone sud', 'liaison Valence', 'accueil evacues'],
+  },
+});
 let waterPanelLoadSeq = 0;
 const waterPanelCache = new Map();
 let contactsPanelLoadSeq = 0;
@@ -12549,6 +12754,57 @@ function renderStationTable(title, items = [], movement = 'departure') {
   </section>`;
 }
 
+function stationOperationalInfo(station = {}) {
+  return STATION_OPERATIONAL_INFO[station.id] || {
+    sector: 'Isere',
+    role: 'Gare de proximite utile pour le maillage ferroviaire local.',
+    connections: ['TER regional', 'rabattements routiers locaux'],
+    attention: 'Verifier sur place les acces, l eclairage et la capacite d accueil avant activation.',
+    usefulFor: ['desserte locale', 'point de rendez-vous', 'navette de rabattement'],
+  };
+}
+
+function stationNextInfo(station = {}) {
+  const departures = upcomingStationItems(station.departures || []);
+  const arrivals = upcomingStationItems(station.arrivals || []);
+  const delayedItems = [...departures, ...arrivals].filter((item) => Number(item.delay_minutes || 0) > 0);
+  const maxDelay = delayedItems.reduce((max, item) => Math.max(max, Number(item.delay_minutes || 0)), 0);
+  return { nextDeparture: departures[0], nextArrival: arrivals[0], maxDelay };
+}
+
+function renderStationOperationalInfo(station = {}) {
+  const info = stationOperationalInfo(station);
+  const next = stationNextInfo(station);
+  const hasCoords = Number.isFinite(Number(station.lat)) && Number.isFinite(Number(station.lon));
+  const coords = hasCoords ? `${Number(station.lat).toFixed(5)}, ${Number(station.lon).toFixed(5)}` : 'Coordonnees a confirmer';
+  const osmHref = hasCoords
+    ? `https://www.openstreetmap.org/?mlat=${encodeURIComponent(station.lat)}&mlon=${encodeURIComponent(station.lon)}#map=16/${encodeURIComponent(station.lat)}/${encodeURIComponent(station.lon)}`
+    : '';
+  const nextDepartureLabel = next.nextDeparture
+    ? `${next.nextDeparture.time || next.nextDeparture.scheduled_time || '--:--'} vers ${next.nextDeparture.destination || 'destination non precisee'}`
+    : 'Aucun depart proche';
+  const nextArrivalLabel = next.nextArrival
+    ? `${next.nextArrival.time || next.nextArrival.scheduled_time || '--:--'} depuis ${next.nextArrival.origin || 'provenance non precisee'}`
+    : 'Aucune arrivee proche';
+  return `<div class="station-operational-info">
+    <div class="station-operational-info__main">
+      <p class="station-operational-info__sector">${escapeHtml(info.sector || 'Isere')}</p>
+      <p>${escapeHtml(info.role || '')}</p>
+      <div class="station-operational-info__tags">
+        ${(info.usefulFor || []).map((item) => `<span>${escapeHtml(item)}</span>`).join('')}
+      </div>
+    </div>
+    <dl class="station-operational-info__details">
+      <div><dt>Correspondances</dt><dd>${escapeHtml((info.connections || []).join(' · ') || 'A confirmer')}</dd></div>
+      <div><dt>Point d attention</dt><dd>${escapeHtml(info.attention || 'Verifier les acces terrain avant activation.')}</dd></div>
+      <div><dt>Prochain depart</dt><dd>${escapeHtml(nextDepartureLabel)}</dd></div>
+      <div><dt>Prochaine arrivee</dt><dd>${escapeHtml(nextArrivalLabel)}</dd></div>
+      <div><dt>Retard max visible</dt><dd class="${next.maxDelay > 0 ? 'station-operational-info__late' : ''}">${next.maxDelay > 0 ? escapeHtml(`+${next.maxDelay} min`) : 'Aucun retard proche'}</dd></div>
+      <div><dt>Coordonnees</dt><dd>${osmHref ? `<a href="${escapeHtml(osmHref)}" target="_blank" rel="noreferrer">${escapeHtml(coords)}</a>` : escapeHtml(coords)}</dd></div>
+    </dl>
+  </div>`;
+}
+
 function syncStationsFilterOptions(stations = []) {
   const select = document.getElementById('stations-filter');
   if (!select) return;
@@ -12632,6 +12888,7 @@ function renderStationsPanel(payload = stationsTimetableCache) {
           ${Number(station.delayed_total || 0) > 0 ? `${Number(station.delayed_total || 0)} retard(s)` : 'A l heure'}
         </span>
       </header>
+      ${renderStationOperationalInfo(station)}
       <div class="station-timetable__grid">
         ${renderStationTable('Départs', station.departures || [], 'departure')}
         ${renderStationTable('Arrivées', station.arrivals || [], 'arrival')}
