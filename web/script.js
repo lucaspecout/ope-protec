@@ -12493,23 +12493,45 @@ function stationDelayClass(item = {}) {
   return 'stations-delay';
 }
 
-function renderStationMovements(items = [], movement = 'departure') {
-  if (!items.length) return '<li class="muted">Aucun horaire proche.</li>';
-  return items.slice(0, 6).map((item) => {
-    const relation = movement === 'departure'
-      ? `vers ${escapeHtml(item.destination || '-')}`
-      : `depuis ${escapeHtml(item.origin || '-')}`;
-    const platform = item.platform ? ` · voie ${escapeHtml(item.platform)}` : '';
+function renderStationRows(items = [], movement = 'departure') {
+  if (!items.length) {
+    return '<tr><td colspan="6" class="muted">Aucun horaire proche.</td></tr>';
+  }
+  return items.slice(0, 10).map((item) => {
+    const place = movement === 'departure' ? item.destination : item.origin;
     const train = [item.category, item.train_number || item.line].filter(Boolean).join(' ');
-    return `<li class="${item.is_delayed ? 'is-delayed' : ''}">
-      <time>${escapeHtml(item.time || item.scheduled_time || '--:--')}</time>
-      <div>
-        <strong>${relation}</strong>
-        <span class="muted">${escapeHtml(train || 'Train')}${platform}</span>
-      </div>
-      <span class="${stationDelayClass(item)}">${escapeHtml(stationDelayLabel(item))}</span>
-    </li>`;
+    const delay = Number(item.delay_minutes || 0);
+    return `<tr class="${delay > 0 ? 'is-delayed' : ''}">
+      <td><strong>${escapeHtml(item.scheduled_time || item.time || '--:--')}</strong></td>
+      <td><strong>${escapeHtml(item.time || item.scheduled_time || '--:--')}</strong></td>
+      <td>${escapeHtml(place || '-')}</td>
+      <td>${escapeHtml(train || 'Train')}</td>
+      <td>${escapeHtml(item.platform || '-')}</td>
+      <td><span class="${stationDelayClass(item)}">${escapeHtml(stationDelayLabel(item))}</span></td>
+    </tr>`;
   }).join('');
+}
+
+function renderStationTable(title, items = [], movement = 'departure') {
+  const placeHeader = movement === 'departure' ? 'Destination' : 'Provenance';
+  return `<section class="station-table-block">
+    <h5>${escapeHtml(title)}</h5>
+    <div class="station-table-wrap">
+      <table class="station-timetable-table">
+        <thead>
+          <tr>
+            <th>Prévu</th>
+            <th>Réel</th>
+            <th>${escapeHtml(placeHeader)}</th>
+            <th>Train</th>
+            <th>Voie</th>
+            <th>Retard</th>
+          </tr>
+        </thead>
+        <tbody>${renderStationRows(items, movement)}</tbody>
+      </table>
+    </div>
+  </section>`;
 }
 
 function syncStationsFilterOptions(stations = []) {
@@ -12557,7 +12579,7 @@ function stationPopupTimetableHtml(resourceName = '') {
 }
 
 function renderStationsPanel(payload = stationsTimetableCache) {
-  const list = document.getElementById('stations-list');
+  const list = document.getElementById('station-timetables-list');
   const summary = document.getElementById('stations-summary');
   const errorEl = document.getElementById('stations-error');
   if (!list) return;
@@ -12579,7 +12601,7 @@ function renderStationsPanel(payload = stationsTimetableCache) {
     return;
   }
   list.innerHTML = filtered.map((station) => `
-    <article class="station-card ${Number(station.delayed_total || 0) > 0 ? 'station-card--delayed' : ''}">
+    <article class="station-timetable ${Number(station.delayed_total || 0) > 0 ? 'station-timetable--delayed' : ''}">
       <header>
         <div>
           <h4>${escapeHtml(station.name)}</h4>
@@ -12589,21 +12611,15 @@ function renderStationsPanel(payload = stationsTimetableCache) {
           ${Number(station.delayed_total || 0) > 0 ? `${Number(station.delayed_total || 0)} retard(s)` : 'A l heure'}
         </span>
       </header>
-      <div class="station-card__grid">
-        <section>
-          <h5>Departs</h5>
-          <ul>${renderStationMovements(station.departures || [], 'departure')}</ul>
-        </section>
-        <section>
-          <h5>Arrivees</h5>
-          <ul>${renderStationMovements(station.arrivals || [], 'arrival')}</ul>
-        </section>
+      <div class="station-timetable__grid">
+        ${renderStationTable('Départs', station.departures || [], 'departure')}
+        ${renderStationTable('Arrivées', station.arrivals || [], 'arrival')}
       </div>
     </article>`).join('');
 }
 
 async function loadAndRenderStationsPanel(forceRefresh = false) {
-  const list = document.getElementById('stations-list');
+  const list = document.getElementById('station-timetables-list');
   const errorEl = document.getElementById('stations-error');
   if (list && !stationsTimetableCache) list.innerHTML = '<p class="muted">Chargement des horaires SNCF...</p>';
   if (errorEl) errorEl.textContent = '';
