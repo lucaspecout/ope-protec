@@ -4879,6 +4879,10 @@ def _sncf_build_timetable_entry(
     if not aimed and not expected:
         return None
     aimed_sort = _parse_sncf_dt(expected or aimed)
+    if aimed_sort:
+        now_for_sort = datetime.now(aimed_sort.tzinfo) if aimed_sort.tzinfo else datetime.utcnow()
+        if aimed_sort < now_for_sort - timedelta(minutes=1):
+            return None
     delay = _sncf_delay_minutes(aimed, expected)
     train_number = journey.findtext(".//siri:TrainNumberRef", default="", namespaces=namespace) or ""
     product = (journey.findtext("siri:ProductCategoryRef", default="", namespaces=namespace) or "").split("::")[-2:-1]
@@ -4938,8 +4942,8 @@ def _fetch_sncf_isere_station_timetables_live() -> dict[str, Any]:
         for station in station_map.values():
             station["arrivals"].sort(key=lambda item: item.get("_sort") or "")
             station["departures"].sort(key=lambda item: item.get("_sort") or "")
-            station["arrivals"] = [{k: v for k, v in item.items() if k != "_sort"} for item in station["arrivals"][:8]]
-            station["departures"] = [{k: v for k, v in item.items() if k != "_sort"} for item in station["departures"][:8]]
+            station["arrivals"] = [{k: v for k, v in item.items() if k != "_sort"} for item in station["arrivals"][:10]]
+            station["departures"] = [{k: v for k, v in item.items() if k != "_sort"} for item in station["departures"][:10]]
             station["next_items_total"] = len(station["arrivals"]) + len(station["departures"])
             if station["next_items_total"]:
                 stations.append(station)

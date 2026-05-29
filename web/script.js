@@ -12493,11 +12493,26 @@ function stationDelayClass(item = {}) {
   return 'stations-delay';
 }
 
+function stationSortTime(item = {}) {
+  const raw = item.expected_time || item.aimed_time || '';
+  const time = raw ? new Date(raw).getTime() : NaN;
+  return Number.isFinite(time) ? time : Number.MAX_SAFE_INTEGER;
+}
+
+function upcomingStationItems(items = []) {
+  const now = Date.now() - 60 * 1000;
+  return (Array.isArray(items) ? items : [])
+    .filter((item) => stationSortTime(item) >= now)
+    .sort((a, b) => stationSortTime(a) - stationSortTime(b))
+    .slice(0, 10);
+}
+
 function renderStationRows(items = [], movement = 'departure') {
-  if (!items.length) {
+  const upcoming = upcomingStationItems(items);
+  if (!upcoming.length) {
     return '<tr><td colspan="6" class="muted">Aucun horaire proche.</td></tr>';
   }
-  return items.slice(0, 10).map((item) => {
+  return upcoming.map((item) => {
     const place = movement === 'departure' ? item.destination : item.origin;
     const train = [item.category, item.train_number || item.line].filter(Boolean).join(' ');
     const delay = Number(item.delay_minutes || 0);
@@ -12565,8 +12580,8 @@ function stationPopupTimetableHtml(resourceName = '') {
     return name && (normalizedName.includes(name) || name.includes(normalizedName));
   });
   if (!station) return '<p class="muted stations-popup-note">Horaires non disponibles pour cette gare.</p>';
-  const nextDepartures = (station.departures || []).slice(0, 2);
-  const nextArrivals = (station.arrivals || []).slice(0, 2);
+  const nextDepartures = upcomingStationItems(station.departures || []).slice(0, 2);
+  const nextArrivals = upcomingStationItems(station.arrivals || []).slice(0, 2);
   const delayed = Number(station.delayed_total || 0);
   return `<div class="stations-popup">
     <strong>Horaires SNCF</strong>
@@ -12585,7 +12600,13 @@ function renderStationsPanel(payload = stationsTimetableCache) {
   if (!list) return;
   const stations = Array.isArray(payload?.stations) ? payload.stations : [];
   syncStationsFilterOptions(stations);
-  const filtered = selectedStationFilter ? stations.filter((station) => station.id === selectedStationFilter) : stations;
+  const enrichedStations = stations.map((station) => {
+    const arrivals = upcomingStationItems(station.arrivals || []);
+    const departures = upcomingStationItems(station.departures || []);
+    const delayed_total = [...arrivals, ...departures].filter((item) => Number(item.delay_minutes || 0) > 0).length;
+    return { ...station, arrivals, departures, delayed_total, next_items_total: arrivals.length + departures.length };
+  }).filter((station) => station.next_items_total > 0);
+  const filtered = selectedStationFilter ? enrichedStations.filter((station) => station.id === selectedStationFilter) : enrichedStations;
   const delayedTotal = filtered.reduce((sum, station) => sum + Number(station.delayed_total || 0), 0);
   const nextTotal = filtered.reduce((sum, station) => sum + Number(station.next_items_total || 0), 0);
   if (summary) {
