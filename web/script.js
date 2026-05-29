@@ -264,6 +264,7 @@ let bisonCameraLayer = null;
 let autorouteLayer = null;
 let prAutorouteLayer = null;
 let tchooTrainLayer = null;
+let tchooRailTileLayer = null;
 let tchooTrainTimer = null;
 let institutionLayer = null;
 let populationLayer = null;
@@ -6245,11 +6246,31 @@ function stopTchooTrainTimer() {
   tchooTrainTimer = null;
 }
 
+function applyTchooRailOverlay(enabled) {
+  if (!leafletMap || typeof window.L === 'undefined') return;
+  if (!enabled) {
+    if (tchooRailTileLayer && leafletMap.hasLayer(tchooRailTileLayer)) leafletMap.removeLayer(tchooRailTileLayer);
+    return;
+  }
+  if (!tchooRailTileLayer) {
+    tchooRailTileLayer = window.L.tileLayer('https://{s}.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      opacity: 0.72,
+      attribution: '&copy; OpenRailwayMap contributors',
+    });
+    tchooRailTileLayer.on('tileerror', () => {
+      setMapFeedback('Le calque voies ferrées OpenRailwayMap est temporairement indisponible.', true);
+    });
+  }
+  if (!leafletMap.hasLayer(tchooRailTileLayer)) tchooRailTileLayer.addTo(leafletMap);
+}
+
 function renderTchooTrainLayer() {
   if (!leafletMap || typeof window.L === 'undefined') return 0;
   const show = document.getElementById('filter-tchoo-trains')?.checked ?? false;
   if (!tchooTrainLayer) tchooTrainLayer = window.L.layerGroup();
   if (!show) {
+    applyTchooRailOverlay(false);
     stopTchooTrainTimer();
     tchooTrainMarkers.clear();
     tchooTrainLayer.clearLayers();
@@ -6257,6 +6278,7 @@ function renderTchooTrainLayer() {
     return 0;
   }
 
+  applyTchooRailOverlay(true);
   if (!leafletMap.hasLayer(tchooTrainLayer)) tchooTrainLayer.addTo(leafletMap);
   tchooTrainLayer.clearLayers();
   tchooTrainMarkers.clear();
@@ -6303,7 +6325,12 @@ const TCHOO_TRAIN_ROUTES = Object.freeze([
     line: 'TER AURA',
     durationMs: 44 * 60 * 1000,
     color: '#0f766e',
-    points: [[45.190, 5.714], [45.203, 5.687], [45.194, 5.677], [45.211, 5.665], [45.251, 5.627], [45.297, 5.585], [45.363, 5.544], [45.444, 5.490], [45.560, 5.449], [45.584, 5.273], [45.607, 5.153]],
+    points: [
+      [45.1910, 5.7142], [45.2068, 5.7044], [45.2296, 5.6825], [45.2531, 5.6712],
+      [45.2925, 5.6362], [45.3236, 5.5639], [45.3638, 5.5902], [45.3565, 5.5019],
+      [45.3978, 5.4205], [45.4434, 5.4318], [45.4847, 5.4751], [45.5580, 5.4448],
+      [45.5861, 5.2732], [45.6186, 5.2348], [45.6356, 5.1451],
+    ],
   },
   {
     id: 'grenoble-chambery',
@@ -6311,7 +6338,11 @@ const TCHOO_TRAIN_ROUTES = Object.freeze([
     line: 'Sillon alpin nord',
     durationMs: 36 * 60 * 1000,
     color: '#2563eb',
-    points: [[45.190, 5.714], [45.207, 5.744], [45.219, 5.789], [45.250, 5.872], [45.285, 5.881], [45.331, 5.952], [45.383, 5.993], [45.434, 6.019], [45.486, 6.061]],
+    points: [
+      [45.1910, 5.7142], [45.1862, 5.7428], [45.1847, 5.7845], [45.2090, 5.8083],
+      [45.2355, 5.8844], [45.2627, 5.8992], [45.2831, 5.9217], [45.3415, 5.9836],
+      [45.3844, 6.0002], [45.4341, 6.0189], [45.5026, 6.0525],
+    ],
   },
   {
     id: 'grenoble-valence',
@@ -6319,7 +6350,11 @@ const TCHOO_TRAIN_ROUTES = Object.freeze([
     line: 'Sillon alpin sud',
     durationMs: 58 * 60 * 1000,
     color: '#7c3aed',
-    points: [[45.190, 5.714], [45.154, 5.703], [45.124, 5.698], [45.087, 5.682], [45.059, 5.671], [45.046, 5.632], [45.064, 5.551], [45.156, 5.529], [45.219, 5.537], [45.298, 5.486], [45.363, 5.333], [45.255, 5.193], [45.191, 5.109]],
+    points: [
+      [45.1910, 5.7142], [45.2068, 5.7044], [45.2296, 5.6825], [45.2531, 5.6712],
+      [45.2925, 5.6362], [45.3236, 5.5639], [45.2990, 5.4855], [45.2498, 5.4800],
+      [45.2091, 5.4074], [45.1512, 5.3195], [45.0472, 5.0549],
+    ],
   },
   {
     id: 'grenoble-gap',
@@ -6327,7 +6362,11 @@ const TCHOO_TRAIN_ROUTES = Object.freeze([
     line: 'Ligne des Alpes',
     durationMs: 62 * 60 * 1000,
     color: '#c2410c',
-    points: [[45.190, 5.714], [45.154, 5.703], [45.124, 5.698], [45.095, 5.700], [45.045, 5.706], [44.986, 5.716], [44.928, 5.713], [44.829, 5.620], [44.756, 5.605]],
+    points: [
+      [45.1910, 5.7142], [45.1542, 5.7156], [45.1240, 5.6990], [45.0967, 5.7045],
+      [45.0548, 5.6711], [45.0445, 5.7063], [44.9842, 5.7120], [44.9284, 5.7071],
+      [44.8894, 5.6669], [44.8278, 5.6199], [44.7558, 5.6064],
+    ],
   },
 ]);
 
