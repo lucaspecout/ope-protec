@@ -242,6 +242,41 @@ const ISERE_MAJOR_CITIES = [
   { key: 'voiron', name: 'Voiron', lat: 45.3659, lon: 5.5926, population: 20600 },
   { key: 'isle', name: 'L’Isle-d’Abeau', lat: 45.6256, lon: 5.226, population: 16840 },
   { key: 'meylan', name: 'Meylan', lat: 45.2125, lon: 5.7773, population: 17790 },
+  { key: 'fontaine', name: 'Fontaine', lat: 45.1939, lon: 5.6856, population: 22400 },
+  { key: 'pont-claix', name: 'Le Pont-de-Claix', lat: 45.1245, lon: 5.7064, population: 10900 },
+  { key: 'seyssinet', name: 'Seyssinet-Pariset', lat: 45.1765, lon: 5.6946, population: 12000 },
+  { key: 'saint-egreve', name: 'Saint-Égrève', lat: 45.2339, lon: 5.6819, population: 16000 },
+  { key: 'coublevie', name: 'Coublevie', lat: 45.3567, lon: 5.6181, population: 5200 },
+  { key: 'moirans', name: 'Moirans', lat: 45.3267, lon: 5.5642, population: 7800 },
+  { key: 'tullins', name: 'Tullins', lat: 45.2989, lon: 5.4852, population: 7700 },
+  { key: 'saint-marcellin', name: 'Saint-Marcellin', lat: 45.1514, lon: 5.3199, population: 7800 },
+  { key: 'vinay', name: 'Vinay', lat: 45.2106, lon: 5.4070, population: 4300 },
+  { key: 'la-cote-saint-andre', name: 'La Côte-Saint-André', lat: 45.3940, lon: 5.2593, population: 4800 },
+  { key: 'beaurepaire', name: 'Beaurepaire', lat: 45.3382, lon: 5.0557, population: 5000 },
+  { key: 'roussillon', name: 'Roussillon', lat: 45.3737, lon: 4.8123, population: 8300 },
+  { key: 'peage-roussillon', name: 'Le Péage-de-Roussillon', lat: 45.3732, lon: 4.7970, population: 6600 },
+  { key: 'saint-maurice-exil', name: 'Saint-Maurice-l’Exil', lat: 45.3983, lon: 4.7742, population: 6300 },
+  { key: 'pont-eveque', name: 'Pont-Évêque', lat: 45.5314, lon: 4.9148, population: 5200 },
+  { key: 'heyrieux', name: 'Heyrieux', lat: 45.6314, lon: 5.0639, population: 4800 },
+  { key: 'villefontaine', name: 'Villefontaine', lat: 45.6122, lon: 5.1494, population: 19200 },
+  { key: 'la-verpilliere', name: 'La Verpillière', lat: 45.6356, lon: 5.1453, population: 7300 },
+  { key: 'morestel', name: 'Morestel', lat: 45.6750, lon: 5.4707, population: 4500 },
+  { key: 'cremieu', name: 'Crémieu', lat: 45.7258, lon: 5.2493, population: 3400 },
+  { key: 'pontcharra', name: 'Pontcharra', lat: 45.4328, lon: 6.0181, population: 7300 },
+  { key: 'crolles', name: 'Crolles', lat: 45.2850, lon: 5.8836, population: 8300 },
+  { key: 'goncelin', name: 'Goncelin', lat: 45.3420, lon: 5.9780, population: 2500 },
+  { key: 'villard-bonnot', name: 'Villard-Bonnot', lat: 45.2407, lon: 5.8909, population: 7200 },
+  { key: 'vizille', name: 'Vizille', lat: 45.0782, lon: 5.7708, population: 7300 },
+  { key: 'vif', name: 'Vif', lat: 45.0548, lon: 5.6713, population: 8600 },
+  { key: 'varces', name: 'Varces-Allières-et-Risset', lat: 45.0882, lon: 5.6839, population: 8200 },
+  { key: 'la-mure', name: 'La Mure', lat: 44.9025, lon: 5.7868, population: 5000 },
+  { key: 'mens', name: 'Mens', lat: 44.8172, lon: 5.7511, population: 1400 },
+  { key: 'bourg-oisans', name: 'Le Bourg-d’Oisans', lat: 45.0549, lon: 6.0336, population: 3300 },
+  { key: 'alpe-huez', name: 'Huez / Alpe d’Huez', lat: 45.0919, lon: 6.0693, population: 1300 },
+  { key: 'saint-jean-bournay', name: 'Saint-Jean-de-Bournay', lat: 45.5016, lon: 5.1394, population: 4700 },
+  { key: 'les-abrets', name: 'Les Abrets en Dauphiné', lat: 45.5370, lon: 5.5838, population: 6500 },
+  { key: 'tour-du-pin', name: 'La Tour-du-Pin', lat: 45.5660, lon: 5.4482, population: 8200 },
+  { key: 'charvieu', name: 'Charvieu-Chavagneux', lat: 45.7481, lon: 5.1554, population: 9900 },
 ];
 let meteoCityOptions = [...ISERE_MAJOR_CITIES];
 
@@ -4091,7 +4126,7 @@ async function renderMeteoCitiesLayer() {
   if (!leafletMap.hasLayer(meteoCitiesLayer)) meteoCitiesLayer.addTo(leafletMap);
   meteoCitiesLayer.clearLayers();
   const mode = document.getElementById('filter-meteo-layer-type')?.value || 'temperature';
-  const cities = (await getMeteoCityOptions()).slice(0, 18);
+  const cities = (await getMeteoCityOptions()).slice(0, 48);
   if (!cities.length) {
     setMapFeedback('Aucune ville météo disponible à afficher.', true);
     return;
