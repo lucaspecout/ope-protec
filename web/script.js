@@ -8231,8 +8231,12 @@ async function renderTrafficOnMap() {
 
   const showCameras = document.getElementById('filter-cameras')?.checked ?? true;
   if (showCameras) {
-    const itinisereWebcams = await loadItinisereWebcams(false);
-    if (renderSequence !== trafficRenderSequence) return;
+    const itinisereWebcams = cachedItinisereWebcams;
+    if (!itinisereWebcams.length && !itinisereWebcamsInFlight) {
+      loadItinisereWebcams(false).then(() => {
+        if (document.getElementById('filter-cameras')?.checked ?? true) renderTrafficOnMap();
+      });
+    }
     BISON_FUTE_CAMERAS.forEach((camera) => {
       const coords = normalizeMapCoordinates(camera.lat, camera.lon);
       if (!coords) return;
@@ -14584,14 +14588,46 @@ async function preloadAllPanelData(forceRefresh = false) {
   }
 }
 
+async function refreshMapDataInBackground() {
+  if (!(isMapPanelActive() || leafletMap)) return;
+  try {
+    await ensureMapReady();
+    await Promise.allSettled([
+      loadMapPoints(),
+      loadMapAnnotations(),
+      renderTrafficOnMap(),
+    ]);
+  } catch (error) {
+    setMapFeedback(`Carte mise Ã  jour partiellement: ${sanitizeErrorMessage(error.message)}`, true);
+  }
+}
+
+function requestExternalRisksBackgroundRefresh() {
+  if (!token) return;
+  api('/external/isere/risks?refresh=true', {
+    bypassCache: true,
+    cacheTtlMs: 0,
+    timeoutMs: 8000,
+    maxRetries: 0,
+  }).then((data) => {
+    cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, data);
+    renderExternalRisks(cachedExternalRisksSnapshot);
+    renderApiInterconnections(cachedExternalRisksSnapshot);
+    saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
+    saveSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot, cachedExternalRisksSnapshot);
+    checkServiceAlertsFromSnapshot(cachedExternalRisksSnapshot);
+    refreshMapDataInBackground();
+  }).catch(() => {});
+}
+
 async function refreshAll(forceRefresh = false) {
   if (refreshAllInFlight) return refreshAllInFlight;
 
   refreshAllInFlight = withPreservedScroll(async () => {
-    // Phase 1 : bootstrap (dashboard + risks + communes + évènements + MCO + users) → 1 requête
-    // Phase 2 : points carte + annotations + trafic en parallèle → 3 requêtes simultanées
-    // Total : 4 requêtes au lieu de 10, tout tient dans la limite de 6 connexions du navigateur.
-    startStartupQueue(isMapPanelActive() || leafletMap ? 5 : 2);
+    // Phase visible : relire vite le snapshot applicatif. Les couches carte et
+    // les flux externes forcés continuent en arrière-plan pour garder l'UI fluide.
+    startStartupQueue(2);
+    if (forceRefresh) requestExternalRisksBackgroundRefresh();
 
     // Effacer toute erreur résiduelle du cycle précédent dès le début.
     // Sans ce reset, une erreur ponctuelle reste affichée pour toujours même si les
@@ -14599,15 +14635,15 @@ async function refreshAll(forceRefresh = false) {
     const errorTarget = document.getElementById('dashboard-error');
     if (errorTarget) errorTarget.textContent = '';
 
-    const suffix = forceRefresh ? '?refresh=true' : '';
+    const suffix = '';
     let bootstrapError = null;
     let fallbackFailedCount = 0;
 
     setStartupQueueCurrent('Chargement initial…');
     try {
       const bsData = await api(`/operations/bootstrap${suffix}`, {
-        bypassCache: forceRefresh,
-        cacheTtlMs: forceRefresh ? 0 : API_CACHE_TTL_MS,
+        bypassCache: false,
+        cacheTtlMs: API_CACHE_TTL_MS,
         timeoutMs: API_SLOW_ENDPOINT_TIMEOUT_MS,
         // Pas de retry sur le bootstrap : un fallback individuel prend le relais
         // immédiatement. Réessayer 3 fois × 45s bloquerait l'UI pour rien.
@@ -14639,8 +14675,8 @@ async function refreshAll(forceRefresh = false) {
       // Fallback : appels individuels si le bootstrap échoue.
       // Compter les échecs : si tous réussissent, l'UI est complète → pas d'erreur à afficher.
       const fallbackResults = await Promise.allSettled([
-        loadDashboard(forceRefresh),
-        loadExternalRisks(forceRefresh),
+        loadDashboard(false),
+        loadExternalRisks(false),
         loadMunicipalities(null),
         loadEvents(null),
         loadLogs(null),
@@ -14650,21 +14686,7 @@ async function refreshAll(forceRefresh = false) {
     }
     advanceStartupQueue('données initiales');
 
-    if (isMapPanelActive() || leafletMap) {
-      await ensureMapReady();
-      const phase2 = [
-        { label: 'points cartographiques', loader: loadMapPoints },
-        { label: 'annotations tactiques', loader: loadMapAnnotations },
-        { label: 'trafic cartographique', loader: renderTrafficOnMap },
-      ];
-      await Promise.all(phase2.map(async ({ label, loader }) => {
-        try {
-          await loader();
-        } finally {
-          advanceStartupQueue(label);
-        }
-      }));
-    }
+    refreshMapDataInBackground();
 
     renderResources();
     advanceStartupQueue('pages applicatives');
@@ -15672,7 +15694,7 @@ function logout() {
 
 function startAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
-  refreshTimer = setInterval(() => token && refreshAll(true), AUTO_REFRESH_MS);
+  refreshTimer = setInterval(() => token && refreshAll(false), AUTO_REFRESH_MS);
 }
 
 function startStationTimetableRefresh() {
