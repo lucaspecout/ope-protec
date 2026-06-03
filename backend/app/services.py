@@ -4864,35 +4864,35 @@ def fetch_sncf_isere_alerts(force_refresh: bool = False) -> dict[str, Any]:
 
 
 SNCF_ISERE_STATIONS = [
-    {"id": "grenoble", "name": "Grenoble", "lat": 45.19142, "lon": 5.71472},
-    {"id": "grenoble-universites-gieres", "name": "Grenoble Universites - Gieres", "lat": 45.1848, "lon": 5.7842},
+    {"id": "grenoble", "name": "Grenoble", "lat": 45.19142, "lon": 5.71472, "stop_ref": "87747006"},
+    {"id": "grenoble-universites-gieres", "name": "Grenoble Universites - Gieres", "lat": 45.1848, "lon": 5.7842, "stop_ref": "87747402"},
     {"id": "echirolles", "name": "Echirolles", "lat": 45.1512, "lon": 5.7195},
-    {"id": "pont-de-claix", "name": "Pont-de-Claix", "lat": 45.1238, "lon": 5.6995},
-    {"id": "jarrie-vizille", "name": "Jarrie - Vizille", "lat": 45.0944, "lon": 5.7562},
-    {"id": "vif", "name": "Vif", "lat": 45.0561, "lon": 5.6727},
-    {"id": "saint-georges-de-commiers", "name": "Saint-Georges-de-Commiers", "lat": 45.0381, "lon": 5.7059},
-    {"id": "monestier-de-clermont", "name": "Monestier-de-Clermont", "lat": 44.9162, "lon": 5.6321},
-    {"id": "clelles-mens", "name": "Clelles - Mens", "lat": 44.8283, "lon": 5.6172},
-    {"id": "voreppe", "name": "Voreppe", "lat": 45.2948, "lon": 5.6344},
-    {"id": "moirans", "name": "Moirans", "lat": 45.3262, "lon": 5.5682},
-    {"id": "voiron", "name": "Voiron", "lat": 45.3632, "lon": 5.5942},
-    {"id": "rives", "name": "Rives", "lat": 45.3539, "lon": 5.4976},
-    {"id": "tullins-fures", "name": "Tullins-Fures", "lat": 45.2982, "lon": 5.4862},
+    {"id": "pont-de-claix", "name": "Pont-de-Claix", "lat": 45.1238, "lon": 5.6995, "stop_ref": "87752899"},
+    {"id": "jarrie-vizille", "name": "Jarrie - Vizille", "lat": 45.0944, "lon": 5.7562, "stop_ref": "87747535"},
+    {"id": "vif", "name": "Vif", "lat": 45.0561, "lon": 5.6727, "stop_ref": "87747576"},
+    {"id": "saint-georges-de-commiers", "name": "Saint-Georges-de-Commiers", "lat": 45.0381, "lon": 5.7059, "stop_ref": "87747568"},
+    {"id": "monestier-de-clermont", "name": "Monestier-de-Clermont", "lat": 44.9162, "lon": 5.6321, "stop_ref": "87747592"},
+    {"id": "clelles-mens", "name": "Clelles - Mens", "lat": 44.8283, "lon": 5.6172, "stop_ref": "87747626"},
+    {"id": "voreppe", "name": "Voreppe", "lat": 45.2948, "lon": 5.6344, "stop_ref": "87747337"},
+    {"id": "moirans", "name": "Moirans", "lat": 45.3262, "lon": 5.5682, "stop_ref": "87747329"},
+    {"id": "voiron", "name": "Voiron", "lat": 45.3632, "lon": 5.5942, "stop_ref": "87747287"},
+    {"id": "rives", "name": "Rives", "lat": 45.3539, "lon": 5.4976, "stop_ref": "87747246"},
+    {"id": "tullins-fures", "name": "Tullins-Fures", "lat": 45.2982, "lon": 5.4862, "stop_ref": "87761759"},
     {"id": "vinay", "name": "Vinay", "lat": 45.2099, "lon": 5.4065},
     {"id": "saint-marcellin", "name": "Saint-Marcellin", "lat": 45.1515, "lon": 5.3225},
     {"id": "polienas", "name": "Polienas", "lat": 45.2497, "lon": 5.4747},
-    {"id": "le-grand-lemps", "name": "Le Grand-Lemps", "lat": 45.3974, "lon": 5.4203},
+    {"id": "le-grand-lemps", "name": "Le Grand-Lemps", "lat": 45.3974, "lon": 5.4203, "stop_ref": "87747220"},
     {"id": "chabons", "name": "Chabons", "lat": 45.4414, "lon": 5.4296},
-    {"id": "virieu-sur-bourbre", "name": "Virieu-sur-Bourbre", "lat": 45.4854, "lon": 5.4742},
-    {"id": "saint-andre-le-gaz", "name": "Saint-Andre-le-Gaz", "lat": 45.5448, "lon": 5.5282},
-    {"id": "bourgoin-jallieu", "name": "Bourgoin-Jallieu", "lat": 45.5844, "lon": 5.2735},
-    {"id": "l-isle-d-abeau", "name": "L'Isle-d'Abeau", "lat": 45.6204, "lon": 5.2359},
-    {"id": "la-verpilliere", "name": "La Verpilliere", "lat": 45.6365, "lon": 5.1458},
-    {"id": "saint-quentin-fallavier", "name": "Saint-Quentin-Fallavier", "lat": 45.6329, "lon": 5.1097},
-    {"id": "vienne", "name": "Vienne", "lat": 45.5259, "lon": 4.8748},
-    {"id": "estressin", "name": "Estressin", "lat": 45.5389, "lon": 4.8693},
-    {"id": "chasse-sur-rhone", "name": "Chasse-sur-Rhone", "lat": 45.5792, "lon": 4.7988},
-    {"id": "le-peage-de-roussillon", "name": "Le Peage-de-Roussillon", "lat": 45.3715, "lon": 4.7971},
+    {"id": "virieu-sur-bourbre", "name": "Virieu-sur-Bourbre", "lat": 45.4854, "lon": 5.4742, "stop_ref": "87747204"},
+    {"id": "saint-andre-le-gaz", "name": "Saint-Andre-le-Gaz", "lat": 45.5448, "lon": 5.5282, "stop_ref": "87723494"},
+    {"id": "bourgoin-jallieu", "name": "Bourgoin-Jallieu", "lat": 45.5844, "lon": 5.2735, "stop_ref": "87723429"},
+    {"id": "l-isle-d-abeau", "name": "L'Isle-d'Abeau", "lat": 45.6204, "lon": 5.2359, "stop_ref": "87761239"},
+    {"id": "la-verpilliere", "name": "La Verpilliere", "lat": 45.6365, "lon": 5.1458, "stop_ref": "87723395"},
+    {"id": "saint-quentin-fallavier", "name": "Saint-Quentin-Fallavier", "lat": 45.6329, "lon": 5.1097, "stop_ref": "87723387"},
+    {"id": "vienne", "name": "Vienne", "lat": 45.5259, "lon": 4.8748, "stop_ref": "87722587"},
+    {"id": "estressin", "name": "Estressin", "lat": 45.5389, "lon": 4.8693, "stop_ref": "87722579"},
+    {"id": "chasse-sur-rhone", "name": "Chasse-sur-Rhone", "lat": 45.5792, "lon": 4.7988, "stop_ref": "87722561"},
+    {"id": "le-peage-de-roussillon", "name": "Le Peage-de-Roussillon", "lat": 45.3715, "lon": 4.7971, "stop_ref": "87722678"},
 ]
 
 
@@ -4907,6 +4907,11 @@ def _normalize_sncf_station_name(value: str) -> str:
 _SNCF_ISERE_STATION_INDEX = {
     _normalize_sncf_station_name(station["name"]): station
     for station in SNCF_ISERE_STATIONS
+}
+_SNCF_ISERE_STATION_REF_INDEX = {
+    str(station.get("stop_ref") or "").strip(): station
+    for station in SNCF_ISERE_STATIONS
+    if station.get("stop_ref")
 }
 _SNCF_ISERE_STATION_ALIASES = {
     "grenoble universites gieres": "grenoble universites gieres",
@@ -4924,7 +4929,12 @@ _SNCF_ISERE_STATION_ALIASES = {
 }
 
 
-def _match_isere_station(stop_name: str) -> dict[str, Any] | None:
+def _match_isere_station(stop_name: str, stop_ref: str = "") -> dict[str, Any] | None:
+    ref = str(stop_ref or "").split("::")[-1].strip()
+    if ref:
+        direct_ref = _SNCF_ISERE_STATION_REF_INDEX.get(ref)
+        if direct_ref:
+            return direct_ref
     normalized = _normalize_sncf_station_name(stop_name)
     if not normalized:
         return None
@@ -5024,7 +5034,10 @@ def _fetch_sncf_isere_station_timetables_live() -> dict[str, Any]:
         for journey in root.findall(".//siri:EstimatedVehicleJourney", namespace):
             calls = list(journey.findall(".//siri:RecordedCall", namespace)) + list(journey.findall(".//siri:EstimatedCall", namespace))
             for call in calls:
-                station = _match_isere_station(_sncf_call_text(call, "StopPointName", namespace))
+                station = _match_isere_station(
+                    _sncf_call_text(call, "StopPointName", namespace),
+                    _sncf_call_text(call, "StopPointRef", namespace),
+                )
                 if not station:
                     continue
                 for movement in ("arrival", "departure"):

@@ -25,6 +25,7 @@ const STORAGE_KEYS = {
 const AUTO_REFRESH_MS = 45000;
 const EVENTS_LIVE_REFRESH_MS = 10000;
 const HOME_LIVE_REFRESH_MS = 60000;
+const STATION_TIMETABLE_REFRESH_MS = 60000;
 const API_CACHE_TTL_MS = 45000;
 const API_PANEL_REFRESH_MS = 60000;
 const API_MAX_CONCURRENT_REQUESTS = 8;
@@ -232,6 +233,7 @@ let pendingCurrentPassword = '';
 let refreshTimer = null;
 let liveEventsTimer = null;
 let homeLiveTimer = null;
+let stationTimetableTimer = null;
 let apiPanelTimer = null;
 let apiResyncTimer = null;
 let refreshAllInFlight = null;
@@ -326,7 +328,6 @@ let barrageMarkerLayer = null;
 let montagneLayer = null;
 let helipadLayer = null;
 let seismesLayer = null;
-let groundwaterLayer = null;
 let feuxForetLayer = null;
 let colsAlpinsLayer = null;
 let meteoCitiesLayer = null;
@@ -399,6 +400,7 @@ let selectedMeteoCityKey = ISERE_MAJOR_CITIES[0]?.key || 'grenoble';
 let selectedWaterMunicipalityId = '';
 let selectedContactsCity = '';
 let stationsTimetableCache = null;
+let stationsTimetableInFlight = null;
 let selectedStationFilter = '';
 const STATION_OPERATIONAL_INFO = Object.freeze({
   grenoble: {
@@ -4228,39 +4230,6 @@ function renderSeismesLayer() {
   });
 }
 
-// ── Feature 16 : Nappes phréatiques sur la carte ─────────────────────────────
-function renderGroundwaterLayer() {
-  if (!leafletMap || typeof window.L === 'undefined') return;
-  const show = document.getElementById('filter-groundwater')?.checked ?? false;
-  if (!show) {
-    if (groundwaterLayer && leafletMap.hasLayer(groundwaterLayer)) leafletMap.removeLayer(groundwaterLayer);
-    return;
-  }
-  if (!groundwaterLayer) groundwaterLayer = window.L.layerGroup();
-  if (!leafletMap.hasLayer(groundwaterLayer)) groundwaterLayer.addTo(leafletMap);
-  groundwaterLayer.clearLayers();
-  const stations = Array.isArray(cachedExternalRisksSnapshot?.groundwater_isere?.stations) ? cachedExternalRisksSnapshot.groundwater_isere.stations : [];
-  stations.forEach((s) => {
-    const coords = normalizeMapCoordinates(s.latitude ?? s.lat, s.longitude ?? s.lon);
-    if (!coords) return;
-    const trend = s.trend || 'stable';
-    const arrow = trend === 'hausse' ? '↑' : trend === 'baisse' ? '↓' : '→';
-    const color = trend === 'hausse' ? '#1971c2' : trend === 'baisse' ? '#e03131' : '#2b8a3e';
-    const icon = window.L.divIcon({
-      className: '',
-      html: `<div style="background:${color};color:#fff;font-size:11px;font-weight:700;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;box-shadow:0 1px 4px rgba(0,0,0,.4)">${arrow}</div>`,
-      iconSize: [26, 26], iconAnchor: [13, 13],
-    });
-    const level = s.groundwater_level_m_ngf != null ? `${Number(s.groundwater_level_m_ngf).toFixed(2)} m NGF` : '—';
-    const depth = s.depth_m != null ? `${Number(s.depth_m).toFixed(2)} m` : 'n/d';
-    const measured = s.date_measure ? new Date(s.date_measure) : null;
-    const measuredLabel = measured && !Number.isNaN(measured.getTime()) ? measured.toLocaleString('fr-FR') : (s.date_measure || 'n/d');
-    window.L.marker([coords.lat, coords.lon], { icon })
-      .bindPopup(`<div class="map-popup-content"><p class="tag">Hub'Eau · nappes</p><strong>💧 ${escapeHtml(s.name || s.code_bss || s.bss_id || '?')}</strong><p style="margin:.3rem 0 0">Niveau : <strong>${escapeHtml(level)}</strong> · Profondeur : <strong>${escapeHtml(depth)}</strong></p><p style="margin:.25rem 0 0">Tendance : <strong>${escapeHtml(`${arrow} ${trend}`)}</strong></p><p class="muted" style="font-size:.74rem;margin:.35rem 0 0">${escapeHtml(s.commune || '')} · mesure ${escapeHtml(String(measuredLabel))}</p></div>`)
-      .addTo(groundwaterLayer);
-  });
-}
-
 // ── Feature 17 : Feux de forêt EFFIS ─────────────────────────────────────────
 function renderFeuxForetLayer() {
   if (!leafletMap || typeof window.L === 'undefined') return;
@@ -4609,7 +4578,6 @@ function initMap() {
   helipadLayer = window.L.layerGroup();
   barrageMarkerLayer = window.L.layerGroup();
   seismesLayer = window.L.layerGroup();
-  groundwaterLayer = window.L.layerGroup();
   feuxForetLayer = window.L.layerGroup();
   colsAlpinsLayer = window.L.layerGroup();
   meteoCitiesLayer = window.L.layerGroup();
@@ -4880,7 +4848,6 @@ async function resetMapFilters() {
   const cameras = document.getElementById('filter-cameras');
   const googleFlow = document.getElementById('filter-google-traffic-flow');
   const tchooTrains = document.getElementById('filter-tchoo-trains');
-  const groundwater = document.getElementById('filter-groundwater');
   const seismes = document.getElementById('filter-seismes');
   const feuxForet = document.getElementById('filter-feux-foret');
   const healthResources = document.getElementById('filter-resources-health');
@@ -4903,7 +4870,6 @@ async function resetMapFilters() {
   if (trafficIncidents) trafficIncidents.checked = true;
   if (cameras) cameras.checked = true;
   if (tchooTrains) tchooTrains.checked = false;
-  if (groundwater) groundwater.checked = false;
   if (seismes) seismes.checked = false;
   if (feuxForet) feuxForet.checked = false;
   if (healthResources) healthResources.checked = false;
@@ -4924,7 +4890,6 @@ async function resetMapFilters() {
   renderCustomPoints();
   renderResources();
   await renderMeteoCitiesLayer();
-  renderGroundwaterLayer();
   renderSeismesLayer();
   renderFeuxForetLayer();
   await renderMunicipalitiesOnMap(cachedMunicipalities);
@@ -4964,7 +4929,7 @@ function toggleMapContrast() {
 
 function fitMapToData(showFeedback = false) {
   if (!leafletMap) return;
-  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsBoundaryLayer, pcsLayer, resourceLayer, institutionLayer, populationLayer, searchLayer, customPointsLayer, mapPointsLayer, itinisereLayer, bisonLayer, bisonCameraLayer, groundwaterLayer, seismesLayer, feuxForetLayer, tchooTrainLayer].filter(Boolean);
+  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsBoundaryLayer, pcsLayer, resourceLayer, institutionLayer, populationLayer, searchLayer, customPointsLayer, mapPointsLayer, itinisereLayer, bisonLayer, bisonCameraLayer, seismesLayer, feuxForetLayer, tchooTrainLayer].filter(Boolean);
   const bounds = window.L.latLngBounds([]);
   layers.forEach((layer) => {
     if (layer?.getBounds) {
@@ -12908,21 +12873,39 @@ function renderStationsPanel(payload = stationsTimetableCache) {
     </article>`).join('');
 }
 
-async function loadAndRenderStationsPanel(forceRefresh = false) {
+async function loadAndRenderStationsPanel(forceRefresh = false, { silent = false } = {}) {
+  if (stationsTimetableInFlight) return stationsTimetableInFlight;
   const list = document.getElementById('station-timetables-list');
   const errorEl = document.getElementById('stations-error');
-  if (list && !stationsTimetableCache) list.innerHTML = '<p class="muted">Chargement des horaires SNCF...</p>';
+  if (list && !stationsTimetableCache && !silent) list.innerHTML = '<p class="muted">Chargement des horaires SNCF...</p>';
   if (errorEl) errorEl.textContent = '';
   const suffix = forceRefresh ? '?refresh=true' : '';
-  const payload = await api(`/api/sncf/isere/station-timetables${suffix}`, {
+  const request = api(`/api/sncf/isere/station-timetables${suffix}`, {
     bypassCache: forceRefresh,
-    cacheTtlMs: forceRefresh ? 0 : 60 * 1000,
+    cacheTtlMs: forceRefresh ? 0 : STATION_TIMETABLE_REFRESH_MS,
     timeoutMs: API_SLOW_ENDPOINT_TIMEOUT_MS,
+  }).then((payload) => {
+    stationsTimetableCache = payload;
+    renderStationsPanel(payload);
+    if (leafletMap) renderResources();
+    return payload;
+  }).catch((error) => {
+    if (errorEl && (!silent || !stationsTimetableCache)) errorEl.textContent = sanitizeErrorMessage(error.message);
+    if (!stationsTimetableCache) renderStationsPanel({ status: 'degraded', stations: [], error: error.message });
+    throw error;
+  }).finally(() => {
+    if (stationsTimetableInFlight === request) stationsTimetableInFlight = null;
   });
-  stationsTimetableCache = payload;
-  renderStationsPanel(payload);
-  if (leafletMap) renderResources();
-  return payload;
+  stationsTimetableInFlight = request;
+  return request;
+}
+
+function refreshStationTimetables({ forceRefresh = false, silent = true } = {}) {
+  if (!token) return Promise.resolve(null);
+  return loadAndRenderStationsPanel(forceRefresh, { silent }).catch((error) => {
+    if (!silent) throw error;
+    return null;
+  });
 }
 
 async function loadAndRenderWaterPanel(forceRefresh = false) {
@@ -13749,7 +13732,6 @@ function renderExternalRisks(data = {}) {
   // Redessiner couches carte avec nouvelles données
   renderColsAlpinsLayer();
   applyAvalancheZoneLayer();
-  renderGroundwaterLayer();
   renderSeismesLayer();
   renderFeuxForetLayer();
   renderNewsPanel(prefecture, dauphine, franceBleu, placegrenet, grenobleMétropole, arsAura, seismesIsere);
@@ -15060,7 +15042,6 @@ function bindAppInteractions() {
     }
   });
   document.getElementById('filter-seismes')?.addEventListener('change', () => renderSeismesLayer());
-  document.getElementById('filter-groundwater')?.addEventListener('change', () => renderGroundwaterLayer());
   document.getElementById('filter-feux-foret')?.addEventListener('change', () => renderFeuxForetLayer());
   document.getElementById('filter-cols-alpins')?.addEventListener('change', () => renderColsAlpinsLayer());
   document.getElementById('filter-resources-telecom')?.addEventListener('change', () => {
@@ -15615,7 +15596,7 @@ function bindAppInteractions() {
     'filter-resources-telecom', 'filter-resources-telecom-type',
     'filter-resources-active', 'filter-resources-protcivile',
   ]);
-  ['filter-hydro', 'filter-pcs', 'filter-meteo-cities', 'filter-meteo-layer-type', 'filter-groundwater', 'filter-seismes', 'filter-feux-foret', 'filter-resources-active', 'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type', 'filter-resources-hosting-capacity', 'filter-resources-hosting-surface', 'filter-resources-hosting-accessibility', 'filter-resources-hosting-sanitary', 'filter-resources-hosting-heating', 'filter-resources-hosting-parking', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-dae', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-resources-protcivile', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras', 'filter-autoroutes', 'filter-autoroutes-type', 'filter-pr-autoroutes', 'filter-tchoo-trains'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-meteo-cities', 'filter-meteo-layer-type', 'filter-seismes', 'filter-feux-foret', 'filter-resources-active', 'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type', 'filter-resources-hosting-capacity', 'filter-resources-hosting-surface', 'filter-resources-hosting-accessibility', 'filter-resources-hosting-sanitary', 'filter-resources-hosting-heating', 'filter-resources-hosting-parking', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-dae', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-resources-protcivile', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras', 'filter-autoroutes', 'filter-autoroutes-type', 'filter-pr-autoroutes', 'filter-tchoo-trains'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       if (RESOURCE_ONLY_FILTERS.has(id)) {
         // Rendu immédiat depuis le cache
@@ -15625,7 +15606,6 @@ function bindAppInteractions() {
       // Filtres globaux (hydro, pcs, trafic, caméras) → tout re-rendre
       renderStations(cachedVigicruesPayload);
       await renderMeteoCitiesLayer();
-      renderGroundwaterLayer();
       renderSeismesLayer();
       renderFeuxForetLayer();
       await renderMunicipalitiesOnMap(cachedMunicipalities);
@@ -15644,6 +15624,7 @@ function logout() {
   localStorage.removeItem(STORAGE_KEYS.token);
   if (refreshTimer) clearInterval(refreshTimer);
   if (liveEventsTimer) clearInterval(liveEventsTimer);
+  if (stationTimetableTimer) clearInterval(stationTimetableTimer);
   if (apiPanelTimer) clearInterval(apiPanelTimer);
   if (apiResyncTimer) clearInterval(apiResyncTimer);
   stopRouteRefreshTimer();
@@ -15657,6 +15638,14 @@ function logout() {
 function startAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
   refreshTimer = setInterval(() => token && refreshAll(true), AUTO_REFRESH_MS);
+}
+
+function startStationTimetableRefresh() {
+  if (stationTimetableTimer) clearInterval(stationTimetableTimer);
+  refreshStationTimetables({ forceRefresh: true, silent: true });
+  stationTimetableTimer = setInterval(() => {
+    refreshStationTimetables({ forceRefresh: true, silent: true });
+  }, STATION_TIMETABLE_REFRESH_MS);
 }
 
 function startAgentMarkersPolling() {
@@ -16019,6 +16008,7 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
   if (!runRefreshInBackground) await refreshPromise;
 
   startAutoRefresh();
+  startStationTimetableRefresh();
   startLiveEventsRefresh();
   startExternalRisksSSE();
   startLiveClock();
