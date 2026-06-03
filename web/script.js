@@ -43,6 +43,17 @@ const TELECOM_POINTS_CACHE_TTL_MS = 10 * 60 * 1000;
 const PR_AUTOROUTES_LOCAL_CACHE_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 const MAP_ROUTE_REFRESH_MS = 60 * 1000;
 const OSM_DETAILS_MIN_ZOOM = 15;
+const LAZY_ASSETS = {
+  leafletCss: 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
+  leafletDrawCss: 'https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css',
+  leafletJs: 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
+  leafletDrawJs: 'https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js',
+  leafletHeatJs: 'https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js',
+  turfJs: 'https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js',
+  chartJs: 'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js',
+};
+const lazyAssetPromises = new Map();
+let mapBootstrapPromise = null;
 const FLUX_SERVICES = [
   { key: 'meteo_france',           label: 'Météo-France',              icon: '⛅', category: 'Météo',         interval: 120,   metric: (d) => d.level ? `Vigilance ${d.level}` : `${(d.alerts || []).length} alerte(s)` },
   { key: 'apic_isere',             label: 'APIC · Pluie intense',      icon: '🌧️', category: 'Météo',        interval: 180,   metric: (d) => `${d.alerts_total ?? 0} avertissement(s)` },
@@ -1848,6 +1859,68 @@ function showHome() { showLogin(); }
 function showLogin() { setVisibility(homeView, false); setVisibility(loginView, true); setVisibility(appView, false); setVisibility(passwordForm, false); setVisibility(loginForm, true); }
 function showApp() { setVisibility(homeView, false); setVisibility(loginView, false); setVisibility(appView, true); }
 
+function loadLazyScript(src, globalName = '') {
+  if (globalName && window[globalName]) return Promise.resolve(window[globalName]);
+  if (lazyAssetPromises.has(src)) return lazyAssetPromises.get(src);
+  const promise = new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[data-lazy-src="${src}"]`);
+    if (existing) {
+      existing.addEventListener('load', () => resolve(globalName ? window[globalName] : true), { once: true });
+      existing.addEventListener('error', () => reject(new Error(`Chargement impossible: ${src}`)), { once: true });
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = src;
+    script.async = true;
+    script.dataset.lazySrc = src;
+    script.onload = () => resolve(globalName ? window[globalName] : true);
+    script.onerror = () => reject(new Error(`Chargement impossible: ${src}`));
+    document.head.appendChild(script);
+  });
+  lazyAssetPromises.set(src, promise);
+  return promise;
+}
+
+function loadLazyStylesheet(href) {
+  if (document.querySelector(`link[href="${href}"]`)) return Promise.resolve(true);
+  if (lazyAssetPromises.has(href)) return lazyAssetPromises.get(href);
+  const promise = new Promise((resolve, reject) => {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = href;
+    link.crossOrigin = '';
+    link.onload = () => resolve(true);
+    link.onerror = () => reject(new Error(`Chargement CSS impossible: ${href}`));
+    document.head.appendChild(link);
+  });
+  lazyAssetPromises.set(href, promise);
+  return promise;
+}
+
+async function ensureChartAssets() {
+  if (window.Chart) return window.Chart;
+  await loadLazyScript(LAZY_ASSETS.chartJs, 'Chart');
+  return window.Chart;
+}
+
+async function ensureMapAssets() {
+  await Promise.all([
+    loadLazyStylesheet(LAZY_ASSETS.leafletCss),
+    loadLazyStylesheet(LAZY_ASSETS.leafletDrawCss),
+    loadLazyScript(LAZY_ASSETS.leafletJs, 'L'),
+  ]);
+  await Promise.all([
+    loadLazyScript(LAZY_ASSETS.leafletDrawJs),
+    loadLazyScript(LAZY_ASSETS.leafletHeatJs),
+    loadLazyScript(LAZY_ASSETS.turfJs, 'turf'),
+  ]);
+  return window.L;
+}
+
+function isMapPanelActive() {
+  return !document.getElementById('map-panel')?.classList.contains('hidden');
+}
+
 function apiOrigins() {
   const origins = [];
   const { protocol, hostname, port } = window.location;
@@ -2679,6 +2752,23 @@ function syncMobileNavWithPanel() {
   updateMobileNavActive(stored);
 }
 
+async function ensureMapReady() {
+  if (leafletMap) return leafletMap;
+  if (!mapBootstrapPromise) {
+    mapBootstrapPromise = ensureMapAssets()
+      .then(async () => {
+        await loadIsereBoundary();
+        if (token) startMapAnnotationsSync();
+      })
+      .catch((error) => {
+        mapBootstrapPromise = null;
+        throw error;
+      });
+  }
+  await mapBootstrapPromise;
+  return leafletMap;
+}
+
 function setActivePanel(panelId) {
   if (!canAccessPanel(panelId)) panelId = 'situation-panel';
   closeMobileSidebar();
@@ -2688,13 +2778,19 @@ function setActivePanel(panelId) {
   updateGlobalLoadingVisual(getStartupQueuePercent());
   updateMobileNavActive(panelId);
   document.getElementById('panel-title').textContent = PANEL_TITLES[panelId] || 'Centre opérationnel';
-  if (panelId === 'map-panel' && leafletMap) {
-    setTimeout(() => {
-      leafletMap.invalidateSize();
-      centerMapOnIsere();
-    }, 100);
-    if (token) _refreshAgentMarkers();
-    if (token && !stationsTimetableCache) loadAndRenderStationsPanel(false).catch(() => {});
+  if (panelId === 'map-panel') {
+    ensureMapReady().then(() => {
+      setTimeout(() => {
+        leafletMap?.invalidateSize();
+        centerMapOnIsere();
+      }, 100);
+      if (token) _refreshAgentMarkers();
+      if (token && !stationsTimetableCache) loadAndRenderStationsPanel(false).catch(() => {});
+      renderResources();
+      renderTrafficOnMap().catch(() => {});
+    }).catch((error) => {
+      setMapFeedback(`Carte indisponible: ${sanitizeErrorMessage(error.message)}`, true);
+    });
   }
   if (panelId === 'logs-panel') ensureLogMunicipalitiesLoaded();
   if (panelId === 'news-panel') ensureSocialFeedsRendered();
@@ -6319,6 +6415,7 @@ function renderHelipadLayer() {
 }
 
 function _ensureStaticDataLoaded() {
+  if (!leafletMap && !isMapPanelActive()) return;
   if ((!institutionsLoaded || !verifiedHostingLoaded) && !_institutionsLoadInFlight) {
     _institutionsLoadInFlight = true;
     Promise.all([loadIsereInstitutions(), loadVerifiedHostingIsere()])
@@ -14562,7 +14659,7 @@ async function refreshAll(forceRefresh = false) {
     // Phase 1 : bootstrap (dashboard + risks + communes + évènements + MCO + users) → 1 requête
     // Phase 2 : points carte + annotations + trafic en parallèle → 3 requêtes simultanées
     // Total : 4 requêtes au lieu de 10, tout tient dans la limite de 6 connexions du navigateur.
-    startStartupQueue(5);
+    startStartupQueue(isMapPanelActive() || leafletMap ? 5 : 2);
 
     // Effacer toute erreur résiduelle du cycle précédent dès le début.
     // Sans ce reset, une erreur ponctuelle reste affichée pour toujours même si les
@@ -14621,25 +14718,23 @@ async function refreshAll(forceRefresh = false) {
     }
     advanceStartupQueue('données initiales');
 
-    // Phase 2 : carte et annotations (non inclus dans bootstrap)
-    const phase2 = [
-      { label: 'points cartographiques', loader: loadMapPoints, optional: true },
-      { label: 'annotations tactiques', loader: loadMapAnnotations, optional: true },
-      { label: 'trafic cartographique', loader: renderTrafficOnMap, optional: true },
-    ];
-    const phase2Results = await Promise.all(phase2.map(async ({ label, loader }) => {
-      try {
-        await loader();
-        advanceStartupQueue(label);
-        return { status: 'fulfilled' };
-      } catch (error) {
-        advanceStartupQueue(label);
-        return { status: 'rejected', reason: error, label };
-      }
-    }));
+    if (isMapPanelActive() || leafletMap) {
+      await ensureMapReady();
+      const phase2 = [
+        { label: 'points cartographiques', loader: loadMapPoints },
+        { label: 'annotations tactiques', loader: loadMapAnnotations },
+        { label: 'trafic cartographique', loader: renderTrafficOnMap },
+      ];
+      await Promise.all(phase2.map(async ({ label, loader }) => {
+        try {
+          await loader();
+        } finally {
+          advanceStartupQueue(label);
+        }
+      }));
+    }
 
     renderResources();
-    await preloadAllPanelData(forceRefresh);
     advanceStartupQueue('pages applicatives');
     _ensureStaticDataLoaded();
 
@@ -14753,6 +14848,7 @@ function renderMapChecks(checks = []) {
 }
 
 async function runMapChecks() {
+  await ensureMapReady();
   const checks = [];
   checks.push({ ok: typeof window.L !== 'undefined', label: 'Leaflet chargé', detail: typeof window.L !== 'undefined' ? 'bibliothèque disponible' : 'script Leaflet absent' });
   checks.push({ ok: Boolean(leafletMap), label: 'Instance carte initialisée', detail: leafletMap ? 'instance active' : 'carte non initialisée' });
@@ -15995,7 +16091,6 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
   renderSituationOverview();
   setActivePanel(localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel');
   syncMobileNavWithPanel();
-  loadIsereBoundary();
   renderStations(cachedVigicruesPayload);
   syncLogScopeFields();
   syncLogOtherFields();
@@ -16009,7 +16104,6 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
 
   startAutoRefresh();
   startLiveEventsRefresh();
-  startMapAnnotationsSync();
   startExternalRisksSSE();
   startLiveClock();
   startDataFreshnessIndicator();
@@ -17122,13 +17216,14 @@ async function _fetchAndShowLocalWeather(lat, lon) {
   if (titleEl) titleEl.textContent = `⛅ Météo · ${lat.toFixed(4)}°N, ${lon.toFixed(4)}°E`;
   try {
     const data = await api(`/api/meteo/local?lat=${lat}&lon=${lon}`);
-    _renderLocalWeatherModal(data, lat, lon);
+    await _renderLocalWeatherModal(data, lat, lon);
   } catch (err) {
     if (content) content.innerHTML = `<p class="error">Impossible de charger la météo : ${escapeHtml(sanitizeErrorMessage(err.message))}</p>`;
   }
 }
 
-function _renderLocalWeatherModal(data, lat, lon) {
+async function _renderLocalWeatherModal(data, lat, lon) {
+  await ensureChartAssets();
   const content = document.getElementById('meteo-local-content');
   const hourly = data?.hourly || {};
   const times = (hourly.time || []).slice(0, 24);
