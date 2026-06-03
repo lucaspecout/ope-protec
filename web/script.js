@@ -368,6 +368,8 @@ let cachedVigicruesPayload = { stations: [], troncons: [] };
 let cachedMunicipalities = [];
 let cachedMunicipalityRecords = [];
 let cachedItinisereEvents = [];
+let cachedItinisereWebcams = [];
+let itinisereWebcamsInFlight = null;
 let cachedBisonFute = {};
 let cachedBisonLiveEvents = [];
 let geocodeCache = new Map();
@@ -1406,9 +1408,12 @@ function nearestPointOnCorridor(corridor = [], anchor = null) {
 function cameraPopupMarkup(camera = {}) {
   const name = escapeHtml(camera.name || 'Caméra routière');
   const road = escapeHtml(camera.road || 'Réseau principal');
-  const manager = escapeHtml(camera.manager || 'Bison Futé');
-  const sourceUrl = escapeHtml(camera.streamUrl || 'https://www.bison-fute.gouv.fr');
-  const mediaType = camera.mediaType === 'image' ? 'image' : 'video';
+  const manager = escapeHtml(camera.manager || camera.source || 'Bison Futé');
+  const rawSourceUrl = camera.imageUrl || camera.image_url || camera.streamUrl || camera.folder_url || camera.source_url || 'https://www.bison-fute.gouv.fr';
+  const sourceUrl = escapeHtml(rawSourceUrl);
+  const pageUrl = escapeHtml(camera.source_url || camera.folder_url || rawSourceUrl);
+  const mediaType = camera.mediaType === 'image' || camera.imageUrl || camera.image_url ? 'image' : 'video';
+  const updatedAt = camera.image_updated_at || camera.updated_at || '';
   const mediaMarkup = mediaType === 'image'
     ? `<img src="${sourceUrl}" alt="Flux image caméra ${name}" loading="lazy" referrerpolicy="no-referrer" />`
     : `<video muted autoplay loop playsinline preload="metadata" aria-label="Flux caméra ${name}">
@@ -1421,7 +1426,8 @@ function cameraPopupMarkup(camera = {}) {
       <a class="camera-popup__media" href="${sourceUrl}" target="_blank" rel="noreferrer" title="Ouvrir le flux caméra dans un nouvel onglet">
         ${mediaMarkup}
       </a>
-      <a href="${sourceUrl}" target="_blank" rel="noreferrer">Voir le flux caméra</a>
+      ${updatedAt ? `<span class="muted">Image: ${escapeHtml(updatedAt)}</span>` : ''}
+      <a href="${pageUrl}" target="_blank" rel="noreferrer">Voir la source caméra</a>
     </article>
   `;
 }
@@ -6739,6 +6745,22 @@ function filterCurrentTrafficEvents(events = []) {
   return (Array.isArray(events) ? events : []).filter((event) => isTrafficEventCurrent(event));
 }
 
+async function loadItinisereWebcams(forceRefresh = false) {
+  if (itinisereWebcamsInFlight) return itinisereWebcamsInFlight;
+  const suffix = forceRefresh ? '?refresh=true' : '';
+  itinisereWebcamsInFlight = api(`/api/itinisere/webcams${suffix}`, {
+    bypassCache: forceRefresh,
+    cacheTtlMs: forceRefresh ? 0 : 60 * 1000,
+    timeoutMs: API_SLOW_ENDPOINT_TIMEOUT_MS,
+  }).then((payload) => {
+    cachedItinisereWebcams = Array.isArray(payload?.webcams) ? payload.webcams : [];
+    return cachedItinisereWebcams;
+  }).catch(() => cachedItinisereWebcams).finally(() => {
+    itinisereWebcamsInFlight = null;
+  });
+  return itinisereWebcamsInFlight;
+}
+
 function trafficMarkerSpec(point = {}) {
   const type = bisonIsereTrafficType(point);
   const isBison = String(point.source || '').toLowerCase().includes('bison');
@@ -8209,6 +8231,8 @@ async function renderTrafficOnMap() {
 
   const showCameras = document.getElementById('filter-cameras')?.checked ?? true;
   if (showCameras) {
+    const itinisereWebcams = await loadItinisereWebcams(false);
+    if (renderSequence !== trafficRenderSequence) return;
     BISON_FUTE_CAMERAS.forEach((camera) => {
       const coords = normalizeMapCoordinates(camera.lat, camera.lon);
       if (!coords) return;
@@ -8216,7 +8240,18 @@ async function renderTrafficOnMap() {
       const pointIcon = emojiDivIcon('🎥', { iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -11] });
       window.L.marker([coords.lat, coords.lon], { icon: pointIcon }).bindPopup(popupHtml).addTo(bisonCameraLayer);
     });
-    mapStats.traffic += BISON_FUTE_CAMERAS.length;
+    itinisereWebcams.forEach((camera) => {
+      const coords = normalizeMapCoordinates(camera.lat, camera.lon);
+      if (!coords) return;
+      const popupHtml = cameraPopupMarkup({
+        ...camera,
+        source: 'Itinisère',
+        mediaType: 'image',
+      });
+      const pointIcon = emojiDivIcon('📷', { iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -11] });
+      window.L.marker([coords.lat, coords.lon], { icon: pointIcon }).bindPopup(popupHtml).addTo(bisonCameraLayer);
+    });
+    mapStats.traffic += BISON_FUTE_CAMERAS.length + itinisereWebcams.length;
 
   }
 

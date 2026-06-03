@@ -68,6 +68,7 @@ from .services import (
     fetch_isere_boundary_geojson,
     fetch_meteo_france_isere,
     fetch_itinisere_disruptions,
+    fetch_itinisere_webcams,
     fetch_prefecture_isere_news,
     fetch_fr_alert_isere,
     fetch_dauphine_isere_news,
@@ -2171,6 +2172,14 @@ def interactive_map_itinisere_events(
 ):
     safe_limit = max(10, min(limit, 120))
     return fetch_itinisere_disruptions(limit=safe_limit, force_refresh=refresh)
+
+
+@app.get("/api/itinisere/webcams")
+def interactive_map_itinisere_webcams(
+    refresh: bool = False,
+    _: User = Depends(require_roles(*READ_ROLES)),
+):
+    return fetch_itinisere_webcams(force_refresh=refresh)
 
 
 @app.get("/api/bison-fute/events")

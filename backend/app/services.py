@@ -466,6 +466,7 @@ _meteo_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "re
 
 _VIGICRUES_CACHE_TTL_SECONDS = 300
 _ITINISERE_CACHE_TTL_SECONDS = 180
+_ITINISERE_WEBCAMS_CACHE_TTL_SECONDS = 60
 _BISON_CACHE_TTL_SECONDS = 600
 _GEORISQUES_CACHE_TTL_SECONDS = 900
 _PREFECTURE_CACHE_TTL_SECONDS = 120
@@ -498,6 +499,8 @@ _vigicrues_cache_lock = Lock()
 _vigicrues_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "vigicrues"}
 _itinisere_cache_lock = Lock()
 _itinisere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "itinisere"}
+_itinisere_webcams_cache_lock = Lock()
+_itinisere_webcams_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "itinisere_webcams"}
 _bison_cache_lock = Lock()
 _bison_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "bison_fute"}
 _isere_boundary_cache_lock = Lock()
@@ -3687,6 +3690,104 @@ def fetch_itinisere_disruptions(limit: int = 60, force_refresh: bool = False) ->
         ttl_seconds=_ITINISERE_CACHE_TTL_SECONDS,
         force_refresh=force_refresh,
         loader=lambda: _fetch_itinisere_disruptions_live(limit=safe_limit),
+    )
+
+
+_ITINISERE_WEBCAMS_LAYER_URL = "https://itinisere.fr/mod_turbolead/mod/inforoute/index.php?action=367&layer=layer-webcam"
+_ITINISERE_WEBCAM_SCRIPT_URL = "https://itinisere.fr/mod_turbolead/mod/inforoute/webcam.php"
+
+
+def _itinisere_webcam_image(feature: dict[str, Any], props: dict[str, Any]) -> tuple[str, str]:
+    webcam_id = str(props.get("id_webcam") or feature.get("id") or "").replace("_WEBCAM_", "").strip()
+    url_folder = str(props.get("url_dossier") or "").strip()
+    path_folder = str(props.get("path_dossier") or "").strip()
+    type_media = str(props.get("type_media") or "IMAGE").strip() or "IMAGE"
+    config = str(props.get("config") or "local").strip() or "local"
+    if not webcam_id or not url_folder or not path_folder:
+        return "", ""
+    query = urlencode({
+        "type": config,
+        "dossier": path_folder,
+        "id": webcam_id,
+        "type_media": type_media,
+    })
+    try:
+        payload = _http_get_json(f"{_ITINISERE_WEBCAM_SCRIPT_URL}?{query}", timeout=8, headers={"User-Agent": _BROWSER_UA})
+    except (HTTPError, URLError, TimeoutError, ValueError, TypeError):
+        return "", ""
+    if not isinstance(payload, dict) or payload.get("result") != "OK":
+        return "", ""
+    filename = str(payload.get("filename") or "").strip().lstrip("/")
+    if not filename:
+        return "", ""
+    image_url = f"{url_folder.rstrip('/')}/{filename}"
+    return image_url, str(payload.get("strDate") or payload.get("date") or "").strip()
+
+
+def _fetch_itinisere_webcams_live() -> dict[str, Any]:
+    try:
+        data = _http_get_json(_ITINISERE_WEBCAMS_LAYER_URL, timeout=15, headers={"User-Agent": _BROWSER_UA})
+        features = data.get("features") if isinstance(data, dict) else []
+        webcams: list[dict[str, Any]] = []
+        for feature in (features if isinstance(features, list) else []):
+            if not isinstance(feature, dict):
+                continue
+            props = feature.get("properties") if isinstance(feature.get("properties"), dict) else {}
+            geometry = feature.get("geometry") if isinstance(feature.get("geometry"), dict) else {}
+            coords = geometry.get("coordinates") if isinstance(geometry.get("coordinates"), list) else []
+            if len(coords) < 2:
+                continue
+            try:
+                lon = float(coords[0])
+                lat = float(coords[1])
+            except (TypeError, ValueError):
+                continue
+            if not _is_isere_coordinate(lat, lon):
+                continue
+            image_url, image_updated_at = _itinisere_webcam_image(feature, props)
+            webcam_id = str(props.get("id_webcam") or feature.get("id") or "").replace("_WEBCAM_", "").strip()
+            title = str(props.get("titre") or f"Webcam Itinisere {webcam_id}").strip()
+            webcams.append({
+                "id": webcam_id or str(feature.get("id") or ""),
+                "name": title,
+                "road": (_itinisere_extract_roads(title) or ["Route departementale"])[0],
+                "lat": lat,
+                "lon": lon,
+                "source": "Itinisere",
+                "source_url": "https://itinisere.fr/",
+                "image_url": image_url,
+                "image_updated_at": image_updated_at,
+                "folder_url": str(props.get("url_dossier") or "").strip(),
+                "refresh_ms": int(props.get("delai_rafraichissement") or 10000),
+            })
+        webcams.sort(key=lambda item: item.get("name") or "")
+        return {
+            "service": "Itinisere webcams",
+            "status": "online" if webcams else "degraded",
+            "source": _ITINISERE_WEBCAMS_LAYER_URL,
+            "webcams": webcams,
+            "webcams_total": len(webcams),
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+    except (HTTPError, URLError, TimeoutError, ValueError, TypeError) as exc:
+        return {
+            "service": "Itinisere webcams",
+            "status": "offline",
+            "source": _ITINISERE_WEBCAMS_LAYER_URL,
+            "webcams": [],
+            "webcams_total": 0,
+            "error": str(exc)[:200],
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+
+
+def fetch_itinisere_webcams(force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_itinisere_webcams_cache,
+        lock=_itinisere_webcams_cache_lock,
+        ttl_seconds=_ITINISERE_WEBCAMS_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=_fetch_itinisere_webcams_live,
     )
 
 
