@@ -2252,34 +2252,6 @@ svg text { font-size: 14px; fill: #17335f; }
   transform-origin: 50% 50%;
 }
 
-.gtfs-train-icon-wrap {
-  background: transparent;
-  border: 0;
-}
-
-.gtfs-train-icon {
-  min-width: 34px;
-  height: 24px;
-  padding: 0 6px;
-  border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: #083344;
-  color: #fff;
-  border: 2px solid #67e8f9;
-  box-shadow: 0 2px 8px rgba(8, 51, 68, .38);
-  font-size: 9px;
-  font-weight: 800;
-  line-height: 1;
-}
-
-.gtfs-train-icon__arrow {
-  display: inline-block;
-  font-size: 10px;
-  transform-origin: 50% 50%;
-}
-
 @keyframes train-pulse {
   0%, 100% { box-shadow: 0 2px 8px rgba(15, 23, 42, .35), 0 0 0 0 rgba(37, 99, 235, .22); }
   50% { box-shadow: 0 2px 8px rgba(15, 23, 42, .35), 0 0 0 7px rgba(37, 99, 235, 0); }

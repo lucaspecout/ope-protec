@@ -315,8 +315,6 @@ let prAutorouteLayer = null;
 let tchooTrainLayer = null;
 let tchooRailTileLayer = null;
 let tchooTrainTimer = null;
-let gtfsTrainLayer = null;
-let gtfsTrainCache = { savedAt: 0, vehicles: [], source: '', error: '' };
 let institutionLayer = null;
 let populationLayer = null;
 let mapTileLayer = null;
@@ -4605,7 +4603,6 @@ function initMap() {
   autorouteLayer = window.L.layerGroup().addTo(leafletMap);
   prAutorouteLayer = window.L.layerGroup();
   tchooTrainLayer = window.L.layerGroup();
-  gtfsTrainLayer = window.L.layerGroup();
   institutionLayer = window.L.layerGroup().addTo(leafletMap);
   populationLayer = window.L.layerGroup().addTo(leafletMap);
   montagneLayer = window.L.layerGroup(); // ajouté à la carte uniquement si filtre activé
@@ -4883,7 +4880,6 @@ async function resetMapFilters() {
   const cameras = document.getElementById('filter-cameras');
   const googleFlow = document.getElementById('filter-google-traffic-flow');
   const tchooTrains = document.getElementById('filter-tchoo-trains');
-  const gtfsTrains = document.getElementById('filter-gtfs-trains');
   const groundwater = document.getElementById('filter-groundwater');
   const seismes = document.getElementById('filter-seismes');
   const feuxForet = document.getElementById('filter-feux-foret');
@@ -4907,7 +4903,6 @@ async function resetMapFilters() {
   if (trafficIncidents) trafficIncidents.checked = true;
   if (cameras) cameras.checked = true;
   if (tchooTrains) tchooTrains.checked = false;
-  if (gtfsTrains) gtfsTrains.checked = false;
   if (groundwater) groundwater.checked = false;
   if (seismes) seismes.checked = false;
   if (feuxForet) feuxForet.checked = false;
@@ -4969,7 +4964,7 @@ function toggleMapContrast() {
 
 function fitMapToData(showFeedback = false) {
   if (!leafletMap) return;
-  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsBoundaryLayer, pcsLayer, resourceLayer, institutionLayer, populationLayer, searchLayer, customPointsLayer, mapPointsLayer, itinisereLayer, bisonLayer, bisonCameraLayer, groundwaterLayer, seismesLayer, feuxForetLayer, gtfsTrainLayer, tchooTrainLayer].filter(Boolean);
+  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsBoundaryLayer, pcsLayer, resourceLayer, institutionLayer, populationLayer, searchLayer, customPointsLayer, mapPointsLayer, itinisereLayer, bisonLayer, bisonCameraLayer, groundwaterLayer, seismesLayer, feuxForetLayer, tchooTrainLayer].filter(Boolean);
   const bounds = window.L.latLngBounds([]);
   layers.forEach((layer) => {
     if (layer?.getBounds) {
@@ -6979,101 +6974,6 @@ function renderTchooTrainLayer() {
   return tchooTrainMarkers.size;
 }
 
-function gtfsTrainIcon(vehicle = {}) {
-  const bearing = Number(vehicle.bearing || 0);
-  const label = String(vehicle.route || vehicle.label || 'TR').slice(0, 5).toUpperCase();
-  return window.L.divIcon({
-    className: 'gtfs-train-icon-wrap',
-    html: `<span class="gtfs-train-icon"><span class="gtfs-train-icon__arrow" style="transform:rotate(${Number.isFinite(bearing) ? bearing.toFixed(0) : 0}deg)">▲</span><span>${escapeHtml(label)}</span></span>`,
-    iconSize: [38, 24],
-    iconAnchor: [19, 12],
-    popupAnchor: [0, -14],
-  });
-}
-
-function extractGtfsText(field) {
-  if (!field) return '';
-  if (typeof field === 'string') return field;
-  const translations = field.translation || field.translations || [];
-  if (Array.isArray(translations) && translations.length) {
-    return String(translations.find((item) => String(item?.language || '').startsWith('fr'))?.text || translations[0]?.text || '');
-  }
-  return '';
-}
-
-function normalizeGtfsVehicleEntity(entity = {}) {
-  const vehicle = entity.vehicle || entity;
-  const position = vehicle.position || {};
-  const lat = Number(position.latitude ?? position.lat);
-  const lon = Number(position.longitude ?? position.lon);
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-  if (!isPointInIsere({ lat, lon })) return null;
-  const trip = vehicle.trip || {};
-  const descriptor = vehicle.vehicle || {};
-  const timestamp = Number(vehicle.timestamp || entity.timestamp || 0);
-  return {
-    id: String(entity.id || descriptor.id || trip.tripId || trip.trip_id || `${lat},${lon}`),
-    lat,
-    lon,
-    bearing: Number(position.bearing || 0),
-    speed: Number(position.speed || 0),
-    route: String(trip.routeId || trip.route_id || vehicle.route_id || '').replace(/^SNCF:|^FR:|^OCE:/i, ''),
-    label: String(descriptor.label || descriptor.id || trip.tripId || 'Train'),
-    status: String(vehicle.currentStatus || vehicle.current_status || ''),
-    timestamp: timestamp ? new Date(timestamp * 1000).toISOString() : '',
-  };
-}
-
-async function fetchGtfsRtVehicles() {
-  if (gtfsTrainCache.savedAt && Date.now() - gtfsTrainCache.savedAt < 45 * 1000) return gtfsTrainCache;
-  const candidates = [
-    'https://proxy.transport.data.gouv.fr/resource/sncf-gtfs-rt-vehicle-positions',
-    'https://proxy.transport.data.gouv.fr/resource/gtfs-rt-sncf-vehicle-positions',
-    'https://proxy.transport.data.gouv.fr/resource/isere-mobilites-gtfs-rt-vehicle-positions',
-    'https://proxy.transport.data.gouv.fr/resource/m-tag-gtfs-rt-vehicle-positions',
-  ];
-  for (const url of candidates) {
-    try {
-      const response = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } }, 12000);
-      if (!response.ok) continue;
-      const payload = await response.json();
-      const entities = Array.isArray(payload?.entity) ? payload.entity : Array.isArray(payload?.entities) ? payload.entities : [];
-      const vehicles = entities.map(normalizeGtfsVehicleEntity).filter(Boolean);
-      if (vehicles.length) {
-        gtfsTrainCache = { savedAt: Date.now(), vehicles, source: url, error: '' };
-        return gtfsTrainCache;
-      }
-    } catch {
-      // Essayer la ressource suivante.
-    }
-  }
-  gtfsTrainCache = { savedAt: Date.now(), vehicles: [], source: '', error: 'Aucun flux GTFS-RT vehicle positions exploitable en JSON via transport.data.gouv.fr' };
-  return gtfsTrainCache;
-}
-
-async function renderGtfsTrainLayer() {
-  if (!leafletMap || typeof window.L === 'undefined') return 0;
-  const show = document.getElementById('filter-gtfs-trains')?.checked ?? false;
-  if (!gtfsTrainLayer) gtfsTrainLayer = window.L.layerGroup();
-  if (!show) {
-    gtfsTrainLayer.clearLayers();
-    if (leafletMap.hasLayer(gtfsTrainLayer)) leafletMap.removeLayer(gtfsTrainLayer);
-    return 0;
-  }
-  if (!leafletMap.hasLayer(gtfsTrainLayer)) gtfsTrainLayer.addTo(leafletMap);
-  gtfsTrainLayer.clearLayers();
-  const payload = await fetchGtfsRtVehicles();
-  payload.vehicles.forEach((vehicle) => {
-    const updated = vehicle.timestamp ? new Date(vehicle.timestamp) : null;
-    const updatedLabel = updated && !Number.isNaN(updated.getTime()) ? updated.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : 'n/d';
-    window.L.marker([vehicle.lat, vehicle.lon], { icon: gtfsTrainIcon(vehicle), zIndexOffset: 620 })
-      .bindPopup(`<div class="map-popup-content"><p class="tag">GTFS-RT · position véhicule</p><strong>📡 ${escapeHtml(vehicle.label || 'Train')}</strong><p style="margin:.3rem 0 0">Ligne : <strong>${escapeHtml(vehicle.route || 'n/d')}</strong></p><p class="muted" style="font-size:.74rem;margin:.35rem 0 0">Mise à jour : ${escapeHtml(updatedLabel)}</p><a href="${escapeHtml(payload.source || 'https://transport.data.gouv.fr')}" target="_blank" rel="noreferrer">Source transport.data.gouv.fr</a></div>`)
-      .addTo(gtfsTrainLayer);
-  });
-  if (!payload.vehicles.length && payload.error) setMapFeedback(payload.error, true);
-  return payload.vehicles.length;
-}
-
 const ISERE_BOUNDS = {
   latMin: 44.6,
   latMax: 46.0,
@@ -8358,7 +8258,6 @@ async function renderTrafficOnMap() {
 
 
   mapStats.traffic += renderTchooTrainLayer();
-  mapStats.traffic += await renderGtfsTrainLayer();
   renderPrAutorouteLayer();
   updateMapSummary();
 }
@@ -15716,7 +15615,7 @@ function bindAppInteractions() {
     'filter-resources-telecom', 'filter-resources-telecom-type',
     'filter-resources-active', 'filter-resources-protcivile',
   ]);
-  ['filter-hydro', 'filter-pcs', 'filter-meteo-cities', 'filter-meteo-layer-type', 'filter-groundwater', 'filter-seismes', 'filter-feux-foret', 'filter-resources-active', 'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type', 'filter-resources-hosting-capacity', 'filter-resources-hosting-surface', 'filter-resources-hosting-accessibility', 'filter-resources-hosting-sanitary', 'filter-resources-hosting-heating', 'filter-resources-hosting-parking', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-dae', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-resources-protcivile', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras', 'filter-autoroutes', 'filter-autoroutes-type', 'filter-pr-autoroutes', 'filter-tchoo-trains', 'filter-gtfs-trains'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-meteo-cities', 'filter-meteo-layer-type', 'filter-groundwater', 'filter-seismes', 'filter-feux-foret', 'filter-resources-active', 'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type', 'filter-resources-hosting-capacity', 'filter-resources-hosting-surface', 'filter-resources-hosting-accessibility', 'filter-resources-hosting-sanitary', 'filter-resources-hosting-heating', 'filter-resources-hosting-parking', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-dae', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-resources-protcivile', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras', 'filter-autoroutes', 'filter-autoroutes-type', 'filter-pr-autoroutes', 'filter-tchoo-trains'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       if (RESOURCE_ONLY_FILTERS.has(id)) {
         // Rendu immédiat depuis le cache
