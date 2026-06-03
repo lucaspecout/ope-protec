@@ -2001,6 +2001,22 @@ function isNetworkFetchError(error) {
     || message.includes('ERR_NETWORK');
 }
 
+function isTransientBackendError(error) {
+  const status = Number(error?.status || error?.cause?.status || 0);
+  const message = String(error?.message || error?.cause?.message || '').toLowerCase();
+  return status === 502
+    || status === 503
+    || status === 504
+    || message.includes('backend démarre')
+    || message.includes('backend demarre')
+    || message.includes('service temporairement indisponible')
+    || message.includes('serveur en cours de démarrage')
+    || message.includes('serveur en cours de demarrage')
+    || message.includes('délai dépassé')
+    || message.includes('delai depasse')
+    || isNetworkFetchError(error);
+}
+
 
 function setLoginError(message = '', debugDetails = '') {
   const errorTarget = document.getElementById('login-error');
@@ -15890,7 +15906,7 @@ async function copySitrepToClipboard() {
 }
 
 // Seuil avant d'afficher une erreur live (absorbe les micro-coupures réseau).
-const _LIVE_EVENTS_ERROR_THRESHOLD = 2;
+const _LIVE_EVENTS_ERROR_THRESHOLD = 6;
 
 async function refreshLiveEvents() {
   if (!token || document.hidden) return;
@@ -15934,6 +15950,7 @@ async function refreshLiveEvents() {
       }
     } catch (error) {
       _liveEventsFailCount += 1;
+      if (isTransientBackendError(error)) return;
       // N'afficher l'erreur qu'après le seuil d'échecs consécutifs, et
       // seulement si le dashboard-error est vide (ne pas écraser refreshAll).
       if (_liveEventsFailCount >= _LIVE_EVENTS_ERROR_THRESHOLD) {
