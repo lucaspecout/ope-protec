@@ -507,7 +507,7 @@ _georisques_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min
 _prefecture_cache_lock = Lock()
 _prefecture_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "prefecture"}
 _fr_alert_isere_cache_lock = Lock()
-_fr_alert_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "fr_alert_isere"}
+_fr_alert_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "fr_alert_isere_v2"}
 _dauphine_cache_lock = Lock()
 _dauphine_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "dauphine"}
 _FRANCE_BLEU_ISERE_CACHE_TTL_SECONDS = 300
@@ -4041,6 +4041,8 @@ _FR_ALERT_LIST_URLS = (
     f"https://fr-alert.gouv.fr/tableau-alertes/{datetime.utcnow().year}",
     "https://www.fr-alert.gouv.fr/tableau-alertes",
     "https://fr-alert.gouv.fr/les-alertes/31/type/Actual/all",
+    "https://fr-alert.gouv.fr/les-alertes/28/type/Actual/all",
+    "https://fr-alert.gouv.fr/les-alertes/100/type/Actual/all",
     "https://fr-alert.gouv.fr/les-alertes/28/categorie/NRBCE/all",
     "https://fr-alert.gouv.fr/les-alertes/200/categorie/Transport/all",
 )
@@ -4097,41 +4099,139 @@ def _fr_alert_is_today(value: datetime | None) -> bool:
     return value.date() == (datetime.utcnow() + timedelta(hours=2)).date()
 
 
+def _fr_alert_absolute_url(raw_url: str) -> str:
+    value = unescape(str(raw_url or "")).strip()
+    if not value:
+        return ""
+    value = value.split("#", 1)[0]
+    if not value:
+        return ""
+    if value.startswith("//"):
+        value = "https:" + value
+    elif value.startswith("/"):
+        value = "https://fr-alert.gouv.fr" + value
+    parsed = urlparse(value)
+    if not parsed.scheme:
+        value = "https://fr-alert.gouv.fr/" + value.lstrip("/")
+    return value
+
+
+def _fr_alert_add_url(urls: list[str], seen: set[str], raw_url: str) -> None:
+    absolute = _fr_alert_absolute_url(raw_url)
+    if not absolute:
+        return
+    key = absolute.lower().rstrip("/")
+    if key in seen:
+        return
+    urls.append(absolute)
+    seen.add(key)
+
+
+def _fr_alert_json_value(html: str, field: str) -> str:
+    pattern = rf'"{re.escape(field)}"\s*:\s*\[\s*\{{\s*"value"\s*:\s*"(.*?)"'
+    match = re.search(pattern, html or "", flags=re.IGNORECASE | re.DOTALL)
+    if not match:
+        return ""
+    raw = match.group(1)
+    try:
+        raw = json.loads(f'"{raw}"')
+    except Exception:
+        raw = raw.replace(r"\/", "/").replace(r"\u0026", "&")
+    return _strip_html_tags(str(raw))
+
+
+def _fr_alert_parameter_value(html: str, name: str) -> str:
+    pattern = rf'\\"{re.escape(name)}\\"\s*:\s*\\"(.*?)\\"'
+    match = re.search(pattern, html or "", flags=re.IGNORECASE | re.DOTALL)
+    if not match:
+        return ""
+    raw = match.group(1)
+    try:
+        raw = json.loads(f'"{raw}"')
+    except Exception:
+        pass
+    return _strip_html_tags(str(raw))
+
+
+def _fr_alert_epoch_datetime(html: str) -> datetime | None:
+    for field in ("effective", "onset", "created", "updated"):
+        raw = _fr_alert_json_value(html, field)
+        if not raw:
+            continue
+        try:
+            timestamp = int(float(raw))
+        except (TypeError, ValueError):
+            continue
+        if timestamp <= 0:
+            continue
+        return datetime.utcfromtimestamp(timestamp) + timedelta(hours=2)
+    return None
+
+
+def _fr_alert_date_label(value: datetime | None) -> str:
+    if value is None:
+        return ""
+    return value.strftime("%d/%m/%Y %H:%M")
+
+
 def _fr_alert_detail_to_event(url: str, html: str) -> dict[str, Any] | None:
     text = _strip_html_tags(html)
     normalized = _fr_alert_normalize(text)
-    if not any(token in normalized for token in ("isere", "grenoble", "prefecture de l isere")):
+    isere_tokens = (
+        "isere", "grenoble", "prefecture de l isere", "bourgoin jallieu",
+        "pont de claix", "chasse sur rhone", "saint quentin sur isere",
+        "umicore", "titanobel", "finorga", "pcas",
+    )
+    if not any(token in normalized for token in isere_tokens):
         return None
 
-    title_match = re.search(r"<h[12][^>]*>(.*?)</h[12]>", html or "", flags=re.IGNORECASE | re.DOTALL)
-    title = _strip_html_tags(title_match.group(1)) if title_match else "FR-Alert Isère"
-    title = re.sub(r"\s+", " ", title).strip() or "FR-Alert Isère"
+    title_match = re.search(r'<p[^>]+class=["\'][^"\']*header-description[^"\']*["\'][^>]*>(.*?)</p>', html or "", flags=re.IGNORECASE | re.DOTALL)
+    title = _strip_html_tags(title_match.group(1)) if title_match else ""
+    if not title:
+        title = _fr_alert_json_value(html, "headline")
+    if not title:
+        title_match = re.search(r"<h[12][^>]*>(.*?)</h[12]>", html or "", flags=re.IGNORECASE | re.DOTALL)
+        title = _strip_html_tags(title_match.group(1)) if title_match else "FR-Alert Isere"
+    title = re.sub(r"\s+", " ", title).strip() or "FR-Alert Isere"
 
     date_match = _FR_ALERT_DATE_RE.search(text)
     started_label = date_match.group(1) if date_match else ""
     started_dt = _parse_fr_alert_date(started_label)
+    if started_dt is None:
+        started_dt = _fr_alert_epoch_datetime(html)
+    if not started_label:
+        started_label = _fr_alert_date_label(started_dt)
+
     source_match = re.search(r"Source\s*:\s*([^*]+?)(?:EXERCICE|Informations|Fin de l|$)", text, flags=re.IGNORECASE)
     source = re.sub(r"\s+", " ", source_match.group(1)).strip(" -") if source_match else "FR-Alert"
+    if source == "FR-Alert":
+        source = _fr_alert_json_value(html, "sender_name") or source
+
     is_exercise = "exercice" in normalized
     message = re.sub(r"\s+", " ", text).strip()
     location = ""
-    if started_label and started_label in text:
+    place_match = re.search(r'<[^>]+class=["\'][^"\']*alert-place[^"\']*["\'][^>]*>(.*?)</[^>]+>', html or "", flags=re.IGNORECASE | re.DOTALL)
+    if place_match:
+        location = _strip_html_tags(place_match.group(1))
+    if not location:
+        location = _fr_alert_parameter_value(html, "zone-name") or _fr_alert_json_value(html, "area_desc")
+    if not location and started_label and started_label in text:
         location = re.sub(r"\s+", " ", text.split(started_label, 1)[-1][:220]).strip(" -")
-        location = re.sub(r"Fuseau horaire.*", "", location, flags=re.IGNORECASE).strip(" -")
+    location = re.sub(r"Fuseau horaire.*", "", location, flags=re.IGNORECASE).strip(" -")
 
+    clean_url = _fr_alert_absolute_url(url)
     return {
         "title": title[:180],
         "category": title.split(" - ", 1)[0][:80],
         "location": location[:220],
         "message": message[:900],
         "source": source[:140],
-        "link": url,
+        "link": clean_url or url,
         "started_at": started_dt.isoformat() if started_dt else "",
         "started_at_label": started_label,
         "is_today": _fr_alert_is_today(started_dt),
         "is_exercise": is_exercise,
     }
-
 
 def _prefecture_fr_alert_fallback(limit: int = 8) -> list[dict[str, Any]]:
     try:
@@ -4227,7 +4327,8 @@ def _official_fr_alert_isere_fallback(limit: int = 5) -> list[dict[str, Any]]:
 
 
 def _fetch_fr_alert_isere_live(limit: int = 12) -> dict[str, Any]:
-    urls: list[str] = list(_FR_ALERT_ISERE_SEED_URLS)
+    urls: list[str] = []
+    seen_urls: set[str] = set()
     source_used = ""
     for source_url in _FR_ALERT_LIST_URLS:
         try:
@@ -4236,19 +4337,20 @@ def _fetch_fr_alert_isere_live(limit: int = 12) -> dict[str, Any]:
             continue
         source_used = source_url
         for raw_url in _FR_ALERT_LINK_RE.findall(html):
-            absolute = raw_url if raw_url.startswith("http") else f"https://fr-alert.gouv.fr/{raw_url.lstrip('/')}"
-            if absolute not in urls:
-                urls.append(absolute)
-        if len(urls) >= 80:
-            break
+            _fr_alert_add_url(urls, seen_urls, raw_url)
+    for seed_url in _FR_ALERT_ISERE_SEED_URLS:
+        _fr_alert_add_url(urls, seen_urls, seed_url)
 
     events: list[dict[str, Any]] = []
-    for url in urls[:80]:
+    seen_events: set[str] = set()
+    for url in urls[:120]:
         try:
             detail_html = _http_get_text(url, timeout=10, headers={"User-Agent": _BROWSER_UA})
             event = _fr_alert_detail_to_event(url, detail_html)
-            if event:
+            key = str(event.get("link") or event.get("title") or "").lower() if event else ""
+            if event and key not in seen_events:
                 events.append(event)
+                seen_events.add(key)
         except Exception:
             continue
         if len(events) >= limit:
