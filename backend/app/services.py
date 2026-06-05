@@ -2062,18 +2062,36 @@ def _fetch_vigicrues_vigicru_levels() -> dict[str, str]:
     Returns dict: tronçon_code (e.g. "AN12") → level ("vert"|"jaune"|"orange"|"rouge").
     Much faster and more reliable than one RSS call per tronçon.
     """
-    payload = _http_get_json(
+    payload: Any = None
+    last_error: Exception | None = None
+    for url in (
+        "https://www.vigicrues.gouv.fr/services/InfoVigiCru.geojson",
         "https://www.vigicrues.gouv.fr/services/1/InfoVigiCru.geojson",
-        timeout=10,
-    )
-    niveau_map = {0: "vert", 1: "jaune", 2: "orange", 3: "rouge"}
+    ):
+        try:
+            payload = _http_get_json(url, timeout=10)
+            break
+        except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
+            last_error = exc
+            continue
+    if payload is None:
+        raise last_error or RuntimeError("Flux Vigicrues InfoVigiCru indisponible")
+    situation_level_map = {0: "vert", 1: "jaune", 2: "orange", 3: "rouge"}
+    info_level_map = {0: "vert", 1: "vert", 2: "jaune", 3: "orange", 4: "rouge"}
     result: dict[str, str] = {}
     for feature in (payload.get("features") or []):
         props = feature.get("properties") or {}
-        code = str(props.get("CdEntVigiCru") or "").strip()
+        code = str(props.get("CdEntVigiCru") or props.get("CdEntCru") or props.get("acroentcru") or "").strip()
         niveau = props.get("NivSituVigiCruEnt")
+        level_map = situation_level_map
+        if niveau is None:
+            niveau = props.get("NivInfViCr")
+            level_map = info_level_map
         if code and niveau is not None:
-            result[code] = niveau_map.get(int(niveau), "vert")
+            try:
+                result[code] = level_map.get(int(niveau), "vert")
+            except (TypeError, ValueError):
+                result[code] = normalize_level(niveau)
     return result
 
 
