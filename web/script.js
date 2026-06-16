@@ -247,6 +247,7 @@ let homeLiveTimer = null;
 let stationTimetableTimer = null;
 let apiPanelTimer = null;
 let apiResyncTimer = null;
+let agentMarkersTimer = null;
 let refreshAllInFlight = null;
 let _lastRefreshAllTs = 0;
 let _lastServerSnapshotAt = 0;
@@ -254,6 +255,7 @@ let _serverSnapshotSyncing = false;
 let _liveEventsFailCount = 0;
 let lastApiResyncAt = null;
 let isLoginSubmitting = false;
+let externalRisksRenderTimer = 0;
 const apiGetCache = new Map();
 const apiInFlight = new Map();
 const apiRequestQueue = [];
@@ -2896,7 +2898,7 @@ function setActivePanel(panelId) {
     });
   }
   if (panelId === 'api-panel' && token) {
-    withPanelLoading('api-panel', 'Synchronisation des flux...', () => loadApiInterconnections(false)).catch((error) => {
+    withPanelLoading('api-panel', 'Synchronisation des flux...', () => Promise.all([loadApiInterconnections(false), loadSystemHealth()])).catch((error) => {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
     });
   }
@@ -8972,6 +8974,18 @@ function stopExternalRisksSSE() {
   }
 }
 
+function scheduleExternalRisksRender({ map = false } = {}) {
+  if (externalRisksRenderTimer) window.clearTimeout(externalRisksRenderTimer);
+  externalRisksRenderTimer = window.setTimeout(() => {
+    externalRisksRenderTimer = 0;
+    if (document.hidden) return;
+    renderExternalRisks(cachedExternalRisksSnapshot);
+    renderApiInterconnections(cachedExternalRisksSnapshot);
+    saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
+    if (map && isMapPanelActive()) renderTrafficOnMap().catch(() => {});
+  }, 250);
+}
+
 function startExternalRisksSSE() {
   stopExternalRisksSSE();
   if (!token || typeof window.EventSource === 'undefined') return;
@@ -8980,6 +8994,12 @@ function startExternalRisksSSE() {
     try {
       const data = JSON.parse(event.data);
       if (!data || typeof data !== 'object') return;
+      if (data.type === 'refresh_status') {
+        cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, { updated_at: data.updated_at || new Date().toISOString(), refresh: data.refresh || {} });
+        markServerSnapshotFresh(cachedExternalRisksSnapshot);
+        scheduleExternalRisksRender();
+        return;
+      }
       const patch = data.type === 'service_update' && data.service_key
         ? {
           updated_at: data.updated_at || new Date().toISOString(),
@@ -8989,10 +9009,7 @@ function startExternalRisksSSE() {
         : data;
       markServerSnapshotFresh(patch);
       cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, patch);
-      renderExternalRisks(cachedExternalRisksSnapshot);
-      renderApiInterconnections(cachedExternalRisksSnapshot);
-      saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
-      renderTrafficOnMap().catch(() => {});
+      scheduleExternalRisksRender({ map: true });
     } catch (_) {}
   };
   externalRisksSSE.onerror = () => {
@@ -13415,8 +13432,7 @@ function isPendingServicePayload(payload = {}) {
 }
 
 async function _reloadExternalRiskViews(forceRefresh = false, bypassCache = forceRefresh) {
-  const suffix = forceRefresh ? '?refresh=true' : '';
-  const data = await api(`/external/isere/risks${suffix}`, {
+  const data = await api('/external/isere/risks', {
     bypassCache,
     cacheTtlMs: bypassCache ? 0 : API_CACHE_TTL_MS,
     timeoutMs: API_SLOW_ENDPOINT_TIMEOUT_MS,
@@ -13427,7 +13443,7 @@ async function _reloadExternalRiskViews(forceRefresh = false, bypassCache = forc
   renderApiInterconnections(cachedExternalRisksSnapshot);
   saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
   saveSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot, cachedExternalRisksSnapshot);
-  await renderTrafficOnMap();
+  if (isMapPanelActive()) await renderTrafficOnMap();
   return cachedExternalRisksSnapshot;
 }
 
@@ -13463,6 +13479,22 @@ function requestPriorityServicesForPanel(panelId) {
       maxRetries: 0,
     }).catch(() => {});
   });
+}
+
+function refreshActivePanelData() {
+  if (!token || document.hidden) return Promise.resolve();
+  const panelId = localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel';
+  requestPriorityServicesForPanel(panelId);
+  if (panelId === 'logs-panel') return Promise.allSettled([loadEvents(null), loadLogs(null)]).then(() => undefined);
+  if (panelId === 'municipalities-panel') return loadMunicipalities(null);
+  if (panelId === 'users-panel' && canManageUsers()) return loadUsers(null);
+  if (panelId === 'stations-panel') return loadAndRenderStationsPanel(false, { silent: true });
+  if (panelId === 'water-panel') return loadAndRenderWaterPanel(false);
+  if (panelId === 'contacts-panel') return loadAndRenderContactsPanel(getDefaultContactsPreloadCity(), false);
+  if (panelId === 'api-panel') return loadApiInterconnections(false);
+  if (panelId === 'map-panel') return refreshMapDataInBackground();
+  if (panelId === 'situation-panel') return loadDashboard(false);
+  return Promise.resolve();
 }
 
 function _clearPendingServiceAutoRefresh(serviceKey) {
@@ -13873,11 +13905,13 @@ function renderExternalRisks(data = {}) {
   renderFeuxForetWidget(feuxForet);
   renderCopernicusEmsWidget(mergedData?.copernicus_ems || {});
   renderOfficialColsAlpinsWidget(colsAlpins);
-  // Redessiner couches carte avec nouvelles données
-  renderColsAlpinsLayer();
-  applyAvalancheZoneLayer();
-  renderSeismesLayer();
-  renderFeuxForetLayer();
+  // Redessiner les couches lourdes uniquement si la carte est visible.
+  if (isMapPanelActive()) {
+    renderColsAlpinsLayer();
+    applyAvalancheZoneLayer();
+    renderSeismesLayer();
+    renderFeuxForetLayer();
+  }
   renderNewsPanel(prefecture, dauphine, franceBleu, placegrenet, grenobleMétropole, arsAura, seismesIsere);
   renderSncfAlerts(sncf);
   renderApicAlerts(apic);
@@ -13938,8 +13972,7 @@ async function loadExternalRisks(forceRefresh = false) {
     renderTrafficOnMap().catch(() => {});
   }
 
-  const suffix = forceRefresh ? '?refresh=true' : '';
-  const data = await api(`/external/isere/risks${suffix}`, {
+  const data = await api('/external/isere/risks', {
     bypassCache: forceRefresh,
     cacheTtlMs: forceRefresh ? 0 : API_CACHE_TTL_MS,
     timeoutMs: API_SLOW_ENDPOINT_TIMEOUT_MS,
@@ -13947,7 +13980,7 @@ async function loadExternalRisks(forceRefresh = false) {
   cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, data);
   renderExternalRisks(cachedExternalRisksSnapshot);
   saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
-  await renderTrafficOnMap();
+  if (isMapPanelActive()) await renderTrafficOnMap();
 }
 
 function _fluxServiceState(payload, intervalSec) {
@@ -14090,7 +14123,6 @@ function renderApiInterconnections(data = {}) {
 }
 
 async function loadApiInterconnections(forceRefresh = false) {
-  const suffix = forceRefresh ? '?refresh=true' : '';
   if (!forceRefresh) {
     const cached = readSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot);
     if (cached) {
@@ -14098,10 +14130,46 @@ async function loadApiInterconnections(forceRefresh = false) {
       renderApiInterconnections(cachedExternalRisksSnapshot);
     }
   }
-  const data = await api(`/external/isere/risks${suffix}`, { timeoutMs: API_SLOW_ENDPOINT_TIMEOUT_MS });
+  const data = await api('/external/isere/risks', { timeoutMs: API_SLOW_ENDPOINT_TIMEOUT_MS });
   cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, data);
   renderApiInterconnections(cachedExternalRisksSnapshot);
   saveSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot, cachedExternalRisksSnapshot);
+}
+
+async function loadSystemHealth() {
+  const summary = document.getElementById('system-health-summary');
+  const list = document.getElementById('system-health-list');
+  if (summary) summary.textContent = 'Chargement de l’état des flux...';
+  try {
+    const data = await api('/external/isere/risks/status', { cacheTtlMs: 15000 });
+    const services = Array.isArray(data?.services) ? data.services : [];
+    const errorCount = services.filter((svc) => ['error', 'unavailable'].includes(String(svc.status || '').toLowerCase())).length;
+    const staleCount = services.filter((svc) => String(svc.status || '').toLowerCase() === 'stale').length;
+    const pausedCount = services.filter((svc) => svc?.meta?.circuit_open).length;
+    const refreshingCount = services.filter((svc) => svc?.meta?.refreshing).length;
+    const snapshotKb = Number(data?.snapshot_size_bytes || 0) ? `${Math.round(Number(data.snapshot_size_bytes) / 1024)} Ko` : '-';
+    if (summary) summary.textContent = `${services.length} flux · ${refreshingCount} en cours · ${staleCount} dernière valeur connue · ${errorCount} erreur · ${pausedCount} suspendu(s) · SSE ${Number(data?.sse_clients || 0)} · snapshot ${snapshotKb}`;
+    const rows = services.slice().sort((a, b) => {
+      const ar = (a?.meta?.circuit_open ? 100000 : 0) + Number(a?.meta?.failure_count || 0) * 1000 + Number(a?.meta?.last_duration_ms || 0);
+      const br = (b?.meta?.circuit_open ? 100000 : 0) + Number(b?.meta?.failure_count || 0) * 1000 + Number(b?.meta?.last_duration_ms || 0);
+      return br - ar;
+    }).slice(0, 8);
+    if (list) {
+      list.innerHTML = rows.map((svc) => {
+        const meta = svc.meta || {};
+        const status = escapeHtml(String(svc.status || 'unknown'));
+        const duration = meta.last_duration_ms != null ? `${Number(meta.last_duration_ms)} ms` : '-';
+        const retry = meta.next_retry_at ? ` · prochain essai ${formatElapsedSince(meta.next_retry_at)}` : '';
+        const paused = meta.circuit_open ? ' · suspendu temporairement' : '';
+        return `<div class="system-health-row status-${status}">
+          <strong>${escapeHtml(svc.key || '?')}</strong>
+          <span>${status} · ${duration} · échecs ${Number(meta.failure_count || 0)}${paused}${retry}</span>
+        </div>`;
+      }).join('') || '<p class="muted">Aucun flux à signaler.</p>';
+    }
+  } catch (error) {
+    if (summary) summary.textContent = `Santé système indisponible: ${sanitizeErrorMessage(error.message)}`;
+  }
 }
 
 function renderMunicipalitiesList(municipalities = []) {
@@ -14629,8 +14697,7 @@ async function loadLdapBindPasswordStatus() {
 }
 
 async function loadOperationsBootstrap(forceRefresh = false) {
-  const suffix = forceRefresh ? '?refresh=true' : '';
-  const payload = await api(`/operations/bootstrap${suffix}`, {
+  const payload = await api('/operations/bootstrap', {
     bypassCache: forceRefresh,
     cacheTtlMs: forceRefresh ? 0 : 5000,
     timeoutMs: API_SLOW_ENDPOINT_TIMEOUT_MS,
@@ -14718,21 +14785,9 @@ async function refreshMapDataInBackground() {
 }
 
 function requestExternalRisksBackgroundRefresh() {
-  if (!token) return;
-  api('/external/isere/risks?refresh=true', {
-    bypassCache: true,
-    cacheTtlMs: 0,
-    timeoutMs: 8000,
-    maxRetries: 0,
-  }).then((data) => {
-    markServerSnapshotFresh(data);
-    cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, data);
-    renderExternalRisks(cachedExternalRisksSnapshot);
-    renderApiInterconnections(cachedExternalRisksSnapshot);
-    saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
-    saveSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot, cachedExternalRisksSnapshot);
-    refreshMapDataInBackground();
-  }).catch(() => {});
+  // Les flux externes sont orchestrés côté backend et poussés par SSE.
+  // Le navigateur ne déclenche plus de refresh global pour éviter les tempêtes réseau.
+  return Promise.resolve();
 }
 
 async function refreshAll(forceRefresh = false) {
@@ -14785,7 +14840,7 @@ async function refreshAll(forceRefresh = false) {
       // Compter les échecs : si tous réussissent, l'UI est complète → pas d'erreur à afficher.
       const fallbackResults = await Promise.allSettled([
         loadDashboard(false),
-        loadExternalRisks(false),
+        Promise.resolve(),
         loadMunicipalities(null),
         loadEvents(null),
         loadLogs(null),
@@ -15036,6 +15091,11 @@ function bindAppInteractions() {
       if (btn) btn.classList.remove('spinning');
     }
   });
+  document.getElementById('system-health-refresh-btn')?.addEventListener('click', () => {
+    loadSystemHealth().catch((error) => {
+      document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
+    });
+  });
   document.getElementById('georisques-pcs-select')?.addEventListener('change', (event) => {
     selectedGeorisquesPcsCommuneKey = String(event.target?.value || '').trim().toLowerCase();
     const georisquesPayload = cachedExternalRisksSnapshot?.georisques || {};
@@ -15222,7 +15282,8 @@ function bindAppInteractions() {
   });
   document.getElementById('api-refresh-btn')?.addEventListener('click', async () => {
     try {
-      await loadApiInterconnections(true);
+      requestPriorityServicesForPanel('api-panel');
+      await Promise.all([loadApiInterconnections(false), loadSystemHealth()]);
       document.getElementById('dashboard-error').textContent = '';
     } catch (error) {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
@@ -15799,6 +15860,8 @@ function logout() {
   if (stationTimetableTimer) clearInterval(stationTimetableTimer);
   if (apiPanelTimer) clearInterval(apiPanelTimer);
   if (apiResyncTimer) clearInterval(apiResyncTimer);
+  if (agentMarkersTimer) clearInterval(agentMarkersTimer);
+  agentMarkersTimer = null;
   stopRouteRefreshTimer();
   stopTchooTrainTimer();
   stopMapAnnotationsSync();
@@ -15809,29 +15872,33 @@ function logout() {
 
 function startAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
-  refreshTimer = setInterval(() => {
-    if (!token || document.hidden || refreshAllInFlight) return;
-    if (_lastServerSnapshotAt && Date.now() - _lastServerSnapshotAt < AUTO_REFRESH_MS) return;
-    refreshAll(false);
-  }, AUTO_REFRESH_MS);
+  refreshTimer = null;
 }
 
 function startStationTimetableRefresh() {
   if (stationTimetableTimer) clearInterval(stationTimetableTimer);
-  refreshStationTimetables({ forceRefresh: true, silent: true });
+  if ((localStorage.getItem(STORAGE_KEYS.activePanel) || '') === 'stations-panel') {
+    refreshStationTimetables({ forceRefresh: true, silent: true });
+  }
   stationTimetableTimer = setInterval(() => {
+    if ((localStorage.getItem(STORAGE_KEYS.activePanel) || '') !== 'stations-panel' || document.hidden) return;
     refreshStationTimetables({ forceRefresh: true, silent: true });
   }, STATION_TIMETABLE_REFRESH_MS);
 }
 
 function startAgentMarkersPolling() {
+  if (agentMarkersTimer) clearInterval(agentMarkersTimer);
+  agentMarkersTimer = null;
   const _doRefresh = () => {
-    if (!token || !leafletMap) return;
+    if (!token || !leafletMap || document.hidden || !isMapPanelActive()) return;
     _ensureAgentLayer();
     _refreshAgentMarkers();
   };
   const _tryStart = () => {
-    if (leafletMap) { _doRefresh(); setInterval(_doRefresh, 10000); }
+    if (leafletMap) {
+      _doRefresh();
+      if (!agentMarkersTimer) agentMarkersTimer = setInterval(_doRefresh, 10000);
+    }
     else setTimeout(_tryStart, 500);
   };
   setTimeout(_tryStart, 1000);
@@ -16051,7 +16118,7 @@ function startApiPanelAutoRefresh() {
     const activePanel = localStorage.getItem(STORAGE_KEYS.activePanel);
     if (!token || activePanel !== 'api-panel' || document.hidden) return;
     withPreservedScroll(async () => {
-      await loadApiInterconnections(false);
+      await Promise.all([loadApiInterconnections(false), loadSystemHealth()]);
     }).catch((error) => {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
     });
@@ -16547,9 +16614,8 @@ document.getElementById('event-form')?.addEventListener('submit', async (event) 
   bindAppInteractions();
   startApiPanelAutoRefresh();
   // Sur mobile, `visibilitychange` et `focus` se déclenchent ensemble quand on
-  // déverrouille l'écran. On déduplique avec un court debounce pour n'appeler
-  // refreshAll qu'une seule fois, et seulement si au moins 30s se sont écoulées
-  // depuis la dernière actualisation (évite les rafraîchissements inutiles).
+  // déverrouille l'écran. On déduplique avec un court debounce et on recharge
+  // seulement la page active, jamais tous les flux externes.
   const _REFRESH_DEBOUNCE_MS = 500;
   const _MIN_REFRESH_INTERVAL_MS = 30000;
   let _visibilityDebounceTimer = null;
@@ -16558,7 +16624,8 @@ document.getElementById('event-form')?.addEventListener('submit', async (event) 
     clearTimeout(_visibilityDebounceTimer);
     _visibilityDebounceTimer = setTimeout(() => {
       if (Date.now() - _lastRefreshAllTs < _MIN_REFRESH_INTERVAL_MS) return;
-      refreshAll(false);
+      refreshActivePanelData().catch(() => {});
+      _lastRefreshAllTs = Date.now();
     }, _REFRESH_DEBOUNCE_MS);
   }
   document.addEventListener('visibilitychange', () => {

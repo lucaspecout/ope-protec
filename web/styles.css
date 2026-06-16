@@ -953,6 +953,23 @@ label { display: block; margin-bottom: .8rem; }
 .flux-stat.pending { background: #eef0fa; color: #3a4b8c; }
 .flux-stat.clock { background: #f2f4f8; color: #555; font-size: .78rem; }
 .flux-filters { display: flex; gap: .4rem; margin-bottom: .9rem; flex-wrap: wrap; }
+.system-health-card { margin: .65rem 0 .9rem; }
+.system-health-head { display: flex; justify-content: space-between; align-items: center; gap: .75rem; flex-wrap: wrap; }
+.system-health-head h4 { margin: 0; }
+.system-health-summary { margin: .45rem 0 .55rem; font-size: .86rem; }
+.system-health-list { display: grid; gap: .35rem; }
+.system-health-row {
+  display: flex;
+  justify-content: space-between;
+  gap: .75rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: .42rem .55rem;
+  background: #f8fafc;
+  font-size: .8rem;
+}
+.system-health-row strong { color: var(--primary); }
+.system-health-row span { color: var(--muted); text-align: right; }
 .flux-filter-btn { padding: .35rem .85rem; border-radius: 20px; border: 1px solid var(--line); background: var(--bg); font-size: .82rem; cursor: pointer; transition: background .15s, color .15s; }
 .flux-filter-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
 .flux-service-list { display: flex; flex-direction: column; gap: .45rem; margin-bottom: 1rem; }

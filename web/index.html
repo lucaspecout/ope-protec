@@ -363,6 +363,14 @@
             <button id="api-refresh-btn" type="button">Forcer actualisation</button>
           </div>
           <div id="flux-summary" class="flux-summary"></div>
+          <article class="tile system-health-card">
+            <div class="system-health-head">
+              <h4>Santé système</h4>
+              <button id="system-health-refresh-btn" type="button" class="ghost">Actualiser santé</button>
+            </div>
+            <div id="system-health-summary" class="system-health-summary muted">Chargement de l'état des flux...</div>
+            <div id="system-health-list" class="system-health-list"></div>
+          </article>
           <div class="flux-filters" id="flux-filters">
             <button class="flux-filter-btn active" data-filter="all">Tous</button>
             <button class="flux-filter-btn" data-filter="online">Actifs</button>

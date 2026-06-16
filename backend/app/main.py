@@ -446,7 +446,8 @@ LOW_REFRESH_SERVICES = (
     "cols_alpins_isere",
     "copernicus_ems",
 )
-SERVICE_BACKOFF_SECONDS = (60, 180, 600)
+SERVICE_BACKOFF_SECONDS = (60, 180, 300, 900)
+SERVICE_CIRCUIT_BREAKER_OPEN_AFTER = 3
 
 _external_risks_snapshot_lock = Lock()
 _external_risks_snapshot: dict = {"updated_at": None, "payload": {}}
@@ -1188,6 +1189,7 @@ def _service_meta(key: str, *, status: str | None = None) -> dict:
         "last_duration_ms": runtime.get("last_duration_ms"),
         "failure_count": int(runtime.get("failure_count") or 0),
         "next_retry_at": runtime.get("next_retry_at"),
+        "circuit_open": bool(runtime.get("circuit_open")),
     }
     if status:
         meta["status"] = status
@@ -1245,8 +1247,10 @@ def _refresh_one_service(key: str) -> None:
             runtime = _service_runtime.setdefault(key, {})
             next_retry_mono = float(runtime.get("next_retry_mono") or 0)
             if next_retry_mono and now_mono < next_retry_mono:
+                runtime["circuit_open"] = int(runtime.get("failure_count") or 0) >= SERVICE_CIRCUIT_BREAKER_OPEN_AFTER
                 return
             runtime["refreshing"] = True
+            runtime["circuit_open"] = False
             runtime["started_at"] = now_utc.isoformat() + "Z"
         with _external_risks_snapshot_lock:
             pending_payload = dict((_external_risks_snapshot.get("payload") or {}).get(key) or {})
@@ -1290,12 +1294,14 @@ def _refresh_one_service(key: str) -> None:
                     runtime["failure_count"] = 0
                     runtime["last_success_at"] = datetime.utcnow().isoformat() + "Z"
                     runtime["last_error"] = None
+                    runtime["circuit_open"] = False
                     runtime["next_retry_mono"] = 0
                     runtime["next_retry_at"] = None
                 else:
                     failure_count = int(runtime.get("failure_count") or 0) + 1
                     backoff = SERVICE_BACKOFF_SECONDS[min(failure_count - 1, len(SERVICE_BACKOFF_SECONDS) - 1)]
                     runtime["failure_count"] = failure_count
+                    runtime["circuit_open"] = failure_count >= SERVICE_CIRCUIT_BREAKER_OPEN_AFTER
                     runtime["last_error"] = str(result.get("error") or result.get("stale_reason") or "service indisponible")
                     runtime["last_error_at"] = datetime.utcnow().isoformat() + "Z"
                     runtime["next_retry_mono"] = monotonic() + backoff
@@ -1314,6 +1320,7 @@ def _refresh_one_service(key: str) -> None:
                 backoff = SERVICE_BACKOFF_SECONDS[min(failure_count - 1, len(SERVICE_BACKOFF_SECONDS) - 1)]
                 runtime["refreshing"] = False
                 runtime["failure_count"] = failure_count
+                runtime["circuit_open"] = failure_count >= SERVICE_CIRCUIT_BREAKER_OPEN_AFTER
                 runtime["last_duration_ms"] = duration_ms
                 runtime["last_error"] = str(exc)
                 runtime["last_error_at"] = datetime.utcnow().isoformat() + "Z"
@@ -2116,6 +2123,11 @@ def trigger_external_risks_refresh(db: Session | None = None) -> None:
         finally:
             with _external_risks_refresh_lock:
                 _external_risks_refresh_in_progress = False
+            _broadcast_risk_update_from_thread({
+                "type": "refresh_status",
+                "updated_at": utc_timestamp(),
+                "refresh": {"in_progress": _is_any_service_refreshing()},
+            })
 
     Thread(target=run_all, daemon=True).start()
 
@@ -2167,6 +2179,12 @@ def isere_refresh_one_service(
 @app.get("/external/isere/risks/status")
 def external_risks_status(_: User = Depends(require_roles(*READ_ROLES))):
     snapshot = _annotate_external_snapshot(_get_external_risks_snapshot())
+    with _sse_risk_clients_lock:
+        sse_clients = len(_sse_risk_clients)
+    try:
+        snapshot_size_bytes = len(json.dumps(snapshot, default=str, ensure_ascii=False).encode("utf-8"))
+    except Exception:
+        snapshot_size_bytes = 0
     services = []
     for key, interval in SERVICE_REFRESH_INTERVALS.items():
         slot = snapshot.get(key) if isinstance(snapshot.get(key), dict) else {}
@@ -2181,6 +2199,8 @@ def external_risks_status(_: User = Depends(require_roles(*READ_ROLES))):
     return {
         "updated_at": snapshot.get("updated_at"),
         "refreshing": _is_any_service_refreshing(),
+        "sse_clients": sse_clients,
+        "snapshot_size_bytes": snapshot_size_bytes,
         "services": services,
     }
 
@@ -2214,8 +2234,9 @@ def operations_bootstrap(
     avec des sessions indépendantes — SQLAlchemy n'est pas thread-safe sur une session."""
     started_at = datetime.utcnow()
 
-    # get_external_risks_payload lit depuis la mémoire (snapshot) → <1ms, pas de réseau.
-    risks_payload = get_external_risks_payload(refresh=refresh, db=db)
+    # Le bootstrap doit rester instantané: il lit le snapshot en mémoire et ne déclenche
+    # jamais de rafraîchissement externe global depuis la navigation utilisateur.
+    risks_payload = get_external_risks_payload(refresh=False, db=db)
     dashboard_payload = build_dashboard_payload(db, user, external_risks=risks_payload)
 
     # Requêtes DB parallèles — chaque tâche ouvre et ferme sa propre session.
