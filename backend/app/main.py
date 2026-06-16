@@ -1,12 +1,13 @@
 from datetime import datetime, timedelta
 from copy import deepcopy
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 from pathlib import Path
 import re
 import secrets
 import socket
 from threading import Lock, Thread
-from time import sleep
+from time import monotonic, sleep
 from typing import Callable
 from urllib.parse import urlparse
 
@@ -420,6 +421,32 @@ SERVICE_REFRESH_INTERVALS: dict[str, int] = {
     "cols_alpins_isere":   1800,    # État cols alpins Isère (couche officielle Itinisère)
     "copernicus_ems":      1800,    # Copernicus EMS cartographie d'urgence
 }
+CRITICAL_REFRESH_SERVICES = (
+    "meteo_france",
+    "vigicrues",
+    "apic_isere",
+    "vigicrues_flash_isere",
+    "fr_alert_isere",
+    "prefecture_isere",
+)
+HIGH_REFRESH_SERVICES = CRITICAL_REFRESH_SERVICES + (
+    "itinisere",
+    "sncf_isere",
+    "ter_aura",
+    "mreseau",
+)
+LOW_REFRESH_SERVICES = (
+    "anfr_isere",
+    "finess_isere",
+    "geodae_isere",
+    "groundwater_isere",
+    "rnb_isere",
+    "isere_opendata",
+    "avalanche_isere",
+    "cols_alpins_isere",
+    "copernicus_ems",
+)
+SERVICE_BACKOFF_SECONDS = (60, 180, 600)
 
 _external_risks_snapshot_lock = Lock()
 _external_risks_snapshot: dict = {"updated_at": None, "payload": {}}
@@ -442,6 +469,8 @@ def _is_legacy_cols_snapshot(slot: dict | None) -> bool:
     )
 _external_risks_refresh_lock = Lock()
 _external_risks_refresh_in_progress = False
+_service_runtime_lock = Lock()
+_service_runtime: dict[str, dict] = {}
 
 # SSE broadcast registry — clients abonnés aux mises à jour temps réel
 _sse_risk_clients: set[asyncio.Queue] = set()
@@ -1109,21 +1138,20 @@ def serialize_document(document: MunicipalityDocument, db: Session) -> Municipal
     )
 
 
-def _broadcast_risk_update_from_thread() -> None:
-    """Pousse le snapshot courant vers tous les clients SSE connectés.
+def _broadcast_risk_update_from_thread(event_payload: dict | None = None) -> None:
+    """Pousse une mise à jour vers tous les clients SSE connectés.
     Appelé depuis des threads sync — utilise call_soon_threadsafe pour
     soumettre l'écriture dans la boucle asyncio principale."""
     loop = _sse_risk_loop
     if loop is None or not loop.is_running():
         return
-    # Capturer le snapshot ici, dans le thread, avant de soumettre à la boucle.
-    snapshot = _get_external_risks_snapshot()
+    payload = deepcopy(event_payload) if isinstance(event_payload, dict) else _get_external_risks_snapshot()
 
     def _enqueue() -> None:
         with _sse_risk_clients_lock:
             for q in list(_sse_risk_clients):
                 try:
-                    q.put_nowait(snapshot)
+                    q.put_nowait(payload)
                 except asyncio.QueueFull:
                     pass  # client trop lent, on passe
 
@@ -1146,9 +1174,50 @@ def _get_external_risks_snapshot() -> dict:
         return deepcopy(_external_risks_snapshot.get("payload") or {})
 
 
+def _service_meta(key: str, *, status: str | None = None) -> dict:
+    with _service_runtime_lock:
+        runtime = deepcopy(_service_runtime.get(key) or {})
+    meta = {
+        "service_key": key,
+        "priority": "critical" if key in CRITICAL_REFRESH_SERVICES else "low" if key in LOW_REFRESH_SERVICES else "normal",
+        "interval_seconds": SERVICE_REFRESH_INTERVALS.get(key),
+        "refreshing": bool(runtime.get("refreshing")),
+        "last_success_at": runtime.get("last_success_at"),
+        "last_error_at": runtime.get("last_error_at"),
+        "last_error": runtime.get("last_error"),
+        "last_duration_ms": runtime.get("last_duration_ms"),
+        "failure_count": int(runtime.get("failure_count") or 0),
+        "next_retry_at": runtime.get("next_retry_at"),
+    }
+    if status:
+        meta["status"] = status
+    return meta
+
+
+def _is_any_service_refreshing() -> bool:
+    with _service_runtime_lock:
+        return any(bool(state.get("refreshing")) for state in _service_runtime.values())
+
+
+def _annotate_service_payload(key: str, payload: dict, *, status: str | None = None) -> dict:
+    result = dict(payload or {})
+    result["meta"] = _service_meta(key, status=status or str(result.get("status") or "unknown"))
+    return result
+
+
+def _annotate_external_snapshot(payload: dict) -> dict:
+    annotated = dict(payload or {})
+    for key in SERVICE_REFRESH_INTERVALS:
+        slot = annotated.get(key)
+        if isinstance(slot, dict):
+            annotated[key] = _annotate_service_payload(key, slot)
+    return annotated
+
+
 def _update_service_slot(key: str, result: dict) -> None:
     """Mise à jour atomique d'un seul slot de service dans le snapshot.
     Les autres services ne sont pas affectés."""
+    result = _annotate_service_payload(key, result)
     with _external_risks_snapshot_lock:
         payload = dict(_external_risks_snapshot.get("payload") or {})
         payload[key] = deepcopy(result)
@@ -1157,13 +1226,40 @@ def _update_service_slot(key: str, result: dict) -> None:
         _external_risks_snapshot["updated_at"] = datetime.utcnow()
         snapshot_copy = deepcopy(payload)
     save_risks_snapshot(snapshot_copy)
-    _broadcast_risk_update_from_thread()
+    _broadcast_risk_update_from_thread({
+        "type": "service_update",
+        "service_key": key,
+        "updated_at": snapshot_copy.get("updated_at"),
+        "payload": result,
+        "refresh": {"in_progress": _is_any_service_refreshing()},
+    })
 
 
 def _refresh_one_service(key: str) -> None:
     """Récupère les données d'un seul service externe et met à jour son slot."""
     db: Session | None = None
     try:
+        now_mono = monotonic()
+        now_utc = datetime.utcnow()
+        with _service_runtime_lock:
+            runtime = _service_runtime.setdefault(key, {})
+            next_retry_mono = float(runtime.get("next_retry_mono") or 0)
+            if next_retry_mono and now_mono < next_retry_mono:
+                return
+            runtime["refreshing"] = True
+            runtime["started_at"] = now_utc.isoformat() + "Z"
+        with _external_risks_snapshot_lock:
+            pending_payload = dict((_external_risks_snapshot.get("payload") or {}).get(key) or {})
+        if pending_payload:
+            pending_payload["meta"] = _service_meta(key, status="refreshing")
+            _broadcast_risk_update_from_thread({
+                "type": "service_update",
+                "service_key": key,
+                "updated_at": utc_timestamp(),
+                "payload": pending_payload,
+                "refresh": {"in_progress": True},
+            })
+
         pcs_names: list[str] = []
         if key == "georisques":
             db = SessionLocal()
@@ -1180,19 +1276,56 @@ def _refresh_one_service(key: str) -> None:
         # pour les préserver si le service est temporairement indisponible.
         with _external_risks_snapshot_lock:
             prev_slot = deepcopy((_external_risks_snapshot.get("payload") or {}).get(key)) or {}
+        started = monotonic()
         try:
             result = fetcher()
+            duration_ms = int((monotonic() - started) * 1000)
+            success_statuses = {"online", "partial", "stale", "degraded"}
+            is_success = str(result.get("status") or "").lower() in success_statuses or not result.get("error")
+            with _service_runtime_lock:
+                runtime = _service_runtime.setdefault(key, {})
+                runtime["refreshing"] = False
+                runtime["last_duration_ms"] = duration_ms
+                if is_success:
+                    runtime["failure_count"] = 0
+                    runtime["last_success_at"] = datetime.utcnow().isoformat() + "Z"
+                    runtime["last_error"] = None
+                    runtime["next_retry_mono"] = 0
+                    runtime["next_retry_at"] = None
+                else:
+                    failure_count = int(runtime.get("failure_count") or 0) + 1
+                    backoff = SERVICE_BACKOFF_SECONDS[min(failure_count - 1, len(SERVICE_BACKOFF_SECONDS) - 1)]
+                    runtime["failure_count"] = failure_count
+                    runtime["last_error"] = str(result.get("error") or result.get("stale_reason") or "service indisponible")
+                    runtime["last_error_at"] = datetime.utcnow().isoformat() + "Z"
+                    runtime["next_retry_mono"] = monotonic() + backoff
+                    runtime["next_retry_at"] = (datetime.utcnow() + timedelta(seconds=backoff)).isoformat() + "Z"
         except Exception as exc:
+            duration_ms = int((monotonic() - started) * 1000)
             # Conserver les données précédentes (articles, alertes…) :
             # seul le statut et l'erreur sont mis à jour.
             result = prev_slot if prev_slot else dict(fallback)
-            result["status"] = "unavailable"
+            result["status"] = "stale" if prev_slot else "unavailable"
             result["error"] = str(exc)
-            result["updated_at"] = utc_timestamp()
+            result.setdefault("updated_at", utc_timestamp())
+            with _service_runtime_lock:
+                runtime = _service_runtime.setdefault(key, {})
+                failure_count = int(runtime.get("failure_count") or 0) + 1
+                backoff = SERVICE_BACKOFF_SECONDS[min(failure_count - 1, len(SERVICE_BACKOFF_SECONDS) - 1)]
+                runtime["refreshing"] = False
+                runtime["failure_count"] = failure_count
+                runtime["last_duration_ms"] = duration_ms
+                runtime["last_error"] = str(exc)
+                runtime["last_error_at"] = datetime.utcnow().isoformat() + "Z"
+                runtime["next_retry_mono"] = monotonic() + backoff
+                runtime["next_retry_at"] = (datetime.utcnow() + timedelta(seconds=backoff)).isoformat() + "Z"
         _update_service_slot(key, result)
     except Exception:
         pass
     finally:
+        with _service_runtime_lock:
+            if key in _service_runtime:
+                _service_runtime[key]["refreshing"] = False
         if db is not None:
             db.close()
 
@@ -1972,14 +2105,14 @@ def trigger_external_risks_refresh(db: Session | None = None) -> None:
     def run_all() -> None:
         global _external_risks_refresh_in_progress
         try:
-            threads = [
-                Thread(target=_refresh_one_service, args=(key,), daemon=True)
-                for key in SERVICE_REFRESH_INTERVALS
-            ]
-            for t in threads:
-                t.start()
-            for t in threads:
-                t.join()
+            priority = [key for key in HIGH_REFRESH_SERVICES if key in SERVICE_REFRESH_INTERVALS]
+            remaining = [key for key in SERVICE_REFRESH_INTERVALS if key not in priority]
+            for group in (priority, remaining):
+                threads = [Thread(target=_refresh_one_service, args=(key,), daemon=True) for key in group]
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join(timeout=15 if group is priority else 25)
         finally:
             with _external_risks_refresh_lock:
                 _external_risks_refresh_in_progress = False
@@ -1990,12 +2123,14 @@ def trigger_external_risks_refresh(db: Session | None = None) -> None:
 def get_external_risks_payload(refresh: bool = False, db: Session | None = None) -> dict:
     if refresh:
         trigger_external_risks_refresh(db=db)
-    payload = _get_external_risks_snapshot()
+    payload = _annotate_external_snapshot(_get_external_risks_snapshot())
     with _external_risks_refresh_lock:
         refresh_in_progress = _external_risks_refresh_in_progress
     payload["refresh"] = {
         **(payload.get("refresh") if isinstance(payload.get("refresh"), dict) else {}),
-        "in_progress": refresh_in_progress,
+        "in_progress": refresh_in_progress or _is_any_service_refreshing(),
+        "critical_services": list(CRITICAL_REFRESH_SERVICES),
+        "high_services": list(HIGH_REFRESH_SERVICES),
     }
     return payload
 
@@ -2020,12 +2155,33 @@ def isere_refresh_one_service(
     if service_key not in SERVICE_REFRESH_INTERVALS:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail=f"Service inconnu : {service_key}")
-    _refresh_one_service(service_key)
-    snapshot = _get_external_risks_snapshot()
+    Thread(target=_refresh_one_service, args=(service_key,), daemon=True).start()
+    snapshot = _annotate_external_snapshot(_get_external_risks_snapshot())
     return {
         "service_key": service_key,
-        "status": "refreshed",
+        "status": "queued",
         "current": snapshot.get(service_key, {}),
+    }
+
+
+@app.get("/external/isere/risks/status")
+def external_risks_status(_: User = Depends(require_roles(*READ_ROLES))):
+    snapshot = _annotate_external_snapshot(_get_external_risks_snapshot())
+    services = []
+    for key, interval in SERVICE_REFRESH_INTERVALS.items():
+        slot = snapshot.get(key) if isinstance(snapshot.get(key), dict) else {}
+        meta = slot.get("meta") if isinstance(slot, dict) else {}
+        services.append({
+            "key": key,
+            "status": slot.get("status") if isinstance(slot, dict) else "unknown",
+            "updated_at": slot.get("updated_at") if isinstance(slot, dict) else None,
+            "interval_seconds": interval,
+            "meta": meta,
+        })
+    return {
+        "updated_at": snapshot.get("updated_at"),
+        "refreshing": _is_any_service_refreshing(),
+        "services": services,
     }
 
 

@@ -110,6 +110,17 @@ const PANEL_TITLES = {
   'audit-panel': "Journal d'audit",
 };
 
+const PANEL_PRIORITY_SERVICES = {
+  'situation-panel': ['meteo_france', 'vigicrues', 'apic_isere', 'vigicrues_flash_isere', 'fr_alert_isere', 'prefecture_isere'],
+  'services-panel': ['meteo_france', 'vigicrues', 'apic_isere', 'vigicrues_flash_isere', 'itinisere', 'sncf_isere'],
+  'meteo-panel': ['meteo_france', 'apic_isere', 'atmo_aura'],
+  'water-panel': ['vigicrues', 'vigicrues_flash_isere', 'vigieau', 'groundwater_isere'],
+  'news-panel': ['prefecture_isere', 'fr_alert_isere', 'dauphine_isere', 'france_bleu_isere', 'placegrenet', 'grenoble_metro', 'ars_aura'],
+  'api-panel': ['meteo_france', 'vigicrues', 'apic_isere', 'fr_alert_isere'],
+  'map-panel': ['meteo_france', 'vigicrues', 'itinisere', 'aprr_isere', 'vinci_autoroutes', 'seismes_isere', 'feux_foret_isere'],
+  'stations-panel': ['sncf_isere', 'ter_aura'],
+};
+
 const RESOURCE_TYPE_META = {
   poste_commandement: { label: 'Poste de commandement', icon: '🛰️' },
   gymnase: { label: 'Gymnase', icon: '🏟️' },
@@ -251,6 +262,7 @@ let preferredApiOrigin = window.location.origin;
 const apiOriginFailures = new Map();
 const startupQueueState = { total: 0, completed: 0, current: '' };
 const panelLoadingState = new Map();
+const serviceRefreshRequestState = new Map();
 
 const ISERE_MAJOR_CITIES = [
   { key: 'grenoble', name: 'Grenoble', lat: 45.1885, lon: 5.7245, population: 158180 },
@@ -2843,6 +2855,7 @@ function setActivePanel(panelId) {
   updateGlobalLoadingVisual(getStartupQueuePercent());
   updateMobileNavActive(panelId);
   document.getElementById('panel-title').textContent = PANEL_TITLES[panelId] || 'Centre opérationnel';
+  requestPriorityServicesForPanel(panelId);
   if (panelId === 'map-panel') {
     withPanelLoading('map-panel', 'Chargement de la carte...', () => ensureMapReady().then(() => {
       setTimeout(() => {
@@ -8967,13 +8980,20 @@ function startExternalRisksSSE() {
     try {
       const data = JSON.parse(event.data);
       if (!data || typeof data !== 'object') return;
-      markServerSnapshotFresh(data);
-      cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, data);
+      const patch = data.type === 'service_update' && data.service_key
+        ? {
+          updated_at: data.updated_at || new Date().toISOString(),
+          refresh: data.refresh || {},
+          [data.service_key]: data.payload || {},
+        }
+        : data;
+      markServerSnapshotFresh(patch);
+      cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, patch);
       renderExternalRisks(cachedExternalRisksSnapshot);
       renderApiInterconnections(cachedExternalRisksSnapshot);
       saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
       renderTrafficOnMap().catch(() => {});
-      checkServiceAlertsFromSnapshot(data);
+      checkServiceAlertsFromSnapshot(patch);
     } catch (_) {}
   };
   externalRisksSSE.onerror = () => {
@@ -13415,10 +13435,36 @@ async function _reloadExternalRiskViews(forceRefresh = false, bypassCache = forc
 
 async function _requestServiceRefreshAndReload(serviceKey) {
   await api(`/external/isere/risks/${encodeURIComponent(serviceKey)}/refresh`, { method: 'POST' });
-  if (PENDING_SERVICE_SETTLE_MS > 0) {
-    await new Promise((resolve) => setTimeout(resolve, PENDING_SERVICE_SETTLE_MS));
-  }
-  return _reloadExternalRiskViews(false, true);
+  const current = cachedExternalRisksSnapshot?.[serviceKey] || {};
+  cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, {
+    updated_at: new Date().toISOString(),
+    [serviceKey]: {
+      ...current,
+      status: current.status || 'pending',
+      meta: { ...(current.meta || {}), refreshing: true },
+    },
+  });
+  renderExternalRisks(cachedExternalRisksSnapshot);
+  renderApiInterconnections(cachedExternalRisksSnapshot);
+  return cachedExternalRisksSnapshot;
+}
+
+function requestPriorityServicesForPanel(panelId) {
+  if (!token) return;
+  const services = PANEL_PRIORITY_SERVICES[panelId] || [];
+  const now = Date.now();
+  services.forEach((serviceKey) => {
+    const lastAt = Number(serviceRefreshRequestState.get(serviceKey) || 0);
+    if (now - lastAt < 30000) return;
+    serviceRefreshRequestState.set(serviceKey, now);
+    api(`/external/isere/risks/${encodeURIComponent(serviceKey)}/refresh`, {
+      method: 'POST',
+      bypassCache: true,
+      cacheTtlMs: 0,
+      timeoutMs: 5000,
+      maxRetries: 0,
+    }).catch(() => {});
+  });
 }
 
 function _clearPendingServiceAutoRefresh(serviceKey) {
@@ -13911,6 +13957,7 @@ function _fluxServiceState(payload, intervalSec) {
   const status = String(payload?.status || 'pending');
   const updatedAt = payload?.updated_at ? new Date(payload.updated_at).getTime() : 0;
   const ageMs = updatedAt > 0 ? (Date.now() - updatedAt) : Infinity;
+  if (payload?.meta?.refreshing) return { state: 'pending', updatedAt, ageMs };
   if (status === 'pending' || status === 'idle') return { state: 'pending', updatedAt, ageMs };
   if (status === 'stale' || status === 'partial') return { state: 'stale', updatedAt, ageMs };
   if (status !== 'online' || payload?.error) return { state: 'error', updatedAt, ageMs };
@@ -13997,7 +14044,8 @@ function renderApiInterconnections(data = {}) {
 
   // Render rows
   const listHtml = filtered.map(({ svc, payload, state, updatedAt, ageMs }) => {
-    const metric = state === 'pending'
+    const hasKnownPayload = payload?.updated_at || payload?.meta?.last_success_at;
+    const metric = state === 'pending' && !hasKnownPayload
       ? 'Chargement des données...'
       : (() => { try { return svc.metric(payload); } catch (_) { return '–'; } })();
     const { text: ageText, css: ageCss } = _fluxAgeLabel(ageMs, svc.interval, state);
@@ -15766,7 +15814,11 @@ function logout() {
 
 function startAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
-  refreshTimer = setInterval(() => token && refreshAll(false), AUTO_REFRESH_MS);
+  refreshTimer = setInterval(() => {
+    if (!token || document.hidden || refreshAllInFlight) return;
+    if (_lastServerSnapshotAt && Date.now() - _lastServerSnapshotAt < AUTO_REFRESH_MS) return;
+    refreshAll(false);
+  }, AUTO_REFRESH_MS);
 }
 
 function startStationTimetableRefresh() {
