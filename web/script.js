@@ -238,6 +238,8 @@ let apiPanelTimer = null;
 let apiResyncTimer = null;
 let refreshAllInFlight = null;
 let _lastRefreshAllTs = 0;
+let _lastServerSnapshotAt = 0;
+let _serverSnapshotSyncing = false;
 let _liveEventsFailCount = 0;
 let lastApiResyncAt = null;
 let isLoginSubmitting = false;
@@ -1439,8 +1441,12 @@ const appView = document.getElementById('app-view');
 const loginForm = document.getElementById('login-form');
 const passwordForm = document.getElementById('password-form');
 
-const normalizeLevel = (level) => ({ verte: 'vert', green: 'vert', yellow: 'jaune', red: 'rouge' }[(level || '').toLowerCase()] || (level || 'vert').toLowerCase());
-const levelColor = (level) => ({ vert: '#2f9e44', jaune: '#f59f00', orange: '#f76707', rouge: '#e03131' }[normalizeLevel(level)] || '#2f9e44');
+const normalizeLevel = (level) => {
+  const raw = String(level ?? '').trim().toLowerCase();
+  if (!raw || raw === '-' || raw === 'unknown' || raw === 'inconnu' || raw === 'inconnue' || raw === 'pending' || raw === 'idle' || raw === 'gris') return 'gris';
+  return ({ verte: 'vert', green: 'vert', yellow: 'jaune', red: 'rouge', grey: 'gris', gray: 'gris' }[raw] || raw);
+};
+const levelColor = (level) => ({ vert: '#2f9e44', jaune: '#f59f00', orange: '#f76707', rouge: '#e03131', gris: '#64748b' }[normalizeLevel(level)] || '#64748b');
 const LOG_LEVEL_EMOJI = { vert: '🟢', jaune: '🟡', orange: '🟠', rouge: '🔴' };
 const LOG_STATUS_LABEL = { nouveau: 'Nouveau', en_cours: 'En cours', suivi: 'Suivi', clos: 'Clos' };
 const EVENT_STATUS_LABEL = { ouvert: 'Ouvert', clos: 'Clos' };
@@ -2104,6 +2110,24 @@ function formatElapsedSince(timestamp) {
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
   return `il y a ${hours}h${remainingMinutes ? ` ${remainingMinutes}min` : ''}`;
+}
+
+function markServerSnapshotFresh(payload = {}) {
+  const risks = payload?.external_risks && typeof payload.external_risks === 'object' ? payload.external_risks : payload;
+  const rawUpdatedAt = payload?.updated_at || risks?.updated_at || payload?.dashboard?.updated_at;
+  const parsed = rawUpdatedAt ? new Date(rawUpdatedAt).getTime() : 0;
+  _lastServerSnapshotAt = Number.isFinite(parsed) && parsed > 0 ? parsed : Date.now();
+  _serverSnapshotSyncing = Boolean(
+    risks?.refresh?.in_progress
+    || isPendingServicePayload(risks?.meteo_france || {})
+    || isPendingServicePayload(risks?.vigicrues || {})
+  );
+  _lastRefreshAllTs = Date.now();
+}
+
+function setServerSnapshotSyncing(syncing, label = '') {
+  _serverSnapshotSyncing = Boolean(syncing);
+  if (label) setStartupQueueCurrent(label);
 }
 
 function renderApiResyncClock() {
@@ -8910,6 +8934,7 @@ function startExternalRisksSSE() {
     try {
       const data = JSON.parse(event.data);
       if (!data || typeof data !== 'object') return;
+      markServerSnapshotFresh(data);
       cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, data);
       renderExternalRisks(cachedExternalRisksSnapshot);
       renderApiInterconnections(cachedExternalRisksSnapshot);
@@ -13344,6 +13369,7 @@ async function _reloadExternalRiskViews(forceRefresh = false, bypassCache = forc
     cacheTtlMs: bypassCache ? 0 : API_CACHE_TTL_MS,
     timeoutMs: API_SLOW_ENDPOINT_TIMEOUT_MS,
   });
+  markServerSnapshotFresh(data);
   cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, data);
   renderExternalRisks(cachedExternalRisksSnapshot);
   renderApiInterconnections(cachedExternalRisksSnapshot);
@@ -13739,9 +13765,11 @@ function renderExternalRisks(data = {}) {
   const colsAlpins = mergedData?.cols_alpins_isere || {};
   _queuePendingServiceAutoRefresh('cols_alpins_isere', colsAlpins);
 
-  setRiskText('meteo-status', `${meteo.status || 'inconnu'} · niveau ${normalizeLevel(meteo.level || 'inconnu')}`, meteo.level || 'vert');
+  const meteoDisplayLevel = isPendingServicePayload(meteo) ? 'gris' : (meteo.level || 'gris');
+  const vigicruesDisplayLevel = isPendingServicePayload(vigicrues) ? 'gris' : (vigicrues.water_alert_level || 'gris');
+  setRiskText('meteo-status', `${meteo.status || 'inconnu'} · niveau ${normalizeLevel(meteoDisplayLevel)}`, meteoDisplayLevel);
   setText('meteo-info', sanitizeMeteoInformation(meteo.info_state) || meteo.bulletin_title || '');
-  setRiskText('vigicrues-status', `${vigicrues.status || 'inconnu'} · niveau ${normalizeLevel(vigicrues.water_alert_level || 'inconnu')}`, vigicrues.water_alert_level || 'vert');
+  setRiskText('vigicrues-status', `${vigicrues.status || 'inconnu'} · niveau ${normalizeLevel(vigicruesDisplayLevel)}`, vigicruesDisplayLevel);
   setText('vigicrues-info', `${(vigicrues.stations || []).length} station(s) suivie(s) · ${(vigicrues.troncons || []).length} tronçon(s)`);
   setHtml('stations-list', (vigicrues.stations || []).slice(0, 10).map((s) => {
     const statusLevel = stationStatusLevel(s);
@@ -13804,9 +13832,9 @@ function renderExternalRisks(data = {}) {
   renderMeteoAlerts(meteo);
   renderWeeklyWeatherPanel(mergedData).catch(() => {});
   renderItinisereEvents(itinisereEvents);
-  setText('meteo-level', normalizeLevel(meteo.level || 'vert'));
+  setText('meteo-level', normalizeLevel(isPendingServicePayload(meteo) ? 'gris' : (meteo.level || 'gris')));
   setText('meteo-hazards', (meteo.hazards || []).join(', ') || 'non précisé');
-  setText('river-level', normalizeLevel(vigicrues.water_alert_level || 'vert'));
+  setText('river-level', normalizeLevel(isPendingServicePayload(vigicrues) ? 'gris' : (vigicrues.water_alert_level || 'gris')));
   const itinisereInsights = itinisere.insights || {};
   const topRoads = (itinisereInsights.top_roads || []).map((item) => `${item.road} (${item.count})`).join(', ');
   const severityBreakdown = itinisereInsights.severity_breakdown || {};
@@ -14522,8 +14550,14 @@ async function loadLdapBindPasswordStatus() {
 
 async function loadOperationsBootstrap(forceRefresh = false) {
   const suffix = forceRefresh ? '?refresh=true' : '';
-  const payload = await api(`/operations/bootstrap${suffix}`, { cacheTtlMs: 5000 });
+  const payload = await api(`/operations/bootstrap${suffix}`, {
+    bypassCache: forceRefresh,
+    cacheTtlMs: forceRefresh ? 0 : 5000,
+    timeoutMs: API_SLOW_ENDPOINT_TIMEOUT_MS,
+    maxRetries: 0,
+  });
   if (!payload || typeof payload !== 'object') throw new Error('Réponse bootstrap invalide');
+  markServerSnapshotFresh(payload);
 
   if (payload.dashboard) {
     renderDashboard(payload.dashboard);
@@ -14546,7 +14580,8 @@ async function loadOperationsBootstrap(forceRefresh = false) {
   const duration = Number(perf.backend_duration_ms || 0);
   const countM = Number(perf.municipality_count || (payload.municipalities || []).length || 0);
   const countL = Number(perf.log_count || (payload.logs || []).length || 0);
-  setText('operations-perf', `Perf: ${duration} ms · ${countM} communes · ${countL} événements`);
+  const risksSync = payload?.external_risks?.refresh?.in_progress ? ' · flux externes en synchronisation' : '';
+  setText('operations-perf', `Perf: ${duration} ms · ${countM} communes · ${countL} événements${risksSync}`);
   return payload;
 }
 
@@ -14610,6 +14645,7 @@ function requestExternalRisksBackgroundRefresh() {
     timeoutMs: 8000,
     maxRetries: 0,
   }).then((data) => {
+    markServerSnapshotFresh(data);
     cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, data);
     renderExternalRisks(cachedExternalRisksSnapshot);
     renderApiInterconnections(cachedExternalRisksSnapshot);
@@ -14627,6 +14663,7 @@ async function refreshAll(forceRefresh = false) {
     // Phase visible : relire vite le snapshot applicatif. Les couches carte et
     // les flux externes forcés continuent en arrière-plan pour garder l'UI fluide.
     startStartupQueue(2);
+    setServerSnapshotSyncing(true, forceRefresh ? 'Synchronisation demandée…' : 'Lecture du snapshot serveur…');
     if (forceRefresh) requestExternalRisksBackgroundRefresh();
 
     // Effacer toute erreur résiduelle du cycle précédent dès le début.
@@ -14635,20 +14672,12 @@ async function refreshAll(forceRefresh = false) {
     const errorTarget = document.getElementById('dashboard-error');
     if (errorTarget) errorTarget.textContent = '';
 
-    const suffix = '';
     let bootstrapError = null;
     let fallbackFailedCount = 0;
 
-    setStartupQueueCurrent('Chargement initial…');
+    setStartupQueueCurrent('Lecture du snapshot serveur…');
     try {
-      const bsData = await api(`/operations/bootstrap${suffix}`, {
-        bypassCache: false,
-        cacheTtlMs: API_CACHE_TTL_MS,
-        timeoutMs: API_SLOW_ENDPOINT_TIMEOUT_MS,
-        // Pas de retry sur le bootstrap : un fallback individuel prend le relais
-        // immédiatement. Réessayer 3 fois × 45s bloquerait l'UI pour rien.
-        maxRetries: 0,
-      });
+      const bsData = await loadOperationsBootstrap(false);
 
       // — dashboard —
       if (bsData?.dashboard) {
@@ -14699,6 +14728,11 @@ async function refreshAll(forceRefresh = false) {
       if (errorTarget) errorTarget.textContent = `Chargement dégradé: ${sanitizeErrorMessage(bootstrapError.message)}`;
     }
 
+    _serverSnapshotSyncing = Boolean(
+      isPendingServicePayload(cachedExternalRisksSnapshot?.meteo_france || {})
+      || isPendingServicePayload(cachedExternalRisksSnapshot?.vigicrues || {})
+      || cachedExternalRisksSnapshot?.refresh?.in_progress
+    );
     finishStartupQueue();
   });
 
@@ -15741,9 +15775,9 @@ function updateHeaderVigilanceBadge(level) {
   const badge = document.getElementById('header-vigilance-badge');
   if (!badge) return;
   const lvl = normalizeLevel(level || 'vert');
-  const labels = { vert: 'VERT', jaune: 'JAUNE', orange: 'ORANGE', rouge: 'ROUGE' };
+  const labels = { vert: 'VERT', jaune: 'JAUNE', orange: 'ORANGE', rouge: 'ROUGE', gris: 'SYNC' };
   badge.textContent = labels[lvl] || lvl.toUpperCase();
-  ['vert', 'jaune', 'orange', 'rouge'].forEach((l) => badge.classList.toggle(`header-vigilance-badge--${l}`, l === lvl));
+  ['vert', 'jaune', 'orange', 'rouge', 'gris'].forEach((l) => badge.classList.toggle(`header-vigilance-badge--${l}`, l === lvl));
 }
 
 /** Indicateur de fraîcheur : "données de il y a Xs" mis à jour toutes les 15s. */
@@ -15751,12 +15785,19 @@ function startDataFreshnessIndicator() {
   const el = document.getElementById('header-freshness');
   if (!el) return;
   function update() {
-    if (!_lastRefreshAllTs) { el.textContent = ''; return; }
-    const seconds = Math.floor((Date.now() - _lastRefreshAllTs) / 1000);
-    if (seconds < 10)  { el.textContent = 'données fraîches'; return; }
-    if (seconds < 60)  { el.textContent = `données il y a ${seconds}s`; return; }
-    if (seconds < 3600) { el.textContent = `données il y a ${Math.floor(seconds / 60)} min`; return; }
-    el.textContent = `données il y a ${Math.floor(seconds / 3600)}h`;
+    if (!_lastServerSnapshotAt && !_lastRefreshAllTs) { el.textContent = ''; return; }
+    if (_serverSnapshotSyncing) {
+      el.textContent = _lastServerSnapshotAt
+        ? `synchronisation · snapshot ${formatElapsedSince(_lastServerSnapshotAt)}`
+        : 'synchronisation des données';
+      return;
+    }
+    const reference = _lastServerSnapshotAt || _lastRefreshAllTs;
+    const seconds = Math.floor((Date.now() - reference) / 1000);
+    if (seconds < 10)  { el.textContent = 'snapshot serveur à jour'; return; }
+    if (seconds < 60)  { el.textContent = `snapshot serveur il y a ${seconds}s`; return; }
+    if (seconds < 3600) { el.textContent = `snapshot serveur il y a ${Math.floor(seconds / 60)} min`; return; }
+    el.textContent = `snapshot serveur il y a ${Math.floor(seconds / 3600)}h`;
   }
   update();
   setInterval(update, 15000);

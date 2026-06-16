@@ -1796,6 +1796,18 @@ def build_dashboard_payload(db: Session, user: User, external_risks: dict | None
         external_risks=external_risks,
         crisis_count=crisis_count,
     )
+    vigicrues = external_risks.get("vigicrues") if isinstance(external_risks, dict) and isinstance(external_risks.get("vigicrues"), dict) else {}
+    critical_sources_syncing = (
+        str(meteo.get("status") or "").lower() in {"pending", "idle"}
+        and str(vigicrues.get("status") or "").lower() in {"pending", "idle", ""}
+    )
+    if critical_sources_syncing and global_risk_details["level"] == "vert" and crisis_count == 0:
+        global_risk_details = {
+            **global_risk_details,
+            "level": "gris",
+            "label": "sync",
+            "factors": [{"label": "Synchronisation", "points": 0, "detail": "Météo/crues en cours de mise à jour"}],
+        }
 
     return {
         "vigilance": meteo_level,
@@ -1813,8 +1825,8 @@ def build_dashboard_payload(db: Session, user: User, external_risks: dict | None
 
 def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str]) -> dict[str, tuple[Callable[[], dict], dict]]:
     return {
-        "meteo_france": (lambda: fetch_meteo_france_isere(force_refresh=refresh), {"status": "pending", "level": "vert", "title": "Météo-France en attente"}),
-        "vigicrues": (lambda: fetch_vigicrues_isere(force_refresh=refresh), {"status": "pending", "level": "vert", "stations": [], "alerts": []}),
+        "meteo_france": (lambda: fetch_meteo_france_isere(force_refresh=refresh), {"status": "pending", "level": "gris", "title": "Météo-France en synchronisation"}),
+        "vigicrues": (lambda: fetch_vigicrues_isere(force_refresh=refresh), {"status": "pending", "level": "gris", "water_alert_level": "gris", "stations": [], "alerts": []}),
         "itinisere": (lambda: fetch_itinisere_disruptions(force_refresh=refresh), {"status": "pending", "events": [], "events_total": 0}),
         "bison_fute": (lambda: fetch_bison_fute_traffic(force_refresh=refresh), {"status": "pending", "alerts": []}),
         "georisques": (lambda: fetch_georisques_isere_summary(force_refresh=refresh, commune_names=pcs_commune_names), {"status": "pending", "details": []}),
@@ -1978,7 +1990,14 @@ def trigger_external_risks_refresh(db: Session | None = None) -> None:
 def get_external_risks_payload(refresh: bool = False, db: Session | None = None) -> dict:
     if refresh:
         trigger_external_risks_refresh(db=db)
-    return _get_external_risks_snapshot()
+    payload = _get_external_risks_snapshot()
+    with _external_risks_refresh_lock:
+        refresh_in_progress = _external_risks_refresh_in_progress
+    payload["refresh"] = {
+        **(payload.get("refresh") if isinstance(payload.get("refresh"), dict) else {}),
+        "in_progress": refresh_in_progress,
+    }
+    return payload
 
 
 @app.get("/external/isere/risks")

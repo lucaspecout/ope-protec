@@ -3151,6 +3151,12 @@ select:focus {
   white-space: nowrap;
 }
 
+.header-vigilance-badge--gris {
+  background: #eef2f7;
+  color: #475569;
+  border-color: #cbd5e1;
+}
+
 /* ── KPI tiles avec fond coloré selon le niveau ──────────────── */
 .situation-tile--bg-vert {
   border-left: 4px solid #2f9e44;
@@ -3168,6 +3174,15 @@ select:focus {
   border-left: 4px solid #d53f56;
   background: linear-gradient(145deg, #fff2f4, #ffffff);
   animation: tile-rouge-pulse 2.5s ease-in-out infinite;
+}
+.situation-tile--bg-gris {
+  border-left: 4px solid #64748b;
+  background: linear-gradient(145deg, #f8fafc, #ffffff);
+}
+.kpi-value.gris,
+.risk-gris {
+  color: #64748b;
+  font-weight: 700;
 }
 @keyframes tile-rouge-pulse {
   0%, 100% { border-left-color: #d53f56; }
