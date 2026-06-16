@@ -8993,7 +8993,6 @@ function startExternalRisksSSE() {
       renderApiInterconnections(cachedExternalRisksSnapshot);
       saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
       renderTrafficOnMap().catch(() => {});
-      checkServiceAlertsFromSnapshot(patch);
     } catch (_) {}
   };
   externalRisksSSE.onerror = () => {
@@ -13428,7 +13427,6 @@ async function _reloadExternalRiskViews(forceRefresh = false, bypassCache = forc
   renderApiInterconnections(cachedExternalRisksSnapshot);
   saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
   saveSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot, cachedExternalRisksSnapshot);
-  checkServiceAlertsFromSnapshot(cachedExternalRisksSnapshot);
   await renderTrafficOnMap();
   return cachedExternalRisksSnapshot;
 }
@@ -13949,7 +13947,6 @@ async function loadExternalRisks(forceRefresh = false) {
   cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, data);
   renderExternalRisks(cachedExternalRisksSnapshot);
   saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
-  checkServiceAlertsFromSnapshot(cachedExternalRisksSnapshot);
   await renderTrafficOnMap();
 }
 
@@ -14734,7 +14731,6 @@ function requestExternalRisksBackgroundRefresh() {
     renderApiInterconnections(cachedExternalRisksSnapshot);
     saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
     saveSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot, cachedExternalRisksSnapshot);
-    checkServiceAlertsFromSnapshot(cachedExternalRisksSnapshot);
     refreshMapDataInBackground();
   }).catch(() => {});
 }
@@ -14775,7 +14771,6 @@ async function refreshAll(forceRefresh = false) {
         renderExternalRisks(cachedExternalRisksSnapshot);
         saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
         renderApiInterconnections(cachedExternalRisksSnapshot);
-        checkServiceAlertsFromSnapshot(cachedExternalRisksSnapshot);
       }
       // — données opérationnelles (support preloaded) —
       await Promise.all([
@@ -16050,7 +16045,7 @@ function startApiPanelAutoRefresh() {
   apiResyncTimer = setInterval(() => {
     const activePanel = localStorage.getItem(STORAGE_KEYS.activePanel);
     if (activePanel === 'api-panel') renderApiResyncClock();
-  }, 1000);
+  }, 15000);
 
   apiPanelTimer = setInterval(() => {
     const activePanel = localStorage.getItem(STORAGE_KEYS.activePanel);
@@ -16990,280 +16985,19 @@ async function _forceRefreshService(serviceKey, btn) {
   }
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// FEATURE 1 — Notifications push navigateur
-// ════════════════════════════════════════════════════════════════════════════
-
+// Les notifications navigateur sont volontairement désactivées: les alertes
+// applicatives restent visibles dans l'interface et les notifications Discord.
 let notificationsEnabled = false;
-const BROWSER_NOTIFICATION_COOLDOWN_MS = 10 * 60 * 1000;
-const _svcAlertState = (() => {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEYS.browserNotifAlertState);
-    const parsed = raw ? JSON.parse(raw) : {};
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch (_) {
-    return {};
-  }
-})();
-
-const _NOTIF_LEVEL_SEV = { inconnu: -1, pending: -1, vert: 0, online: 0, partial: 0, jaune: 1, stale: 1, orange: 2, degraded: 2, rouge: 3, unavailable: 3 };
-
-function _persistBrowserNotifState() {
-  try {
-    localStorage.setItem(STORAGE_KEYS.browserNotifAlertState, JSON.stringify(_svcAlertState));
-  } catch (_) {}
-}
-
-function _criticalNotificationLevel(level) {
-  const normalized = normalizeLevel(level || 'vert');
-  return ['orange', 'rouge'].includes(normalized) ? normalized : null;
-}
-
-function _addCriticalServiceAlert(target, { id, title, level, detail = '' } = {}) {
-  const normalizedLevel = _criticalNotificationLevel(level);
-  const normalizedId = String(id || '').trim();
-  if (!normalizedLevel || !normalizedId) return;
-  target.push({
-    id: normalizedId,
-    title: String(title || normalizedId).trim(),
-    level: normalizedLevel,
-    detail: String(detail || '').trim(),
-  });
-}
-
-function _extractCriticalServiceAlerts(key, data = {}) {
-  const alerts = [];
-  const push = (entry) => _addCriticalServiceAlert(alerts, entry);
-  const events = Array.isArray(data?.events) ? data.events : [];
-
-  if (key === 'meteo_france') {
-    const currentAlerts = Array.isArray(data?.current_alerts) ? data.current_alerts : (Array.isArray(data?.alerts) ? data.alerts : []);
-    currentAlerts.forEach((alert, index) => {
-      const level = _criticalNotificationLevel(alert?.level);
-      if (!level) return;
-      push({
-        id: `meteo:${alert?.phenomenon || index}:${level}`,
-        title: alert?.phenomenon || 'Vigilance météo',
-        level,
-        detail: Array.isArray(alert?.details) ? alert.details.join(', ') : '',
-      });
-    });
-  } else if (key === 'vigicrues') {
-    (Array.isArray(data?.troncons) ? data.troncons : []).forEach((troncon) => {
-      const level = _criticalNotificationLevel(troncon?.level);
-      if (!level) return;
-      push({
-        id: `vigicrues:troncon:${troncon?.code || troncon?.name || level}`,
-        title: troncon?.name || troncon?.code || 'Tronçon Vigicrues',
-        level,
-      });
-    });
-    (Array.isArray(data?.stations) ? data.stations : []).forEach((station) => {
-      const level = _criticalNotificationLevel(stationStatusLevel(station));
-      if (!level) return;
-      push({
-        id: `vigicrues:station:${station?.code || station?.station || level}`,
-        title: station?.station || station?.code || 'Station Vigicrues',
-        level,
-        detail: station?.river || '',
-      });
-    });
-  } else if (key === 'apic_isere' || key === 'vigicrues_flash_isere') {
-    (Array.isArray(data?.alerts) ? data.alerts : []).forEach((alert, index) => {
-      const level = _criticalNotificationLevel(alert?.level);
-      if (!level) return;
-      push({
-        id: `${key}:${alert?.zone || alert?.title || index}:${level}`,
-        title: alert?.zone || alert?.title || 'Alerte',
-        level,
-        detail: alert?.description || '',
-      });
-    });
-  } else if (key === 'vigieau') {
-    (Array.isArray(data?.alerts) ? data.alerts : []).forEach((alert, index) => {
-      const level = _criticalNotificationLevel(alert?.level_color || alert?.level);
-      if (!level) return;
-      push({
-        id: `vigieau:${alert?.zone || alert?.title || index}:${level}`,
-        title: alert?.zone || alert?.title || 'Restriction eau',
-        level,
-        detail: alert?.measure || alert?.usages || '',
-      });
-    });
-  } else if (key === 'itinisere' || key === 'autoroutes_isere') {
-    events.forEach((event, index) => {
-      const level = _criticalNotificationLevel(event?.severity || event?.level);
-      if (!level) return;
-      push({
-        id: `${key}:${event?.id || event?.title || event?.label || index}:${level}`,
-        title: event?.title || event?.label || event?.category || 'Perturbation',
-        level,
-        detail: event?.road || event?.route || '',
-      });
-    });
-  } else if (key === 'sncf_isere') {
-    (Array.isArray(data?.alerts) ? data.alerts : []).forEach((alert, index) => {
-      const level = _criticalNotificationLevel(alert?.level);
-      if (!level) return;
-      push({
-        id: `sncf:${alert?.id || alert?.title || index}:${level}`,
-        title: alert?.title || alert?.line || 'Alerte SNCF',
-        level,
-        detail: alert?.description || '',
-      });
-    });
-  } else if (key === 'ter_aura' || key === 'cars_region_aura' || key === 'mreseau') {
-    const disruptions = Array.isArray(data?.disruptions) ? data.disruptions : [];
-    disruptions.forEach((alert, index) => {
-      const level = _criticalNotificationLevel(alert?.level || alert?.severity);
-      if (!level) return;
-      push({
-        id: `${key}:${alert?.id || alert?.title || index}:${level}`,
-        title: alert?.title || alert?.line || 'Perturbation transport',
-        level,
-        detail: alert?.description || '',
-      });
-    });
-  } else if (key === 'avalanche_isere') {
-    (Array.isArray(data?.massifs) ? data.massifs : []).forEach((massif) => {
-      const value = Number(massif?.risk_level ?? massif?.niveau ?? 0);
-      const level = value >= 4 ? 'rouge' : value >= 3 ? 'orange' : null;
-      if (!level) return;
-      push({
-        id: `bra:${massif?.name || massif?.massif || value}`,
-        title: massif?.name || massif?.massif || 'Massif BRA',
-        level,
-        detail: `Risque ${value}/5`,
-      });
-    });
-  } else if (key === 'cols_alpins_isere') {
-    (Array.isArray(data?.cols) ? data.cols : []).forEach((col) => {
-      const level = _criticalNotificationLevel(col?.couleur);
-      if (!level) return;
-      push({
-        id: `col:${col?.name || col?.nom || level}`,
-        title: col?.name || col?.nom || 'Col alpin',
-        level,
-        detail: col?.statut || col?.detail || '',
-      });
-    });
-  }
-
-  return alerts.slice(0, 25);
-}
-
-function _notifyServiceCriticalAlert(label, level, previousLevel, alerts) {
-  if (!alerts.length) return;
-  const topAlert = alerts[0];
-  const levelLabel = String(level || '').toUpperCase();
-  const bodyParts = [`${alerts.length} nouvelle(s) alerte(s) ${levelLabel}`];
-  if (topAlert.title) bodyParts.push(topAlert.title);
-  if (topAlert.detail) bodyParts.push(topAlert.detail);
-  if (previousLevel && previousLevel !== level) bodyParts.push(`avant: ${previousLevel}`);
-  try {
-    new Notification(`CRISIS38 — ${label}`, {
-      body: bodyParts.join(' · '),
-      icon: '/favicon.ico',
-      tag: `svc-alert-${label}`,
-    });
-  } catch (_) {}
-}
-
-function _browserNotifFingerprint(key, level, alerts = []) {
-  const ids = alerts.map((alert) => alert.id).filter(Boolean).sort().slice(0, 8).join('|');
-  return `${key}:${level}:${ids}`;
-}
-
-function _getServiceDisplayLevel(key, data) {
-  const status = String(data?.status || 'inconnu');
-  if (status === 'unavailable') return 'rouge';
-  if (key === 'autoroutes_isere') {
-    const total = Number(data?.events_total || 0);
-    if (total > 0) return normalizeLevel(data?.events?.[0]?.severity || data?.events?.[0]?.level || status);
-    return normalizeLevel(status);
-  }
-  if (key === 'meteo_france') return normalizeLevel(data?.level || status);
-  if (key === 'vigicrues') return normalizeLevel(data?.water_alert_level || status);
-  if (key === 'apic_isere') return (data?.alerts_total || 0) > 0 ? 'orange' : 'vert';
-  if (key === 'avalanche_isere') {
-    const n = data?.niveau_max_bra || 0;
-    return n >= 4 ? 'rouge' : n >= 3 ? 'orange' : n >= 2 ? 'jaune' : 'vert';
-  }
-  if (key === 'feux_foret_isere') {
-    const t = data?.fires_total || 0;
-    return t > 5 ? 'orange' : t > 0 ? 'jaune' : 'vert';
-  }
-  return normalizeLevel(status);
-}
-
-function checkServiceAlertsFromSnapshot(snapshot) {
-  if (!notificationsEnabled || !snapshot || typeof snapshot !== 'object') return;
-  let hasChanged = false;
-  for (const svc of FLUX_SERVICES) {
-    const key = svc.key;
-    if (!Object.prototype.hasOwnProperty.call(snapshot, key)) continue;
-    const data = getFluxPayload(key, snapshot);
-    if (!data || typeof data !== 'object') continue;
-    const status = String(data.status || '').toLowerCase();
-    if (data?.meta?.refreshing || status === 'pending' || status === 'idle') continue;
-    const newLevel = _getServiceDisplayLevel(key, data);
-    const criticalAlerts = _extractCriticalServiceAlerts(key, data);
-    const criticalIds = criticalAlerts.map((alert) => alert.id);
-    const previous = _svcAlertState[key] || {};
-    const prevLevel = previous.level;
-    const prevIds = new Set(Array.isArray(previous.criticalIds) ? previous.criticalIds : []);
-    _svcAlertState[key] = {
-      level: newLevel,
-      criticalIds: criticalIds.slice(0, 50),
-      updatedAt: Date.now(),
-      lastNotificationFingerprint: previous.lastNotificationFingerprint || '',
-      lastNotificationAt: Number(previous.lastNotificationAt || 0),
-    };
-    hasChanged = true;
-    if (prevLevel === undefined) continue;
-    const prevSev = _NOTIF_LEVEL_SEV[prevLevel] ?? 0;
-    const newSev = _NOTIF_LEVEL_SEV[newLevel] ?? 0;
-    const hasLevelEscalation = newSev > prevSev && newSev >= 2;
-    const newCriticalAlerts = criticalAlerts.filter((alert) => !prevIds.has(alert.id));
-    if (hasLevelEscalation || newCriticalAlerts.length) {
-      const alertPayload = newCriticalAlerts.length ? newCriticalAlerts : criticalAlerts.slice(0, 1);
-      const fingerprint = _browserNotifFingerprint(key, newLevel, alertPayload);
-      const lastFingerprint = previous.lastNotificationFingerprint || '';
-      const lastAt = Number(previous.lastNotificationAt || 0);
-      if (fingerprint !== lastFingerprint || Date.now() - lastAt >= BROWSER_NOTIFICATION_COOLDOWN_MS) {
-        _notifyServiceCriticalAlert(svc.label || key, newLevel, prevLevel, alertPayload);
-        _svcAlertState[key].lastNotificationFingerprint = fingerprint;
-        _svcAlertState[key].lastNotificationAt = Date.now();
-      }
-    }
-  }
-  if (hasChanged) _persistBrowserNotifState();
-}
-
-async function requestNotificationPermission() {
-  if (!('Notification' in window)) return;
-  const perm = await Notification.requestPermission();
-  notificationsEnabled = perm === 'granted';
-  _updateNotifBtn();
-}
-
+function checkServiceAlertsFromSnapshot() {}
 function _updateNotifBtn() {
   const btn = document.getElementById('notif-permission-btn');
   if (!btn) return;
-  if (!('Notification' in window)) { btn.style.display = 'none'; return; }
-  const p = Notification.permission;
-  btn.textContent = p === 'granted' ? '🔔 Actif' : p === 'denied' ? '🔕 Bloqué' : '🔔 Alertes';
-  btn.title = p === 'granted' ? 'Notifications push activées' : p === 'denied' ? 'Notifications bloquées — autoriser dans le navigateur' : 'Activer les notifications push';
-  notificationsEnabled = p === 'granted';
-  btn.style.color = p === 'granted' ? 'var(--level-vert, #2b8a3e)' : p === 'denied' ? 'var(--level-rouge, #c92a2a)' : '';
+  notificationsEnabled = false;
+  btn.hidden = true;
+  btn.classList.add('hidden');
+  btn.style.display = 'none';
 }
-
-(function initNotifBtn() {
-  const btn = document.getElementById('notif-permission-btn');
-  if (!btn) return;
-  _updateNotifBtn();
-  btn.addEventListener('click', requestNotificationPermission);
-})();
+(function initNotifBtn() { _updateNotifBtn(); })();
 
 // ════════════════════════════════════════════════════════════════════════════
 // FEATURE 11 — Copernicus EMS widget
