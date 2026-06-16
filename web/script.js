@@ -16995,6 +16995,7 @@ async function _forceRefreshService(serviceKey, btn) {
 // ════════════════════════════════════════════════════════════════════════════
 
 let notificationsEnabled = false;
+const BROWSER_NOTIFICATION_COOLDOWN_MS = 10 * 60 * 1000;
 const _svcAlertState = (() => {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.browserNotifAlertState);
@@ -17168,6 +17169,11 @@ function _notifyServiceCriticalAlert(label, level, previousLevel, alerts) {
   } catch (_) {}
 }
 
+function _browserNotifFingerprint(key, level, alerts = []) {
+  const ids = alerts.map((alert) => alert.id).filter(Boolean).sort().slice(0, 8).join('|');
+  return `${key}:${level}:${ids}`;
+}
+
 function _getServiceDisplayLevel(key, data) {
   const status = String(data?.status || 'inconnu');
   if (status === 'unavailable') return 'rouge';
@@ -17195,8 +17201,11 @@ function checkServiceAlertsFromSnapshot(snapshot) {
   let hasChanged = false;
   for (const svc of FLUX_SERVICES) {
     const key = svc.key;
+    if (!Object.prototype.hasOwnProperty.call(snapshot, key)) continue;
     const data = getFluxPayload(key, snapshot);
     if (!data || typeof data !== 'object') continue;
+    const status = String(data.status || '').toLowerCase();
+    if (data?.meta?.refreshing || status === 'pending' || status === 'idle') continue;
     const newLevel = _getServiceDisplayLevel(key, data);
     const criticalAlerts = _extractCriticalServiceAlerts(key, data);
     const criticalIds = criticalAlerts.map((alert) => alert.id);
@@ -17207,6 +17216,8 @@ function checkServiceAlertsFromSnapshot(snapshot) {
       level: newLevel,
       criticalIds: criticalIds.slice(0, 50),
       updatedAt: Date.now(),
+      lastNotificationFingerprint: previous.lastNotificationFingerprint || '',
+      lastNotificationAt: Number(previous.lastNotificationAt || 0),
     };
     hasChanged = true;
     if (prevLevel === undefined) continue;
@@ -17215,7 +17226,15 @@ function checkServiceAlertsFromSnapshot(snapshot) {
     const hasLevelEscalation = newSev > prevSev && newSev >= 2;
     const newCriticalAlerts = criticalAlerts.filter((alert) => !prevIds.has(alert.id));
     if (hasLevelEscalation || newCriticalAlerts.length) {
-      _notifyServiceCriticalAlert(svc.label || key, newLevel, prevLevel, newCriticalAlerts.length ? newCriticalAlerts : criticalAlerts.slice(0, 1));
+      const alertPayload = newCriticalAlerts.length ? newCriticalAlerts : criticalAlerts.slice(0, 1);
+      const fingerprint = _browserNotifFingerprint(key, newLevel, alertPayload);
+      const lastFingerprint = previous.lastNotificationFingerprint || '';
+      const lastAt = Number(previous.lastNotificationAt || 0);
+      if (fingerprint !== lastFingerprint || Date.now() - lastAt >= BROWSER_NOTIFICATION_COOLDOWN_MS) {
+        _notifyServiceCriticalAlert(svc.label || key, newLevel, prevLevel, alertPayload);
+        _svcAlertState[key].lastNotificationFingerprint = fingerprint;
+        _svcAlertState[key].lastNotificationAt = Date.now();
+      }
     }
   }
   if (hasChanged) _persistBrowserNotifState();
