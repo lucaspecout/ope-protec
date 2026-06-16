@@ -1,3 +1,30 @@
+// Blocage défensif des notifications navigateur.
+// Les notifications opérationnelles conservées sont celles de l'interface et Discord.
+(function disableBrowserNotifications() {
+  try {
+    localStorage.removeItem('browserNotifAlertStateV1');
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations()
+        .then((registrations) => registrations.forEach((registration) => registration.unregister()))
+        .catch(() => {});
+    }
+  } catch (_) {}
+  try {
+    if ('Notification' in window) {
+      const BlockedNotification = function BlockedNotification() {
+        return { close() {} };
+      };
+      Object.defineProperty(BlockedNotification, 'permission', { configurable: true, get: () => 'denied' });
+      Object.defineProperty(BlockedNotification, 'requestPermission', { configurable: true, value: () => Promise.resolve('denied') });
+      Object.defineProperty(window, 'Notification', {
+        configurable: true,
+        writable: false,
+        value: BlockedNotification,
+      });
+    }
+  } catch (_) {}
+})();
+
 const STORAGE_KEYS = {
   token: 'token',
   activePanel: 'activePanel',
@@ -20,7 +47,6 @@ const STORAGE_KEYS = {
   staticBarrageCache: 'staticBarrageCacheV1',
   staticPrAutoroutesCache: 'staticPrAutoroutesCacheV1',
   serviceStatusHistory: 'serviceStatusHistory',
-  browserNotifAlertState: 'browserNotifAlertStateV1',
 };
 const AUTO_REFRESH_MS = 45000;
 const EVENTS_LIVE_REFRESH_MS = 10000;
