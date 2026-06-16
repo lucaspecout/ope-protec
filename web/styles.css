@@ -283,14 +283,14 @@ label { display: block; margin-bottom: .8rem; }
   position: relative;
 }
 .view.is-loading::after {
-  content: 'Chargement des données...';
+  content: attr(data-loading-label);
   display: none;
   position: absolute;
   right: 1rem;
   top: 1rem;
   border: 1px solid #cfe0fb;
   border-radius: 999px;
-  padding: .28rem .65rem .28rem 1.65rem;
+  padding: .28rem 1.65rem .28rem .65rem;
   background: #f7fbff;
   color: var(--primary);
   font-size: .78rem;
@@ -301,7 +301,7 @@ label { display: block; margin-bottom: .8rem; }
   content: '';
   display: none;
   position: absolute;
-  right: calc(1rem + 5.75rem);
+  right: 1.45rem;
   top: 1.48rem;
   z-index: 1;
   width: .58rem;
@@ -966,11 +966,30 @@ label { display: block; margin-bottom: .8rem; }
 .flux-dot.online { background: var(--ok); box-shadow: 0 0 0 3px rgba(28,160,65,.18); }
 .flux-dot.error { background: var(--danger); box-shadow: 0 0 0 3px rgba(200,35,51,.18); }
 .flux-dot.stale { background: #e8a000; box-shadow: 0 0 0 3px rgba(232,160,0,.18); }
-.flux-dot.pending { background: #bbc; }
+.flux-dot.pending {
+  width: 12px;
+  height: 12px;
+  background: transparent;
+  border: 2px solid #c0c8d8;
+  border-top-color: #2e5c96;
+  animation: spin-login .75s linear infinite;
+}
 .flux-row-main { min-width: 0; }
 .flux-row-title { display: flex; align-items: center; gap: .4rem; font-weight: 600; font-size: .9rem; flex-wrap: wrap; }
 .flux-icon { font-size: 1rem; line-height: 1; }
 .flux-row-category { font-size: .7rem; color: #4a5a80; background: #eef1f8; border-radius: 4px; padding: .1rem .45rem; font-weight: 500; }
+.flux-loading-label {
+  display: inline-flex;
+  align-items: center;
+  gap: .25rem;
+  font-size: .7rem;
+  color: #475569;
+  background: #f1f5f9;
+  border: 1px solid #dbe4f0;
+  border-radius: 999px;
+  padding: .08rem .45rem;
+  font-weight: 700;
+}
 .flux-row-metric { font-size: .83rem; color: #333; margin-top: .15rem; }
 .flux-row-error { font-size: .78rem; color: var(--danger); margin-top: .2rem; }
 .flux-row-source { margin-top: .15rem; }
@@ -2917,6 +2936,21 @@ select:focus {
   font-size: .77rem;
   font-weight: 700;
   color: var(--text);
+}
+.svc-card-status.is-pending {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+}
+.svc-card-status.is-pending::before {
+  content: '';
+  width: .62rem;
+  height: .62rem;
+  border: 2px solid #cbd5e1;
+  border-top-color: #2e5c96;
+  border-radius: 50%;
+  animation: spin-login .75s linear infinite;
+  flex: 0 0 auto;
 }
 
 /* Chevron tournant à l'ouverture */

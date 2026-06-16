@@ -250,6 +250,7 @@ let apiActiveRequests = 0;
 let preferredApiOrigin = window.location.origin;
 const apiOriginFailures = new Map();
 const startupQueueState = { total: 0, completed: 0, current: '' };
+const panelLoadingState = new Map();
 
 const ISERE_MAJOR_CITIES = [
   { key: 'grenoble', name: 'Grenoble', lat: 45.1885, lon: 5.7245, population: 158180 },
@@ -1129,9 +1130,27 @@ function updateGlobalLoadingVisual(percent = 0) {
   if (currentNode) currentNode.textContent = startupQueueState.current || 'Chargement des donnees...';
   if (track) track.setAttribute('aria-valuenow', String(visiblePercent));
 
-  document.querySelectorAll('.view').forEach((panel) => {
-    panel.classList.remove('is-loading');
-  });
+}
+
+function setPanelLoading(panelId, loading, label = 'Chargement des données...') {
+  const panel = document.getElementById(panelId);
+  if (!panel) return;
+  const current = panelLoadingState.get(panelId) || { count: 0, label };
+  current.count = Math.max(0, current.count + (loading ? 1 : -1));
+  current.label = label || current.label || 'Chargement des données...';
+  panelLoadingState.set(panelId, current);
+  const active = current.count > 0;
+  panel.classList.toggle('is-loading', active);
+  panel.setAttribute('data-loading-label', active ? current.label : '');
+}
+
+async function withPanelLoading(panelId, label, task) {
+  setPanelLoading(panelId, true, label);
+  try {
+    return await task();
+  } finally {
+    setPanelLoading(panelId, false, label);
+  }
 }
 
 function startStartupQueue(total = 0) {
@@ -2825,7 +2844,7 @@ function setActivePanel(panelId) {
   updateMobileNavActive(panelId);
   document.getElementById('panel-title').textContent = PANEL_TITLES[panelId] || 'Centre opérationnel';
   if (panelId === 'map-panel') {
-    ensureMapReady().then(() => {
+    withPanelLoading('map-panel', 'Chargement de la carte...', () => ensureMapReady().then(() => {
       setTimeout(() => {
         leafletMap?.invalidateSize();
         centerMapOnIsere();
@@ -2834,14 +2853,24 @@ function setActivePanel(panelId) {
       if (token && !stationsTimetableCache) loadAndRenderStationsPanel(false).catch(() => {});
       renderResources();
       renderTrafficOnMap().catch(() => {});
-    }).catch((error) => {
+    })).catch((error) => {
       setMapFeedback(`Carte indisponible: ${sanitizeErrorMessage(error.message)}`, true);
     });
   }
   if (panelId === 'logs-panel') ensureLogMunicipalitiesLoaded();
   if (panelId === 'news-panel') ensureSocialFeedsRendered();
+  if (['situation-panel', 'services-panel', 'meteo-panel', 'news-panel'].includes(panelId) && token) {
+    withPanelLoading(panelId, 'Synchronisation des données...', async () => {
+      if (panelId === 'situation-panel') await loadDashboard(false);
+      await loadExternalRisks(false);
+      if (panelId === 'meteo-panel') await renderWeeklyWeatherPanel(cachedExternalRisksSnapshot || {});
+    }).catch((error) => {
+      const errorTarget = document.getElementById('dashboard-error');
+      if (errorTarget && !errorTarget.textContent.trim()) errorTarget.textContent = sanitizeErrorMessage(error.message);
+    });
+  }
   if (panelId === 'water-panel' && token) {
-    loadAndRenderWaterPanel(false).catch((error) => {
+    withPanelLoading('water-panel', 'Chargement eau potable...', () => loadAndRenderWaterPanel(false)).catch((error) => {
       waterPanelEmptyState(sanitizeErrorMessage(error.message));
     });
   }
@@ -2849,24 +2878,25 @@ function setActivePanel(panelId) {
     const city = currentUser?.role === 'mairie'
       ? String(currentUser?.municipality_name || selectedContactsCity || '').trim()
       : String(selectedContactsCity || '').trim();
-    loadAndRenderContactsPanel(city, false).catch((error) => {
+    withPanelLoading('contacts-panel', 'Chargement contacts...', () => loadAndRenderContactsPanel(city, false)).catch((error) => {
       contactsPanelEmptyState(sanitizeErrorMessage(error.message));
     });
   }
   if (panelId === 'api-panel' && token) {
-    loadApiInterconnections(false).catch((error) => {
+    withPanelLoading('api-panel', 'Synchronisation des flux...', () => loadApiInterconnections(false)).catch((error) => {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
     });
   }
   if (panelId === 'stations-panel' && token) {
-    loadAndRenderStationsPanel(false).catch((error) => {
+    withPanelLoading('stations-panel', 'Chargement horaires gares...', () => loadAndRenderStationsPanel(false)).catch((error) => {
       const errorEl = document.getElementById('stations-error');
       if (errorEl) errorEl.textContent = sanitizeErrorMessage(error.message);
     });
   }
   if (panelId === 'notifications-panel' && token) {
-    _notifLoad();
-    _notifLoadLog();
+    withPanelLoading('notifications-panel', 'Chargement notifications...', async () => {
+      await Promise.allSettled([_notifLoad(), _notifLoadLog()]);
+    });
   }
 }
 
@@ -6595,6 +6625,9 @@ function setRiskText(id, value, level = null) {
   const normalized = normalizeLevel(level || value);
   node.textContent = value;
   node.style.color = levelColor(normalized);
+  const text = String(value || '').toLowerCase();
+  const pending = normalized === 'gris' || text.includes('pending') || text.includes('synchronisation') || text.includes('chargement');
+  node.classList.toggle('is-pending', pending && node.classList.contains('svc-card-status'));
 }
 
 function setText(id, value) {
@@ -13964,7 +13997,9 @@ function renderApiInterconnections(data = {}) {
 
   // Render rows
   const listHtml = filtered.map(({ svc, payload, state, updatedAt, ageMs }) => {
-    const metric = (() => { try { return svc.metric(payload); } catch (_) { return '–'; } })();
+    const metric = state === 'pending'
+      ? 'Chargement des données...'
+      : (() => { try { return svc.metric(payload); } catch (_) { return '–'; } })();
     const { text: ageText, css: ageCss } = _fluxAgeLabel(ageMs, svc.interval, state);
     const nextText = _fluxNextLabel(updatedAt, svc.interval, state);
     const errorText = payload.error
@@ -13980,7 +14015,7 @@ function renderApiInterconnections(data = {}) {
     return `<div class="flux-row status-${state}" data-key="${escapeHtml(svc.key)}">
       <div class="flux-dot ${state}"></div>
       <div class="flux-row-main">
-        <div class="flux-row-title"><span class="flux-icon">${escapeHtml(svc.icon)}</span>${escapeHtml(svc.label)}<span class="flux-row-category">${escapeHtml(svc.category)}</span></div>
+        <div class="flux-row-title"><span class="flux-icon">${escapeHtml(svc.icon)}</span>${escapeHtml(svc.label)}<span class="flux-row-category">${escapeHtml(svc.category)}</span>${state === 'pending' ? '<span class="flux-loading-label">en cours</span>' : ''}</div>
         <div class="flux-row-metric">${escapeHtml(metric)}</div>
         ${errorText ? `<div class="flux-row-error">⚠ ${escapeHtml(errorText)}</div>` : ''}
         ${sourceLink ? `<div class="flux-row-source">${sourceLink}</div>` : ''}
@@ -14663,6 +14698,8 @@ async function refreshAll(forceRefresh = false) {
     // Phase visible : relire vite le snapshot applicatif. Les couches carte et
     // les flux externes forcés continuent en arrière-plan pour garder l'UI fluide.
     startStartupQueue(2);
+    const activePanelId = localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel';
+    setPanelLoading(activePanelId, true, forceRefresh ? 'Actualisation en cours...' : 'Mise à jour des données...');
     setServerSnapshotSyncing(true, forceRefresh ? 'Synchronisation demandée…' : 'Lecture du snapshot serveur…');
     if (forceRefresh) requestExternalRisksBackgroundRefresh();
 
@@ -14733,6 +14770,7 @@ async function refreshAll(forceRefresh = false) {
       || isPendingServicePayload(cachedExternalRisksSnapshot?.vigicrues || {})
       || cachedExternalRisksSnapshot?.refresh?.in_progress
     );
+    setPanelLoading(activePanelId, false);
     finishStartupQueue();
   });
 
