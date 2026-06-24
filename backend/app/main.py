@@ -68,6 +68,7 @@ from .services import (
     fetch_georisques_isere_summary,
     fetch_isere_boundary_geojson,
     fetch_meteo_france_isere,
+    fetch_meteo_forets_isere,
     fetch_itinisere_disruptions,
     fetch_itinisere_webcams,
     fetch_prefecture_isere_news,
@@ -389,6 +390,7 @@ SERVICE_REFRESH_INTERVALS: dict[str, int] = {
     "prefecture_isere":        90,   # Actualités urgentes
     "fr_alert_isere":          90,
     "meteo_france":           120,
+    "meteo_forets_isere":    1800,
     "itinisere":              120,
     "sncf_isere":             120,
     "vigicrues":              120,
@@ -500,6 +502,8 @@ def _extract_level_from_slot(key: str, data: dict) -> str:
         return "rouge"
     if key == "meteo_france":
         return str(data.get("level") or status)
+    if key == "meteo_forets_isere":
+        return str(data.get("level") or status)
     if key == "vigicrues":
         return str(data.get("water_alert_level") or status)
     if key == "apic_isere":
@@ -517,7 +521,7 @@ def _extract_level_from_slot(key: str, data: dict) -> str:
 
 
 _SVC_LABELS: dict[str, str] = {
-    "meteo_france": "Météo-France", "vigicrues": "Vigicrues", "apic_isere": "APIC",
+    "meteo_france": "Météo-France", "meteo_forets_isere": "Météo des forêts", "vigicrues": "Vigicrues", "apic_isere": "APIC",
     "avalanche_isere": "Avalanches BRA", "feux_foret_isere": "Feux de forêt EFFIS",
     "seismes_isere": "Séismes Isère", "vigicrues_flash_isere": "Vigicrues Flash",
     "vigieau": "Vigieau", "atmo_aura": "Atmo AURA", "copernicus_ems": "GDACS · Catastrophes Europe",
@@ -1966,6 +1970,7 @@ def build_dashboard_payload(db: Session, user: User, external_risks: dict | None
 def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str]) -> dict[str, tuple[Callable[[], dict], dict]]:
     return {
         "meteo_france": (lambda: fetch_meteo_france_isere(force_refresh=refresh), {"status": "pending", "level": "gris", "title": "Météo-France en synchronisation"}),
+        "meteo_forets_isere": (lambda: fetch_meteo_forets_isere(force_refresh=refresh), {"status": "pending", "level": "gris", "danger": "synchronisation", "forecasts": []}),
         "vigicrues": (lambda: fetch_vigicrues_isere(force_refresh=refresh), {"status": "pending", "level": "gris", "water_alert_level": "gris", "stations": [], "alerts": []}),
         "itinisere": (lambda: fetch_itinisere_disruptions(force_refresh=refresh), {"status": "pending", "events": [], "events_total": 0}),
         "bison_fute": (lambda: fetch_bison_fute_traffic(force_refresh=refresh), {"status": "pending", "alerts": []}),
@@ -3753,6 +3758,11 @@ def api_avalanche_isere(refresh: bool = False, _: User = Depends(require_roles(*
 @app.get("/api/feux-foret-isere")
 def api_feux_foret_isere(refresh: bool = False, _: User = Depends(require_roles(*READ_ROLES))):
     return fetch_feux_foret_isere(force_refresh=refresh)
+
+
+@app.get("/api/meteo-forets-isere")
+def api_meteo_forets_isere(refresh: bool = False, _: User = Depends(require_roles(*READ_ROLES))):
+    return fetch_meteo_forets_isere(force_refresh=refresh)
 
 
 @app.get("/api/cols-alpins-isere")

@@ -83,6 +83,7 @@ const lazyAssetPromises = new Map();
 let mapBootstrapPromise = null;
 const FLUX_SERVICES = [
   { key: 'meteo_france',           label: 'Météo-France',              icon: '⛅', category: 'Météo',         interval: 120,   metric: (d) => d.level ? `Vigilance ${d.level}` : `${(d.alerts || []).length} alerte(s)` },
+  { key: 'meteo_forets_isere',     label: 'Météo des forêts · Isère',  icon: '🌲', category: 'Météo',         interval: 1800,  metric: (d) => `Danger ${d.forecasts?.[0]?.danger || d.danger || 'indisponible'}` },
   { key: 'apic_isere',             label: 'APIC · Pluie intense',      icon: '🌧️', category: 'Météo',        interval: 180,   metric: (d) => `${d.alerts_total ?? 0} avertissement(s)` },
   { key: 'vigicrues',              label: 'Vigicrues',                 icon: '🌊', category: 'Eau',           interval: 120,   metric: (d) => `${(d.stations || []).length} station(s) · niveau ${d.water_alert_level || '?'}` },
   { key: 'vigicrues_flash_isere',  label: 'Vigicrues Flash',           icon: '⚡', category: 'Eau',           interval: 180,   metric: (d) => `${d.alerts_total ?? 0} alerte(s) crues rapides` },
@@ -11458,9 +11459,21 @@ function buildSituationKpiModalContent(key, externalRisks = {}) {
   const vigicruesFlash = externalRisks?.vigicrues_flash_isere || {};
   const atmo = externalRisks?.atmo_aura || {};
   const arcep = externalRisks?.arcep_isere || {};
+  const meteoForets = externalRisks?.meteo_forets_isere || {};
   switch (key) {
     case 'meteo':
       return buildMeteoSituationModalContent(meteo);
+    case 'meteo-forets': {
+      const forecasts = Array.isArray(meteoForets.forecasts) ? meteoForets.forecasts : [];
+      const items = forecasts.map((forecast) => `
+        <li>
+          <strong>${escapeHtml(forecast.day || forecast.date || 'Prévision')}</strong>
+          · <span style="color:${levelColor(forecast.level)};font-weight:700">${escapeHtml(forecast.danger || 'indisponible')}</span>
+          ${forecast.date ? `<br><span class="muted">${escapeHtml(safeDateToLocale(forecast.date))}</span>` : ''}
+        </li>
+      `).join('');
+      return `<p><strong>Danger feux de forêt prévu pour l’Isère</strong></p><p class="muted">Source officielle : Météo-France. Cette donnée décrit le danger météorologique, pas les incendies en cours.</p><ul class="situation-kpi-modal__list">${items || '<li>Donnée indisponible.</li>'}</ul><p><a href="https://meteofrance.com/meteo-des-forets" target="_blank" rel="noreferrer">Voir la carte officielle</a></p>`;
+    }
     case 'crues': {
       const mainTronconCodes = new Set(['AN11', 'AN12', 'AN20', 'AN30', 'AN31']);
       const troncons = (Array.isArray(vigicrues.troncons) ? vigicrues.troncons : [])
@@ -11673,6 +11686,9 @@ function renderSituationOverview() {
   const braLevel = braNiveauMax >= 4 ? 'rouge' : braNiveauMax >= 3 ? 'orange' : braNiveauMax >= 2 ? 'jaune' : braNiveauMax ? 'vert' : 'inconnu';
   const braLabel = { 1: 'Faible', 2: 'Limité', 3: 'Marqué', 4: 'Fort', 5: 'Très fort' }[braNiveauMax] || 'Indisponible';
   const feuxData = externalRisks?.feux_foret_isere || {};
+  const meteoForetsData = externalRisks?.meteo_forets_isere || {};
+  const meteoForetsToday = Array.isArray(meteoForetsData.forecasts) ? meteoForetsData.forecasts[0] : null;
+  const meteoForetsTomorrow = Array.isArray(meteoForetsData.forecasts) ? meteoForetsData.forecasts[1] : null;
   const seismesData = externalRisks?.seismes_isere || {};
   const dernierSeisme = (seismesData.items || [])[0];
   const seismeLevel = dernierSeisme?.magnitude >= 4 ? 'rouge' : dernierSeisme?.magnitude >= 3 ? 'orange' : dernierSeisme?.magnitude >= 2 ? 'jaune' : 'vert';
@@ -11699,6 +11715,7 @@ function renderSituationOverview() {
   ];
   const risquesNaturelsCards = [
     { key: 'avalanche', label: '🏔️ Avalanches BRA', value: braNiveauMax ? `${braNiveauMax}/5 — ${braLabel}` : 'Indisponible', info: `${(braData.massifs || []).length} massif(s) Isère`, css: braLevel },
+    { key: 'meteo-forets', label: '🌲 Météo des forêts · Isère', value: meteoForetsToday?.danger || 'Indisponible', info: meteoForetsTomorrow ? `Demain : ${meteoForetsTomorrow.danger}` : 'Danger prévu par Météo-France', css: meteoForetsToday?.level || 'gris' },
     { key: 'feux', label: '🔥 Feux de forêt EFFIS', value: `${feuxData.fires_total ?? 0} foyer(s) 24h`, info: feuxData.fires_total > 0 ? 'Foyers détectés par satellite VIIRS' : 'Aucun foyer détecté dans la région', css: (feuxData.fires_total ?? 0) > 5 ? 'rouge' : (feuxData.fires_total ?? 0) > 0 ? 'orange' : 'vert' },
     { key: 'seismes', label: '🌍 Séismes récents', value: dernierSeisme ? `M${dernierSeisme.magnitude} ${escapeHtml(dernierSeisme.place?.split(',')[0] || '')}` : 'Aucun', info: `${(seismesData.items || []).length} séisme(s) détecté(s)`, css: seismeLevel },
     { key: 'cols', label: '⛰️ Cols alpins', value: `${colsData.dangereux_total ?? 0} à surveiller`, info: `${colsData.cols_total ?? 0} cols suivis`, css: (colsData.dangereux_total ?? 0) > 3 ? 'orange' : (colsData.dangereux_total ?? 0) > 0 ? 'jaune' : 'vert' },

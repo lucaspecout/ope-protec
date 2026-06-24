@@ -22,6 +22,9 @@ from urllib.parse import quote_plus, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 import xml.etree.ElementTree as ET
 import zipfile
+from zoneinfo import ZoneInfo
+
+from PIL import Image
 
 import warnings as _warnings
 # Supprimer les avertissements de version urllib3/requests (conflit de packaging)
@@ -6256,6 +6259,149 @@ def _bra_get_mfsession_token() -> str:
                 for c in raw
             )
     raise ValueError("Cookie mfsession introuvable sur la page BRA Météo-France")
+
+
+# ── Météo des forêts Isère (carte officielle Météo-France) ─────────────────
+
+_METEO_FORETS_PAGE_URL = "https://meteofrance.com/meteo-des-forets"
+_METEO_FORETS_IMAGE_URL = (
+    "https://rwg.meteofrance.com/gdss/v1/init_internet/blob"
+    "?blob_filename=carte-meteo-foretJ1J2.png&reference_time-max=1&token={token}"
+)
+_METEO_FORETS_CACHE_TTL_SECONDS = 1800
+_meteo_forets_cache_lock = Lock()
+_meteo_forets_cache: dict[str, Any] = {
+    "payload": None,
+    "expires_at": datetime.min,
+    "redis_key": "meteo_forets_isere_v1",
+    "max_stale_hours": 48,
+}
+
+# Points situés à l'intérieur de l'Isère sur la carte 1068 × 1900 publiée par
+# Météo-France. Les coordonnées sont remises à l'échelle si le rendu évolue.
+_METEO_FORETS_ISERE_POINTS = ((680, 590), (680, 1445))
+_METEO_FORETS_REFERENCE_SIZE = (1068, 1900)
+_METEO_FORETS_PALETTE = {
+    "faible": ((49, 170, 53), "vert"),
+    "modéré": ((255, 246, 0), "jaune"),
+    "élevé": ((255, 183, 49), "orange"),
+    "très élevé": ((204, 0, 0), "rouge"),
+}
+
+
+def _meteo_forets_get_token() -> str:
+    req = Request(_METEO_FORETS_PAGE_URL, headers={
+        "User-Agent": "Mozilla/5.0 (compatible; ope-protec/1.0)",
+        "Accept-Language": "fr-FR,fr;q=0.9",
+    })
+    with urlopen(req, timeout=15) as resp:
+        cookies = resp.headers.get_all("Set-Cookie") or []
+    for cookie in cookies:
+        if "mfsession=" not in cookie:
+            continue
+        raw = cookie.split("mfsession=", 1)[1].split(";", 1)[0]
+        return "".join(
+            chr((ord(char) - (65 if char <= "Z" else 97) + 13) % 26 + (65 if char <= "Z" else 97))
+            if char.isalpha() else char
+            for char in raw
+        )
+    raise ValueError("Cookie mfsession introuvable")
+
+
+def _meteo_forets_classify_pixel(rgb: tuple[int, int, int]) -> tuple[str, str, float]:
+    candidates = []
+    for label, (reference, level) in _METEO_FORETS_PALETTE.items():
+        distance = math.sqrt(sum((rgb[index] - reference[index]) ** 2 for index in range(3)))
+        candidates.append((distance, label, level))
+    distance, label, level = min(candidates)
+    return label, level, distance
+
+
+def _meteo_forets_extract_isere(image_bytes: bytes) -> list[dict[str, Any]]:
+    with Image.open(io.BytesIO(image_bytes)) as image:
+        image = image.convert("RGB")
+        scale_x = image.width / _METEO_FORETS_REFERENCE_SIZE[0]
+        scale_y = image.height / _METEO_FORETS_REFERENCE_SIZE[1]
+        results = []
+        paris_now = datetime.now(ZoneInfo("Europe/Paris"))
+        for day_index, (reference_x, reference_y) in enumerate(_METEO_FORETS_ISERE_POINTS):
+            center_x = round(reference_x * scale_x)
+            center_y = round(reference_y * scale_y)
+            votes: dict[tuple[str, str], int] = {}
+            distances: dict[tuple[str, str], list[float]] = {}
+            for dx, dy in ((0, 0), (-4, 0), (4, 0), (0, -4), (0, 4), (-3, -3), (3, 3)):
+                x = min(max(center_x + round(dx * scale_x), 0), image.width - 1)
+                y = min(max(center_y + round(dy * scale_y), 0), image.height - 1)
+                label, level, distance = _meteo_forets_classify_pixel(image.getpixel((x, y)))
+                key = (label, level)
+                if distance <= 90:
+                    votes[key] = votes.get(key, 0) + 1
+                    distances.setdefault(key, []).append(distance)
+            if not votes:
+                raise ValueError("Couleur de l'Isère non reconnue sur la carte")
+            (label, level), vote_count = max(votes.items(), key=lambda item: item[1])
+            if vote_count < 4:
+                raise ValueError("Lecture de la couleur de l'Isère ambiguë")
+            forecast_date = (paris_now + timedelta(days=day_index)).date()
+            results.append({
+                "date": forecast_date.isoformat(),
+                "day": "aujourd'hui" if day_index == 0 else "demain",
+                "danger": label,
+                "level": level,
+                "confidence": round(1 - min(sum(distances[(label, level)]) / len(distances[(label, level)]), 90) / 90, 2),
+            })
+        return results
+
+
+def _fetch_meteo_forets_isere_live() -> dict[str, Any]:
+    try:
+        token = _meteo_forets_get_token()
+        req = Request(
+            _METEO_FORETS_IMAGE_URL.format(token=token),
+            headers={
+                "User-Agent": "Mozilla/5.0 (compatible; ope-protec/1.0)",
+                "Authorization": f"Bearer {token}",
+            },
+        )
+        with urlopen(req, timeout=20) as resp:
+            image_bytes = resp.read()
+        forecasts = _meteo_forets_extract_isere(image_bytes)
+        level_rank = {"vert": 0, "jaune": 1, "orange": 2, "rouge": 3}
+        max_forecast = max(forecasts, key=lambda item: level_rank.get(item["level"], -1))
+        return {
+            "service": "Météo des forêts · Isère",
+            "status": "online",
+            "department": "Isère",
+            "department_code": "38",
+            "level": max_forecast["level"],
+            "danger": max_forecast["danger"],
+            "forecasts": forecasts,
+            "source": _METEO_FORETS_PAGE_URL,
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+    except Exception as exc:
+        return {
+            "service": "Météo des forêts · Isère",
+            "status": "unavailable",
+            "department": "Isère",
+            "department_code": "38",
+            "level": "gris",
+            "danger": "indisponible",
+            "forecasts": [],
+            "source": _METEO_FORETS_PAGE_URL,
+            "error": str(exc),
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+
+
+def fetch_meteo_forets_isere(force_refresh: bool = False) -> dict[str, Any]:
+    return _cached_external_payload(
+        cache=_meteo_forets_cache,
+        lock=_meteo_forets_cache_lock,
+        ttl_seconds=_METEO_FORETS_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        loader=_fetch_meteo_forets_isere_live,
+    )
 
 
 def _bra_fetch_massif_xml(opp_id: int, token: str) -> dict[str, Any] | None:
