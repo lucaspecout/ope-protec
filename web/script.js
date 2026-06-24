@@ -11748,7 +11748,10 @@ function renderSituationOverview() {
     </div>
 
     <div class="situation-top-grid">
-      ${risquesNaturelsCards.map((card) => `<article class="tile situation-tile situation-tile--interactive" role="button" tabindex="0" data-kpi-key="${escapeHtml(card.key)}" data-kpi-label="${escapeHtml(card.label)}"><h3>${card.label}</h3><p class="kpi-value ${card.css}">${card.value}</p><p class="muted">${card.info}</p></article>`).join('')}
+      ${risquesNaturelsCards.map((card) => {
+        const colorClass = card.key === 'meteo-forets' ? ` situation-tile--bg-${escapeHtml(normalizeLevel(card.css))}` : '';
+        return `<article class="tile situation-tile situation-tile--interactive${colorClass}" role="button" tabindex="0" data-kpi-key="${escapeHtml(card.key)}" data-kpi-label="${escapeHtml(card.label)}"><h3>${card.label}</h3><p class="kpi-value ${card.css}">${card.value}</p><p class="muted">${card.info}</p></article>`;
+      }).join('')}
     </div>
 
     <div class="situation-middle-grid">
@@ -14411,11 +14414,8 @@ function generateMcoEventPdf() {
   const locality = event.municipality_id ? getMunicipalityName(event.municipality_id) : 'Départemental';
   const worstLevel = logs.reduce((max, log) => riskRank(log.danger_level) > riskRank(max) ? (log.danger_level || 'vert') : max, 'vert');
   const levelNorm = normalizeLevel(worstLevel);
-  const levelEmoji = LOG_LEVEL_EMOJI[levelNorm] || '🟢';
   const levelColors = { rouge: '#c92a2a', orange: '#e67700', jaune: '#e9a800', vert: '#2b8a3e' };
-  const levelBg = { rouge: '#fff5f5', orange: '#fff8f0', jaune: '#fffde7', vert: '#f0fff4' };
   const levelColor = levelColors[levelNorm] || '#2b8a3e';
-  const levelBgColor = levelBg[levelNorm] || '#f0fff4';
 
   const created = event.created_at ? formatMcoTimestamp(event.created_at, { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
   const exportedAt = new Date().toLocaleString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -14433,7 +14433,6 @@ function generateMcoEventPdf() {
 
   const timelineRows = logs.map((log, idx) => {
     const level = normalizeLevel(log.danger_level || 'vert');
-    const emoji = log.danger_emoji || LOG_LEVEL_EMOJI[level] || '🟢';
     const dotColor = entryDotColor[level] || '#2b8a3e';
     const timeStr = formatMcoTimestamp(log.event_time || log.created_at, { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
     const scope = formatLogScope(log);
@@ -14449,8 +14448,6 @@ function generateMcoEventPdf() {
         </div>
         <div class="tl-card" style="border-left:3px solid ${dotColor};">
           <div class="tl-card-head">
-            <span class="tl-emoji">${emoji}</span>
-            <span class="tl-level" style="color:${dotColor}">${escapeHtml(levelNorm.toUpperCase())}</span>
             <span class="tl-scope">${escapeHtml(scopeLabel)}</span>
           </div>
           ${log.description ? `<div class="tl-desc">${escapeHtml(log.description)}</div>` : ''}
@@ -14485,7 +14482,7 @@ function generateMcoEventPdf() {
   .cover-addr { font-size: 10.5pt; opacity: .85; margin-bottom: 14px; }
   .cover-badges { display: flex; gap: 8px; flex-wrap: wrap; }
   .cover-badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 9pt; font-weight: 600; }
-  .cover-badge--level { background: ${levelColor}; color: #fff; }
+  .cover-level-dot { width: 15px; height: 15px; border-radius: 50%; background: ${levelColor}; border: 2px solid rgba(255,255,255,.8); }
   .cover-badge--status { background: ${isClosed ? '#495057' : '#2b8a3e'}; color: #fff; }
   .cover-badge--loc { background: rgba(255,255,255,.18); color: #fff; border: 1px solid rgba(255,255,255,.3); }
 
@@ -14509,8 +14506,6 @@ function generateMcoEventPdf() {
   .tl-line { width: 2px; background: #dee2e6; flex: 1; min-height: 12px; margin-top: 2px; }
   .tl-card { background: #f8f9fa; border-radius: 6px; padding: 8px 11px 9px; margin-bottom: 10px; }
   .tl-card-head { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
-  .tl-emoji { font-size: 12pt; }
-  .tl-level { font-size: 8pt; font-weight: 700; letter-spacing: .05em; }
   .tl-scope { font-size: 8.5pt; color: #868e96; margin-left: auto; }
   .tl-desc { font-size: 10pt; color: #1a1a2e; line-height: 1.5; margin-bottom: 5px; }
   .tl-actions { font-size: 9.5pt; color: #495057; background: #e9ecef; border-radius: 4px; padding: 4px 8px; margin-bottom: 5px; line-height: 1.4; }
@@ -14536,7 +14531,7 @@ function generateMcoEventPdf() {
   <div class="cover-title">${escapeHtml(event.title || 'Évènement')}</div>
   <div class="cover-addr">${escapeHtml(event.address || 'Adresse non renseignée')}</div>
   <div class="cover-badges">
-    <span class="cover-badge cover-badge--level">${levelEmoji} Niveau ${escapeHtml(levelNorm)}</span>
+    <span class="cover-level-dot"></span>
     <span class="cover-badge cover-badge--status">${isClosed ? '🔒 Clôturé' : '🟢 En cours'}</span>
     <span class="cover-badge cover-badge--loc">📍 ${escapeHtml(locality)}</span>
   </div>
