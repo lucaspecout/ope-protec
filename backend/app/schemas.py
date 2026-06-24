@@ -445,12 +445,27 @@ class IncidentEventOut(BaseModel):
         from_attributes = True
 
 
-class IncidentEventStatusUpdate(BaseModel):
-    status: str
+class IncidentEventUpdate(BaseModel):
+    title: str | None = None
+    status: str | None = None
+
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        sanitized = value.strip()
+        if not sanitized:
+            raise ValueError("Le titre est obligatoire")
+        if len(sanitized) > 180:
+            raise ValueError("Le titre ne peut pas dépasser 180 caractères")
+        return sanitized
 
     @field_validator("status")
     @classmethod
-    def validate_status(cls, value: str) -> str:
+    def validate_status(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         normalized = value.lower().strip()
         if normalized not in ALLOWED_EVENT_STATUS:
             raise ValueError("Statut d'évènement invalide")

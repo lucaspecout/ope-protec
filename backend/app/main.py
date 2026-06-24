@@ -34,7 +34,7 @@ from .schemas import (
     MapAnnotationOut,
     IncidentEventCreate,
     IncidentEventOut,
-    IncidentEventStatusUpdate,
+    IncidentEventUpdate,
     MapPointCreate,
     MapPointOut,
     MunicipalityCreate,
@@ -2849,16 +2849,24 @@ def create_event(data: IncidentEventCreate, db: Session = Depends(get_db), user:
 
 
 @app.patch("/events/{event_id}", response_model=IncidentEventOut)
-def update_event_status(
+def update_event(
     event_id: int,
-    data: IncidentEventStatusUpdate,
+    data: IncidentEventUpdate,
     db: Session = Depends(get_db),
     user: User = Depends(require_roles(*EDIT_ROLES)),
 ):
     event = db.get(IncidentEvent, event_id)
     if not event:
         raise HTTPException(404, "Évènement introuvable")
-    event.status = data.status
+    changes = {
+        field: value
+        for field, value in data.model_dump(exclude_unset=True).items()
+        if value is not None
+    }
+    if not changes:
+        raise HTTPException(422, "Aucune modification fournie")
+    for field, value in changes.items():
+        setattr(event, field, value)
     db.commit()
     db.refresh(event)
     return event

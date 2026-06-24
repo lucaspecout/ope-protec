@@ -1738,6 +1738,9 @@ function updateEventDetailPanel() {
     closeButton.textContent = isClosed ? "Réouvrir" : "Clôturer";
   }
 
+  const renameButton = document.getElementById('event-rename-btn');
+  if (renameButton) renameButton.setAttribute('data-event-rename', String(selectedEvent.id));
+
   const deleteButton = document.getElementById('event-delete-btn');
   if (deleteButton) deleteButton.setAttribute('data-event-delete', String(selectedEvent.id));
 
@@ -15621,6 +15624,7 @@ function bindAppInteractions() {
     const deleteButton = event.target.closest('[data-log-delete]');
     const editButton = event.target.closest('[data-log-edit]');
     const deleteEventButton = event.target.closest('[data-event-delete]');
+    const renameEventButton = event.target.closest('[data-event-rename]');
     const exportPdfButton = event.target.closest('#event-export-pdf-btn');
     if (openEventButton) {
       openOperationalEventMcoForm(openEventButton.getAttribute('data-event-open'));
@@ -15631,7 +15635,7 @@ function bindAppInteractions() {
       return;
     }
 
-    if (!eventStatusButton && !deleteButton && !editButton && !deleteEventButton) return;
+    if (!eventStatusButton && !deleteButton && !editButton && !deleteEventButton && !renameEventButton) return;
     if (!canEdit()) return;
 
     try {
@@ -15643,6 +15647,27 @@ function bindAppInteractions() {
           highPriority: true,
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ status }),
+        });
+        upsertCachedEvent(updatedEvent);
+        return;
+      }
+
+      if (renameEventButton) {
+        const eventId = renameEventButton.getAttribute('data-event-rename');
+        const currentEvent = cachedEvents.find((item) => String(item.id) === String(eventId));
+        if (!currentEvent) return;
+        const title = window.prompt("Nouveau titre de l'évènement :", currentEvent.title || '');
+        if (title === null) return;
+        const sanitizedTitle = title.trim();
+        if (!sanitizedTitle) {
+          throw new Error('Le titre de l’évènement ne peut pas être vide.');
+        }
+        if (sanitizedTitle === currentEvent.title) return;
+        const updatedEvent = await api(`/events/${eventId}`, {
+          method: 'PATCH',
+          highPriority: true,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: sanitizedTitle }),
         });
         upsertCachedEvent(updatedEvent);
         return;
