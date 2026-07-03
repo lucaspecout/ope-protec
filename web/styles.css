@@ -317,17 +317,7 @@ label { display: block; margin-bottom: .8rem; }
   pointer-events: none;
 }
 .global-loading-bar {
-  position: fixed;
-  right: 1rem;
-  top: .9rem;
-  z-index: 220;
-  width: min(180px, calc(100vw - 2rem));
-  border: 1px solid #cfe0fb;
-  border-radius: 999px;
-  padding: .35rem .55rem;
-  background: rgba(248, 251, 255, .96);
-  box-shadow: 0 8px 18px rgba(16, 43, 94, .1);
-  backdrop-filter: blur(6px);
+  display: none !important;
 }
 .global-loading-bar__top {
   display: flex;

@@ -1160,22 +1160,8 @@ function updateApiQueueVisual() {
 function updateGlobalLoadingVisual(percent = 0) {
   const bar = document.getElementById('global-loading-bar');
   if (!bar) return;
-
-  const isLoading = startupQueueState.total > 0 && startupQueueState.completed < startupQueueState.total;
-  const visiblePercent = isLoading ? percent : 0;
-  bar.hidden = !isLoading;
-  bar.classList.toggle('hidden', !isLoading);
-
-  const progress = document.getElementById('global-loading-progress');
-  const percentNode = document.getElementById('global-loading-percent');
-  const currentNode = document.getElementById('global-loading-current');
-  const track = bar.querySelector('.global-loading-bar__track');
-
-  if (progress) progress.style.width = `${visiblePercent}%`;
-  if (percentNode) percentNode.textContent = isLoading ? `${percent}%` : '';
-  if (currentNode) currentNode.textContent = startupQueueState.current || 'Chargement des donnees...';
-  if (track) track.setAttribute('aria-valuenow', String(visiblePercent));
-
+  bar.hidden = true;
+  bar.classList.add('hidden');
 }
 
 function setPanelLoading(panelId, loading, label = 'Chargement des données...') {
