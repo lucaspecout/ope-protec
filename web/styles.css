@@ -1858,6 +1858,18 @@ svg text { font-size: 14px; fill: #17335f; }
 .mco-entry-form select,
 .mco-entry-form textarea { margin: 0; }
 .mco-form-submit-row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.mco-entry-form button.is-busy,
+.mco-create-event-form button.is-busy {
+  opacity: .78;
+  cursor: progress;
+}
+.mco-entry-form button:disabled,
+.mco-create-event-form button:disabled,
+.mco-entry-btn:disabled,
+.event-detail-actions button:disabled {
+  opacity: .62;
+  cursor: progress;
+}
 
 /* Back button (mobile only) */
 .mco-back-btn { display: none; margin: .6rem .8rem; font-size: .82rem; padding: .4rem .75rem; }

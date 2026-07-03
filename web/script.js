@@ -1656,6 +1656,18 @@ function renderEventsList() {
     sorted = sorted.filter((e) => String(e.status || '').toLowerCase() === 'clos');
   }
 
+  const eventLogStats = new Map();
+  (Array.isArray(cachedLogs) ? cachedLogs : []).forEach((log) => {
+    const eventId = String(log.event_id || '');
+    if (!eventId) return;
+    const previous = eventLogStats.get(eventId) || { count: 0, worstLevel: 'vert' };
+    const level = log.danger_level || 'vert';
+    eventLogStats.set(eventId, {
+      count: previous.count + 1,
+      worstLevel: riskRank(level) > riskRank(previous.worstLevel) ? level : previous.worstLevel,
+    });
+  });
+
   const markup = sorted.map((event) => {
     const isSelected = String(event.id) === String(selectedOperationalEventId);
     const municipality = event.municipality_id
@@ -1664,13 +1676,8 @@ function renderEventsList() {
     const status = EVENT_STATUS_LABEL[event.status] || event.status || 'Ouvert';
     const isClosed = String(event.status || '').toLowerCase() === 'clos';
 
-    // Compute worst severity from MCO entries for this event
-    const eventLogs = (Array.isArray(cachedLogs) ? cachedLogs : [])
-      .filter((log) => String(log.event_id || '') === String(event.id));
-    const worstLevel = eventLogs.reduce((max, log) => {
-      return riskRank(log.danger_level) > riskRank(max) ? (log.danger_level || 'vert') : max;
-    }, 'vert');
-    const levelNorm = normalizeLevel(worstLevel);
+    const stats = eventLogStats.get(String(event.id)) || { count: 0, worstLevel: 'vert' };
+    const levelNorm = normalizeLevel(stats.worstLevel);
     const levelEmoji = LOG_LEVEL_EMOJI[levelNorm] || '🟢';
 
     const badgeClass = levelNorm === 'rouge' ? 'red' : levelNorm === 'orange' ? 'orange' : levelNorm === 'jaune' ? 'yellow' : 'green';
@@ -1681,7 +1688,7 @@ function renderEventsList() {
         <div class="mco-event-card-sub">${escapeHtml(event.address || '-')} · ${municipality}</div>
         <div class="mco-event-card-foot">
           <span class="badge ${isClosed ? 'neutral' : badgeClass}" style="font-size:.7rem;padding:.18rem .5rem">${escapeHtml(status)}</span>
-          ${eventLogs.length > 0 ? `<span class="mco-event-entry-count">📝 ${eventLogs.length} entrée${eventLogs.length > 1 ? 's' : ''}</span>` : '<span class="mco-event-entry-count muted">Aucune entrée</span>'}
+          ${stats.count > 0 ? `<span class="mco-event-entry-count">📝 ${stats.count} entrée${stats.count > 1 ? 's' : ''}</span>` : '<span class="mco-event-entry-count muted">Aucune entrée</span>'}
           ${isSelected ? '<span style="font-size:.72rem;font-weight:700;color:var(--primary)">● ouvert</span>' : ''}
         </div>
       </div>
@@ -1845,11 +1852,41 @@ async function ensureLogMunicipalitiesLoaded() {
   if (!municipalitySelect) return;
   const loadedOptions = Array.from(municipalitySelect.options || []).filter((option) => option.value).length;
   if (loadedOptions > 0) return;
+  if (Array.isArray(cachedMunicipalities) && cachedMunicipalities.length) {
+    populateLogMunicipalityOptions(cachedMunicipalities);
+    return;
+  }
   try {
     await loadMunicipalities();
   } catch (_) {
     populateLogMunicipalityOptions();
   }
+}
+
+function logScopeRequiresMunicipality(scope) {
+  return ['commune', 'pcs'].includes(String(scope || '').toLowerCase());
+}
+
+function setFormBusy(form, busy, label = 'Enregistrement...') {
+  if (!form) return null;
+  const submitButton = form.querySelector('button[type="submit"]');
+  if (!submitButton) return null;
+  if (busy) {
+    submitButton.dataset.previousText = submitButton.textContent || '';
+    submitButton.dataset.busyText = label;
+    submitButton.disabled = true;
+    submitButton.classList.add('is-busy');
+    submitButton.textContent = label;
+  } else {
+    submitButton.disabled = false;
+    submitButton.classList.remove('is-busy');
+    if (submitButton.dataset.previousText && submitButton.textContent === submitButton.dataset.busyText) {
+      submitButton.textContent = submitButton.dataset.previousText;
+    }
+    delete submitButton.dataset.previousText;
+    delete submitButton.dataset.busyText;
+  }
+  return submitButton;
 }
 
 function setVisibility(node, visible) {
@@ -14840,12 +14877,12 @@ async function loadEvents(preloaded = null) {
   updateMenuEventsBadge();
 }
 
-function refreshMcoViews() {
+function refreshMcoViews({ includeSituation = true } = {}) {
   populateEventOptions(cachedEvents);
   renderEventsList();
   updateEventDetailPanel();
   renderLogsList();
-  renderSituationOverview();
+  if (includeSituation) renderSituationOverview();
   updateMenuEventsBadge();
 }
 
@@ -14859,7 +14896,7 @@ function upsertCachedEvent(event) {
     : [event, ...existing];
   cachedEvents = sortOperationalEvents(cachedEvents).slice(0, 300);
   saveSnapshot(STORAGE_KEYS.eventsSnapshot, cachedEvents);
-  refreshMcoViews();
+  refreshMcoViews({ includeSituation: false });
 }
 
 function removeCachedEvent(eventId) {
@@ -14870,7 +14907,7 @@ function removeCachedEvent(eventId) {
     .filter((log) => String(log.event_id || '') !== id);
   saveSnapshot(STORAGE_KEYS.eventsSnapshot, cachedEvents);
   saveSnapshot(STORAGE_KEYS.logsSnapshot, cachedLogs);
-  refreshMcoViews();
+  refreshMcoViews({ includeSituation: false });
 }
 
 function upsertCachedLog(log) {
@@ -14885,7 +14922,7 @@ function upsertCachedLog(log) {
     .sort((a, b) => parseMcoTimestamp(b.created_at || b.event_time).getTime() - parseMcoTimestamp(a.created_at || a.event_time).getTime())
     .slice(0, 200);
   saveSnapshot(STORAGE_KEYS.logsSnapshot, cachedLogs);
-  refreshMcoViews();
+  refreshMcoViews({ includeSituation: false });
 }
 
 function removeCachedLog(logId) {
@@ -14893,7 +14930,7 @@ function removeCachedLog(logId) {
   cachedLogs = (Array.isArray(cachedLogs) ? cachedLogs : [])
     .filter((log) => String(log.id) !== id);
   saveSnapshot(STORAGE_KEYS.logsSnapshot, cachedLogs);
-  refreshMcoViews();
+  refreshMcoViews({ includeSituation: false });
 }
 
 async function exportLogsCsv() {
@@ -15864,6 +15901,8 @@ function bindAppInteractions() {
     if (!eventStatusButton && !deleteButton && !editButton && !deleteEventButton && !renameEventButton) return;
     if (!canEdit()) return;
 
+    const actionButton = eventStatusButton || deleteButton || deleteEventButton || renameEventButton;
+    if (actionButton) actionButton.disabled = true;
     try {
       if (eventStatusButton) {
         const eventId = eventStatusButton.getAttribute('data-event-status');
@@ -15930,6 +15969,8 @@ function bindAppInteractions() {
       await loadLogs();
     } catch (error) {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
+    } finally {
+      if (actionButton) actionButton.disabled = false;
     }
   });
   syncLogScopeFields();
@@ -16825,9 +16866,12 @@ document.getElementById('municipality-form').addEventListener('submit', async (e
 document.getElementById('log-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!canEdit()) return;
-  const form = new FormData(event.target);
+  const formElement = event.target;
+  const form = new FormData(formElement);
   const errorTarget = document.getElementById('dashboard-error');
-  await ensureLogMunicipalitiesLoaded();
+  const targetScope = form.get('target_scope') || 'departemental';
+  if (logScopeRequiresMunicipality(targetScope)) await ensureLogMunicipalitiesLoaded();
+  setFormBusy(formElement, true, formElement.dataset.editLogId ? 'Modification...' : 'Ajout...');
   try {
     const payload = {
       event_id: selectedOperationalEventId ? Number(selectedOperationalEventId) : null,
@@ -16836,7 +16880,7 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
       danger_level: form.get('danger_level') || 'vert',
       danger_emoji: LOG_LEVEL_EMOJI[form.get('danger_level') || 'vert'] || '🟢',
       status: 'nouveau',
-      target_scope: form.get('target_scope'),
+      target_scope: targetScope,
       municipality_id: form.get('municipality_id') ? Number(form.get('municipality_id')) : null,
       location: form.get('location') || null,
       source: form.get('source') || null,
@@ -16845,7 +16889,7 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
       actions_taken: form.get('actions_taken') || null,
       event_time: form.get('event_time') || new Date().toISOString(),
     };
-    const editingLogId = event.target.dataset.editLogId;
+    const editingLogId = formElement.dataset.editLogId;
     let savedLog = null;
     if (editingLogId) {
       savedLog = await api(`/logs/${editingLogId}`, {
@@ -16862,21 +16906,25 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
         body: JSON.stringify(payload),
       });
     }
-    event.target.reset();
+    formElement.reset();
     resetLogFormState();
     if (errorTarget) errorTarget.textContent = '';
     syncLogScopeFields();
     upsertCachedLog(savedLog);
   } catch (error) {
     if (errorTarget) errorTarget.textContent = sanitizeErrorMessage(error.message);
+  } finally {
+    setFormBusy(formElement, false);
   }
 });
 
 document.getElementById('event-form')?.addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!canEdit()) return;
-  const form = new FormData(event.target);
+  const formElement = event.target;
+  const form = new FormData(formElement);
   const errorTarget = document.getElementById('dashboard-error');
+  setFormBusy(formElement, true, 'Création...');
   try {
     const createdEvent = await api('/events', {
       method: 'POST',
@@ -16889,12 +16937,14 @@ document.getElementById('event-form')?.addEventListener('submit', async (event) 
         municipality_id: form.get('municipality_id') ? Number(form.get('municipality_id')) : null,
       }),
     });
-    event.target.reset();
+    formElement.reset();
     if (errorTarget) errorTarget.textContent = '';
     selectedOperationalEventId = createdEvent?.id ? String(createdEvent.id) : selectedOperationalEventId;
     upsertCachedEvent(createdEvent);
   } catch (error) {
     if (errorTarget) errorTarget.textContent = sanitizeErrorMessage(error.message);
+  } finally {
+    setFormBusy(formElement, false);
   }
 });
 
