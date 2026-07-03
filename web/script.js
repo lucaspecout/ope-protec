@@ -2875,6 +2875,7 @@ function setActivePanel(panelId) {
   if (!canAccessPanel(panelId)) panelId = 'situation-panel';
   closeMobileSidebar();
   localStorage.setItem(STORAGE_KEYS.activePanel, panelId);
+  document.getElementById('app-view')?.classList.toggle('app--map-active', panelId === 'map-panel');
   document.querySelectorAll('.menu-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.target === panelId));
   document.querySelectorAll('.view').forEach((panel) => setVisibility(panel, panel.id === panelId));
   updateGlobalLoadingVisual(getStartupQueuePercent());

@@ -5610,6 +5610,29 @@ body {
   box-shadow: none;
 }
 
+.app.app--map-active {
+  min-height: 100dvh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.app.app--map-active .content {
+  height: 100dvh;
+  padding: 0;
+  overflow: hidden;
+  background: #0b1d3a;
+}
+
+.app.app--map-active .app-header {
+  display: none;
+}
+
+.app.app--map-active #map-panel.view {
+  height: 100dvh;
+  min-height: 0;
+  margin: 0;
+}
+
 #map-panel .map-panel-head {
   flex: 0 0 auto;
   min-height: 58px;
