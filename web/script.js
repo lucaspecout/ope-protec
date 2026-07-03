@@ -13809,7 +13809,7 @@ function buildServiceCards() {
   root.dataset.built = '1';
 
   const groups = new Map();
-  for (const svc of FLUX_SERVICES) {
+  for (const svc of getServicesPanelFluxServices()) {
     if (!groups.has(svc.category)) groups.set(svc.category, []);
     groups.get(svc.category).push(svc);
   }
@@ -13864,7 +13864,8 @@ function renderSvcSummaryBar(data = {}) {
   const bar = document.getElementById('svc-summary-bar');
   if (!bar) return;
   const counts = { online: 0, error: 0, stale: 0, pending: 0 };
-  for (const svc of FLUX_SERVICES) {
+  const services = getServicesPanelFluxServices();
+  for (const svc of services) {
     const { state } = _fluxServiceState(getFluxPayload(svc.key, data), svc.interval);
     counts[state] = (counts[state] || 0) + 1;
   }
@@ -13873,7 +13874,7 @@ function renderSvcSummaryBar(data = {}) {
   if (counts.stale   > 0) pills.push(`<span class="svc-pill svc-pill--stale">${counts.stale} obsolète${counts.stale > 1 ? 's' : ''}</span>`);
   if (counts.error   > 0) pills.push(`<span class="svc-pill svc-pill--error">${counts.error} erreur${counts.error > 1 ? 's' : ''}</span>`);
   if (counts.pending > 0) pills.push(`<span class="svc-pill svc-pill--pending">${counts.pending} en attente</span>`);
-  pills.push(`<span class="svc-pill svc-pill--total">${FLUX_SERVICES.length} flux</span>`);
+  pills.push(`<span class="svc-pill svc-pill--total">${services.length} flux</span>`);
   bar.innerHTML = pills.join('');
 }
 
