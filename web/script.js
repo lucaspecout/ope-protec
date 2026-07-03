@@ -2353,7 +2353,9 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = API_REQUEST_TIMEO
 function canRetryRequest(error, attempt, method) {
   const maxRetries = method === 'GET' ? API_MAX_RETRIES_GET : API_MAX_RETRIES_NON_GET;
   if (attempt >= maxRetries) return false;
-  if (error?.status !== undefined && error?.status !== null) return false;
+  if (error?.status !== undefined && error?.status !== null) {
+    return method === 'GET' && [502, 503, 504].includes(Number(error.status));
+  }
   return Boolean(error?.isTimeout || isNetworkFetchError(error) || String(error?.message || '').includes('Réponse non-JSON'));
 }
 
@@ -2391,8 +2393,8 @@ async function requestApiAcrossOrigins(path, fetchOptions = {}, {
         return payload;
       } catch (error) {
         apiOriginFailures.set(origin, Date.now());
-        if (error?.status !== undefined && error?.status !== null) throw error;
         lastError = error;
+        if (error?.status !== undefined && error?.status !== null && !canRetryRequest(error, attempt, method)) throw error;
       }
     }
 
@@ -14924,7 +14926,7 @@ async function refreshAll(forceRefresh = false) {
     // N'afficher "Chargement dégradé" que si le fallback a aussi échoué (≥3 sources en erreur).
     // Si le bootstrap échoue mais que les fallbacks individuels passent, l'UI est complète
     // et il n'y a rien à signaler à l'utilisateur.
-    if (bootstrapError && fallbackFailedCount >= 3) {
+    if (bootstrapError && fallbackFailedCount >= 3 && !isTransientBackendError(bootstrapError)) {
       if (errorTarget) errorTarget.textContent = `Chargement dégradé: ${sanitizeErrorMessage(bootstrapError.message)}`;
     }
 
@@ -16207,6 +16209,7 @@ function startApiPanelAutoRefresh() {
     withPreservedScroll(async () => {
       await Promise.all([loadApiInterconnections(false), loadSystemHealth()]);
     }).catch((error) => {
+      if (isTransientBackendError(error)) return;
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
     });
   }, API_PANEL_REFRESH_MS);
@@ -16339,6 +16342,7 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
   prefillEventTime();
 
   const refreshPromise = refreshAll().catch((error) => {
+    if (isTransientBackendError(error)) return;
     document.getElementById('dashboard-error').textContent = `Actualisation différée: ${sanitizeErrorMessage(error.message)}`;
   });
 
