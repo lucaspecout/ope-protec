@@ -107,7 +107,7 @@ const FLUX_SERVICES = [
   { key: 'ars_aura',               label: 'ARS AURA · Santé',          icon: '🏥', category: 'Actualités',   interval: 300,   metric: (d) => `${(d.items || []).length} alerte(s) sanitaire(s)` },
   { key: 'seismes_isere',          label: 'Séismes Isère',             icon: '🌍', category: 'Risques',       interval: 600,   metric: (d) => `${(d.items || []).length} séisme(s) détecté(s)` },
   { key: 'avalanche_isere',        label: 'Avalanches BRA · Isère',    icon: '🏔️', category: 'Risques',       interval: 1800,  metric: (d) => `Niveau max ${d.niveau_max_bra ?? '?'}/5 · ${(d.massifs || []).length} massif(s)` },
-  { key: 'feux_foret_isere',       label: 'Feux de forêt EFFIS',       icon: '🔥', category: 'Risques',       interval: 600,   metric: (d) => `${d.fires_total ?? 0} foyer(s) détecté(s) 24h` },
+  { key: 'feux_foret_isere',       label: 'Feux de forêt Isère',       icon: '🔥', category: 'Risques',       interval: 600,   metric: (d) => `${d.fires_total ?? 0} foyer(s) 24h · ${d.recent_incidents_total ?? 0} récent(s)` },
   { key: 'copernicus_ems',         label: 'GDACS · Catastrophes Europe',  icon: '🛰️', category: 'Risques',    interval: 1800,  metric: (d) => `${d.france_total ?? 0} événement(s) France · ${d.activations_total ?? 0} Europe` },
   { key: 'cols_alpins_isere',      label: 'Cols alpins Isère',         icon: '⛰️', category: 'Transport',     interval: 1800,  metric: (d) => `${d.cols_total ?? 0} cols · ${d.dangereux_total ?? 0} à surveiller` },
   { key: 'anfr_isere',             label: 'ANFR · Antennes mobiles',   icon: '📡', category: 'Télécom',       interval: 21600, metric: (d) => `${d.supports_total ?? 0} support(s) mobile recensés` },
@@ -1112,7 +1112,12 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
     feux_foret_isere: mergeServiceSlot(previous.feux_foret_isere || {}, next.feux_foret_isere || {}, (p, n) => ({
       ...p, ...n,
       fires: keepPreviousArray(p.fires, n.fires),
+      top_fires: keepPreviousArray(p.top_fires, n.top_fires),
+      recent_incidents: keepPreviousArray(p.recent_incidents, n.recent_incidents),
+      info_items: keepPreviousArray(p.info_items, n.info_items),
       fires_total: keepPreviousValue(p.fires_total, n.fires_total),
+      recent_incidents_total: keepPreviousValue(p.recent_incidents_total, n.recent_incidents_total),
+      info_items_total: keepPreviousValue(p.info_items_total, n.info_items_total),
     })),
     cols_alpins_isere: mergeColsAlpinsSlot(previous.cols_alpins_isere || {}, next.cols_alpins_isere || {}),
     copernicus_ems: mergeServiceSlot(previous.copernicus_ems || {}, next.copernicus_ems || {}, (p, n) => ({
@@ -4386,7 +4391,7 @@ function renderSeismesLayer() {
   });
 }
 
-// ── Feature 17 : Feux de forêt EFFIS ─────────────────────────────────────────
+// ── Feature 17 : Feux de forêt ───────────────────────────────────────────────
 function renderFeuxForetLayer() {
   if (!leafletMap || typeof window.L === 'undefined') return;
   const show = document.getElementById('filter-feux-foret')?.checked ?? false;
@@ -4408,7 +4413,7 @@ function renderFeuxForetLayer() {
       iconSize: [22, 22], iconAnchor: [11, 11],
     });
     window.L.marker([f.lat, f.lon], { icon })
-      .bindPopup(`<strong>🔥 Foyer actif EFFIS</strong><br>Puissance : ${frp}<br>Confiance : ${conf}<br><span class="muted">${escapeHtml(f.date || '')}</span>`)
+      .bindPopup(`<strong>🔥 Foyer actif satellite</strong><br>Puissance : ${frp}<br>Confiance : ${conf}<br><span class="muted">${escapeHtml(f.date || '')}</span>`)
       .addTo(feuxForetLayer);
   });
 }
@@ -11589,14 +11594,19 @@ function buildSituationKpiModalContent(key, externalRisks = {}) {
       const feuxData = externalRisks?.feux_foret_isere || {};
       const fires = Array.isArray(feuxData.top_fires) && feuxData.top_fires.length ? feuxData.top_fires
                    : Array.isArray(feuxData.fires) ? feuxData.fires.slice(0, 8) : [];
-      const items = fires.map((f) => {
+      const satelliteItems = fires.map((f) => {
         const zone = escapeHtml(f.zone || `${f.lat?.toFixed(2)}°N ${f.lon?.toFixed(2)}°E`);
         const frp = f.frp != null ? `${Number(f.frp).toFixed(0)} MW` : '–';
         const conf = escapeHtml(f.confidence || '?');
         const confColor = conf === 'high' ? '#c92a2a' : conf === 'nominal' ? '#e67700' : '#868e96';
         return `<li style="padding:4px 0;border-bottom:1px solid #eee"><strong>🔥 ${zone}</strong><br><span class="muted">Puissance : ${frp} · Confiance : <span style="color:${confColor};font-weight:600">${conf}</span></span></li>`;
       }).join('');
-      return `<p><strong>Foyers détectés (24h) :</strong> ${feuxData.fires_total ?? 0}</p><p><strong>Source :</strong> EFFIS / Copernicus / VIIRS satellite</p><ul class="situation-kpi-modal__list">${items || '<li>Aucun foyer détecté dans la région.</li>'}</ul>`;
+      const recentIncidents = Array.isArray(feuxData.recent_incidents) ? feuxData.recent_incidents : [];
+      const recentItems = recentIncidents.slice(0, 8).map((item) => {
+        const href = item.link ? ` href="${escapeHtml(item.link)}" target="_blank" rel="noreferrer"` : '';
+        return `<li style="padding:4px 0;border-bottom:1px solid #eee"><strong>🔥 ${escapeHtml(item.title || item.commune || 'Isère')}</strong><br><span class="muted">${escapeHtml(item.recency || 'Signalement récent')} · FeuxDeForet.fr</span>${href ? `<br><a${href}>Voir la fiche</a>` : ''}</li>`;
+      }).join('');
+      return `<p><strong>Foyers satellite détectés (24h) :</strong> ${feuxData.fires_total ?? 0}</p><p><strong>Signalements récents FeuxDeForet.fr :</strong> ${feuxData.recent_incidents_total ?? recentIncidents.length}</p><p><strong>Sources :</strong> EFFIS / Copernicus / VIIRS satellite + FeuxDeForet.fr Isère</p><h4>Signalements Isère</h4><ul class="situation-kpi-modal__list">${recentItems || '<li>Aucun signalement récent FeuxDeForet.fr pour l’Isère.</li>'}</ul><h4>Détections satellite</h4><ul class="situation-kpi-modal__list">${satelliteItems || '<li>Aucun foyer satellite détecté dans la région.</li>'}</ul>`;
     }
     case 'seismes': {
       const seismesData = externalRisks?.seismes_isere || {};
@@ -11770,7 +11780,7 @@ function renderSituationOverview() {
   const risquesNaturelsCards = [
     { key: 'avalanche', label: '🏔️ Avalanches BRA', value: braNiveauMax ? `${braNiveauMax}/5 — ${braLabel}` : 'Indisponible', info: `${(braData.massifs || []).length} massif(s) Isère`, css: braLevel },
     { key: 'meteo-forets', label: '🌲 Météo des forêts · Isère', value: meteoForetsToday?.danger || 'Indisponible', info: meteoForetsTomorrow ? `Demain : ${meteoForetsTomorrow.danger}` : 'Danger prévu par Météo-France', css: meteoForetsToday?.level || 'gris' },
-    { key: 'feux', label: '🔥 Feux de forêt EFFIS', value: `${feuxData.fires_total ?? 0} foyer(s) 24h`, info: feuxData.fires_total > 0 ? 'Foyers détectés par satellite VIIRS' : 'Aucun foyer détecté dans la région', css: (feuxData.fires_total ?? 0) > 5 ? 'rouge' : (feuxData.fires_total ?? 0) > 0 ? 'orange' : 'vert' },
+    { key: 'feux', label: '🔥 Feux de forêt Isère', value: `${feuxData.fires_total ?? 0} foyer(s) 24h`, info: `${feuxData.recent_incidents_total ?? 0} signalement(s) récent(s) FeuxDeForet.fr`, css: (feuxData.fires_total ?? 0) > 5 ? 'rouge' : (feuxData.fires_total ?? 0) > 0 ? 'orange' : 'vert' },
     { key: 'seismes', label: '🌍 Séismes récents', value: dernierSeisme ? `M${dernierSeisme.magnitude} ${escapeHtml(dernierSeisme.place?.split(',')[0] || '')}` : 'Aucun', info: `${(seismesData.items || []).length} séisme(s) détecté(s)`, css: seismeLevel },
     { key: 'cols', label: '⛰️ Cols alpins', value: `${colsData.dangereux_total ?? 0} à surveiller`, info: `${colsData.cols_total ?? 0} cols suivis`, css: (colsData.dangereux_total ?? 0) > 3 ? 'orange' : (colsData.dangereux_total ?? 0) > 0 ? 'jaune' : 'vert' },
   ];
@@ -12860,32 +12870,46 @@ function renderAvalancheIsere(data = {}) {
 
 function renderFeuxForetWidget(data = {}) {
   const total = data.fires_total ?? 0;
+  const recentTotal = data.recent_incidents_total ?? (Array.isArray(data.recent_incidents) ? data.recent_incidents.length : 0);
   const color = total > 5 ? 'rouge' : total > 0 ? 'orange' : 'vert';
   const src = data.data_source ? ` · ${escapeHtml(data.data_source)}` : '';
-  setRiskText('feux-svc-status', `${data.status || 'inconnu'} · ${total} foyer(s) détecté(s)${src}`, color);
+  setRiskText('feux-svc-status', `${data.status || 'inconnu'} · ${total} foyer(s) satellite · ${recentTotal} récent(s) FeuxDeForet.fr${src}`, color);
 
   const top = Array.isArray(data.top_fires) && data.top_fires.length ? data.top_fires
               : Array.isArray(data.fires) ? data.fires.slice(0, 3) : [];
+  const recent = Array.isArray(data.recent_incidents) ? data.recent_incidents.slice(0, 5) : [];
 
-  if (!top.length) {
-    setHtml('feux-svc-list', '<li class="muted">Aucun foyer détecté dans le département.</li>');
+  if (!top.length && !recent.length) {
+    setHtml('feux-svc-list', '<li class="muted">Aucun foyer satellite ni signalement récent FeuxDeForet.fr dans le département.</li>');
     return;
   }
 
-  setHtml('feux-svc-list', top.map((f, i) => {
+  const recentHtml = recent.map((item, i) => {
+    const label = i === 0 ? 'Dernier signalement' : 'Signalement récent';
+    const link = item.link ? `<br><a href="${escapeHtml(item.link)}" target="_blank" rel="noreferrer">Voir la fiche FeuxDeForet.fr</a>` : '';
+    return `<li style="padding:4px 0;border-bottom:1px solid #eee">
+      <span style="font-size:0.7em;font-weight:600;color:#888;text-transform:uppercase">FeuxDeForet.fr · ${escapeHtml(label)}</span><br>
+      <strong>🔥 ${escapeHtml(item.title || item.commune || 'Isère')}</strong><br>
+      <span class="muted">${escapeHtml(item.recency || 'Signalement récent')}</span>${link}
+    </li>`;
+  }).join('');
+
+  const satelliteHtml = top.map((f, i) => {
     const zone    = escapeHtml(f.zone || `${f.lat?.toFixed(2)}°N ${f.lon?.toFixed(2)}°E`);
     const frp     = f.frp != null ? `<strong>${Number(f.frp).toFixed(0)} MW</strong>` : '– MW';
     const conf    = escapeHtml(f.confidence || '?');
     const confColor = conf === 'high' ? '#c92a2a' : conf === 'nominal' ? '#e67700' : '#868e96';
     const dateStr = f.date ? escapeHtml(f.date) + (f.time ? ` ${String(f.time).padStart(4,'0').replace(/(\d{2})(\d{2})/, '$1h$2')}` : '') : '–';
-    const label   = i === 0 ? '🔴 Dernière alerte' : i === 1 ? '🟠 Alerte précédente' : '🟡 Alerte antérieure';
+    const label   = i === 0 ? 'Dernière détection satellite' : i === 1 ? 'Détection précédente' : 'Détection antérieure';
     return `<li style="padding:4px 0;border-bottom:1px solid #eee">
       <span style="font-size:0.7em;font-weight:600;color:#888;text-transform:uppercase">${label}</span><br>
       <strong>📍 ${zone}</strong><br>
       <span class="muted">Puissance : ${frp} · Confiance : <span style="color:${confColor};font-weight:600">${conf}</span></span><br>
       <span class="muted">Détecté le ${dateStr}</span>
     </li>`;
-  }).join(''));
+  }).join('');
+
+  setHtml('feux-svc-list', `${recentHtml}${satelliteHtml}`);
 }
 
 function renderColsAlpinsWidget(data = {}) {
@@ -13857,7 +13881,7 @@ const SVC_CARD_META = {
   ars_aura:              { statusId: 'ars-aura-svc-status',    infoId: null,                   url: 'https://www.auvergne-rhone-alpes.ars.sante.fr/alertes-sanitaires-en-cours' },
   seismes_isere:         { statusId: 'seismes-svc-status',     infoId: 'seismes-svc-info',     url: 'https://www.franceseisme.fr' },
   avalanche_isere:       { statusId: 'avalanche-svc-status',   infoId: null,                   url: 'https://meteofrance.com/meteo-montagne' },
-  feux_foret_isere:      { statusId: 'feux-svc-status',        infoId: null,                   url: 'https://effis.jrc.ec.europa.eu' },
+  feux_foret_isere:      { statusId: 'feux-svc-status',        infoId: null,                   url: 'https://feuxdeforet.fr/auvergne-rhone-alpes/isere/' },
   copernicus_ems:        { statusId: 'copernicus-svc-status',  infoId: null,                   url: 'https://www.gdacs.org' },
   cols_alpins_isere:     { statusId: 'cols-svc-status',        infoId: null,                   url: 'https://itinisere.fr/mod_turbolead/mod/inforoute/index.php?action=367&layer=Layer-repere_cols' },
   anfr_isere:            { statusId: 'anfr-status',            infoId: 'anfr-info',            url: 'https://www.data.gouv.fr/fr/datasets/donnees-sur-les-installations-radioelectriques-de-plus-de-5-watts-1/' },
@@ -13906,7 +13930,7 @@ const SVC_DETAIL_LISTS = {
   ars_aura:              [{ id: 'ars-aura-svc-list',     label: 'Alertes sanitaires ARS AURA' }],
   seismes_isere:         [{ id: 'seismes-svc-list',      label: 'Séismes récents Isère' }],
   avalanche_isere:       [{ id: 'avalanche-svc-list',    label: 'BRA — Risque avalanche massifs Isère' }],
-  feux_foret_isere:      [{ id: 'feux-svc-list',         label: 'Foyers actifs EFFIS (24h)' }],
+  feux_foret_isere:      [{ id: 'feux-svc-list',         label: 'Feux de forêt Isère · signalements et foyers satellite' }],
   copernicus_ems:        [{ id: 'copernicus-svc-list',   label: 'Catastrophes actives — GDACS' }],
   cols_alpins_isere:     [{ id: 'cols-svc-list',         label: 'État des cols alpins Isère' }],
 };

@@ -419,7 +419,7 @@ SERVICE_REFRESH_INTERVALS: dict[str, int] = {
     "ars_aura":             300,    # ARS AURA – alertes sanitaires
     "seismes_isere":        600,    # Séismes Isère (BCSF-RéNaSS)
     "avalanche_isere":     1800,    # BRA Météo-France massifs Isère
-    "feux_foret_isere":     600,    # Feux de forêt EFFIS/JRC
+    "feux_foret_isere":     600,    # Feux de forêt EFFIS/JRC + FeuxDeForet.fr Isère
     "cols_alpins_isere":   1800,    # État cols alpins Isère (couche officielle Itinisère)
     "copernicus_ems":      1800,    # Copernicus EMS cartographie d'urgence
 }
@@ -522,7 +522,7 @@ def _extract_level_from_slot(key: str, data: dict) -> str:
 
 _SVC_LABELS: dict[str, str] = {
     "meteo_france": "Météo-France", "meteo_forets_isere": "Météo des forêts", "vigicrues": "Vigicrues", "apic_isere": "APIC",
-    "avalanche_isere": "Avalanches BRA", "feux_foret_isere": "Feux de forêt EFFIS",
+    "avalanche_isere": "Avalanches BRA", "feux_foret_isere": "Feux de forêt Isère",
     "seismes_isere": "Séismes Isère", "vigicrues_flash_isere": "Vigicrues Flash",
     "vigieau": "Vigieau", "atmo_aura": "Atmo AURA", "copernicus_ems": "GDACS · Catastrophes Europe",
     "cols_alpins_isere": "Cols alpins", "prefecture_isere": "Préfecture Isère", "fr_alert_isere": "FR-Alert Isère",
@@ -2001,7 +2001,7 @@ def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str])
         "mreseau": (lambda: fetch_mreseau_disruptions(force_refresh=refresh), {"status": "pending", "disruptions": [], "disruptions_total": 0, "normal_service": True}),
         "cars_region_aura": (lambda: fetch_cars_region_aura_disruptions(force_refresh=refresh), {"status": "pending", "disruptions": [], "disruptions_total": 0}),
         "avalanche_isere": (lambda: fetch_avalanche_isere(force_refresh=refresh), {"status": "pending", "massifs": [], "massifs_total": 0, "niveau_global": "gris"}),
-        "feux_foret_isere": (lambda: fetch_feux_foret_isere(force_refresh=refresh), {"status": "pending", "fires": [], "fires_total": 0}),
+        "feux_foret_isere": (lambda: fetch_feux_foret_isere(force_refresh=refresh), {"status": "pending", "fires": [], "fires_total": 0, "top_fires": [], "recent_incidents": [], "recent_incidents_total": 0, "info_items": [], "info_items_total": 0}),
         "cols_alpins_isere": (lambda: fetch_cols_alpins_isere(force_refresh=refresh), {"status": "pending", "cols": [], "cols_total": 0, "dangereux_total": 0}),
         "copernicus_ems": (lambda: fetch_copernicus_ems_france(force_refresh=refresh), {"status": "pending", "activations": [], "activations_total": 0, "france_total": 0, "france_activations": []}),
     }
