@@ -6934,3 +6934,194 @@ table,
     min-height: 92px;
   }
 }
+
+/* MCO contrast fix for the dark command-center theme */
+#logs-panel,
+#logs-panel * {
+  color-scheme: dark;
+}
+
+#logs-panel .mco-page-head,
+#logs-panel .mco-workspace,
+#logs-panel .mco-sidebar,
+#logs-panel .mco-content,
+#logs-panel .mco-event-header,
+#logs-panel .mco-stream-head,
+#logs-panel .mco-add-wrap,
+#logs-panel .mco-new-event-wrap {
+  border-color: rgba(148, 163, 184, .18);
+  background: linear-gradient(180deg, rgba(14, 28, 48, .94), rgba(6, 16, 31, .98));
+  box-shadow: 0 18px 42px rgba(0, 0, 0, .28);
+}
+
+#logs-panel .mco-page-head h3,
+#logs-panel #event-detail-title,
+#logs-panel .mco-add-title,
+#logs-panel .mco-event-card-title,
+#logs-panel .mco-entry-desc,
+#logs-panel .mco-entry-actions-text,
+#logs-panel .mco-stream-label strong {
+  color: #f8fbff !important;
+}
+
+#logs-panel .muted,
+#logs-panel .mco-event-card-sub,
+#logs-panel .mco-entry-time-abs,
+#logs-panel .mco-empty-state,
+#logs-panel .mco-stream-label {
+  color: #9fb0c6 !important;
+}
+
+#logs-panel .mco-filter-btn {
+  color: #a9bad1;
+  border-color: rgba(148, 163, 184, .18);
+  background: rgba(15, 30, 51, .74);
+  box-shadow: none;
+}
+
+#logs-panel .mco-filter-btn:hover {
+  color: #fff;
+  background: rgba(59, 130, 246, .16);
+  transform: none;
+}
+
+#logs-panel .mco-filter-btn.active {
+  color: #fff;
+  border-color: rgba(59, 130, 246, .58);
+  background: linear-gradient(180deg, #3b82f6, #1d4ed8);
+}
+
+#logs-panel .mco-event-card {
+  border-color: rgba(148, 163, 184, .18);
+  background: linear-gradient(180deg, rgba(15, 30, 51, .88), rgba(8, 20, 38, .96));
+  box-shadow: none;
+}
+
+#logs-panel .mco-event-card:hover {
+  background: linear-gradient(180deg, rgba(24, 45, 73, .94), rgba(10, 26, 48, .98));
+  box-shadow: 0 10px 24px rgba(0, 0, 0, .24);
+}
+
+#logs-panel .mco-event-card.active {
+  border-color: rgba(96, 165, 250, .78);
+  background: linear-gradient(180deg, rgba(30, 58, 138, .52), rgba(8, 20, 38, .98));
+  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, .18), 0 14px 28px rgba(0, 0, 0, .28);
+}
+
+#logs-panel .mco-event-card.active.mco-event-card--rouge {
+  border-color: rgba(248, 113, 113, .78);
+  background: linear-gradient(180deg, rgba(127, 29, 29, .62), rgba(8, 20, 38, .98));
+}
+
+#logs-panel .mco-event-card-foot,
+#logs-panel .mco-event-entry-count,
+#logs-panel .mco-entry-scope,
+#logs-panel .mco-meta-chip {
+  color: #cfe4ff;
+  border-color: rgba(96, 165, 250, .18);
+  background: rgba(59, 130, 246, .12);
+}
+
+#logs-panel .mco-event-entry-count {
+  color: #fbbf24;
+  border-color: rgba(245, 158, 11, .22);
+  background: rgba(245, 158, 11, .12);
+}
+
+#logs-panel .mco-timeline {
+  background: transparent;
+}
+
+#logs-panel .mco-entry {
+  border-color: rgba(148, 163, 184, .18);
+  background: linear-gradient(180deg, rgba(15, 30, 51, .92), rgba(8, 20, 38, .98));
+  box-shadow: 0 12px 26px rgba(0, 0, 0, .20);
+}
+
+#logs-panel .mco-entry:hover {
+  background: linear-gradient(180deg, rgba(20, 39, 65, .96), rgba(9, 23, 43, .98));
+  box-shadow: 0 16px 32px rgba(0, 0, 0, .26);
+}
+
+#logs-panel .mco-entry--vert {
+  border-left-color: #22c55e;
+  background: linear-gradient(180deg, rgba(20, 83, 45, .26), rgba(8, 20, 38, .98));
+}
+
+#logs-panel .mco-entry--jaune {
+  border-left-color: #facc15;
+  background: linear-gradient(180deg, rgba(113, 63, 18, .28), rgba(8, 20, 38, .98));
+}
+
+#logs-panel .mco-entry--orange {
+  border-left-color: #fb923c;
+  background: linear-gradient(180deg, rgba(124, 45, 18, .34), rgba(8, 20, 38, .98));
+}
+
+#logs-panel .mco-entry--rouge {
+  border-left-color: #f87171;
+  background: linear-gradient(180deg, rgba(127, 29, 29, .42), rgba(8, 20, 38, .98));
+}
+
+#logs-panel .mco-entry-time-rel {
+  color: #60a5fa;
+}
+
+#logs-panel .mco-entry-actions-text {
+  border-color: rgba(96, 165, 250, .16);
+  background: rgba(59, 130, 246, .10);
+}
+
+#logs-panel .mco-entry-btn {
+  color: #bfdbfe;
+  border-color: rgba(96, 165, 250, .24);
+  background: rgba(30, 64, 175, .22);
+}
+
+#logs-panel .mco-entry-btn:hover {
+  color: #fff;
+  background: rgba(59, 130, 246, .32);
+}
+
+#logs-panel .mco-entry-btn.danger,
+#logs-panel .event-detail-actions .danger {
+  color: #fecaca;
+  border-color: rgba(248, 113, 113, .35);
+  background: rgba(127, 29, 29, .42);
+}
+
+#logs-panel .mco-entry-btn.danger:hover,
+#logs-panel .event-detail-actions .danger:hover {
+  color: #fff;
+  background: rgba(185, 28, 28, .62);
+}
+
+#logs-panel input,
+#logs-panel textarea,
+#logs-panel select {
+  color: #eef6ff;
+  border-color: rgba(148, 163, 184, .24);
+  background: rgba(3, 10, 24, .78);
+}
+
+#logs-panel input::placeholder,
+#logs-panel textarea::placeholder {
+  color: #7f92aa;
+}
+
+#logs-panel .mco-empty-state {
+  border: 1px dashed rgba(148, 163, 184, .22);
+  background: rgba(8, 20, 38, .70);
+}
+
+#logs-panel .mco-back-btn,
+#logs-panel .event-detail-actions .ghost,
+#logs-panel #mco-cancel-edit-btn {
+  color: #cfe4ff;
+  border-color: rgba(148, 163, 184, .20);
+  background: rgba(15, 30, 51, .84);
+}
+
+#logs-panel .mco-sidebar::-webkit-scrollbar-thumb {
+  background: rgba(96, 165, 250, .35);
+}
