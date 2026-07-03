@@ -11810,6 +11810,118 @@ function renderSituationOverview() {
       <p class="muted">${escapeHtml(String(card.info || ''))}</p>
     </article>`;
 
+  const riskPercent = Math.max(8, Math.min(100, Number.parseInt(String(globalRiskValue).replace(/[^\d]/g, ''), 10) || (riskRank(globalRisk) * 24) || 8));
+  const visualCards = [
+    ...kpiCards,
+    { key: 'apic', label: 'Pluie intense', value: `${apicAlerts}`, info: 'APIC communes', css: apicAlerts > 0 ? 'orange' : 'vert' },
+    { key: 'vigicrues-flash', label: 'Crues rapides', value: `${vigicruesFlashAlerts}`, info: 'Vigicrues Flash', css: vigicruesFlashAlerts > 0 ? 'orange' : 'vert' },
+    { key: 'sncf', label: 'Transport SNCF', value: `${sncfAlerts}`, info: 'Alertes voie ferree', css: sncfAlerts > 0 ? 'orange' : 'vert' },
+    { key: 'vigieau', label: 'Eau potable', value: `${vigieauAlertsCount}`, info: 'Restrictions actives', css: vigieauAlertsCount > 0 ? 'jaune' : 'vert' },
+  ];
+  const actionItems = [
+    { label: 'Risques critiques', value: buildCriticalRisksMarkup(dashboard, externalRisks), empty: 'Aucun risque orange / rouge detecte.' },
+    { label: 'Evenements ouverts', value: buildOpenEventsSituationMarkup(cachedEvents), empty: 'Aucun evenement ouvert.' },
+  ];
+  const renderVisualCard = (card) => `
+    <article class="situation-visual-card situation-visual-card--${escapeHtml(normalizeLevel(card.css))}" role="button" tabindex="0" data-kpi-key="${escapeHtml(card.key)}" data-kpi-label="${escapeHtml(card.label)}">
+      <span class="situation-visual-card__label">${escapeHtml(card.label)}</span>
+      <strong>${escapeHtml(String(card.value))}</strong>
+      <small>${escapeHtml(String(card.info || ''))}</small>
+    </article>`;
+
+  setHtml('situation-content', `
+    ${buildFrAlertTodayBanner(frAlert)}
+    <section class="situation-visual-hero situation-visual-hero--${escapeHtml(normalizeLevel(highestLevel))}">
+      <div class="situation-visual-hero__copy">
+        <p class="tag">Centre operationnel Isere</p>
+        <h2>${escapeHtml(situationStatusLabel)}</h2>
+        <p class="situation-visual-hero__lead">Vue decisionnelle du departement : priorites terrain, vigilance, eau, mobilite et main courante.</p>
+        <div class="situation-visual-actions">
+          <button id="situation-copy-sitrep-btn" type="button" class="btn-copy-sitrep ghost" title="Copier le SITREP en texte brut">Copier SITREP</button>
+          <button id="situation-export-pdf-btn" type="button">Telecharger PDF</button>
+        </div>
+      </div>
+      <div class="situation-visual-radar" aria-label="Synthese risque Isere">
+        <div class="situation-radar-map">
+          <span class="situation-radar-map__core">${escapeHtml(normalizeLevel(highestLevel).toUpperCase())}</span>
+          <i class="situation-radar-map__pulse"></i>
+        </div>
+        <div class="situation-risk-gauge" style="--risk:${riskPercent}%">
+          <span>Risque global</span>
+          <strong>${escapeHtml(globalRiskValue)}</strong>
+        </div>
+      </div>
+      <div class="situation-visual-hero__meta">
+        <span>Meteo <strong class="risk-${escapeHtml(vigilance)}">${escapeHtml(vigilance)}</strong></span>
+        <span>Crues <strong class="risk-${escapeHtml(crues)}">${escapeHtml(crues)}</strong></span>
+        <span>MAJ ${escapeHtml(generatedAt)}</span>
+      </div>
+    </section>
+
+    <div class="situation-signal-ribbon">
+      ${prioritySignals.map((item) => `
+        <article class="situation-signal situation-signal--${escapeHtml(normalizeLevel(item.level))}">
+          <span>${escapeHtml(item.label)}</span>
+          <strong>${escapeHtml(item.value)}</strong>
+        </article>`).join('')}
+    </div>
+
+    <div class="situation-visual-layout">
+      <section class="situation-now-panel">
+        <div class="situation-visual-title">
+          <p class="tag">Priorite immediate</p>
+          <h3>A traiter maintenant</h3>
+        </div>
+        ${actionItems.map((section) => `
+          <div class="situation-now-block">
+            <h4>${escapeHtml(section.label)}</h4>
+            <ul class="list compact">${section.value || `<li>${escapeHtml(section.empty)}</li>`}</ul>
+          </div>`).join('')}
+      </section>
+
+      <section class="situation-metric-wall">
+        ${visualCards.map(renderVisualCard).join('')}
+      </section>
+    </div>
+
+    <section class="situation-visual-section">
+      <div class="situation-visual-title">
+        <p class="tag">Risques specialises</p>
+        <h3>Terrain, reseaux et mobilite</h3>
+      </div>
+      <div class="situation-orbit-grid">
+        ${[...mobilityCards, ...risquesNaturelsCards].map((card) => renderSituationTile(card, `situation-orbit-tile situation-tile--bg-${escapeHtml(normalizeLevel(card.css))}`)).join('')}
+      </div>
+    </section>
+
+    <div class="situation-bottom-grid">
+      <article class="tile situation-feed-card">
+        <div class="situation-card-title">
+          <h3>Dernieres informations Prefecture</h3>
+          <span>${prefectureItems.length}</span>
+        </div>
+        <ul class="list compact">
+          ${prefectureItems.map((item) => {
+            const title = escapeHtml(item.title || 'Actualite Prefecture');
+            const published = item.published_at ? escapeHtml(item.published_at) : '';
+            const safeLink = String(item.link || '').startsWith('http') ? item.link : 'https://www.isere.gouv.fr';
+            return `<li><strong>${title}</strong>${published ? `<br><span class="muted">${published}</span>` : ''}<br><a href="${safeLink}" target="_blank" rel="noreferrer">Lire l'actualite</a></li>`;
+          }).join('') || '<li>Aucune actualite Prefecture disponible.</li>'}
+        </ul>
+      </article>
+      <article class="tile situation-feed-card">
+        <div class="situation-card-title">
+          <h3>Fil prioritaire MCO</h3>
+          <span>${activeLogs.length}</span>
+        </div>
+        <ul class="list">${activeLogs.map((log) => buildSituationLogMarkup(log)).join('') || '<li>Aucune crise nouvelle / en cours / suivie liee a un evenement ouvert.</li>'}</ul>
+      </article>
+    </div>
+  `);
+
+  bindSituationActions();
+  return;
+
   setHtml('situation-content', `
     ${buildFrAlertTodayBanner(frAlert)}
     <section class="situation-command">
