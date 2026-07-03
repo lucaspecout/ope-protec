@@ -11720,20 +11720,20 @@ function renderSituationOverview() {
   const sncfAlerts = Number(externalRisks?.sncf_isere?.alerts_total ?? (externalRisks?.sncf_isere?.alerts || []).length);
   const arcepOutages = Number(externalRisks?.arcep_isere?.outages_total ?? 0);
   const mobilityCards = [
-    { key: 'bison', label: 'Bison Futé (38) · Départ / Arrivée', value: `${bisonDeparture} / ${bisonReturn}`, info: 'Tendance Isère départ / arrivée', css: bisonCombinedLevel },
-    { key: 'sncf', label: 'SNCF · alertes Isère', value: `${sncfAlerts}`, info: 'Accidents / travaux de voie', css: sncfAlerts > 0 ? 'orange' : 'vert' },
-    { key: 'arcep', label: 'ARCEP · Sites mobiles indisponibles Isère', value: `${arcepOutages}`, info: 'Source data.gouv.fr / ARCEP', css: arcepOutages > 0 ? 'jaune' : 'vert' },
-    { key: 'vigieau', label: 'Vigieau', value: `${vigieauAlertsCount}`, info: "Restriction(s) d'eau active(s)", css: vigieauAlertsCount > 0 ? 'jaune' : 'vert' },
-    { key: 'atmo', label: "Qualité de l'air", value: atmoLabel, info: 'Source Atmo AURA', css: atmoLevel },
-    { key: 'apic', label: 'APIC · alertes Isère', value: `${apicAlerts}`, info: 'Pluie intense à l’échelle communale', css: apicAlerts > 0 ? 'orange' : 'vert' },
-    { key: 'vigicrues-flash', label: 'Vigicrues Flash · alertes Isère', value: `${vigicruesFlashAlerts}`, info: 'Avertissements crues rapides', css: vigicruesFlashAlerts > 0 ? 'orange' : 'vert' },
+    { key: 'bison', icon: '🚗', label: 'Bison Futé (38) · Départ / Arrivée', value: `${bisonDeparture} / ${bisonReturn}`, info: 'Tendance Isère départ / arrivée', css: bisonCombinedLevel },
+    { key: 'sncf', icon: '🚆', label: 'SNCF · alertes Isère', value: `${sncfAlerts}`, info: 'Accidents / travaux de voie', css: sncfAlerts > 0 ? 'orange' : 'vert' },
+    { key: 'arcep', icon: '📡', label: 'ARCEP · Sites mobiles indisponibles Isère', value: `${arcepOutages}`, info: 'Source data.gouv.fr / ARCEP', css: arcepOutages > 0 ? 'jaune' : 'vert' },
+    { key: 'vigieau', icon: '💧', label: 'Vigieau', value: `${vigieauAlertsCount}`, info: "Restriction(s) d'eau active(s)", css: vigieauAlertsCount > 0 ? 'jaune' : 'vert' },
+    { key: 'atmo', icon: '〰', label: "Qualité de l'air", value: atmoLabel, info: 'Source Atmo AURA', css: atmoLevel },
+    { key: 'apic', icon: '🔔', label: 'APIC · alertes Isère', value: `${apicAlerts}`, info: 'Pluie intense à l’échelle communale', css: apicAlerts > 0 ? 'orange' : 'vert' },
+    { key: 'vigicrues-flash', icon: '≋', label: 'Vigicrues Flash · alertes Isère', value: `${vigicruesFlashAlerts}`, info: 'Avertissements crues rapides', css: vigicruesFlashAlerts > 0 ? 'orange' : 'vert' },
   ];
   const risquesNaturelsCards = [
-    { key: 'avalanche', label: '🏔️ Avalanches BRA', value: braNiveauMax ? `${braNiveauMax}/5 — ${braLabel}` : 'Indisponible', info: `${(braData.massifs || []).length} massif(s) Isère`, css: braLevel },
-    { key: 'meteo-forets', label: '🌲 Météo des forêts · Isère', value: meteoForetsToday?.danger || 'Indisponible', info: meteoForetsTomorrow ? `Demain : ${meteoForetsTomorrow.danger}` : 'Danger prévu par Météo-France', css: meteoForetsToday?.level || 'gris' },
-    { key: 'feux', label: '🔥 Feux de forêt Isère', value: `${feuxData.fires_total ?? 0} foyer(s) 24h`, info: `${feuxData.recent_incidents_total ?? 0} signalement(s) récent(s) FeuxDeForet.fr`, css: (feuxData.fires_total ?? 0) > 5 ? 'rouge' : (feuxData.fires_total ?? 0) > 0 ? 'orange' : 'vert' },
-    { key: 'seismes', label: '🌍 Séismes récents', value: dernierSeisme ? `M${dernierSeisme.magnitude} ${escapeHtml(dernierSeisme.place?.split(',')[0] || '')}` : 'Aucun', info: `${(seismesData.items || []).length} séisme(s) détecté(s)`, css: seismeLevel },
-    { key: 'cols', label: '⛰️ Cols alpins', value: `${colsData.dangereux_total ?? 0} à surveiller`, info: `${colsData.cols_total ?? 0} cols suivis`, css: (colsData.dangereux_total ?? 0) > 3 ? 'orange' : (colsData.dangereux_total ?? 0) > 0 ? 'jaune' : 'vert' },
+    { key: 'avalanche', icon: '▲', label: 'Avalanches BRA', value: braNiveauMax ? `${braNiveauMax}/5 — ${braLabel}` : 'Indisponible', info: `${(braData.massifs || []).length} massif(s) Isère`, css: braLevel },
+    { key: 'meteo-forets', icon: '🌲', label: 'Météo des forêts · Isère', value: meteoForetsToday?.danger || 'Indisponible', info: meteoForetsTomorrow ? `Demain : ${meteoForetsTomorrow.danger}` : 'Danger prévu par Météo-France', css: meteoForetsToday?.level || 'gris' },
+    { key: 'feux', icon: '🔥', label: 'Feux de forêt Isère', value: `${feuxData.fires_total ?? 0} foyer(s) 24h`, info: `${feuxData.recent_incidents_total ?? 0} signalement(s) récent(s) FeuxDeForet.fr`, css: (feuxData.fires_total ?? 0) > 5 ? 'rouge' : (feuxData.fires_total ?? 0) > 0 ? 'orange' : 'vert' },
+    { key: 'seismes', icon: '⌁', label: 'Séismes récents', value: dernierSeisme ? `M${dernierSeisme.magnitude} ${escapeHtml(dernierSeisme.place?.split(',')[0] || '')}` : 'Aucun', info: `${(seismesData.items || []).length} séisme(s) détecté(s)`, css: seismeLevel },
+    { key: 'cols', icon: '▲', label: 'Cols alpins', value: `${colsData.dangereux_total ?? 0} à surveiller`, info: `${colsData.cols_total ?? 0} cols suivis`, css: (colsData.dangereux_total ?? 0) > 3 ? 'orange' : (colsData.dangereux_total ?? 0) > 0 ? 'jaune' : 'vert' },
   ];
 
   const generatedAt = safeDateToLocale(Date.now());
@@ -11756,7 +11756,10 @@ function renderSituationOverview() {
     </article>`;
   };
   const renderIllustratedCard = (card) => `<article class="tile situation-tile situation-tile--visual situation-tile--visual-${escapeHtml(card.key)} situation-tile--interactive situation-tile--bg-${escapeHtml(normalizeLevel(card.css))}" role="button" tabindex="0" data-kpi-key="${escapeHtml(card.key)}" data-kpi-label="${escapeHtml(card.label)}">
-      <h3>${escapeHtml(card.label)}</h3>
+      <div class="situation-tile__top">
+        <span class="situation-tile__icon situation-tile__icon--${escapeHtml(normalizeLevel(card.css))}">${escapeHtml(card.icon || '•')}</span>
+        <h3>${escapeHtml(card.label)}</h3>
+      </div>
       <p class="kpi-value ${escapeHtml(card.css)}">${escapeHtml(card.value)}</p>
       <p class="muted">${escapeHtml(card.info)}</p>
     </article>`;
@@ -11786,7 +11789,7 @@ function renderSituationOverview() {
     </div>
 
     <div class="situation-top-grid situation-top-grid--compact">
-      ${mobilityCards.map((card) => renderDashboardCard({ ...card, icon: '•' }, 'compact')).join('')}
+      ${mobilityCards.map((card) => renderDashboardCard(card, 'compact')).join('')}
     </div>
 
     <div class="situation-top-grid situation-top-grid--visuals">
