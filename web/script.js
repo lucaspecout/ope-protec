@@ -11753,7 +11753,6 @@ function renderSituationOverview() {
     { key: 'cols', icon: '▲', label: 'Cols alpins', value: `${colsData.dangereux_total ?? 0} à surveiller`, info: `${colsData.cols_total ?? 0} cols suivis`, css: (colsData.dangereux_total ?? 0) > 3 ? 'orange' : (colsData.dangereux_total ?? 0) > 0 ? 'jaune' : 'vert' },
   ];
 
-  const generatedAt = safeDateToLocale(Date.now());
   const renderSparkline = (path, css = 'vert') => path
     ? `<svg class="situation-sparkline situation-sparkline--${escapeHtml(normalizeLevel(css))}" viewBox="0 0 350 88" aria-hidden="true"><path d="${escapeHtml(path)}"></path></svg>`
     : '';
@@ -11793,7 +11792,7 @@ function renderSituationOverview() {
     <div class="situation-toolbar situation-toolbar--hero">
       <div>
         <h2>SITREP prêt à diffusion · Isère</h2>
-        <p class="muted">Version claire et moderne pour envoi immédiat · Mise à jour : ${escapeHtml(generatedAt)}</p>
+        <p class="muted"><span id="situation-live-datetime">${escapeHtml(safeDateToLocale(Date.now(), { dateStyle: 'full', timeStyle: 'medium' }))}</span></p>
       </div>
       <div class="situation-toolbar__actions">
         <button id="situation-copy-sitrep-btn" type="button" class="btn-copy-sitrep ghost" title="Copier le SITREP en texte brut">Copier SITREP</button>
@@ -16094,6 +16093,10 @@ function startLiveClock() {
     const now = new Date();
     elTime.textContent = now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     elDate.textContent = now.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' });
+    const sitrepDateTime = document.getElementById('situation-live-datetime');
+    if (sitrepDateTime) {
+      sitrepDateTime.textContent = now.toLocaleString('fr-FR', { dateStyle: 'full', timeStyle: 'medium' });
+    }
   }
   tick();
   setInterval(tick, 1000);
