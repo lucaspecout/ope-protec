@@ -11690,10 +11690,10 @@ function renderSituationOverview() {
   `;
 
   const kpiCards = [
-    { key: 'meteo', label: 'Vigilance météo', value: vigilance, info: 'Source Météo-France', css: normalizeLevel(vigilance) },
-    { key: 'crues', label: 'Niveau crues', value: crues, info: `Tronçons AN11/12/20/30/31 max ${mainTronconLevel} · stations max ${stationsLevel}`, css: normalizeLevel(crues) },
-    { key: 'global-risk', label: 'Risque global', value: globalRiskValue, info: 'Score consolidé 0-100', css: normalizeLevel(globalRisk) },
-    { key: 'communes-crise', label: 'Communes en crise', value: String(crisisCount), info: 'PCS actif', css: crisisCount > 0 ? 'rouge' : 'vert' },
+    { key: 'meteo', icon: '☁', label: 'Vigilance météo', value: vigilance, info: 'Source Météo-France', css: normalizeLevel(vigilance), line: 'm18,70 c32,-16 62,14 96,-8 c34,-22 62,2 98,-8 c42,-12 74,-18 116,-5' },
+    { key: 'crues', icon: '≋', label: 'Niveau crues', value: crues, info: `Tronçons AN11/12/20/30/31 max ${mainTronconLevel} · stations max ${stationsLevel}`, css: normalizeLevel(crues), line: 'm18,72 c34,-12 54,8 84,-4 c34,-16 64,10 104,-3 c38,-13 74,-22 122,-8' },
+    { key: 'global-risk', icon: '⬡', label: 'Risque global', value: globalRiskValue, info: 'Score consolidé 0-100', css: normalizeLevel(globalRisk), progress: globalRiskPercent(dashboard) },
+    { key: 'communes-crise', icon: '◎', label: 'Communes en crise', value: String(crisisCount), info: 'PCS actif', css: crisisCount > 0 ? 'rouge' : 'vert', line: 'm18,70 c38,-4 48,-30 86,-12 c42,20 82,-2 124,6 c32,6 58,-16 100,-14' },
   ];
   // ── Nouvelles tuiles risques (Features 13/15/17/18/20) ───────────────────
   const braData = externalRisks?.avalanche_isere || {};
@@ -11737,36 +11737,65 @@ function renderSituationOverview() {
   ];
 
   const generatedAt = safeDateToLocale(Date.now());
+  const renderSparkline = (path, css = 'vert') => path
+    ? `<svg class="situation-sparkline situation-sparkline--${escapeHtml(normalizeLevel(css))}" viewBox="0 0 350 88" aria-hidden="true"><path d="${escapeHtml(path)}"></path></svg>`
+    : '';
+  const renderDashboardCard = (card, variant = 'standard') => {
+    const progress = Number(card.progress);
+    const progressHtml = Number.isFinite(progress)
+      ? `<div class="situation-progress" aria-hidden="true"><span style="width:${Math.max(0, Math.min(100, progress))}%"></span></div>`
+      : renderSparkline(card.line, card.css);
+    return `<article class="tile situation-tile situation-tile--${escapeHtml(variant)} situation-tile--interactive situation-tile--bg-${escapeHtml(normalizeLevel(card.css))}" role="button" tabindex="0" data-kpi-key="${escapeHtml(card.key)}" data-kpi-label="${escapeHtml(card.label)}">
+      <div class="situation-tile__top">
+        <span class="situation-tile__icon situation-tile__icon--${escapeHtml(normalizeLevel(card.css))}">${escapeHtml(card.icon || '•')}</span>
+        <h3>${escapeHtml(card.label)}</h3>
+      </div>
+      <p class="kpi-value ${escapeHtml(card.css)}">${escapeHtml(card.value)}</p>
+      <p class="muted">${escapeHtml(card.info)}</p>
+      ${progressHtml}
+    </article>`;
+  };
+  const renderIllustratedCard = (card) => `<article class="tile situation-tile situation-tile--visual situation-tile--visual-${escapeHtml(card.key)} situation-tile--interactive situation-tile--bg-${escapeHtml(normalizeLevel(card.css))}" role="button" tabindex="0" data-kpi-key="${escapeHtml(card.key)}" data-kpi-label="${escapeHtml(card.label)}">
+      <h3>${escapeHtml(card.label)}</h3>
+      <p class="kpi-value ${escapeHtml(card.css)}">${escapeHtml(card.value)}</p>
+      <p class="muted">${escapeHtml(card.info)}</p>
+    </article>`;
+  const quickActions = [
+    ['Composer SITREP', 'situation-copy-sitrep-btn'],
+    ['Liste des alertes', 'services-panel'],
+    ['Ressources dispo', 'map-panel'],
+    ['Contacts importants', 'contacts-panel'],
+  ];
+  const activeRiskCount = apicAlerts + vigicruesFlashAlerts + sncfAlerts + (Array.isArray(externalRisks?.itinisere?.events) ? externalRisks.itinisere.events.length : 0);
 
   setHtml('situation-content', `
     ${buildFrAlertTodayBanner(frAlert)}
-    <div class="situation-toolbar">
+    <div class="situation-toolbar situation-toolbar--hero">
       <div>
-        <h3>SITREP prêt à diffusion · Isère</h3>
-        <p class="muted">Version claire et moderne pour envoi immédiat · mise à jour ${escapeHtml(generatedAt)}</p>
+        <h2>SITREP prêt à diffusion · Isère</h2>
+        <p class="muted">Version claire et moderne pour envoi immédiat · Mise à jour : ${escapeHtml(generatedAt)}</p>
       </div>
       <div class="situation-toolbar__actions">
-        <button id="situation-copy-sitrep-btn" type="button" class="btn-copy-sitrep ghost" title="Copier le SITREP en texte brut">📋 Copier SITREP</button>
-        <button id="situation-export-pdf-btn" type="button">📄 Télécharger PDF</button>
+        <button id="situation-copy-sitrep-btn" type="button" class="btn-copy-sitrep ghost" title="Copier le SITREP en texte brut">Copier SITREP</button>
+        <button id="situation-export-pdf-btn" type="button">Télécharger PDF</button>
       </div>
     </div>
 
-    <div class="situation-top-grid">
-      ${kpiCards.map((card) => `<article class="tile situation-tile situation-tile--interactive situation-tile--bg-${escapeHtml(card.css)}" role="button" tabindex="0" data-kpi-key="${escapeHtml(card.key)}" data-kpi-label="${escapeHtml(card.label)}"><h3>${card.label}</h3><p class="kpi-value ${card.css}">${escapeHtml(card.value)}</p><p class="muted">${escapeHtml(card.info)}</p></article>`).join('')}
+    <div class="situation-top-grid situation-top-grid--major">
+      ${kpiCards.map((card) => renderDashboardCard(card, 'major')).join('')}
     </div>
 
-    <div class="situation-top-grid">
-      ${mobilityCards.map((card) => `<article class="tile situation-tile situation-tile--interactive" role="button" tabindex="0" data-kpi-key="${escapeHtml(card.key)}" data-kpi-label="${escapeHtml(card.label)}"><h3>${card.label}</h3><p class="kpi-value ${card.css}">${escapeHtml(card.value)}</p><p class="muted">${card.info}</p></article>`).join('')}
+    <div class="situation-top-grid situation-top-grid--compact">
+      ${mobilityCards.map((card) => renderDashboardCard({ ...card, icon: '•' }, 'compact')).join('')}
     </div>
 
-    <div class="situation-top-grid">
+    <div class="situation-top-grid situation-top-grid--visuals">
       ${risquesNaturelsCards.map((card) => {
-        const colorClass = card.key === 'meteo-forets' ? ` situation-tile--bg-${escapeHtml(normalizeLevel(card.css))}` : '';
-        return `<article class="tile situation-tile situation-tile--interactive${colorClass}" role="button" tabindex="0" data-kpi-key="${escapeHtml(card.key)}" data-kpi-label="${escapeHtml(card.label)}"><h3>${card.label}</h3><p class="kpi-value ${card.css}">${card.value}</p><p class="muted">${card.info}</p></article>`;
+        return renderIllustratedCard(card);
       }).join('')}
     </div>
 
-    <div class="situation-middle-grid">
+    <div class="situation-middle-grid situation-middle-grid--dashboard">
       <article class="tile situation-summary">
         <h3>Dernières informations Préfecture</h3>
         <ul class="list compact">
@@ -11779,22 +11808,41 @@ function renderSituationOverview() {
         </ul>
       </article>
       <article class="tile situation-risks">
-        <h3>Risques en cours (orange / rouge)</h3>
+        <div class="situation-card-head">
+          <h3>Risques en cours</h3>
+          <span>${activeRiskCount} signalement(s)</span>
+        </div>
         <ul class="list compact">${buildCriticalRisksMarkup(dashboard, externalRisks)}</ul>
+      </article>
+      <article class="tile situation-alert-map">
+        <div class="situation-card-head">
+          <h3>Carte des alertes</h3>
+          <span>Isère</span>
+        </div>
+        <div class="situation-mini-map" aria-hidden="true">
+          <span class="map-pin map-pin--green"></span>
+          <span class="map-pin map-pin--orange"></span>
+          <span class="map-pin map-pin--red"></span>
+          <span class="map-badge map-badge--north">14</span>
+          <span class="map-badge map-badge--east">75</span>
+        </div>
+        <button type="button" class="ghost situation-map-link" data-target-panel="map-panel">Voir la carte interactive</button>
+      </article>
+      <article class="tile situation-quick-card">
+        <h3>Accès rapides</h3>
+        <div class="situation-quick-grid">
+          ${quickActions.map(([label, targetId]) => targetId === 'situation-copy-sitrep-btn'
+            ? `<button type="button" class="ghost" data-copy-sitrep-proxy>${escapeHtml(label)}</button>`
+            : `<button type="button" class="ghost" data-target-panel="${escapeHtml(targetId)}">${escapeHtml(label)}</button>`).join('')}
+        </div>
       </article>
     </div>
 
-    <h3>Évènements ouverts</h3>
-    <article class="tile situation-risks">
-      <ul class="list compact">${buildOpenEventsSituationMarkup(cachedEvents)}</ul>
-    </article>
-
-    <h3>Fil de situation</h3>
-    <div class="situation-log-columns">
-      <div>
-        <h4>Nouveaux / En cours / Suivi (prioritaires)</h4>
-        <ul class="list">${activeLogs.map((log) => buildSituationLogMarkup(log)).join('') || '<li>Aucune crise nouvelle / en cours / suivie liée à un évènement ouvert.</li>'}</ul>
-      </div>
+    <div class="situation-bottom-strip">
+      <span><strong>${openEventIds.size}</strong> évènement(s) ouverts</span>
+      <span><strong>${activeLogs.length}</strong> suivi(s) prioritaires</span>
+      <span><strong>${Number(arcepOutages || 0)}</strong> sites mobiles indisponibles</span>
+      <span><strong>24/7</strong> veille opérationnelle</span>
     </div>
   `);
 
@@ -12243,6 +12291,16 @@ function bindSituationActions() {
   if (situationContent && !situationContent.dataset.kpiPopupBound) {
     situationContent.dataset.kpiPopupBound = '1';
     situationContent.addEventListener('click', (event) => {
+      const copyProxy = event.target.closest('[data-copy-sitrep-proxy]');
+      if (copyProxy) {
+        copySitrepToClipboard();
+        return;
+      }
+      const panelTarget = event.target.closest('[data-target-panel]');
+      if (panelTarget) {
+        setActivePanel(panelTarget.getAttribute('data-target-panel'));
+        return;
+      }
       const tile = event.target.closest('[data-kpi-key]');
       if (!tile) return;
       openSituationKpiModal(tile.getAttribute('data-kpi-key'), tile.getAttribute('data-kpi-label'));
