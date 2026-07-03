@@ -1992,6 +1992,30 @@ async function ensureMapAssets() {
   return window.L;
 }
 
+function scheduleIdleWork(callback, { timeout = 1600 } = {}) {
+  if (typeof callback !== 'function') return 0;
+  if ('requestIdleCallback' in window) {
+    return window.requestIdleCallback(callback, { timeout });
+  }
+  return window.setTimeout(() => callback({ didTimeout: true, timeRemaining: () => 0 }), Math.min(timeout, 600));
+}
+
+function scheduleAfterNextPaint(callback) {
+  window.requestAnimationFrame(() => window.requestAnimationFrame(callback));
+}
+
+function warmAuthenticatedAssetConnections() {
+  ['https://unpkg.com', 'https://cdn.jsdelivr.net'].forEach((href) => {
+    if (document.querySelector(`link[data-warm-asset="${href}"]`)) return;
+    const link = document.createElement('link');
+    link.rel = 'preconnect';
+    link.href = href;
+    link.crossOrigin = '';
+    link.dataset.warmAsset = href;
+    document.head.appendChild(link);
+  });
+}
+
 function isMapPanelActive() {
   return !document.getElementById('map-panel')?.classList.contains('hidden');
 }
@@ -2882,6 +2906,8 @@ function setActivePanel(panelId) {
   if (!canAccessPanel(panelId)) panelId = 'situation-panel';
   closeMobileSidebar();
   localStorage.setItem(STORAGE_KEYS.activePanel, panelId);
+  appView?.classList.add('app--panel-switching');
+  scheduleAfterNextPaint(() => appView?.classList.remove('app--panel-switching'));
   document.querySelectorAll('.menu-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.target === panelId));
   document.querySelectorAll('.view').forEach((panel) => setVisibility(panel, panel.id === panelId));
   updateGlobalLoadingVisual(getStartupQueuePercent());
@@ -6553,8 +6579,8 @@ function _ensureStaticDataLoaded() {
  *    les marqueurs se mettent à jour automatiquement sans action utilisateur.
  */
 function renderResources() {
-  _ensureStaticDataLoaded();
   _drawResourceMarkers();
+  scheduleIdleWork(() => _ensureStaticDataLoaded(), { timeout: 1200 });
 }
 
 function toggleResourceActive(resourceId = '') {
@@ -14895,7 +14921,7 @@ async function refreshAll(forceRefresh = false) {
 
     renderResources();
     advanceStartupQueue('pages applicatives');
-    _ensureStaticDataLoaded();
+    scheduleIdleWork(() => _ensureStaticDataLoaded(), { timeout: 1800 });
 
     // N'afficher "Chargement dégradé" que si le fallback a aussi échoué (≥3 sources en erreur).
     // Si le bootstrap échoue mais que les fallbacks individuels passent, l'UI est complète
@@ -16301,6 +16327,7 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
   }
   _updateNotifBtn();
   showApp();
+  warmAuthenticatedAssetConnections();
   buildServiceCards();
   hydrateAppFromSnapshots();
   initMobileNav();
@@ -16319,6 +16346,7 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
   });
 
   if (!runRefreshInBackground) await refreshPromise;
+  scheduleIdleWork(() => preloadAllPanelData(false), { timeout: runRefreshInBackground ? 4500 : 2200 });
 
   startAutoRefresh();
   startStationTimetableRefresh();
