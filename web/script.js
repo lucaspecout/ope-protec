@@ -11861,57 +11861,113 @@ function renderSituationOverview() {
 
   setHtml('situation-content', `
     ${buildFrAlertTodayBanner(frAlert)}
-    <section class="situation-kpi-stack">
-      ${allKpiRows.map(renderKpiLine).join('')}
-    </section>
+    <section class="ops-dashboard ops-dashboard--${escapeHtml(normalizeLevel(highestLevel))}">
+      <header class="ops-topbar">
+        <div>
+          <p class="ops-eyebrow">Alertes de secours</p>
+          <h2>${escapeHtml(situationStatusLabel)}</h2>
+        </div>
+        <div class="ops-topbar__actions">
+          <span class="ops-alert-pill">${escapeHtml(normalizeLevel(highestLevel).toUpperCase())}</span>
+          <span class="ops-refresh-pill">MAJ ${escapeHtml(generatedAt)}</span>
+          <button id="situation-copy-sitrep-btn" type="button" class="btn-copy-sitrep ghost" title="Copier le SITREP en texte brut">Copier SITREP</button>
+          <button id="situation-export-pdf-btn" type="button">PDF</button>
+        </div>
+      </header>
 
-    <div class="situation-toolbar situation-toolbar--kpi situation-toolbar--kpi-actions">
-      <div class="situation-toolbar__actions">
-        <button id="situation-copy-sitrep-btn" type="button" class="btn-copy-sitrep ghost" title="Copier le SITREP en texte brut">Copier SITREP</button>
-        <button id="situation-export-pdf-btn" type="button">Telecharger PDF</button>
+      <section class="ops-kpi-grid">
+        ${controlMetrics.slice(0, 6).map(renderControlMetric).join('')}
+      </section>
+
+      <div class="ops-layout">
+        <section class="ops-stack">
+          <article class="tile ops-panel ops-panel--alert">
+            <div class="situation-card-title">
+              <h3>Alertes en temps reel</h3>
+              <span>${criticalMarkup.includes('<li') ? 'Priorite' : 'OK'}</span>
+            </div>
+            <ul class="list compact">${criticalMarkup}</ul>
+          </article>
+
+          <article class="tile ops-panel">
+            <div class="situation-card-title">
+              <h3>Repartition operationnelle</h3>
+              <span>${openEvents.length + activeLogCount}</span>
+            </div>
+            <div class="ops-donut" style="--risk:${riskPercent}%">
+              <strong>${escapeHtml(String(openEvents.length + activeLogCount))}</strong>
+              <span>Total</span>
+            </div>
+            <div class="ops-signal-list">
+              ${prioritySignals.map((item) => `<p><span class="situation-level-dot situation-level-dot--${escapeHtml(normalizeLevel(item.level))}"></span>${escapeHtml(item.label)}<strong>${escapeHtml(item.value)}</strong></p>`).join('')}
+            </div>
+          </article>
+        </section>
+
+        <article class="tile ops-map-card">
+          <div class="situation-card-title">
+            <h3>Carte des interventions</h3>
+            <span>Isere</span>
+          </div>
+          <div class="ops-map-visual" aria-label="Vue synthetique Isere">
+            <span class="ops-map-city ops-map-city--grenoble">Grenoble</span>
+            <span class="ops-map-city ops-map-city--voiron">Voiron</span>
+            <span class="ops-map-city ops-map-city--bourgoin">Bourgoin-Jallieu</span>
+            <span class="ops-marker ops-marker--red" style="--x:62%;--y:39%">${openEvents.length}</span>
+            <span class="ops-marker ops-marker--orange" style="--x:44%;--y:24%">${apicAlerts}</span>
+            <span class="ops-marker ops-marker--green" style="--x:58%;--y:68%">${activeLogCount}</span>
+            <span class="ops-marker ops-marker--blue" style="--x:30%;--y:55%">${sncfAlerts}</span>
+            <span class="ops-marker ops-marker--purple" style="--x:76%;--y:52%">${vigieauAlertsCount}</span>
+            <div class="ops-map-legend">
+              <span>Interventions</span><span>Equipes</span><span>Vehicules</span><span>Risques</span>
+            </div>
+          </div>
+        </article>
+
+        <section class="ops-stack">
+          <article class="tile ops-panel">
+            <div class="situation-card-title">
+              <h3>Dernieres interventions</h3>
+              <span>${openEvents.length}</span>
+            </div>
+            <ul class="list compact">${openEventsMarkup}</ul>
+          </article>
+          <article class="tile ops-panel">
+            <div class="situation-card-title">
+              <h3>Fil prioritaire</h3>
+              <span>${activeLogs.length}</span>
+            </div>
+            <ul class="list compact">${activeLogs.slice(0, 5).map((log) => buildSituationLogMarkup(log)).join('') || '<li>Aucune crise nouvelle / en cours / suivie liee a un evenement ouvert.</li>'}</ul>
+          </article>
+        </section>
       </div>
-    </div>
 
-    <div class="situation-middle-grid">
-      <article class="tile situation-feed-card situation-feed-card--alert">
-        <div class="situation-card-title">
-          <h3>Risques orange / rouge</h3>
-          <span>Priorite</span>
-        </div>
-        <ul class="list compact">${criticalMarkup}</ul>
-      </article>
-      <article class="tile situation-feed-card">
-        <div class="situation-card-title">
-          <h3>Evenements ouverts</h3>
-          <span>${openEvents.length}</span>
-        </div>
-        <ul class="list compact">${openEventsMarkup}</ul>
-      </article>
-    </div>
-
-    <div class="situation-middle-grid">
-      <article class="tile situation-feed-card">
-        <div class="situation-card-title">
-          <h3>Dernieres informations Prefecture</h3>
-          <span>${prefectureItems.length}</span>
-        </div>
-        <ul class="list compact">
-          ${prefectureItems.map((item) => {
-            const title = escapeHtml(item.title || 'Actualite Prefecture');
-            const published = item.published_at ? escapeHtml(item.published_at) : '';
-            const safeLink = String(item.link || '').startsWith('http') ? item.link : 'https://www.isere.gouv.fr';
-            return `<li><strong>${title}</strong>${published ? `<br><span class="muted">${published}</span>` : ''}<br><a href="${safeLink}" target="_blank" rel="noreferrer">Lire l'actualite</a></li>`;
-          }).join('') || '<li>Aucune actualite Prefecture disponible.</li>'}
-        </ul>
-      </article>
-      <article class="tile situation-feed-card">
-        <div class="situation-card-title">
-          <h3>Fil de situation prioritaire</h3>
-          <span>${activeLogs.length}</span>
-        </div>
-        <ul class="list">${activeLogs.map((log) => buildSituationLogMarkup(log)).join('') || '<li>Aucune crise nouvelle / en cours / suivie liee a un evenement ouvert.</li>'}</ul>
-      </article>
-    </div>
+      <section class="ops-bottom-grid">
+        <article class="tile ops-panel">
+          <div class="situation-card-title">
+            <h3>Signaux suivis</h3>
+            <span>${allKpiRows.length}</span>
+          </div>
+          <div class="ops-mini-grid">
+            ${allKpiRows.slice(0, 12).map(renderKpiLine).join('')}
+          </div>
+        </article>
+        <article class="tile ops-panel">
+          <div class="situation-card-title">
+            <h3>Dernieres informations Prefecture</h3>
+            <span>${prefectureItems.length}</span>
+          </div>
+          <ul class="list compact">
+            ${prefectureItems.slice(0, 5).map((item) => {
+              const title = escapeHtml(item.title || 'Actualite Prefecture');
+              const published = item.published_at ? escapeHtml(item.published_at) : '';
+              const safeLink = String(item.link || '').startsWith('http') ? item.link : 'https://www.isere.gouv.fr';
+              return `<li><strong>${title}</strong>${published ? `<br><span class="muted">${published}</span>` : ''}<br><a href="${safeLink}" target="_blank" rel="noreferrer">Lire l'actualite</a></li>`;
+            }).join('') || '<li>Aucune actualite Prefecture disponible.</li>'}
+          </ul>
+        </article>
+      </section>
+    </section>
   `);
 
   bindSituationActions();
