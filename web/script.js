@@ -2085,8 +2085,8 @@ function sanitizeErrorMessage(message) {
   if (normalized.includes('502') || normalized.includes('Bad Gateway')) {
     return "Serveur en cours de démarrage (502) — réessayez dans quelques secondes.";
   }
-  if (normalized.includes('503') || normalized.includes('Service Unavailable') || normalized.includes('starting')) {
-    return "Serveur en cours de démarrage — réessayez dans quelques secondes.";
+  if (normalized.includes('503') || normalized.includes('Service Unavailable') || normalized.includes('starting') || normalized.includes('syncing')) {
+    return "Synchronisation temporaire de l'API — les données déjà chargées restent utilisables.";
   }
   return normalized;
 }
@@ -2109,6 +2109,8 @@ function isTransientBackendError(error) {
     || message.includes('backend démarre')
     || message.includes('backend demarre')
     || message.includes('service temporairement indisponible')
+    || message.includes('synchronisation temporaire')
+    || message.includes('syncing')
     || message.includes('serveur en cours de démarrage')
     || message.includes('serveur en cours de demarrage')
     || message.includes('délai dépassé')
@@ -2372,8 +2374,29 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = API_REQUEST_TIMEO
 function canRetryRequest(error, attempt, method) {
   const maxRetries = method === 'GET' ? API_MAX_RETRIES_GET : API_MAX_RETRIES_NON_GET;
   if (attempt >= maxRetries) return false;
-  if (error?.status !== undefined && error?.status !== null) return false;
+  const status = Number(error?.status || 0);
+  if (status) return method === 'GET' && [502, 503, 504].includes(status);
   return Boolean(error?.isTimeout || isNetworkFetchError(error) || String(error?.message || '').includes('Réponse non-JSON'));
+}
+
+function hasUsableOperationalSnapshot() {
+  return Boolean(
+    (cachedDashboardSnapshot && Object.keys(cachedDashboardSnapshot).length)
+    || (cachedExternalRisksSnapshot && Object.keys(cachedExternalRisksSnapshot).length)
+    || readSnapshot(STORAGE_KEYS.dashboardSnapshot)
+    || readSnapshot(STORAGE_KEYS.externalRisksSnapshot)
+  );
+}
+
+function setDashboardErrorMessage(message = '', { transient = false } = {}) {
+  const target = document.getElementById('dashboard-error');
+  if (!target) return;
+  if (!message) {
+    target.textContent = '';
+    return;
+  }
+  if (transient && hasUsableOperationalSnapshot()) return;
+  target.textContent = sanitizeErrorMessage(message);
 }
 
 async function requestApiAcrossOrigins(path, fetchOptions = {}, {
@@ -2410,8 +2433,8 @@ async function requestApiAcrossOrigins(path, fetchOptions = {}, {
         return payload;
       } catch (error) {
         apiOriginFailures.set(origin, Date.now());
-        if (error?.status !== undefined && error?.status !== null) throw error;
         lastError = error;
+        if (error?.status !== undefined && error?.status !== null && !canRetryRequest(error, attempt, method)) throw error;
       }
     }
 
@@ -2937,7 +2960,9 @@ function setActivePanel(panelId) {
       if (panelId === 'meteo-panel') await renderWeeklyWeatherPanel(cachedExternalRisksSnapshot || {});
     }).catch((error) => {
       const errorTarget = document.getElementById('dashboard-error');
-      if (errorTarget && !errorTarget.textContent.trim()) errorTarget.textContent = sanitizeErrorMessage(error.message);
+      if (errorTarget && !errorTarget.textContent.trim()) {
+        setDashboardErrorMessage(error.message, { transient: isTransientBackendError(error) });
+      }
     });
   }
   if (panelId === 'water-panel' && token) {
@@ -15060,7 +15085,7 @@ async function refreshAll(forceRefresh = false) {
     // N'afficher "Chargement dégradé" que si le fallback a aussi échoué (≥3 sources en erreur).
     // Si le bootstrap échoue mais que les fallbacks individuels passent, l'UI est complète
     // et il n'y a rien à signaler à l'utilisateur.
-    if (bootstrapError && fallbackFailedCount >= 3) {
+    if (bootstrapError && fallbackFailedCount >= 3 && !(isTransientBackendError(bootstrapError) && hasUsableOperationalSnapshot())) {
       if (errorTarget) errorTarget.textContent = `Chargement dégradé: ${sanitizeErrorMessage(bootstrapError.message)}`;
     }
 
