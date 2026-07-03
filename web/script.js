@@ -11828,6 +11828,111 @@ function renderSituationOverview() {
       <strong>${escapeHtml(String(card.value))}</strong>
       <small>${escapeHtml(String(card.info || ''))}</small>
     </article>`;
+  const controlMetrics = [
+    { key: 'meteo', label: 'Meteo', value: vigilance, detail: 'Vigilance departementale', css: vigilance },
+    { key: 'crues', label: 'Crues', value: crues, detail: `Troncons ${mainTronconLevel} / stations ${stationsLevel}`, css: crues },
+    { key: 'communes-crise', label: 'PCS crise', value: String(crisisCount), detail: 'Communes activees', css: crisisCount > 0 ? 'rouge' : 'vert' },
+    { key: 'apic', label: 'Pluie intense', value: String(apicAlerts), detail: 'Alertes APIC', css: apicAlerts > 0 ? 'orange' : 'vert' },
+    { key: 'vigicrues-flash', label: 'Crues rapides', value: String(vigicruesFlashAlerts), detail: 'Vigicrues Flash', css: vigicruesFlashAlerts > 0 ? 'orange' : 'vert' },
+    { key: 'sncf', label: 'Transport', value: String(sncfAlerts), detail: 'Alertes SNCF', css: sncfAlerts > 0 ? 'orange' : 'vert' },
+    { key: 'vigieau', label: 'Eau', value: String(vigieauAlertsCount), detail: 'Restrictions', css: vigieauAlertsCount > 0 ? 'jaune' : 'vert' },
+    { key: 'arcep', label: 'Reseaux', value: String(arcepOutages), detail: 'Sites mobiles HS', css: arcepOutages > 0 ? 'jaune' : 'vert' },
+  ];
+  const renderControlMetric = (card) => `
+    <article class="control-metric control-metric--${escapeHtml(normalizeLevel(card.css))}" role="button" tabindex="0" data-kpi-key="${escapeHtml(card.key)}" data-kpi-label="${escapeHtml(card.label)}">
+      <span>${escapeHtml(card.label)}</span>
+      <strong>${escapeHtml(String(card.value))}</strong>
+      <small>${escapeHtml(card.detail)}</small>
+    </article>`;
+  const liveTimeline = activeLogs.slice(0, 6);
+  const openEventsMarkup = buildOpenEventsSituationMarkup(cachedEvents);
+  const criticalMarkup = buildCriticalRisksMarkup(dashboard, externalRisks);
+
+  setHtml('situation-content', `
+    ${buildFrAlertTodayBanner(frAlert)}
+    <section class="control-board control-board--${escapeHtml(normalizeLevel(highestLevel))}">
+      <header class="control-topline">
+        <div>
+          <p class="control-eyebrow">CRISIS38 / supervision temps reel</p>
+          <h2>${escapeHtml(situationStatusLabel)}</h2>
+        </div>
+        <div class="control-topline__right">
+          <span class="control-level">${escapeHtml(normalizeLevel(highestLevel).toUpperCase())}</span>
+          <span class="control-clock">MAJ ${escapeHtml(generatedAt)}</span>
+          <button id="situation-tv-fullscreen-btn" type="button" class="ghost">Plein ecran TV</button>
+        </div>
+      </header>
+
+      <div class="control-hero-grid">
+        <aside class="control-risk">
+          <span>Risque global</span>
+          <strong>${escapeHtml(globalRiskValue)}</strong>
+          <div class="control-risk__bar" style="--risk:${riskPercent}%"></div>
+          <p>Meteo <b class="risk-${escapeHtml(vigilance)}">${escapeHtml(vigilance)}</b> / Crues <b class="risk-${escapeHtml(crues)}">${escapeHtml(crues)}</b></p>
+        </aside>
+
+        <div class="control-map" aria-label="Vue departement Isere">
+          <div class="control-map__shape">
+            <span class="control-map__status">${escapeHtml(normalizeLevel(highestLevel).toUpperCase())}</span>
+            <i class="control-map__scan"></i>
+          </div>
+          <div class="control-map__legend">
+            <span>Evenements ${openEvents.length}</span>
+            <span>MCO ${activeLogCount}</span>
+            <span>Pluie/crues ${apicAlerts + vigicruesFlashAlerts}</span>
+          </div>
+        </div>
+
+        <aside class="control-now">
+          <div class="control-panel-title">
+            <span>A traiter</span>
+            <strong>Maintenant</strong>
+          </div>
+          <ul class="list compact">${criticalMarkup}</ul>
+        </aside>
+      </div>
+
+      <section class="control-metric-grid">
+        ${controlMetrics.map(renderControlMetric).join('')}
+      </section>
+
+      <section class="control-bottom-grid">
+        <article class="control-list-panel">
+          <div class="control-panel-title">
+            <span>Operations</span>
+            <strong>Evenements ouverts</strong>
+          </div>
+          <ul class="list compact">${openEventsMarkup}</ul>
+        </article>
+        <article class="control-list-panel">
+          <div class="control-panel-title">
+            <span>Main courante</span>
+            <strong>Derniers signaux</strong>
+          </div>
+          <ul class="control-timeline">
+            ${liveTimeline.map((log) => buildSituationLogMarkup(log)).join('') || '<li>Aucun signal prioritaire actif.</li>'}
+          </ul>
+        </article>
+        <article class="control-list-panel">
+          <div class="control-panel-title">
+            <span>Institutionnel</span>
+            <strong>Prefecture</strong>
+          </div>
+          <ul class="list compact">
+            ${prefectureItems.slice(0, 3).map((item) => {
+              const title = escapeHtml(item.title || 'Actualite Prefecture');
+              const published = item.published_at ? escapeHtml(item.published_at) : '';
+              const safeLink = String(item.link || '').startsWith('http') ? item.link : 'https://www.isere.gouv.fr';
+              return `<li><strong>${title}</strong>${published ? `<br><span class="muted">${published}</span>` : ''}<br><a href="${safeLink}" target="_blank" rel="noreferrer">Lire</a></li>`;
+            }).join('') || '<li>Aucune actualite Prefecture disponible.</li>'}
+          </ul>
+        </article>
+      </section>
+    </section>
+  `);
+
+  bindSituationActions();
+  return;
 
   setHtml('situation-content', `
     ${buildFrAlertTodayBanner(frAlert)}
@@ -12503,6 +12608,16 @@ function exportSitrepPdf() {
 
 function bindSituationActions() {
   document.getElementById('situation-copy-sitrep-btn')?.addEventListener('click', () => copySitrepToClipboard());
+  document.getElementById('situation-tv-fullscreen-btn')?.addEventListener('click', async () => {
+    const panel = document.getElementById('situation-panel');
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await panel?.requestFullscreen?.();
+    } catch (error) {
+      const errorTarget = document.getElementById('dashboard-error');
+      if (errorTarget) errorTarget.textContent = sanitizeErrorMessage(error.message);
+    }
+  });
   document.getElementById('situation-export-pdf-btn')?.addEventListener('click', async () => {
     const button = document.getElementById('situation-export-pdf-btn');
     const originalText = button?.textContent || '📄 Générer et télécharger le SITREP PDF';
