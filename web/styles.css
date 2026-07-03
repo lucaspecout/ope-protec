@@ -5983,10 +5983,10 @@ body {
 #map-panel .map-layout {
   position: absolute;
   left: 14px;
-  right: 14px;
   bottom: 10px;
   z-index: 820;
-  grid-template-columns: .9fr 1.4fr 1.4fr;
+  width: min(460px, calc(100% - 28px));
+  grid-template-columns: 1fr;
   gap: 8px;
   margin: 0;
   pointer-events: none;
@@ -6013,7 +6013,7 @@ body {
 }
 
 #map-panel .map-data-col .filter-group {
-  max-height: 74px;
+  max-height: 88px;
   overflow: hidden;
 }
 
@@ -6028,7 +6028,7 @@ body {
 }
 
 #map-panel .map-data-col .filter-group__body {
-  max-height: 38px;
+  max-height: 52px;
   overflow: hidden;
   padding: 6px 10px;
 }

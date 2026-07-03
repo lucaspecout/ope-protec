@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css?v=20260703-strategic-map" />
+  <link rel="stylesheet" href="/styles.css?v=20260703-map-cleanup" />
 </head>
 <body>
   <div id="network-offline-banner" role="alert" aria-live="assertive">
@@ -1188,15 +1188,6 @@
                   </div>
                   <iframe id="map-streetview-frame" title="Street View Google Maps" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
                 </div>
-                <div class="map-floating-legend" aria-label="Légende carte">
-                  <strong>Légende</strong>
-                  <span><i class="legend-dot legend-dot--stations"></i>Stations</span>
-                  <span><i class="legend-dot legend-dot--resources"></i>Ressources</span>
-                  <span><i class="legend-dot legend-dot--pcs"></i>PCS</span>
-                  <span><i class="legend-dot legend-dot--custom"></i>Points perso</span>
-                  <span><i class="legend-dot legend-dot--traffic"></i>Trafic</span>
-                  <span><i class="legend-dot legend-dot--risk"></i>Risques</span>
-                </div>
               </div>
 
               <!-- Statistiques résumé -->
@@ -1222,26 +1213,9 @@
           <!-- Données opérationnelles détaillées -->
           <div class="map-layout">
             <div class="map-data-col">
-              <p class="muted">Météo <strong id="meteo-level">-</strong> &nbsp;·&nbsp; Hydrologie <strong id="river-level">-</strong></p>
-              <details class="filter-group" open>
-                <summary class="filter-group__title">🛰️ Points opérationnels personnalisés</summary>
-                <div class="filter-group__body"><ul id="custom-points-list" class="list practical"></ul></div>
-              </details>
-              <details class="filter-group">
-                <summary class="filter-group__title">✏️ Annotations tactiques</summary>
-                <div class="filter-group__body"><ul id="map-annotations-list" class="list practical"></ul></div>
-              </details>
-            </div>
-            <div class="map-data-col">
               <details class="filter-group" open>
                 <summary class="filter-group__title">🏛️ Communes avec PCS</summary>
                 <div class="filter-group__body"><ul id="pcs-list" class="list practical"></ul></div>
-              </details>
-            </div>
-            <div class="map-data-col">
-              <details class="filter-group" open>
-                <summary class="filter-group__title">🚨 Alertes mobilité Itinisère</summary>
-                <div class="filter-group__body"><ul id="itinerary-list" class="list practical"></ul></div>
               </details>
             </div>
           </div>
