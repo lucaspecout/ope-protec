@@ -6168,6 +6168,37 @@ body {
   background: rgba(7, 21, 45, .55);
 }
 
+#map-panel .route-item {
+  border-color: rgba(255,255,255,.14);
+  color: #eff6ff;
+  background: rgba(7, 21, 45, .62);
+}
+
+#map-panel .route-item__main strong {
+  color: #ffffff;
+}
+
+#map-panel .route-item__main span {
+  color: rgba(234,242,255,.72);
+}
+
+#map-panel .route-item__actions button {
+  border: 1px solid rgba(147, 197, 253, .5);
+  color: #ffffff;
+  background: rgba(37, 99, 235, .72);
+  box-shadow: none;
+  font-weight: 800;
+}
+
+#map-panel .route-item__actions button[data-route-action="delete"] {
+  border-color: rgba(248, 113, 113, .58);
+  background: rgba(190, 18, 60, .8);
+}
+
+#map-panel .route-item__actions button:hover {
+  filter: brightness(1.12);
+}
+
 #map-panel .map-filter-group--tools .tactical-layer-grid label:has(input:checked),
 #map-panel .map-controls .filter-subgroup:has(input:checked),
 #map-panel .map-controls .map-inline-checkbox:has(input:checked) {
