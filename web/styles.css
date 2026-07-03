@@ -5524,41 +5524,14 @@ body {
   .situation-bottom-strip span:last-child { border-bottom: 0; }
 }
 
-/* Protection Civile Isere logo mark */
-.pc-logo-mark {
-  position: relative;
-  display: inline-block;
-  width: 62px;
-  height: 62px;
-  flex: 0 0 auto;
+/* Protection Civile Isere imported logo image */
+.pc-logo-img {
+  display: block;
   border-radius: 50%;
-  overflow: hidden;
-  background: #f48a00;
-  box-shadow: 0 10px 24px rgba(7, 27, 68, .24);
+  object-fit: contain;
+  background: transparent;
 }
-.pc-logo-mark::before {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 51%;
-  width: 76%;
-  height: 79%;
-  transform: translate(-50%, -50%);
-  background: #ffffff;
-  clip-path: polygon(50% 0%, 100% 92%, 50% 100%, 0% 92%);
-}
-.pc-logo-mark::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 57%;
-  width: 43%;
-  height: 53%;
-  transform: translate(-50%, -50%);
-  background: #074783;
-  clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
-}
-.login-logo__icon.pc-logo-mark {
+.login-logo__icon.pc-logo-img {
   width: 48px;
   height: 48px;
   box-shadow: 0 8px 18px rgba(7, 27, 68, .18);

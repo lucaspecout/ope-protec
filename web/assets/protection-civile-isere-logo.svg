@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Protection Civile Isere</title>
+  <desc id="desc">Logo rond orange de la Protection Civile avec triangle blanc et triangle bleu.</desc>
+  <circle cx="256" cy="256" r="256" fill="#ff8a00"/>
+  <path fill="#ffffff" d="M256 0C157.2 78.7 76.9 211.9 41.4 397.1c133.2 34.2 296.1 33.5 429.2 0C435.1 211.9 354.8 78.7 256 0Z"/>
+  <path fill="#084984" d="M256 76.2 102.5 357.4h307L256 76.2Z"/>
+</svg>
