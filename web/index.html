@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css?v=20260703-map-dark-tools" />
+  <link rel="stylesheet" href="/styles.css?v=20260703-map-poi-shapes" />
 </head>
 <body>
   <div id="network-offline-banner" role="alert" aria-live="assertive">
@@ -1139,11 +1139,15 @@
                 <button id="map-open-streetview" type="button" class="ghost map-btn-lite">👁️ Street View</button>
               </div>
 
-              <!-- Liste ressources -->
+              <!-- POI et formes -->
               <details class="filter-group map-filter-group--lists">
-                <summary class="filter-group__title">📋 Ressources affichées</summary>
+                <summary class="filter-group__title">📍 POI et formes</summary>
                 <div class="filter-group__body">
-                  <ul id="resources-list" class="list compact resources-sidebar-list"></ul>
+                  <p class="muted map-poi-shapes-note">Centrez ou supprimez les POI et formes dessinées.</p>
+                  <h5 class="map-poi-shapes-title">POI</h5>
+                  <ul id="custom-points-list" class="list compact resources-sidebar-list"></ul>
+                  <h5 class="map-poi-shapes-title">Formes</h5>
+                  <ul id="map-annotations-list" class="list compact resources-sidebar-list"></ul>
                 </div>
               </details>
 
@@ -1460,6 +1464,6 @@
     <path id="isere-shape" d="M0 0h1v1H0z"></path>
   </svg>
   <script src="/hosting_data.js?v=20260603-perf1"></script>
-  <script src="/script.js?v=20260703-sitrep-icons"></script>
+  <script src="/script.js?v=20260703-map-poi-shapes"></script>
 </body>
 </html>

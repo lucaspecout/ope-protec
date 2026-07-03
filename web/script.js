@@ -8507,14 +8507,33 @@ function renderMapAnnotations(showFeedback = false) {
       });
       geo.addTo(mapAnnotationFeatureGroup);
     }
-    if (canEdit()) {
-      list.push(`<li>${escapeHtml(record.annotation_type)} · ${escapeHtml(record.text_label || 'zone tracée')} <button type="button" data-remove-annotation="${record.id}">Supprimer</button></li>`);
-    } else {
-      list.push(`<li>${escapeHtml(record.annotation_type)} · ${escapeHtml(record.text_label || 'zone tracée')}</li>`);
-    }
+    const actions = `<span class="map-poi-shapes-actions"><button type="button" data-focus-annotation="${escapeHtml(record.id)}">Focus</button>${canEdit() ? ` <button type="button" data-remove-annotation="${escapeHtml(record.id)}">Supprimer</button>` : ''}</span>`;
+    list.push(`<li><strong>${escapeHtml(record.annotation_type)}</strong> · ${escapeHtml(record.text_label || 'zone tracée')} ${actions}</li>`);
   });
   setHtml('map-annotations-list', list.join('') || '<li>Aucune annotation tactique.</li>');
   if (showFeedback) setMapFeedback(`${mapAnnotations.length} annotation(s) tactique(s) visible(s).`);
+}
+
+function focusMapAnnotation(annotationId) {
+  if (!leafletMap || typeof window.L === 'undefined') return false;
+  const record = mapAnnotations.find((item) => String(item.id) === String(annotationId));
+  if (!record?.geojson) return false;
+  try {
+    const layer = window.L.geoJSON(record.geojson);
+    const bounds = layer.getBounds?.();
+    if (bounds?.isValid?.()) {
+      leafletMap.fitBounds(bounds, { padding: [42, 42], maxZoom: 17 });
+      setMapFeedback(`Forme centrée: ${record.text_label || record.annotation_type || 'annotation'}.`);
+      return true;
+    }
+    const coords = record.geojson?.geometry?.coordinates || [];
+    if (coords.length >= 2 && Number.isFinite(Number(coords[0])) && Number.isFinite(Number(coords[1]))) {
+      leafletMap.setView([Number(coords[1]), Number(coords[0])], Math.max(leafletMap.getZoom(), 16));
+      setMapFeedback(`Annotation centrée: ${record.text_label || record.annotation_type || 'annotation'}.`);
+      return true;
+    }
+  } catch {}
+  return false;
 }
 
 const MAP_BRIEFING_COLORS = {
@@ -9162,7 +9181,8 @@ function renderCustomPoints(showFeedback = true) {
   const listMarkup = filteredPoints
     .map((point) => {
       const pointIcon = point.icon_url ? '🖼️' : (point.icon || iconForCategory(point.category));
-      return `<li><strong>${escapeHtml(pointIcon)} ${escapeHtml(point.name)}</strong> · ${point.lat.toFixed(4)}, ${point.lon.toFixed(4)} <button type="button" data-remove-point="${point.id}">Supprimer</button></li>`;
+      const actions = `<span class="map-poi-shapes-actions"><button type="button" data-focus-point="${escapeHtml(point.id)}">Focus</button><button type="button" data-remove-point="${escapeHtml(point.id)}">Supprimer</button></span>`;
+      return `<li><strong>${escapeHtml(pointIcon)} ${escapeHtml(point.name)}</strong><br><span class="muted">${point.lat.toFixed(4)}, ${point.lon.toFixed(4)}</span> ${actions}</li>`;
     })
     .join('') || '<li>Aucun point personnalisé.</li>';
   setHtml('custom-points-list', listMarkup);
@@ -9185,6 +9205,16 @@ function renderCustomPoints(showFeedback = true) {
   });
   if (showFeedback) setMapFeedback(`${filteredPoints.length} marqueur(s) opérationnel(s)/POI affiché(s).`);
   if (mapPoints.some((p) => p.category === 'site_sensible')) _drawResourceMarkers();
+}
+
+function focusMapPoint(pointId) {
+  if (!leafletMap) return false;
+  const point = mapPoints.find((item) => String(item.id) === String(pointId));
+  const coords = point ? normalizeMapCoordinates(point.lat, point.lon) : null;
+  if (!point || !coords) return false;
+  leafletMap.setView([coords.lat, coords.lon], Math.max(leafletMap.getZoom(), 16));
+  setMapFeedback(`POI centré: ${point.name || 'point opérationnel'}.`);
+  return true;
 }
 
 function onMapClickAddPoint(event) {
@@ -15512,6 +15542,11 @@ function bindAppInteractions() {
     await handleMapSearch();
   });
   document.getElementById('custom-points-list')?.addEventListener('click', async (event) => {
+    const focusButton = event.target.closest('[data-focus-point]');
+    if (focusButton) {
+      focusMapPoint(focusButton.getAttribute('data-focus-point'));
+      return;
+    }
     const button = event.target.closest('[data-remove-point]');
     if (!button) return;
     const targetId = button.getAttribute('data-remove-point');
@@ -15524,6 +15559,11 @@ function bindAppInteractions() {
     }
   });
   document.getElementById('map-annotations-list')?.addEventListener('click', async (event) => {
+    const focusButton = event.target.closest('[data-focus-annotation]');
+    if (focusButton) {
+      focusMapAnnotation(focusButton.getAttribute('data-focus-annotation'));
+      return;
+    }
     const button = event.target.closest('[data-remove-annotation]');
     if (!button) return;
     try {

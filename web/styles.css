@@ -6198,6 +6198,43 @@ body {
   background: #fff;
 }
 
+#map-panel .map-poi-shapes-note {
+  margin: 0 0 8px;
+  color: rgba(234,242,255,.68);
+  font-size: .74rem;
+}
+
+#map-panel .map-poi-shapes-title {
+  margin: 10px 0 5px;
+  color: #eff6ff;
+  font-size: .72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+
+#map-panel .map-poi-shapes-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+#map-panel .map-poi-shapes-actions button {
+  min-height: 26px;
+  padding: .22rem .48rem;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 7px;
+  color: #eff6ff;
+  background: rgba(255,255,255,.08);
+  box-shadow: none;
+  font-size: .72rem;
+}
+
+#map-panel .map-poi-shapes-actions button:hover {
+  background: rgba(255,255,255,.16);
+}
+
 #map-panel .map-filter-group--tools .map-tool-section__title::before {
   background: #a78bfa;
   box-shadow: 0 0 0 3px rgba(167, 139, 250, .18);
