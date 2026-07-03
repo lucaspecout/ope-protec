@@ -1,0 +1,1490 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CRISIS38 · Centre opérationnel Isère</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css?v=20260603-perf3" />
+</head>
+<body>
+  <div id="network-offline-banner" role="alert" aria-live="assertive">
+    Connexion perdue — l'application fonctionne en mode hors-ligne. Les données affichées peuvent ne plus être à jour.
+  </div>
+  <main class="shell">
+    <section id="login-view" class="auth-wrap">
+      <form id="login-form" class="panel auth-card" method="post" action="#" autocomplete="off">
+        <div class="login-logo">
+          <div class="login-logo__icon" aria-hidden="true"></div>
+          <div class="login-logo__text">
+            <strong>CRISIS38</strong>
+            <span>Protection Civile · Isère</span>
+          </div>
+        </div>
+        <h1>Connexion</h1>
+        <p class="lead">Accès au centre opérationnel et aux services connectés.</p>
+        <label>Identifiant<input id="login-username" name="username" autocomplete="username" required /></label>
+        <label>Mot de passe<input id="login-password" name="password" type="password" autocomplete="current-password" required /></label>
+        <button id="login-submit-btn" type="submit">Connexion sécurisée</button>
+        <p id="login-status" class="login-status hidden"></p>
+        <p id="login-error" class="error"></p>
+        <details id="login-error-debug-wrap" class="login-error-debug hidden">
+          <summary>Détails techniques de connexion</summary>
+          <pre id="login-error-debug"></pre>
+        </details>
+      </form>
+
+      <form id="password-form" class="panel auth-card hidden" hidden method="post" action="#" autocomplete="off">
+        <h2>Nouveau mot de passe</h2>
+        <label>Nouveau mot de passe<input name="new_password" type="password" minlength="8" required /></label>
+        <button type="submit">Valider</button>
+        <p id="password-error" class="error"></p>
+      </form>
+    </section>
+
+    <div id="sidebar-backdrop" class="sidebar-backdrop" aria-hidden="true"></div>
+    <section id="app-view" class="app hidden" hidden>
+      <aside id="app-sidebar" class="panel sidebar">
+        <div class="sidebar-header">
+          <p class="tag">Centre de commandement</p>
+          <h2>Isère · 38</h2>
+          <p class="muted">Rôle <strong id="current-role">-</strong></p>
+          <p class="muted">Commune <strong id="current-commune">Toutes</strong></p>
+        </div>
+        <nav class="side-nav" aria-label="Menu principal">
+          <button class="menu-btn" data-target="situation-panel" data-icon="📊"><span class="menu-label">Situation</span></button>
+          <button class="menu-btn" data-target="services-panel" data-icon="🔌"><span class="menu-label">Services connectés</span></button>
+          <button class="menu-btn" data-target="stations-panel" data-icon="🚆"><span class="menu-label">Horaires gares</span></button>
+          <button class="menu-btn" data-target="meteo-panel" data-icon="🌤️"><span class="menu-label">Météo semaine</span></button>
+          <button class="menu-btn" data-target="water-panel" data-icon="🚰"><span class="menu-label">Eau potable</span></button>
+          <button class="menu-btn" data-target="contacts-panel" data-icon="☎️"><span class="menu-label">Contacts Isère</span></button>
+          <button class="menu-btn" data-target="georisques-panel" data-icon="🌍"><span class="menu-label">Page Géorisques</span></button>
+          <button class="menu-btn" data-target="news-panel" data-icon="📰"><span class="menu-label">Actualités</span></button>
+          <button class="menu-btn" data-target="municipalities-panel" data-icon="🏛️"><span class="menu-label">Communes</span></button>
+          <button class="menu-btn" data-target="logs-panel" data-icon="📝"><span class="menu-label">Main courante</span><span id="menu-events-badge" class="menu-badge hidden" aria-label="événements ouverts"></span></button>
+          <button class="menu-btn" data-target="map-panel" data-icon="🗺️"><span class="menu-label">Carte Isère</span></button>
+          <button class="menu-btn hidden" data-target="users-panel" data-icon="👤" hidden><span class="menu-label">Utilisateurs</span></button>
+          <button class="menu-btn" data-target="api-panel" data-icon="🧩"><span class="menu-label">Interconnexions API</span></button>
+          <button class="menu-btn" data-target="notifications-panel" data-icon="🔔"><span class="menu-label">Notifications</span></button>
+          <button class="menu-btn" data-target="audit-panel" data-icon="🔍" id="menu-audit-btn" class="hidden" hidden><span class="menu-label">Audit</span></button>
+        </nav>
+        <button id="logout-btn" class="danger">Déconnexion</button>
+      </aside>
+
+      <section class="content">
+        <header class="panel app-header">
+          <div class="app-header-nav-actions">
+            <button id="app-menu-btn" class="menu-toggle" type="button" aria-expanded="false" aria-controls="app-sidebar">☰ Menu</button>
+            <button id="app-sidebar-toggle" class="ghost" type="button" aria-expanded="true" aria-controls="app-sidebar">↔ Réduire menu</button>
+          </div>
+          <div>
+            <p class="tag">Pilotage en temps réel</p>
+            <h1 id="panel-title">Situation opérationnelle</h1>
+          </div>
+          <div class="header-actions">
+            <p id="dashboard-error" class="error"></p>
+            <div class="header-live-bar" aria-label="État opérationnel">
+              <span id="header-vigilance-badge" class="header-vigilance-badge header-vigilance-badge--vert" title="Niveau de vigilance global">VERT</span>
+              <button id="header-refresh-btn" class="ghost header-refresh-btn" type="button" title="Actualiser les données maintenant">↺</button>
+              <div class="header-clock" aria-live="off" aria-label="Heure courante">
+                <span id="header-time" class="header-clock__time">--:--:--</span>
+                <span id="header-date" class="header-clock__date">--/--/----</span>
+              </div>
+              <span id="header-freshness" class="header-freshness" aria-live="polite"></span>
+              <button id="notif-permission-btn" class="ghost header-notif-btn hidden" type="button" hidden style="display:none;font-size:.82rem;padding:.2rem .5rem">🔔 Alertes</button>
+            </div>
+          </div>
+        </header>
+        <div id="global-loading-bar" class="global-loading-bar hidden" hidden aria-live="polite">
+          <div class="global-loading-bar__top">
+            <strong id="global-loading-title">Chargement</strong>
+            <span id="global-loading-percent">0%</span>
+          </div>
+          <div class="global-loading-bar__track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <span id="global-loading-progress"></span>
+          </div>
+          <p id="global-loading-current">Préparation des modules...</p>
+        </div>
+
+        <section id="situation-panel" class="panel view situation-panel">
+          <div id="situation-content" class="situation-content">
+            <div class="situation-loading">
+              <div class="situation-loading__head">
+                <div>
+                  <p class="tag">Initialisation</p>
+                  <h3>Chargement de la situation opérationnelle</h3>
+                  <p class="muted">Préparation du tableau de bord, des alertes et des flux terrain.</p>
+                </div>
+                <span class="situation-loading__pulse">En cours</span>
+              </div>
+              <div class="situation-loading__grid" aria-hidden="true">
+                <span></span><span></span><span></span><span></span>
+              </div>
+              <div class="situation-loading__wide" aria-hidden="true"></div>
+            </div>
+          </div>
+        </section>
+
+        <section id="services-panel" class="panel view hidden" hidden>
+          <div class="svc-panel-hd">
+            <div>
+              <h3>Services connectés</h3>
+              <p class="muted">Surveillance temps réel des flux opérationnels pour la cellule de crise Isère.</p>
+            </div>
+            <div id="svc-summary-bar" class="svc-summary-bar"></div>
+          </div>
+
+          <!-- Cartes par catégorie — générées dynamiquement par buildServiceCards() -->
+          <div id="svc-cards-root" class="svc-cards-root"></div>
+
+          <!-- Nappes phréatiques — section dédiée -->
+          <div class="svc-gw-section">
+            <div class="svc-gw-hd">
+              <span class="svc-gw-icon">🏔️</span>
+              <div>
+                <h4 class="svc-gw-title">Nappes phréatiques Isère · Hub'Eau</h4>
+                <div id="groundwater-summary" class="svc-gw-kpis"></div>
+              </div>
+            </div>
+            <div id="groundwater-stations" class="svc-gw-stations"></div>
+          </div>
+
+        </section>
+
+        <section id="stations-panel" class="panel view hidden" hidden>
+          <div class="panel-head stations-panel-head">
+            <div>
+              <h3>Horaires des gares de l'Isere</h3>
+              <p class="muted">Arrivees et departs SNCF en temps reel. Les retards sont signales en rouge.</p>
+            </div>
+            <div class="stations-actions">
+              <label for="stations-filter">Gare</label>
+              <select id="stations-filter" aria-label="Filtrer les horaires par gare">
+                <option value="">Toutes les gares</option>
+              </select>
+              <button id="stations-refresh-btn" type="button" class="ghost">Actualiser</button>
+            </div>
+          </div>
+          <div id="stations-summary" class="stations-summary" aria-live="polite"></div>
+          <p id="stations-error" class="error"></p>
+          <div id="station-timetables-list" class="station-timetables-list">
+            <p class="muted">Chargement des horaires SNCF...</p>
+          </div>
+        </section>
+
+        <section id="meteo-panel" class="panel view hidden" hidden>
+          <div class="panel-head">
+            <div>
+              <h3>Prévisions météo hebdomadaires · Isère</h3>
+              <p class="muted">Choisissez une ville pour voir la météo du jour en détail et la tendance de la semaine.</p>
+            </div>
+          </div>
+          <div class="meteo-city-controls">
+            <label for="meteo-city-select">Ville</label>
+            <select id="meteo-city-select" aria-label="Sélectionner une ville"></select>
+          </div>
+
+          <article id="meteo-city-current" class="meteo-current-card">
+            <p class="muted">Chargement de la météo locale…</p>
+          </article>
+
+          <h4>Heure par heure · aujourd'hui</h4>
+          <div id="meteo-hourly-list" class="meteo-hourly-list">
+            <p class="muted">Prévisions horaires indisponibles pour le moment.</p>
+          </div>
+
+          <h4>Vue semaine (emoji)</h4>
+          <div id="meteo-week-list" class="meteo-week-list"></div>
+          <p id="meteo-week-updated" class="muted"></p>
+        </section>
+
+        <section id="water-panel" class="panel view hidden" hidden>
+          <div class="water-hero tile">
+            <div>
+              <p class="tag">Hub'Eau</p>
+              <h3>Eau potable et assainissement</h3>
+              <p class="muted">Sélectionnez d'abord une commune PCS pour afficher la qualité de l'eau potable et les indicateurs réglementaires eau/assainissement.</p>
+            </div>
+            <div class="water-hero__meta">
+              <label for="water-municipality-select">Commune PCS</label>
+              <select id="water-municipality-select" aria-label="Sélectionner une commune PCS">
+                <option value="">Sélectionnez une commune PCS</option>
+              </select>
+            </div>
+          </div>
+
+          <div id="water-panel-empty" class="tile">
+            <h4>Choisir une commune</h4>
+            <p class="muted">Aucune donnée n'est affichée tant qu'une commune PCS n'est pas sélectionnée.</p>
+          </div>
+
+          <div id="water-panel-content" class="hidden" hidden>
+            <div id="water-quality-summary" class="water-summary-grid"></div>
+            <div class="water-layout">
+              <article class="tile">
+                <h4>Qualité de l'eau potable</h4>
+                <div id="water-quality-list" class="water-cards"></div>
+              </article>
+              <article class="tile">
+                <h4>Indicateurs eau et assainissement</h4>
+                <div id="water-services-summary" class="water-kpi-grid"></div>
+                <div id="water-services-list" class="water-cards"></div>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section id="contacts-panel" class="panel view hidden" hidden>
+          <div class="contacts-hero tile">
+            <div>
+              <p class="tag">Annuaire public</p>
+              <h3>Contacts utiles par ville de l'Isère</h3>
+              <p class="muted">Recherchez une commune iséroise pour obtenir directement les contacts utiles: téléphone, adresse et mail.</p>
+            </div>
+            <form id="contacts-search-form" class="contacts-search-form">
+              <label for="contacts-city-search">Ville de l'Isère</label>
+              <div class="contacts-search-row">
+                <input id="contacts-city-search" name="city" type="search" list="contacts-city-suggestions" placeholder="Ex. Voiron, Vienne, La Tour-du-Pin" autocomplete="off" />
+                <button type="submit">Rechercher</button>
+              </div>
+              <datalist id="contacts-city-suggestions"></datalist>
+            </form>
+          </div>
+
+          <div class="contacts-layout">
+            <article class="tile contacts-side-tile">
+              <h4>Numéros d'urgence</h4>
+              <div id="contacts-emergency-list" class="contacts-emergency-list"></div>
+            </article>
+            <article class="tile contacts-main-tile">
+              <div class="contacts-results-head">
+                <div>
+                  <h4 id="contacts-results-title">Choisir une ville</h4>
+                  <p id="contacts-results-meta" class="muted">Aucune recherche lancée.</p>
+                </div>
+                <p id="contacts-results-error" class="error"></p>
+              </div>
+              <div id="contacts-results-list" class="contacts-results-grid">
+                <p class="muted">Saisissez une ville de l'Isère pour afficher les contacts publics utiles.</p>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section id="georisques-panel" class="panel view hidden" hidden>
+          <div class="georisques-hero tile">
+            <div>
+              <p class="tag">Géo-risque opérationnel</p>
+              <h3>Isère · relief, vallées exposées et événements récents</h3>
+              <p class="muted">Vue entièrement recentrée sur les enjeux du 38 : sismicité alpine, mouvements de terrain, inondation, radon et suivi communal.</p>
+            </div>
+            <div class="georisques-hero__meta">
+              <p id="georisques-page-source" class="muted">Source: -</p>
+              <p id="georisques-page-debug" class="muted"></p>
+            </div>
+          </div>
+
+          <div class="georisques-focus-layout">
+            <article class="tile georisques-focus-selector">
+              <p class="tag">Commune PCS</p>
+              <h4>Choisir d'abord une commune</h4>
+              <p class="muted">Sélectionnez une commune PCS pour afficher immédiatement les risques utiles, les documents disponibles et les priorités opérationnelles.</p>
+              <div class="georisques-pcs-toolbar">
+                <label for="georisques-pcs-select">Commune PCS</label>
+                <select id="georisques-pcs-select" aria-label="Sélectionner une commune PCS">
+                  <option value="">Sélectionnez une commune PCS</option>
+                </select>
+              </div>
+            </article>
+            <article class="tile georisques-focus-detail">
+              <h4>Lecture opérationnelle</h4>
+              <div id="georisques-pcs-detail" class="georisques-pcs-detail muted">Sélectionnez une commune PCS pour afficher ses informations.</div>
+            </article>
+          </div>
+
+          <div id="georisques-overview" class="hidden" hidden>
+          <div class="kpis georisques-kpis">
+            <article class="tile"><h3>Statut service</h3><p id="georisques-page-status">-</p></article>
+            <article class="tile"><h3>Sismicité max Isère</h3><p id="georisques-page-seismic">-</p></article>
+            <article class="tile"><h3>Communes exposées radon</h3><p id="georisques-page-radon-alert">0</p></article>
+            <article class="tile"><h3>Inondation (documents)</h3><p id="georisques-page-flood-docs">0</p></article>
+            <article class="tile"><h3>PPR recensés</h3><p id="georisques-page-ppr-total">0</p></article>
+            <article class="tile"><h3>Mouvements terrain</h3><p id="georisques-page-ground-movements">0</p></article>
+            <article class="tile"><h3>Cavités</h3><p id="georisques-page-cavities">0</p></article>
+            <article class="tile"><h3>Mode API</h3><p id="georisques-page-api-mode">-</p></article>
+          </div>
+
+          <div class="georisques-isere-layout">
+            <article class="tile georisques-isere-territories">
+              <h4>Éléments essentiels en Isère</h4>
+              <ul class="list compact">
+                <li><strong>Vallée du Grésivaudan</strong> · risque combiné crue + mouvement de terrain.</li>
+                <li><strong>Agglomération grenobloise</strong> · concentration population, cavités et vulnérabilité urbaine.</li>
+                <li><strong>Oisans / Belledonne / Chartreuse</strong> · zones de pente sensibles (éboulis, glissements, chutes de blocs).</li>
+                <li><strong>Axes A48 / A49 / A41</strong> · impact direct sur mobilité de secours en cas d'aléa géologique.</li>
+              </ul>
+            </article>
+            <article class="tile">
+              <h4>Types de mouvements dominants</h4>
+              <ul id="georisques-movement-types-list" class="list compact"></ul>
+            </article>
+          </div>
+
+          <div class="georisques-lists">
+            <article class="tile">
+              <h4>Événements récents (terrain)</h4>
+              <ul id="georisques-recent-movements-list" class="list"></ul>
+            </article>
+            <article class="tile">
+              <h4>Communes prioritaires (score multi-risques)</h4>
+              <ul id="georisques-priority-communes-list" class="list"></ul>
+            </article>
+          </div>
+
+          <article class="tile">
+            <h4>Suivi détaillé des communes</h4>
+            <ul id="georisques-communes-list" class="list"></ul>
+          </article>
+          <article class="tile">
+            <h4>Documents Géorisques de la commune (AZI, DICRIM, PPR, TIM…)</h4>
+            <ul id="georisques-documents-list" class="list"></ul>
+          </article>
+          </div>
+        </section>
+
+        <section id="api-panel" class="panel view hidden" hidden>
+          <div class="flux-header">
+            <div>
+              <h3>Flux de données — supervision en direct</h3>
+              <p class="muted">Le serveur interroge les sources en permanence en arrière-plan. Tous les utilisateurs voient les mêmes données en temps réel.</p>
+            </div>
+            <button id="api-refresh-btn" type="button">Forcer actualisation</button>
+          </div>
+          <div id="flux-summary" class="flux-summary"></div>
+          <article class="tile system-health-card">
+            <div class="system-health-head">
+              <h4>Santé système</h4>
+              <button id="system-health-refresh-btn" type="button" class="ghost">Actualiser santé</button>
+            </div>
+            <div id="system-health-summary" class="system-health-summary muted">Chargement de l'état des flux...</div>
+            <div id="system-health-list" class="system-health-list"></div>
+          </article>
+          <div class="flux-filters" id="flux-filters">
+            <button class="flux-filter-btn active" data-filter="all">Tous</button>
+            <button class="flux-filter-btn" data-filter="online">Actifs</button>
+            <button class="flux-filter-btn" data-filter="error">Erreurs</button>
+            <button class="flux-filter-btn" data-filter="stale">Lents</button>
+          </div>
+          <div id="flux-service-list" class="flux-service-list"></div>
+          <details class="flux-raw-details">
+            <summary>Réponses JSON brutes</summary>
+            <div id="api-raw-list" class="api-raw-list"></div>
+          </details>
+          <p class="muted" style="display:none"><strong id="api-resync-ago"></strong></p>
+        </section>
+
+        <section id="municipalities-panel" class="panel view hidden" hidden>
+          <h3>Communes & fiches pratiques</h3>
+          <p class="muted">Créez vos communes PCS, puis utilisez les actions rapides pour basculer en crise, enrichir la fiche et joindre des documents.</p>
+          <div id="municipality-filters" class="form municipality-filters">
+            <input id="municipalities-search" type="search" placeholder="Rechercher une commune, responsable, contact..." />
+            <select id="municipalities-status-filter">
+              <option value="all">Tous les statuts</option>
+              <option value="crisis">Communes en crise</option>
+              <option value="watch">Communes en veille</option>
+            </select>
+            <select id="municipalities-sort">
+              <option value="name_asc">Tri: nom A→Z</option>
+              <option value="risk_desc">Tri: vigilance élevée</option>
+              <option value="population_desc">Tri: population décroissante</option>
+            </select>
+          </div>
+          <div id="municipalities-summary-bar" class="muni-summary-bar hidden" hidden></div>
+          <p class="muted">Communes affichées: <strong id="municipalities-count">0</strong></p>
+          <form id="municipality-form" class="form" data-requires-edit>
+            <input name="postal_code" placeholder="Code postal" pattern="[0-9]{5}" maxlength="5" required />
+            <select name="municipality_lookup" data-municipality-lookup>
+              <option value="">Ville trouvée via code postal</option>
+            </select>
+            <input name="name" placeholder="Nom commune" required />
+            <input name="phone" placeholder="Téléphone" required />
+            <input name="email" placeholder="Email" type="email" required />
+            <input name="insee_code" placeholder="Code INSEE (auto)" pattern="[0-9]{5}" maxlength="5" readonly />
+            <input name="contacts" placeholder="Contacts d'astreinte (tel, mails)" />
+            <input name="additional_info" placeholder="Infos complémentaires (zones sensibles, écoles...)" />
+            <input name="population" type="number" placeholder="Population" min="0" />
+            <input name="shelter_capacity" type="number" placeholder="Capacité d'accueil" min="0" />
+            <button type="submit">Ajouter</button>
+          </form>
+          <p id="municipality-feedback" class="muted"></p>
+          <div id="municipalities-list" class="municipality-grid"></div>
+
+
+          <dialog id="municipality-details-modal" class="municipality-details-modal">
+            <div class="municipality-details-modal__head">
+              <h4>Détail commune</h4>
+              <button type="button" id="municipality-details-close" class="ghost" onclick="window.requestMunicipalityDetailsCloseLikeEscape && window.requestMunicipalityDetailsCloseLikeEscape()">Fermer</button>
+            </div>
+            <div id="municipality-details-content"></div>
+          </dialog>
+
+          <aside id="municipality-editor" class="municipality-editor hidden" hidden>
+            <div class="municipality-editor__head">
+              <h4 id="municipality-editor-title">Fiche commune</h4>
+              <button type="button" id="municipality-editor-close" class="ghost" onclick="window.closeMunicipalityEditorFallback && window.closeMunicipalityEditorFallback()">Fermer</button>
+            </div>
+            <form id="municipality-edit-form" class="municipality-edit-form">
+              <input type="hidden" name="id" />
+              <label>Code postal<input name="postal_code" maxlength="5" pattern="[0-9]{5}" /></label>
+              <label>Ville trouvée
+                <select name="municipality_lookup" data-municipality-lookup>
+                  <option value="">Ville trouvée via code postal</option>
+                </select>
+              </label>
+              <label>Nom commune<input name="name" required /></label>
+              <label>Téléphone<input name="phone" required /></label>
+              <label>Email<input name="email" type="email" required /></label>
+              <label>Code INSEE<input name="insee_code" maxlength="5" pattern="[0-9]{5}" readonly /></label>
+              <label>Contacts d'astreinte<textarea name="contacts" rows="2"></textarea></label>
+              <label>Informations complémentaires<textarea name="additional_info" rows="3"></textarea></label>
+              <label>Population<input name="population" type="number" min="0" /></label>
+              <label>Capacité d'accueil<input name="shelter_capacity" type="number" min="0" /></label>
+              <label>Vigilance
+                <select name="vigilance_color">
+                  <option value="vert">Vert</option>
+                  <option value="jaune">Jaune</option>
+                  <option value="orange">Orange</option>
+                  <option value="rouge">Rouge</option>
+                </select>
+              </label>
+              <label><input name="pcs_active" type="checkbox" /> PCS actif</label>
+              <button type="submit">Enregistrer la fiche</button>
+            </form>
+          </aside>
+        </section>
+
+        <section id="logs-panel" class="panel view hidden" hidden>
+
+          <!-- Page header -->
+          <div class="mco-page-head">
+            <div>
+              <h3 style="margin:0">Main courante opérationnelle</h3>
+              <p class="muted" style="margin:.25rem 0 0;font-size:.85rem">Pilotage des évènements et traçabilité des actions engagées.</p>
+            </div>
+            <button id="mco-new-event-toggle" type="button" class="ghost mco-new-event-btn" data-requires-edit>+ Nouvel évènement</button>
+          </div>
+
+          <!-- Collapsible new event form -->
+          <div id="mco-new-event-wrap" class="mco-new-event-wrap hidden" hidden>
+            <form id="event-form" class="mco-create-event-form" data-requires-edit>
+              <input name="title" placeholder="Titre de l'évènement (ex: Crue Isère centre-ville)" required />
+              <input name="address" placeholder="Adresse / secteur concerné" required />
+              <select name="municipality_id" id="event-municipality-id">
+                <option value="">Aucune commune (départemental)</option>
+              </select>
+              <div class="mco-create-event-btns">
+                <button type="submit">Créer l'évènement</button>
+                <button type="button" id="mco-new-event-cancel" class="ghost">Annuler</button>
+              </div>
+            </form>
+          </div>
+
+          <!-- Two-column workspace -->
+          <div class="mco-workspace">
+
+            <!-- LEFT: Event list sidebar -->
+            <aside class="mco-sidebar">
+              <div class="mco-sidebar-filters">
+                <button class="mco-filter-btn active" data-mco-filter="open">En cours</button>
+                <button class="mco-filter-btn" data-mco-filter="all">Tous</button>
+                <button class="mco-filter-btn" data-mco-filter="clos">Clôturés</button>
+              </div>
+              <ul id="events-list" class="mco-events-list"></ul>
+            </aside>
+
+            <!-- RIGHT: Active event detail -->
+            <div class="mco-content">
+
+              <!-- Empty state -->
+              <div id="mco-empty-state" class="mco-empty-state">
+                <div class="mco-empty-icon">📋</div>
+                <p>Sélectionnez un évènement<br>pour afficher la main courante</p>
+              </div>
+
+              <!-- Event detail panel -->
+              <article id="event-detail" class="event-detail hidden" hidden>
+
+                <!-- Mobile: back button -->
+                <button type="button" id="mco-back-btn" class="ghost mco-back-btn">← Retour aux évènements</button>
+
+                <!-- Event header -->
+                <div class="mco-event-header">
+                  <div class="mco-event-header-info">
+                    <h4 id="event-detail-title" style="margin:0;font-size:1.05rem">Fiche évènement</h4>
+                    <p id="event-detail-meta" class="muted" style="margin:.3rem 0 0;font-size:.85rem">-</p>
+                  </div>
+                  <div class="event-detail-actions">
+                    <button id="event-export-pdf-btn" type="button" class="ghost" title="Exporter le rapport PDF">📄 Rapport PDF</button>
+                    <button id="event-rename-btn" type="button" class="ghost" data-requires-edit>✏️ Renommer</button>
+                    <button id="event-close-btn" type="button" class="ghost" data-requires-edit>Clôturer</button>
+                    <button id="event-delete-btn" type="button" class="ghost danger" data-requires-edit>Supprimer</button>
+                  </div>
+                </div>
+
+                <!-- MCO stream -->
+                <div class="mco-stream-head">
+                  <span class="mco-stream-label">Flux main courante · <strong id="logs-count">0</strong> entrée(s)</span>
+                </div>
+                <div id="logs-table-stream" class="mco-timeline"></div>
+                <div id="log-event-mco-suggestions" class="muted"></div>
+
+                <!-- Add entry form -->
+                <div class="mco-add-wrap">
+                  <div class="mco-add-head">
+                    <span class="mco-add-title">Nouvelle entrée MCO</span>
+                  </div>
+                  <form id="log-form" class="mco-entry-form" data-requires-edit>
+                    <div class="mco-form-row mco-form-row--context">
+                      <select name="danger_level" id="log-danger-level" class="mco-level-select">
+                        <option value="vert">🟢 Vert</option>
+                        <option value="jaune">🟡 Jaune</option>
+                        <option value="orange">🟠 Orange</option>
+                        <option value="rouge">🔴 Rouge</option>
+                      </select>
+                      <select name="target_scope" id="log-target-scope">
+                        <option value="departemental">Départemental</option>
+                        <option value="commune">Commune</option>
+                        <option value="pcs">PCS</option>
+                      </select>
+                      <select name="municipality_id" id="log-municipality-id" disabled>
+                        <option value="">Commune</option>
+                      </select>
+                    </div>
+                    <div class="mco-form-row mco-form-row--meta">
+                      <input name="location" placeholder="📍 Lieu / secteur" />
+                      <input name="source" placeholder="Source (CODIS, mairie...)" />
+                      <input name="assigned_to" placeholder="👤 Responsable" />
+                      <input name="event_time" id="log-event-time" type="datetime-local" title="Heure de l'événement (vide = maintenant)" />
+                      <input name="next_update_due" type="datetime-local" title="Prochaine mise à jour prévue" />
+                    </div>
+                    <textarea name="description" placeholder="Faits observés, situation en cours..." rows="2"></textarea>
+                    <textarea name="actions_taken" placeholder="Actions engagées, décisions prises..." rows="2"></textarea>
+                    <div class="mco-form-submit-row">
+                      <button type="submit" id="mco-submit-btn">Ajouter l'entrée</button>
+                      <button type="button" id="mco-cancel-edit-btn" class="ghost hidden" hidden>Annuler la modification</button>
+                    </div>
+                  </form>
+                </div>
+
+              </article>
+            </div><!-- .mco-content -->
+          </div><!-- .mco-workspace -->
+        </section>
+
+        <section id="news-panel" class="panel view hidden" hidden>
+
+          <!-- En-tête -->
+          <div class="news-panel-header">
+            <div class="news-panel-header__left">
+              <h3 class="news-panel-title">Actualités Isère</h3>
+              <p class="news-panel-subtitle muted">Revue de presse opérationnelle — 7 sources · département 38</p>
+            </div>
+            <div class="news-panel-header__right">
+              <span class="news-panel-count-badge" id="news-total-count-badge">0 articles</span>
+              <span class="news-panel-last-update muted" id="news-last-update">–</span>
+            </div>
+          </div>
+
+          <!-- Filtre catégorie -->
+          <div class="news-filter-bar" id="news-filter-bar" role="group" aria-label="Filtrer par catégorie">
+            <button class="news-filter-btn active" data-cat="all">Toutes</button>
+            <button class="news-filter-btn" data-cat="Sécurité &amp; secours">Sécurité</button>
+            <button class="news-filter-btn" data-cat="Météo &amp; risques">Météo</button>
+            <button class="news-filter-btn" data-cat="Mobilité &amp; transport">Transport</button>
+            <button class="news-filter-btn" data-cat="Institutions locales">Institutions</button>
+            <button class="news-filter-btn" data-cat="Éducation">Éducation</button>
+            <button class="news-filter-btn" data-cat="Autres actualités">Autres</button>
+          </div>
+
+          <!-- Grille 3 colonnes sources -->
+          <div class="news-sources-grid">
+
+            <!-- Préfecture de l'Isère -->
+            <div class="news-source-col">
+              <div class="news-source-header news-source-header--prefecture">
+                <div class="news-source-header__icon">🏛️</div>
+                <div>
+                  <div class="news-source-name">Préfecture de l'Isère</div>
+                  <div class="news-source-meta">
+                    <span class="news-source-status" id="news-pref-status">–</span>
+                    <a href="https://www.isere.gouv.fr" target="_blank" rel="noreferrer" class="news-source-link">isere.gouv.fr ↗</a>
+                  </div>
+                </div>
+              </div>
+              <div class="news-articles-list" id="news-prefecture-list">
+                <div class="news-article-skeleton"></div>
+                <div class="news-article-skeleton"></div>
+                <div class="news-article-skeleton"></div>
+              </div>
+              <p class="news-source-footer"><span id="news-pref-count">0</span> actualité(s)</p>
+            </div>
+
+            <!-- Dauphiné Libéré -->
+            <div class="news-source-col">
+              <div class="news-source-header news-source-header--dauphine">
+                <div class="news-source-header__icon">📰</div>
+                <div>
+                  <div class="news-source-name">Le Dauphiné Libéré</div>
+                  <div class="news-source-meta">
+                    <span class="news-source-status" id="news-dauphine-status">–</span>
+                    <a href="https://www.ledauphine.com/isere" target="_blank" rel="noreferrer" class="news-source-link">ledauphine.com ↗</a>
+                  </div>
+                </div>
+              </div>
+              <div class="news-articles-list" id="news-dauphine-list">
+                <div class="news-article-skeleton"></div>
+                <div class="news-article-skeleton"></div>
+                <div class="news-article-skeleton"></div>
+              </div>
+              <p class="news-source-footer"><span id="news-dauphine-count">0</span> article(s)</p>
+            </div>
+
+            <!-- France Bleu Isère -->
+            <div class="news-source-col">
+              <div class="news-source-header news-source-header--francebleu">
+                <div class="news-source-header__icon">📻</div>
+                <div>
+                  <div class="news-source-name">France Bleu Isère</div>
+                  <div class="news-source-meta">
+                    <span class="news-source-status" id="news-francebleu-status">–</span>
+                    <a href="https://www.francebleu.fr/isere" target="_blank" rel="noreferrer" class="news-source-link">francebleu.fr ↗</a>
+                  </div>
+                </div>
+              </div>
+              <div class="news-articles-list" id="news-francebleu-list">
+                <div class="news-article-skeleton"></div>
+                <div class="news-article-skeleton"></div>
+                <div class="news-article-skeleton"></div>
+              </div>
+              <p class="news-source-footer"><span id="news-francebleu-count">0</span> article(s)</p>
+            </div>
+
+            <!-- Place Gre'net -->
+            <div class="news-source-col">
+              <div class="news-source-header news-source-header--placegrenet">
+                <div class="news-source-header__icon">🗞️</div>
+                <div>
+                  <div class="news-source-name">Place Gre'net</div>
+                  <div class="news-source-meta">
+                    <span class="news-source-status" id="news-placegrenet-status">–</span>
+                    <a href="https://www.placegrenet.fr" target="_blank" rel="noreferrer" class="news-source-link">placegrenet.fr ↗</a>
+                  </div>
+                </div>
+              </div>
+              <div class="news-articles-list" id="news-placegrenet-list">
+                <div class="news-article-skeleton"></div>
+                <div class="news-article-skeleton"></div>
+                <div class="news-article-skeleton"></div>
+              </div>
+              <p class="news-source-footer"><span id="news-placegrenet-count">0</span> article(s)</p>
+            </div>
+
+            <!-- Grenoble Alpes Métropole -->
+            <div class="news-source-col">
+              <div class="news-source-header news-source-header--metro">
+                <div class="news-source-header__icon">🏙️</div>
+                <div>
+                  <div class="news-source-name">Grenoble Alpes Métropole</div>
+                  <div class="news-source-meta">
+                    <span class="news-source-status" id="news-metro-status">–</span>
+                    <a href="https://www.grenoblealpesmetropole.fr" target="_blank" rel="noreferrer" class="news-source-link">grenoblealpesmetropole.fr ↗</a>
+                  </div>
+                </div>
+              </div>
+              <div class="news-articles-list" id="news-metro-list">
+                <div class="news-article-skeleton"></div>
+                <div class="news-article-skeleton"></div>
+                <div class="news-article-skeleton"></div>
+              </div>
+              <p class="news-source-footer"><span id="news-metro-count">0</span> actualité(s)</p>
+            </div>
+
+            <!-- ARS AURA Alertes sanitaires -->
+            <div class="news-source-col">
+              <div class="news-source-header news-source-header--ars">
+                <div class="news-source-header__icon">🏥</div>
+                <div>
+                  <div class="news-source-name">ARS AURA · Alertes sanitaires</div>
+                  <div class="news-source-meta">
+                    <span class="news-source-status" id="news-ars-status">–</span>
+                    <a href="https://www.auvergne-rhone-alpes.ars.sante.fr/alertes-sanitaires-en-cours" target="_blank" rel="noreferrer" class="news-source-link">ars.sante.fr ↗</a>
+                  </div>
+                </div>
+              </div>
+              <div class="news-articles-list" id="news-ars-list">
+                <div class="news-article-skeleton"></div>
+                <div class="news-article-skeleton"></div>
+              </div>
+              <p class="news-source-footer"><span id="news-ars-count">0</span> alerte(s)</p>
+            </div>
+
+            <!-- Séismes Isère (BCSF-RéNaSS) -->
+            <div class="news-source-col">
+              <div class="news-source-header news-source-header--seismes">
+                <div class="news-source-header__icon">🌍</div>
+                <div>
+                  <div class="news-source-name">Séismes Isère</div>
+                  <div class="news-source-meta">
+                    <span class="news-source-status" id="news-seismes-status">–</span>
+                    <a href="https://www.franceseisme.fr" target="_blank" rel="noreferrer" class="news-source-link">franceseisme.fr ↗</a>
+                  </div>
+                </div>
+              </div>
+              <div class="news-articles-list" id="news-seismes-list">
+                <div class="news-article-skeleton"></div>
+                <div class="news-article-skeleton"></div>
+              </div>
+              <p class="news-source-footer"><span id="news-seismes-count">0</span> séisme(s)</p>
+            </div>
+
+          </div>
+
+          <!-- Synthèse par catégorie -->
+          <details class="news-stats-block" open>
+            <summary class="news-stats-toggle">Synthèse par catégorie</summary>
+            <div class="news-stats-grid" id="news-stats-grid">
+              <!-- injecté dynamiquement -->
+            </div>
+          </details>
+
+        </section>
+
+        <section id="map-panel" class="panel view hidden" hidden>
+          <div class="map-panel-head">
+            <div>
+              <h3>Carte stratégique Isère</h3>
+              <p class="muted">Vue opérationnelle — filtres, ressources terrain et analyse de zone.</p>
+            </div>
+            <div class="map-quick-actions" role="group" aria-label="Actions rapides carte">
+              <button id="map-focus-crisis" type="button" class="ghost">🎯 Focus crise</button>
+              <button id="map-reset-filters" type="button" class="ghost">↺ Réinitialiser</button>
+              <button id="map-toolbar-collapse-toggle" type="button" class="ghost" aria-expanded="true" aria-controls="map-controls-panel">◀ Filtres</button>
+              <button id="map-toolbar-fullscreen-toggle" type="button" class="ghost" aria-pressed="false">⛶ Plein écran</button>
+            </div>
+          </div>
+
+          <div class="map-workspace">
+
+            <!-- ── Panneau filtres GAUCHE ── -->
+            <aside id="map-controls-panel" class="map-controls" aria-label="Filtres et outils carte">
+              <div class="map-controls-head">
+                <div>
+                  <strong>Filtres carte</strong>
+                  <span>Calques, ressources et outils terrain</span>
+                </div>
+              </div>
+
+              <!-- Recherche & navigation -->
+              <div class="filter-group filter-group--search">
+                <div class="map-search-inline">
+                  <input id="map-search" type="search" placeholder="Adresse, ville, lieu…" aria-label="Recherche sur la carte" />
+                  <button id="map-search-btn" type="button" class="map-btn-lite">🔍</button>
+                  <button id="map-search-clear" type="button" class="ghost map-btn-lite">✕</button>
+                </div>
+                <div class="map-nav-btns">
+                  <button id="map-fit-btn" type="button" class="ghost map-btn-lite">🗺️ Tout voir</button>
+                  <button id="map-locate-btn" type="button" class="ghost map-btn-lite">📍 Me localiser</button>
+                </div>
+              </div>
+
+              <!-- Fond de carte -->
+              <details class="filter-group map-filter-group--basemap" open>
+                <summary class="filter-group__title">🗺️ Fond de carte</summary>
+                <div class="filter-group__body">
+                  <select id="map-basemap-select" aria-label="Choisir le fond de carte">
+                    <option value="osm">Fond standard (OSM)</option>
+                    <option value="satellite">Vue satellite</option>
+                    <option value="topo">Relief (topographique)</option>
+                    <option value="light">Fond clair (lisible)</option>
+                    <option value="population">Population légale</option>
+                    <option value="ign">IGN (Plan IGN v2)</option>
+                  </select>
+                </div>
+              </details>
+
+              <!-- Alertes & Surveillance -->
+              <details class="filter-group map-filter-group--alerts" open>
+                <summary class="filter-group__title">🌊 Alertes &amp; Surveillance</summary>
+                <div class="filter-group__body map-toggle-grid">
+                  <label><input id="filter-hydro" type="checkbox" checked /> Vigicrues (stations crues)</label>
+                  <label><input id="filter-pcs" type="checkbox" checked /> Communes PCS</label>
+                  <label>
+                    <input id="filter-meteo-cities" type="checkbox" />
+                    🌡️ Météo villes en direct
+                    <small class="filter-legend">Température actuelle · Open-Meteo</small>
+                  </label>
+                  <select id="filter-meteo-layer-type" aria-label="Choisir le calque météo">
+                    <option value="temperature" selected>Température actuelle</option>
+                    <option value="heat">Ressenti / chaleur</option>
+                    <option value="wind">Vent en ville</option>
+                    <option value="gust">Rafales</option>
+                    <option value="rain">Pluie actuelle</option>
+                    <option value="precipitation">Cumul pluie</option>
+                    <option value="humidity">Humidité</option>
+                    <option value="pollution">Pollution / qualité de l'air</option>
+                  </select>
+                  <label>
+                    <input id="filter-flood-zones" type="checkbox" />
+                    Zones inondables détaillées
+                    <small class="filter-legend">Zonage PPR + surfaces TRI fréquente / moyenne / rare · Géorisques</small>
+                  </label>
+                  <label>
+                    <input id="filter-seismes" type="checkbox" />
+                    🌍 Séismes récents
+                    <small class="filter-legend">Magnitude, profondeur et localisation</small>
+                  </label>
+                  <label>
+                    <input id="filter-feux-foret" type="checkbox" />
+                    🔥 Feux de forêt
+                    <small class="filter-legend">Foyers actifs EFFIS / Copernicus</small>
+                  </label>
+                  <label>
+                    <input id="filter-avalanche-zones" type="checkbox" />
+                    ❄️ Zones d'avalanche CLPA
+                    <small class="filter-legend">Carte de localisation des phénomènes · Géorisques</small>
+                  </label>
+                  <label>
+                    <input id="filter-barrages" type="checkbox" />
+                    🏗️ Barrages hydrauliques
+                    <small class="filter-legend">Ouvrages &amp; zones submersibles · Géorisques</small>
+                  </label>
+                </div>
+              </details>
+
+              <!-- Montagne & Aérien -->
+              <details class="filter-group map-filter-group--mountain">
+                <summary class="filter-group__title">🏔️ Montagne &amp; Aérien</summary>
+                <div class="filter-group__body map-toggle-grid">
+                  <label><input id="filter-montagne" type="checkbox" /> 🛖 Refuges de montagne</label>
+                  <label><input id="filter-helipads" type="checkbox" /> 🚁 Héliports &amp; zones SMUR</label>
+                  <label>
+                    <input id="filter-cols-alpins" type="checkbox" />
+                    ⛰️ Cols alpins
+                    <small class="filter-legend">État &amp; conditions météo · open-meteo.com</small>
+                  </label>
+                </div>
+              </details>
+
+              <!-- Ressources opérationnelles -->
+              <details class="filter-group map-filter-group--resources">
+                <summary class="filter-group__title">🏢 Ressources opérationnelles</summary>
+                <div class="filter-group__body map-toggle-grid">
+                  <label><input id="filter-resources-command" type="checkbox" checked /> 🛰️ Centres de commandement</label>
+
+                  <div class="filter-subgroup">
+                    <label><input id="filter-resources-hosting" type="checkbox" /> 🏟️ Lieux d'accueil hébergeables</label>
+                    <select id="filter-resources-hosting-type" aria-label="Filtrer les lieux d'accueil hébergeables">
+                      <option value="all">Tous les types</option>
+                      <option value="gymnase">Gymnases</option>
+                      <option value="complexe_sportif">Complexes sportifs</option>
+                      <option value="stade">Stades</option>
+                      <option value="salle_omnisports">Salles omnisports / palais des sports</option>
+                      <option value="centre_culturel">Centres culturels</option>
+                      <option value="salle_spectacle_public">Salles de spectacle / concert</option>
+                      <option value="palais_congres">Palais des congrès / salons</option>
+                      <option value="salle_fetes">Salles des fêtes / polyvalentes</option>
+                    </select>
+                    <div class="hosting-filter-grid" aria-label="Filtres avancés lieux d'accueil">
+                      <label>
+                        Capacité min.
+                        <select id="filter-resources-hosting-capacity" aria-label="Capacité minimale d'accueil">
+                          <option value="0">Toutes capacités</option>
+                          <option value="50">50+ personnes</option>
+                          <option value="100">100+ personnes</option>
+                          <option value="200">200+ personnes</option>
+                          <option value="500">500+ personnes</option>
+                          <option value="700">700+ personnes</option>
+                          <option value="1000">1 000+ personnes</option>
+                          <option value="1500">1 500+ personnes</option>
+                          <option value="2000">2 000+ personnes</option>
+                          <option value="3000">3 000+ personnes</option>
+                          <option value="5000">5 000+ personnes</option>
+                        </select>
+                      </label>
+                      <label>
+                        Surface min.
+                        <select id="filter-resources-hosting-surface" aria-label="Surface minimale du lieu d'accueil">
+                          <option value="0">Toutes surfaces</option>
+                          <option value="100">100+ m²</option>
+                          <option value="300">300+ m²</option>
+                          <option value="500">500+ m²</option>
+                          <option value="1000">1 000+ m²</option>
+                          <option value="2000">2 000+ m²</option>
+                          <option value="5000">5 000+ m²</option>
+                        </select>
+                      </label>
+                      <label>
+                        Accès
+                        <select id="filter-resources-hosting-accessibility" aria-label="Filtrer par accessibilité">
+                          <option value="all">Tous</option>
+                          <option value="accessible">Accessible PMR confirmé/probable</option>
+                        </select>
+                      </label>
+                      <label class="map-inline-checkbox"><input id="filter-resources-hosting-sanitary" type="checkbox" /> Sanitaires</label>
+                      <label class="map-inline-checkbox"><input id="filter-resources-hosting-heating" type="checkbox" /> Chauffage</label>
+                      <label class="map-inline-checkbox"><input id="filter-resources-hosting-parking" type="checkbox" /> Parking</label>
+                    </div>
+                  </div>
+
+                  <div class="filter-subgroup">
+                    <label><input id="filter-resources-schools" type="checkbox" /> 🎒 Écoles</label>
+                    <select id="filter-resources-schools-type" aria-label="Filtrer les établissements scolaires">
+                      <option value="all">Tous les types</option>
+                      <option value="ecole_primaire">Écoles primaires</option>
+                      <option value="college">Collèges</option>
+                      <option value="lycee">Lycées</option>
+                      <option value="universite">Universités</option>
+                      <option value="creche">Crèches</option>
+                    </select>
+                  </div>
+
+                  <div class="filter-subgroup">
+                    <label><input id="filter-resources-security" type="checkbox" /> 👮 Police &amp; Gendarmerie</label>
+                    <select id="filter-resources-security-type" aria-label="Filtrer les forces de sécurité">
+                      <option value="all">Tous les types</option>
+                      <option value="gendarmerie">Gendarmeries</option>
+                      <option value="commissariat_police_nationale">Commissariats (police nationale)</option>
+                      <option value="police_municipale">Police municipale</option>
+                    </select>
+                  </div>
+
+                  <label><input id="filter-resources-fire" type="checkbox" /> 🚒 Casernes de pompiers</label>
+
+                  <div class="filter-subgroup">
+                    <label><input id="filter-resources-health" type="checkbox" /> 🏥 Santé FINESS (Isère)</label>
+                    <select id="filter-resources-health-type" aria-label="Filtrer les établissements de santé">
+                      <option value="all">Toutes les catégories FINESS</option>
+                    </select>
+                  </div>
+
+                  <label><input id="filter-resources-dae" type="checkbox" /> ⚡ Défibrillateurs DAE</label>
+
+                  <div class="filter-subgroup">
+                    <label><input id="filter-resources-transport" type="checkbox" /> 🚉 Transports</label>
+                    <select id="filter-resources-transport-type" aria-label="Filtrer les transports">
+                      <option value="all">Tous les types</option>
+                      <option value="transport_gare_sncf">Gares SNCF</option>
+                      <option value="transport_gare_routiere">Gares routières</option>
+                      <option value="transport_aeroport">Aéroports</option>
+                    </select>
+                  </div>
+
+                  <div class="filter-subgroup">
+                    <label><input id="filter-resources-telecom" type="checkbox" /> 📡 Télécom (ANFR / ARCEP)</label>
+                    <select id="filter-resources-telecom-type" aria-label="Filtrer les ressources télécom" disabled>
+                      <option value="all">Tous les types</option>
+                      <option value="anfr_antenna">Antennes ANFR</option>
+                      <option value="arcep_mobile_outage">Sites indisponibles ARCEP</option>
+                      <option value="telecom_white_zone">Zones blanches à vérifier</option>
+                    </select>
+                  </div>
+
+                  <div class="filter-subgroup">
+                    <label><input id="filter-agents" type="checkbox" checked /> 🧑‍🚒 Agents terrain</label>
+                    <span id="filter-agents-status" style="font-size:.75rem;display:block;margin-top:2px"></span>
+                    <button id="filter-agents-refresh" type="button" class="ghost map-btn-lite" style="margin-top:4px;font-size:.75rem">↺ Rafraîchir maintenant</button>
+                  </div>
+
+                  <label><input id="filter-resources-protcivile" type="checkbox" checked /> 🔺 Antennes Protection Civile</label>
+
+                  <div class="filter-subgroup">
+                    <label><input id="filter-resources-risks" type="checkbox" /> ⚠️ Sites sensibles</label>
+                    <select id="filter-resources-risks-type" aria-label="Filtrer les sites sensibles">
+                      <option value="all">Tous les types</option>
+                      <option value="lieu_risque">Seveso</option>
+                      <option value="centrale_nucleaire">Nucléaire</option>
+                      <option value="energie">Barrages</option>
+                      <option value="site_sensible_custom">Sites ajoutés</option>
+                    </select>
+                  </div>
+                </div>
+              </details>
+
+              <!-- Trafic & Mobilité -->
+              <details class="filter-group map-filter-group--traffic" open>
+                <summary class="filter-group__title">🚦 Trafic &amp; Mobilité</summary>
+                <div class="filter-group__body map-toggle-grid">
+                  <label><input id="filter-cameras" type="checkbox" checked /> 📷 Caméras terrain</label>
+                  <label><input id="filter-traffic-incidents" type="checkbox" checked /> 🚨 Itinisère + Bison Futé</label>
+                  <select id="filter-bison-type" aria-label="Filtrer les événements trafic">
+                    <option value="all" selected>Tout (Itinisère + Bison Futé)</option>
+                    <option value="itinisere">Itinisère (tout)</option>
+                    <option value="alea">Aléas routiers</option>
+                    <option value="accident">Accidents</option>
+                    <option value="danger">Dangers</option>
+                  </select>
+                  <label><input id="filter-autoroutes" type="checkbox" checked /> 🛣️ Autoroutes Isère</label>
+                  <select id="filter-autoroutes-type" aria-label="Filtrer les incidents autoroutes">
+                    <option value="all" selected>Tout (Bison + APRR + Vinci)</option>
+                    <option value="accident">Accidents</option>
+                    <option value="travaux">Travaux / Chantiers</option>
+                    <option value="perturbation">Perturbations</option>
+                    <option value="inconnu">Autres</option>
+                  </select>
+                  <label><input id="filter-pr-autoroutes" type="checkbox" /> 📍 Points de repère (PR km)</label>
+                  <label><input id="filter-google-traffic-flow" type="checkbox" /> 🛣️ Trafic continu (style Google Maps)</label>
+                  <label><input id="filter-tchoo-trains" type="checkbox" /> 🚆 Trains Carto Tchoo</label>
+                </div>
+              </details>
+
+              <!-- Outils terrain -->
+              <details class="filter-group map-filter-group--tools" open>
+                <summary class="filter-group__title">🛠️ Outils terrain</summary>
+                <div class="filter-group__body">
+                  <div class="map-tool-section">
+                    <div class="map-tool-section__title">Calques tactiques</div>
+                  <div class="tactical-layer-grid" aria-label="Calques actions">
+                    <label><input class="tactical-layer-toggle" data-tactical-layer="evacuation" type="checkbox" checked /> Zones d'évacuation</label>
+                    <label><input class="tactical-layer-toggle" data-tactical-layer="rassemblement" type="checkbox" checked /> Points de rassemblement</label>
+                    <label><input class="tactical-layer-toggle" data-tactical-layer="roadblock" type="checkbox" checked /> Routes coupées</label>
+                    <label><input class="tactical-layer-toggle" data-tactical-layer="barriere" type="checkbox" checked /> Barrières</label>
+                    <label><input class="tactical-layer-toggle" data-tactical-layer="danger_zone" type="checkbox" checked /> Zones dangereuses</label>
+                    <label><input class="tactical-layer-toggle" data-tactical-layer="centre_accueil" type="checkbox" checked /> Centres d'accueil</label>
+                    <label><input class="tactical-layer-toggle" data-tactical-layer="team" type="checkbox" checked /> Équipes terrain</label>
+                  </div>
+                  </div>
+                  <div class="map-tool-section">
+                    <div class="map-tool-section__title">Analyse &amp; briefing</div>
+                  <div class="filter-tool-row">
+                    <button id="map-zone-impact-start" type="button" class="ghost map-btn-lite">🧭 Analyser une zone</button>
+                    <button id="map-zone-impact-clear" type="button" class="ghost map-btn-lite">🧹 Effacer analyse</button>
+                    <button id="map-add-point-btn" type="button" class="ghost map-btn-lite" aria-pressed="false" data-requires-edit>➕ Créer un POI</button>
+                    <button id="map-briefing-export-btn" type="button" class="ghost map-btn-lite">📄 Briefing carte</button>
+                  </div>
+                  </div>
+                  <div class="map-tool-section">
+                    <div class="map-tool-section__title">Zones rapides</div>
+                  <div class="filter-tool-row filter-tool-row--evacuation" style="margin-top:.4rem">
+                    <label class="evacuation-radius-field" for="map-evacuation-radius-km">
+                      <span>Rayon</span>
+                      <input id="map-evacuation-radius-km" type="number" min="0.1" step="0.1" value="1" aria-label="Rayon d'évacuation en kilomètres" />
+                      <span>km</span>
+                    </label>
+                    <button id="map-evacuation-circle-start" type="button" class="ghost map-btn-lite" aria-pressed="false">⭕ Zone évacuation</button>
+                    <button id="map-evacuation-circle-clear" type="button" class="ghost map-btn-lite">❌ Effacer rond</button>
+                  </div>
+                  </div>
+                  <div class="map-tool-section">
+                    <div class="map-tool-section__title">Mesure &amp; trajet</div>
+                  <div class="filter-tool-row" style="margin-top:.4rem">
+                    <button id="map-measure-start" type="button" class="ghost map-btn-lite" aria-pressed="false">📏 Mètre</button>
+                    <button id="map-measure-clear" type="button" class="ghost map-btn-lite">🧽 Effacer mesure</button>
+                  </div>
+                  <div class="route-tool">
+                    <div class="route-tool__actions">
+                      <button id="map-route-start" type="button" class="ghost map-btn-lite" aria-pressed="false">Trajet</button>
+                      <button id="map-route-refresh" type="button" class="ghost map-btn-lite">Actualiser</button>
+                      <button id="map-route-clear" type="button" class="ghost map-btn-lite">Effacer</button>
+                    </div>
+                    <div id="map-route-summary" class="route-tool__summary">Cliquez deux points sur la carte pour estimer un trajet.</div>
+                    <div id="map-route-list" class="route-tool__list" aria-live="polite"></div>
+                  </div>
+                  </div>
+                  <div class="map-tool-section" data-requires-edit>
+                    <div class="map-tool-section__title">Annotations</div>
+                  <div class="filter-tool-row" style="margin-top:.4rem" data-requires-edit>
+                    <input id="map-annotation-color" type="color" value="#d7263d" aria-label="Couleur annotation" style="width:36px;height:33px;padding:2px;border-radius:6px" />
+                    <select id="map-annotation-weight" aria-label="Épaisseur annotation">
+                      <option value="2">Trait fin</option>
+                      <option value="3" selected>Trait normal</option>
+                      <option value="5">Trait épais</option>
+                    </select>
+                    <button id="map-annotation-clear-btn" type="button" class="ghost map-btn-lite">🧽 Effacer annotations</button>
+                  </div>
+                  </div>
+                  <div class="map-tool-section">
+                    <div class="map-tool-section__title">Points opérationnels</div>
+                  <div class="filter-tool-row" style="margin-top:.4rem">
+                    <select id="poi-target-category-filter" aria-label="Filtrer les POI par catégorie">
+                      <option value="all">POI : afficher tout</option>
+                      <option value="incident">Incidents</option>
+                      <option value="evacuation">Évacuations</option>
+                      <option value="rassemblement">Points de rassemblement</option>
+                      <option value="water">Risque eau</option>
+                      <option value="roadblock">Routes coupées</option>
+                      <option value="barriere">Barrières</option>
+                      <option value="danger_zone">Zones dangereuses</option>
+                      <option value="centre_accueil">Centres d'accueil</option>
+                      <option value="team">Équipes terrain</option>
+                      <option value="medical">Médical</option>
+                      <option value="logistics">Logistique</option>
+                      <option value="command">Commandement</option>
+                      <option value="poi">POI</option>
+                      <option value="autre">Autres</option>
+                    </select>
+                    <button id="poi-target-toggle-btn" type="button" class="ghost map-btn-lite">Masquer POI</button>
+                  </div>
+                  </div>
+                </div>
+              </details>
+
+              <!-- Feedback & coordonnées -->
+              <p id="map-feedback" class="muted map-feedback-bar"></p>
+              <div id="map-selected-location" class="map-selected-location" hidden>
+                <p class="muted">📍 <strong id="map-selected-coords">-</strong></p>
+                <a id="map-open-google-maps" class="ghost map-btn-lite" href="#" target="_blank" rel="noreferrer noopener">🗺️ Google Maps</a>
+                <button id="map-open-streetview" type="button" class="ghost map-btn-lite">👁️ Street View</button>
+              </div>
+
+              <!-- Liste ressources -->
+              <details class="filter-group map-filter-group--lists">
+                <summary class="filter-group__title">📋 Ressources affichées</summary>
+                <div class="filter-group__body">
+                  <ul id="resources-list" class="list compact resources-sidebar-list"></ul>
+                </div>
+              </details>
+
+            </aside>
+
+            <!-- ── Carte DROITE ── -->
+            <div class="map-canvas-area">
+              <div class="map-canvas-wrap">
+                <div id="isere-map-leaflet" class="leaflet-map" aria-label="Carte interactive Isère"></div>
+                <button
+                  id="map-controls-toggle"
+                  class="map-controls-toggle"
+                  type="button"
+                  aria-expanded="true"
+                  aria-controls="map-controls-panel"
+                  title="Afficher / masquer les filtres"
+                  aria-label="Afficher / masquer les filtres"
+                >🧰</button>
+                <button
+                  id="map-fullscreen-toggle"
+                  class="map-fullscreen-toggle"
+                  type="button"
+                  aria-pressed="false"
+                  title="Plein écran"
+                  aria-label="Passer la carte en plein écran"
+                >⛶</button>
+                <button
+                  id="map-streetview-toggle"
+                  class="map-streetview-toggle"
+                  type="button"
+                  aria-pressed="false"
+                  title="Street View"
+                  aria-label="Choisir un point Street View"
+                >👁️</button>
+                <div id="map-streetview-panel" class="map-streetview-panel hidden" hidden aria-label="Street View">
+                  <div class="map-streetview-panel__bar">
+                    <strong id="map-streetview-title">Street View</strong>
+                    <div>
+                      <a id="map-streetview-open-external" class="ghost map-btn-lite" href="#" target="_blank" rel="noreferrer noopener">Ouvrir Google Maps</a>
+                      <button id="map-streetview-close" type="button" class="ghost map-btn-lite">Retour carte</button>
+                    </div>
+                  </div>
+                  <iframe id="map-streetview-frame" title="Street View Google Maps" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+                </div>
+              </div>
+
+              <!-- Statistiques résumé -->
+              <div class="map-summary" aria-live="polite">
+                <article><p>🌊 Stations</p><strong id="map-summary-stations">0</strong></article>
+                <article><p>🏛️ PCS</p><strong id="map-summary-pcs">0</strong></article>
+                <article><p>📍 Ressources</p><strong id="map-summary-resources">0</strong></article>
+                <article><p>🗂️ Points perso</p><strong id="map-summary-custom">0</strong></article>
+                <article><p>🚦 Trafic</p><strong id="map-summary-traffic">0</strong></article>
+              </div>
+
+              <!-- Analyse de zone -->
+              <div id="map-zone-impact-panel" class="map-zone-impact hidden" aria-live="polite" hidden>
+                <h4>Impact terrain · zone sélectionnée</h4>
+                <p class="muted">Tracez un rectangle ou un polygone pour estimer la population exposée et les ressources mobilisables.</p>
+                <ul id="map-zone-impact-list" class="list compact">
+                  <li>Aucune zone d'analyse active.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <!-- Données opérationnelles détaillées -->
+          <div class="map-layout">
+            <div class="map-data-col">
+              <p class="muted">Météo <strong id="meteo-level">-</strong> &nbsp;·&nbsp; Hydrologie <strong id="river-level">-</strong></p>
+              <details class="filter-group" open>
+                <summary class="filter-group__title">🛰️ Points opérationnels personnalisés</summary>
+                <div class="filter-group__body"><ul id="custom-points-list" class="list practical"></ul></div>
+              </details>
+              <details class="filter-group">
+                <summary class="filter-group__title">✏️ Annotations tactiques</summary>
+                <div class="filter-group__body"><ul id="map-annotations-list" class="list practical"></ul></div>
+              </details>
+            </div>
+            <div class="map-data-col">
+              <details class="filter-group" open>
+                <summary class="filter-group__title">🏛️ Communes avec PCS</summary>
+                <div class="filter-group__body"><ul id="pcs-list" class="list practical"></ul></div>
+              </details>
+            </div>
+            <div class="map-data-col">
+              <details class="filter-group" open>
+                <summary class="filter-group__title">🚨 Alertes mobilité Itinisère</summary>
+                <div class="filter-group__body"><ul id="itinerary-list" class="list practical"></ul></div>
+              </details>
+            </div>
+          </div>
+        </section>
+          <dialog id="map-point-modal" class="municipality-details-modal">
+            <div class="municipality-details-modal__head">
+              <h4>Nouveau point opérationnel</h4>
+              <button type="button" id="map-point-form-cancel" class="ghost">Fermer</button>
+            </div>
+            <form id="map-point-form" class="municipality-edit-form">
+              <label>Titre du marqueur<input name="name" required maxlength="120" placeholder="Ex: Point de rassemblement" /></label>
+              <label>Catégorie
+                <select id="map-point-category" name="category">
+                  <option value="incident">Incident</option>
+                  <option value="evacuation">Évacuation</option>
+                  <option value="rassemblement">Point de rassemblement</option>
+                  <option value="water">Risque eau</option>
+                  <option value="roadblock">Route coupée</option>
+                  <option value="barriere">Barrière</option>
+                  <option value="danger_zone">Zone dangereuse</option>
+                  <option value="centre_accueil">Centre d'accueil</option>
+                  <option value="team">Équipe terrain</option>
+                  <option value="medical">Médical</option>
+                  <option value="logistics">Logistique</option>
+                  <option value="command">Commandement</option>
+                  <option value="site_sensible">Site Sensible</option>
+                  <option value="poi">POI</option>
+                  <option value="autre">Autre</option>
+                </select>
+              </label>
+              <label>Icône (emoji)<input id="map-point-icon" name="icon" maxlength="12" placeholder="📍" /></label>
+              <label class="span-full">Icône personnalisée (URL)
+                <input id="map-point-icon-url" name="icon_url" type="url" placeholder="https://.../icone-poi.png" />
+              </label>
+              <div id="map-icon-suggestions" class="map-icon-suggestions span-full" aria-label="Suggestions d'icônes"></div>
+              <label class="span-full">Notes
+                <textarea name="notes" rows="3" placeholder="Ex: route coupée, équipe envoyée, heure de début..."></textarea>
+              </label>
+              <div class="span-full municipality-actions">
+                <button type="submit">Enregistrer le point</button>
+              </div>
+            </form>
+          </dialog>
+
+        <section id="users-panel" class="panel view hidden" hidden>
+          <h3>Comptes utilisateurs</h3>
+          <form id="user-create-form" class="form" data-admin-only>
+            <label>Identifiant<input name="username" required minlength="3" /></label>
+            <label>Mot de passe initial<input name="password" type="password" minlength="8" required /></label>
+            <label>Rôle
+              <select name="role" id="user-create-role" required>
+                <option value="visiteur">Visiteur</option>
+                <option value="securite">Sécurité</option>
+                <option value="mairie">Mairie</option>
+                <option value="ope">Opérateur</option>
+                <option value="admin">Admin</option>
+              </select>
+            </label>
+            <label id="user-create-municipality-wrap" class="hidden" hidden>Commune PCS
+              <select name="municipality_name" id="user-create-municipality"></select>
+            </label>
+            <button type="submit">Créer l'utilisateur</button>
+          </form>
+          <p id="users-success" class="tag"></p>
+          <p id="users-error" class="error"></p>
+          <form id="ldap-bind-password-form" class="form" data-admin-only autocomplete="off">
+            <h4>Mot de passe de service LDAP</h4>
+            <label>Mot de passe de configuration LDAP<input name="password" type="password" autocomplete="new-password" placeholder="Nouvelle valeur" /></label>
+            <div class="filter-tool-row">
+              <button type="submit">Enregistrer le mot de passe LDAP</button>
+              <button id="ldap-bind-password-clear-btn" type="button" class="ghost">Effacer</button>
+            </div>
+            <p id="ldap-bind-password-status" class="muted"></p>
+          </form>
+          <form id="ldap-test-form" class="form" data-admin-only>
+            <h4>Test LDAP</h4>
+            <label>Identifiant LDAP<input name="username" autocomplete="username" placeholder="laisser vide pour tester seulement la connexion" /></label>
+            <label>Mot de passe LDAP<input name="password" type="password" autocomplete="current-password" /></label>
+            <div class="filter-tool-row">
+              <button type="submit">Tester utilisateur LDAP</button>
+              <button id="ldap-server-test-btn" type="button" class="ghost">Tester serveur LDAP</button>
+            </div>
+            <p id="ldap-test-result" class="muted"></p>
+          </form>
+          <table class="users-table">
+            <thead><tr><th>Utilisateur</th><th>Source</th><th>Rôle</th><th>Commune</th><th>Créé le</th><th>Dernier accès</th><th>Statut</th><th>Actions</th></tr></thead>
+            <tbody id="users-table"></tbody>
+          </table>
+        </section>
+        <!-- ── Notifications Discord ── -->
+        <section id="notifications-panel" class="panel view hidden" hidden>
+          <div class="flux-header" style="margin-bottom:1rem">
+            <div>
+              <h3>🔔 Notifications Discord</h3>
+              <p class="muted">Créez plusieurs règles d'alerte, chacune avec son propre webhook Discord et ses services.</p>
+            </div>
+            <button id="notif-new-btn" type="button" onclick="_notifCreateNew()">+ Nouvelle notification</button>
+          </div>
+
+          <!-- Aide webhook (collapsible) -->
+          <details class="notif-help-box">
+            <summary>🎮 Comment obtenir une URL de webhook Discord ?</summary>
+            <ol>
+              <li>Dans Discord, ouvrez le canal cible → <strong>Paramètres du canal</strong> → <strong>Intégrations</strong> → <strong>Webhooks</strong></li>
+              <li>Cliquez <strong>Nouveau webhook</strong>, donnez-lui un nom (ex : CRISIS38)</li>
+              <li>Cliquez <strong>Copier l'URL du webhook</strong> et collez-la dans le champ de la notification</li>
+            </ol>
+          </details>
+
+          <div id="notif-toast" class="notif-toast-bar"></div>
+
+          <!-- Liste des règles (générée dynamiquement) -->
+          <div id="notif-rules-list"></div>
+
+          <!-- Journal -->
+          <div class="notif-log-head">
+            <strong>📋 Journal des notifications envoyées</strong>
+            <button type="button" id="notif-log-refresh-btn" style="font-size:.78rem;padding:.25rem .6rem">Actualiser</button>
+          </div>
+          <div id="notif-log-list" class="notif-log-list">
+            <div class="muted">Chargement…</div>
+          </div>
+        </section>
+
+        <!-- ── Journal d'audit (admin) ── -->
+        <section id="audit-panel" class="panel view hidden" hidden>
+          <div class="flux-header" style="margin-bottom:1rem">
+            <div>
+              <h3>Journal d'audit · Traçabilité</h3>
+              <p class="muted">Toutes les actions (écriture, suppression, export) effectuées par les utilisateurs.</p>
+            </div>
+            <a id="audit-export-link" href="/api/audit/export/csv?days=30" class="btn ghost" style="font-size:.85rem;padding:.35rem .75rem">⬇ Exporter CSV</a>
+          </div>
+          <div class="audit-toolbar">
+            <input id="audit-search-filter" type="search" placeholder="Rechercher action, utilisateur, IP, détail..." />
+            <select id="audit-user-filter"><option value="">Tous les utilisateurs</option></select>
+            <select id="audit-type-filter"><option value="">Tous les modules</option></select>
+            <select id="audit-method-filter">
+              <option value="">Toutes méthodes</option>
+              <option value="POST">Création / action</option>
+              <option value="PATCH">Modification</option>
+              <option value="PUT">Remplacement</option>
+              <option value="DELETE">Suppression</option>
+              <option value="GET">Export / lecture tracée</option>
+            </select>
+            <select id="audit-status-filter">
+              <option value="">Tous statuts</option>
+              <option value="success">Réussites</option>
+              <option value="warning">Redirections</option>
+              <option value="error">Erreurs</option>
+            </select>
+            <select id="audit-sort-select">
+              <option value="created_at:desc">Plus récent</option>
+              <option value="created_at:asc">Plus ancien</option>
+              <option value="username:asc">Utilisateur A-Z</option>
+              <option value="resource_type:asc">Module A-Z</option>
+              <option value="status_code:desc">Statut élevé</option>
+            </select>
+            <select id="audit-limit-select">
+              <option value="100">100 lignes</option>
+              <option value="250">250 lignes</option>
+              <option value="500">500 lignes</option>
+            </select>
+            <button id="audit-refresh-btn" type="button">Actualiser</button>
+          </div>
+          <div id="audit-summary" class="audit-summary muted"></div>
+          <div class="audit-layout">
+            <div id="audit-list" class="audit-table-wrap"></div>
+            <aside id="audit-details" class="audit-details muted">Sélectionnez une ligne pour afficher le détail.</aside>
+          </div>
+        </section>
+
+        <dialog id="situation-kpi-modal" class="municipality-details-modal situation-kpi-modal">
+          <div class="municipality-details-modal__head">
+            <h4 id="situation-kpi-modal-title">Détail KPI</h4>
+            <button type="button" id="situation-kpi-modal-close" class="ghost">Fermer</button>
+          </div>
+          <div id="situation-kpi-modal-content"></div>
+        </dialog>
+      </section>
+    </section>
+  </main>
+  <!-- ── Vue terrain mobile ── -->
+  <div id="mobile-mco-overlay" class="mobile-mco-overlay hidden" hidden aria-modal="true" role="dialog" aria-label="Créer un événement">
+    <div class="mobile-mco-sheet">
+      <div class="mobile-mco-sheet-hd">
+        <span class="mobile-mco-sheet-title">Nouvel événement</span>
+        <button id="mobile-mco-close" class="ghost mobile-mco-close" type="button" aria-label="Fermer">✕</button>
+      </div>
+      <form id="mobile-mco-form" class="mobile-mco-form">
+        <input name="title" placeholder="Titre (ex: Crue secteur Grenoble)" required autocomplete="off" />
+        <input name="address" placeholder="📍 Adresse / secteur concerné" required autocomplete="off" />
+        <select name="municipality_id" id="mobile-event-municipality-id">
+          <option value="">Aucune commune (départemental)</option>
+        </select>
+        <button type="submit" class="mobile-mco-submit">Créer l'événement</button>
+        <p id="mobile-mco-error" class="error"></p>
+      </form>
+    </div>
+  </div>
+
+  <nav id="mobile-bottom-nav" class="mobile-bottom-nav" aria-label="Navigation mobile">
+    <button class="mobile-nav-btn active" data-mobile-target="situation-panel" aria-label="Situation">
+      <span class="mobile-nav-icon">📊</span>
+      <span class="mobile-nav-label">Situation</span>
+    </button>
+    <button class="mobile-nav-btn" data-mobile-target="map-panel" aria-label="Carte">
+      <span class="mobile-nav-icon">🗺️</span>
+      <span class="mobile-nav-label">Carte</span>
+    </button>
+    <button class="mobile-nav-btn mobile-nav-btn--add" id="mobile-mco-open-btn" aria-label="Nouvel événement">
+      <span class="mobile-nav-icon">➕</span>
+      <span class="mobile-nav-label">Événement</span>
+    </button>
+    <button class="mobile-nav-btn" data-mobile-target="logs-panel" aria-label="Main courante">
+      <span class="mobile-nav-icon">📝</span>
+      <span class="mobile-nav-label">MCO</span>
+    </button>
+    <button class="mobile-nav-btn mobile-nav-btn--locate" id="mobile-locate-btn" aria-label="Me localiser">
+      <span class="mobile-nav-icon">📍</span>
+      <span class="mobile-nav-label">Localiser</span>
+    </button>
+    <button class="mobile-nav-btn" id="mobile-menu-btn" aria-label="Menu">
+      <span class="mobile-nav-icon">☰</span>
+      <span class="mobile-nav-label">Menu</span>
+    </button>
+  </nav>
+
+  <!-- ── Toast géolocalisation ── -->
+  <div id="geo-toast" class="geo-toast" aria-live="polite"></div>
+
+  <!-- ── Modal nom d'agent (géoloc terrain) ── -->
+  <div id="agent-name-modal" class="agent-name-modal hidden" hidden aria-modal="true" role="dialog" aria-label="Partager ma position">
+    <div class="agent-name-sheet">
+      <div class="agent-name-sheet-hd">
+        <span class="agent-name-sheet-title">📍 Partager ma position</span>
+        <button id="agent-name-close" class="ghost" type="button" aria-label="Fermer">✕</button>
+      </div>
+      <p class="agent-name-desc">Votre position GPS sera partagée avec les autres opérateurs connectés et actualisée toutes les 20 s.</p>
+      <form id="agent-name-form" class="agent-name-form">
+        <label>Nom d'affichage
+          <input id="agent-name-input" type="text" placeholder="Ex: Lucas PECOUT" maxlength="40" required autocomplete="name" />
+        </label>
+        <button type="submit" class="agent-name-submit">Commencer le partage</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Compatibilité avec d'anciens scripts qui pilotent #isere-shape. -->
+  <svg aria-hidden="true" width="0" height="0" focusable="false" style="position:absolute">
+    <path id="isere-shape" d="M0 0h1v1H0z"></path>
+  </svg>
+  <script src="/hosting_data.js?v=20260603-perf1"></script>
+  <script src="/script.js?v=20260616-no-browser-notif"></script>
+</body>
+</html>

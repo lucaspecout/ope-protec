@@ -1,0 +1,20 @@
+# Configuration OpenSSL permissive pour les serveurs gouvernementaux français avec TLS legacy
+# Utilisée via OPENSSL_CONF=/etc/ssl/legacy-openssl.cnf dans le conteneur Docker
+
+openssl_conf = openssl_init
+
+[openssl_init]
+ssl_conf = ssl_sect
+
+[ssl_sect]
+system_default = system_default_sect
+
+[system_default_sect]
+# Autorise la renégociation legacy (requis pour opendata.isere.fr et autres serveurs gouv)
+Options = UnsafeLegacyRenegotiation
+# Force TLS 1.2 exactement — évite TLSV1_ALERT_INTERNAL_ERROR sur opendata.isere.fr
+# (serveur rejette TLS 1.3 avec internal error au lieu d'un alert version correcte)
+MinProtocol = TLSv1.2
+MaxProtocol = TLSv1.2
+# Niveau de sécurité bas pour accepter les suites de chiffrement RSA sans PFS
+CipherString = DEFAULT:@SECLEVEL=0
