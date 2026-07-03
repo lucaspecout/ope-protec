@@ -16105,11 +16105,19 @@ function startLiveClock() {
 /** Badge de vigilance globale dans le header — mis à jour à chaque renderDashboard. */
 function updateHeaderVigilanceBadge(level) {
   const badge = document.getElementById('header-vigilance-badge');
-  if (!badge) return;
   const lvl = normalizeLevel(level || 'vert');
   const labels = { vert: 'VERT', jaune: 'JAUNE', orange: 'ORANGE', rouge: 'ROUGE', gris: 'SYNC' };
-  badge.textContent = labels[lvl] || lvl.toUpperCase();
-  ['vert', 'jaune', 'orange', 'rouge', 'gris'].forEach((l) => badge.classList.toggle(`header-vigilance-badge--${l}`, l === lvl));
+  if (badge) {
+    badge.textContent = labels[lvl] || lvl.toUpperCase();
+    ['vert', 'jaune', 'orange', 'rouge', 'gris'].forEach((l) => badge.classList.toggle(`header-vigilance-badge--${l}`, l === lvl));
+  }
+  const sidebarPill = document.getElementById('sidebar-risk-pill');
+  const sidebarLabel = document.getElementById('sidebar-risk-label');
+  if (sidebarPill) {
+    ['vert', 'jaune', 'orange', 'rouge', 'gris'].forEach((l) => sidebarPill.classList.toggle(`sidebar-risk-pill--${l}`, l === lvl));
+    sidebarPill.setAttribute('title', `Risque global : ${labels[lvl] || lvl.toUpperCase()}`);
+  }
+  if (sidebarLabel) sidebarLabel.textContent = labels[lvl] || lvl.toUpperCase();
 }
 
 /** Indicateur de fraîcheur : "données de il y a Xs" mis à jour toutes les 15s. */

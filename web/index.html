@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css?v=20260703-thin-sidebar-scrollbar" />
+  <link rel="stylesheet" href="/styles.css?v=20260703-sidebar-risk-pill" />
 </head>
 <body>
   <div id="network-offline-banner" role="alert" aria-live="assertive">
@@ -51,6 +51,11 @@
           <img class="sidebar-pc-logo pc-logo-img" src="/assets/protection-civile-isere-logo.svg" alt="Protection Civile IsÃ¨re" />
           <p class="tag">Centre de commandement</p>
           <h2>Isère · 38</h2>
+          <div id="sidebar-risk-pill" class="sidebar-risk-pill sidebar-risk-pill--vert" title="Risque global">
+            <span class="sidebar-risk-pill__dot" aria-hidden="true"></span>
+            <span class="sidebar-risk-pill__label">Risque global</span>
+            <strong id="sidebar-risk-label">VERT</strong>
+          </div>
           <p class="muted">Rôle <strong id="current-role">-</strong></p>
           <p class="muted">Commune <strong id="current-commune">Toutes</strong></p>
         </div>
@@ -1452,6 +1457,6 @@
     <path id="isere-shape" d="M0 0h1v1H0z"></path>
   </svg>
   <script src="/hosting_data.js?v=20260603-perf1"></script>
-  <script src="/script.js?v=20260703-live-sitrep-clock"></script>
+  <script src="/script.js?v=20260703-sidebar-risk-pill"></script>
 </body>
 </html>
