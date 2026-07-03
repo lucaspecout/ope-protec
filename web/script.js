@@ -11850,6 +11850,117 @@ function renderSituationOverview() {
 
   setHtml('situation-content', `
     ${buildFrAlertTodayBanner(frAlert)}
+    <div class="situation-toolbar situation-toolbar--cards">
+      <div>
+        <p class="tag">Situation operationnelle</p>
+        <h3>Synthese Isere</h3>
+        <p class="muted">Vue par cartes, organisee par lignes pour lire chaque information directement. Mise a jour ${escapeHtml(generatedAt)}</p>
+      </div>
+      <div class="situation-toolbar__actions">
+        <button id="situation-copy-sitrep-btn" type="button" class="btn-copy-sitrep ghost" title="Copier le SITREP en texte brut">Copier SITREP</button>
+        <button id="situation-export-pdf-btn" type="button">Telecharger PDF</button>
+      </div>
+    </div>
+
+    <section class="situation-card-row">
+      <div class="situation-row-title">
+        <span>01</span>
+        <div>
+          <h3>Indicateurs essentiels</h3>
+          <p class="muted">Le niveau global et les signaux qui changent la posture operationnelle.</p>
+        </div>
+      </div>
+      <div class="situation-row-grid situation-row-grid--major">
+        ${kpiCards.map((card) => renderSituationTile(card, `situation-tile--bg-${escapeHtml(card.css)}`)).join('')}
+      </div>
+    </section>
+
+    <section class="situation-card-row">
+      <div class="situation-row-title">
+        <span>02</span>
+        <div>
+          <h3>Meteo, eau et reseaux</h3>
+          <p class="muted">Pluie intense, crues rapides, restrictions, qualite de l'air et reseaux critiques.</p>
+        </div>
+      </div>
+      <div class="situation-row-grid">
+        ${mobilityCards.slice(3).map((card) => renderSituationTile(card)).join('')}
+      </div>
+    </section>
+
+    <section class="situation-card-row">
+      <div class="situation-row-title">
+        <span>03</span>
+        <div>
+          <h3>Mobilite et acces</h3>
+          <p class="muted">Transport, routes et disponibilite des communications utiles aux deplacements terrain.</p>
+        </div>
+      </div>
+      <div class="situation-row-grid">
+        ${mobilityCards.slice(0, 3).map((card) => renderSituationTile(card)).join('')}
+      </div>
+    </section>
+
+    <section class="situation-card-row">
+      <div class="situation-row-title">
+        <span>04</span>
+        <div>
+          <h3>Risques naturels terrain</h3>
+          <p class="muted">Avalanches, feux, seismes, cols et signaux montagne.</p>
+        </div>
+      </div>
+      <div class="situation-row-grid">
+        ${risquesNaturelsCards.map((card) => renderSituationTile(card, card.key === 'meteo-forets' ? `situation-tile--bg-${escapeHtml(normalizeLevel(card.css))}` : '')).join('')}
+      </div>
+    </section>
+
+    <div class="situation-middle-grid">
+      <article class="tile situation-feed-card situation-feed-card--alert">
+        <div class="situation-card-title">
+          <h3>Risques orange / rouge</h3>
+          <span>Priorite</span>
+        </div>
+        <ul class="list compact">${criticalMarkup}</ul>
+      </article>
+      <article class="tile situation-feed-card">
+        <div class="situation-card-title">
+          <h3>Evenements ouverts</h3>
+          <span>${openEvents.length}</span>
+        </div>
+        <ul class="list compact">${openEventsMarkup}</ul>
+      </article>
+    </div>
+
+    <div class="situation-middle-grid">
+      <article class="tile situation-feed-card">
+        <div class="situation-card-title">
+          <h3>Dernieres informations Prefecture</h3>
+          <span>${prefectureItems.length}</span>
+        </div>
+        <ul class="list compact">
+          ${prefectureItems.map((item) => {
+            const title = escapeHtml(item.title || 'Actualite Prefecture');
+            const published = item.published_at ? escapeHtml(item.published_at) : '';
+            const safeLink = String(item.link || '').startsWith('http') ? item.link : 'https://www.isere.gouv.fr';
+            return `<li><strong>${title}</strong>${published ? `<br><span class="muted">${published}</span>` : ''}<br><a href="${safeLink}" target="_blank" rel="noreferrer">Lire l'actualite</a></li>`;
+          }).join('') || '<li>Aucune actualite Prefecture disponible.</li>'}
+        </ul>
+      </article>
+      <article class="tile situation-feed-card">
+        <div class="situation-card-title">
+          <h3>Fil de situation prioritaire</h3>
+          <span>${activeLogs.length}</span>
+        </div>
+        <ul class="list">${activeLogs.map((log) => buildSituationLogMarkup(log)).join('') || '<li>Aucune crise nouvelle / en cours / suivie liee a un evenement ouvert.</li>'}</ul>
+      </article>
+    </div>
+  `);
+
+  bindSituationActions();
+  return;
+
+  setHtml('situation-content', `
+    ${buildFrAlertTodayBanner(frAlert)}
     <section class="control-board control-board--${escapeHtml(normalizeLevel(highestLevel))}">
       <header class="control-topline">
         <div>
