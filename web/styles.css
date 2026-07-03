@@ -6146,3 +6146,63 @@ body {
     bottom: 8px;
   }
 }
+
+/* Dark readable controls inside the strategic map drawer */
+#map-panel .map-filter-group--tools .map-tool-section,
+#map-panel .map-filter-group--tools .route-tool,
+#map-panel .map-filter-group--tools .tactical-layer-grid label,
+#map-panel .map-filter-group--tools .filter-tool-row button,
+#map-panel .map-filter-group--tools .filter-tool-row .map-btn-lite,
+#map-panel .map-filter-group--tools .filter-tool-row select,
+#map-panel .map-filter-group--tools .evacuation-radius-field,
+#map-panel .map-controls .filter-subgroup,
+#map-panel .map-controls .hosting-filter-grid,
+#map-panel .map-controls .map-inline-checkbox {
+  border-color: rgba(255,255,255,.12);
+  color: #eff6ff;
+  background: rgba(255,255,255,.055);
+  box-shadow: none;
+}
+
+#map-panel .map-filter-group--tools .map-tool-section__title,
+#map-panel .map-filter-group--tools .route-tool__summary,
+#map-panel .map-filter-group--tools .route-tool__list,
+#map-panel .map-filter-group--tools label,
+#map-panel .map-filter-group--tools small,
+#map-panel .map-controls .filter-subgroup label,
+#map-panel .map-controls .hosting-filter-grid label {
+  color: #eff6ff;
+}
+
+#map-panel .map-filter-group--tools .route-tool__summary {
+  background: rgba(7, 21, 45, .55);
+}
+
+#map-panel .map-filter-group--tools .tactical-layer-grid label:has(input:checked),
+#map-panel .map-controls .filter-subgroup:has(input:checked),
+#map-panel .map-controls .map-inline-checkbox:has(input:checked) {
+  border-color: rgba(124, 166, 255, .48);
+  background: rgba(72, 106, 203, .24);
+}
+
+#map-panel .map-controls input,
+#map-panel .map-controls select,
+#map-panel .map-controls textarea {
+  color: #eff6ff;
+  background-color: rgba(7, 21, 45, .72);
+  border-color: rgba(255,255,255,.14);
+}
+
+#map-panel .map-controls option {
+  color: #10284f;
+  background: #fff;
+}
+
+#map-panel .map-filter-group--tools .map-tool-section__title::before {
+  background: #a78bfa;
+  box-shadow: 0 0 0 3px rgba(167, 139, 250, .18);
+}
+
+#map-panel .map-layout {
+  display: none;
+}
