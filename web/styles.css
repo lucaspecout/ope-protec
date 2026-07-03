@@ -6802,6 +6802,70 @@ table,
   gap: .9rem;
 }
 
+.ops-sitrep-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, .95fr) minmax(280px, 1.15fr) minmax(280px, .9fr);
+  gap: .9rem;
+  align-items: stretch;
+}
+
+.ops-data-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: .9rem;
+}
+
+.ops-sitrep-status {
+  display: grid;
+  gap: .25rem;
+  padding: .8rem 0 .75rem;
+}
+
+.ops-sitrep-status strong {
+  color: #fff;
+  font-size: clamp(1.25rem, 2vw, 1.7rem);
+  line-height: 1.1;
+}
+
+.ops-sitrep-status span {
+  color: #9fb0c6;
+  font-size: .82rem;
+  font-weight: 700;
+}
+
+.ops-activity-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .55rem;
+  margin-top: .75rem;
+}
+
+.ops-activity-grid p {
+  display: grid;
+  gap: .28rem;
+  min-height: 76px;
+  margin: 0;
+  padding: .7rem;
+  border: 1px solid rgba(148, 163, 184, .16);
+  border-radius: 8px;
+  background: rgba(7, 18, 34, .72);
+}
+
+.ops-activity-grid span {
+  color: #9fb0c6;
+  font-size: .72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.ops-activity-grid strong {
+  align-self: end;
+  color: #fff;
+  font-size: 1.22rem;
+  line-height: 1.05;
+  overflow-wrap: anywhere;
+}
+
 .ops-mini-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -6892,6 +6956,8 @@ table,
 
   .menu-toggle { display: inline-flex; }
   .ops-layout,
+  .ops-sitrep-grid,
+  .ops-data-grid,
   .ops-bottom-grid {
     grid-template-columns: 1fr;
   }
@@ -6921,6 +6987,7 @@ table,
   }
 
   .ops-kpi-grid,
+  .ops-activity-grid,
   .ops-mini-grid {
     grid-template-columns: 1fr;
   }

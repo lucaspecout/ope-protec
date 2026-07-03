@@ -11847,6 +11847,7 @@ function renderSituationOverview() {
   const liveTimeline = activeLogs.slice(0, 6);
   const openEventsMarkup = buildOpenEventsSituationMarkup(cachedEvents);
   const criticalMarkup = buildCriticalRisksMarkup(dashboard, externalRisks);
+  const hasPrioritySituation = normalizeLevel(highestLevel) !== 'vert' || openEvents.length > 0 || activeLogCount > 0;
   const allKpiRows = [
     ...kpiCards,
     ...mobilityCards,
@@ -11876,81 +11877,85 @@ function renderSituationOverview() {
       </header>
 
       <section class="ops-kpi-grid">
-        ${controlMetrics.slice(0, 6).map(renderControlMetric).join('')}
+        ${controlMetrics.map(renderControlMetric).join('')}
       </section>
 
-      <div class="ops-layout">
-        <section class="ops-stack">
-          <article class="tile ops-panel ops-panel--alert">
-            <div class="situation-card-title">
-              <h3>Alertes en temps reel</h3>
-              <span>${criticalMarkup.includes('<li') ? 'Priorite' : 'OK'}</span>
-            </div>
-            <ul class="list compact">${criticalMarkup}</ul>
-          </article>
-
-          <article class="tile ops-panel">
-            <div class="situation-card-title">
-              <h3>Repartition operationnelle</h3>
-              <span>${openEvents.length + activeLogCount}</span>
-            </div>
-            <div class="ops-donut" style="--risk:${riskPercent}%">
-              <strong>${escapeHtml(String(openEvents.length + activeLogCount))}</strong>
-              <span>Total</span>
-            </div>
-            <div class="ops-signal-list">
-              ${prioritySignals.map((item) => `<p><span class="situation-level-dot situation-level-dot--${escapeHtml(normalizeLevel(item.level))}"></span>${escapeHtml(item.label)}<strong>${escapeHtml(item.value)}</strong></p>`).join('')}
-            </div>
-          </article>
-        </section>
-
-        <article class="tile ops-map-card">
+      <section class="ops-sitrep-grid">
+        <article class="tile ops-panel ops-panel--alert">
           <div class="situation-card-title">
-            <h3>Carte des interventions</h3>
-            <span>Isere</span>
+            <h3>Point prioritaire</h3>
+            <span>${escapeHtml(normalizeLevel(highestLevel).toUpperCase())}</span>
           </div>
-          <div class="ops-map-visual" aria-label="Vue synthetique Isere">
-            <span class="ops-map-city ops-map-city--grenoble">Grenoble</span>
-            <span class="ops-map-city ops-map-city--voiron">Voiron</span>
-            <span class="ops-map-city ops-map-city--bourgoin">Bourgoin-Jallieu</span>
-            <span class="ops-marker ops-marker--red" style="--x:62%;--y:39%">${openEvents.length}</span>
-            <span class="ops-marker ops-marker--orange" style="--x:44%;--y:24%">${apicAlerts}</span>
-            <span class="ops-marker ops-marker--green" style="--x:58%;--y:68%">${activeLogCount}</span>
-            <span class="ops-marker ops-marker--blue" style="--x:30%;--y:55%">${sncfAlerts}</span>
-            <span class="ops-marker ops-marker--purple" style="--x:76%;--y:52%">${vigieauAlertsCount}</span>
-            <div class="ops-map-legend">
-              <span>Interventions</span><span>Equipes</span><span>Vehicules</span><span>Risques</span>
-            </div>
+          <div class="ops-sitrep-status">
+            <strong>${escapeHtml(situationStatusLabel)}</strong>
+            <span>Risque consolide ${escapeHtml(String(globalRiskValue))}</span>
+          </div>
+          <div class="ops-signal-list">
+            ${prioritySignals.map((item) => `<p><span class="situation-level-dot situation-level-dot--${escapeHtml(normalizeLevel(item.level))}"></span>${escapeHtml(item.label)}<strong>${escapeHtml(item.value)}</strong></p>`).join('')}
           </div>
         </article>
 
-        <section class="ops-stack">
-          <article class="tile ops-panel">
-            <div class="situation-card-title">
-              <h3>Dernieres interventions</h3>
-              <span>${openEvents.length}</span>
-            </div>
-            <ul class="list compact">${openEventsMarkup}</ul>
-          </article>
-          <article class="tile ops-panel">
-            <div class="situation-card-title">
-              <h3>Fil prioritaire</h3>
-              <span>${activeLogs.length}</span>
-            </div>
-            <ul class="list compact">${activeLogs.slice(0, 5).map((log) => buildSituationLogMarkup(log)).join('') || '<li>Aucune crise nouvelle / en cours / suivie liee a un evenement ouvert.</li>'}</ul>
-          </article>
-        </section>
-      </div>
+        <article class="tile ops-panel">
+          <div class="situation-card-title">
+            <h3>Alertes a traiter</h3>
+            <span>${hasPrioritySituation ? 'Priorite' : 'OK'}</span>
+          </div>
+          <ul class="list compact">${criticalMarkup}</ul>
+        </article>
+
+        <article class="tile ops-panel">
+          <div class="situation-card-title">
+            <h3>Activite terrain</h3>
+            <span>${openEvents.length + activeLogCount}</span>
+          </div>
+          <div class="ops-activity-grid">
+            <p><span>Evenements ouverts</span><strong>${openEvents.length}</strong></p>
+            <p><span>Entrees MCO actives</span><strong>${activeLogCount}</strong></p>
+            <p><span>PCS crise</span><strong>${crisisCount}</strong></p>
+            <p><span>Derniere MAJ</span><strong>${escapeHtml(generatedAt)}</strong></p>
+          </div>
+        </article>
+      </section>
+
+      <section class="ops-data-grid">
+        <article class="tile ops-panel">
+          <div class="situation-card-title">
+            <h3>Meteo / crues / PCS</h3>
+            <span>${kpiCards.length}</span>
+          </div>
+          <div class="ops-mini-grid">
+            ${kpiCards.map(renderKpiLine).join('')}
+          </div>
+        </article>
+
+        <article class="tile ops-panel">
+          <div class="situation-card-title">
+            <h3>Mobilite / reseaux / eau</h3>
+            <span>${mobilityCards.length}</span>
+          </div>
+          <div class="ops-mini-grid">
+            ${mobilityCards.map(renderKpiLine).join('')}
+          </div>
+        </article>
+
+        <article class="tile ops-panel">
+          <div class="situation-card-title">
+            <h3>Risques naturels</h3>
+            <span>${risquesNaturelsCards.length}</span>
+          </div>
+          <div class="ops-mini-grid">
+            ${risquesNaturelsCards.map(renderKpiLine).join('')}
+          </div>
+        </article>
+      </section>
 
       <section class="ops-bottom-grid">
         <article class="tile ops-panel">
           <div class="situation-card-title">
-            <h3>Signaux suivis</h3>
-            <span>${allKpiRows.length}</span>
+            <h3>Evenements ouverts</h3>
+            <span>${openEvents.length}</span>
           </div>
-          <div class="ops-mini-grid">
-            ${allKpiRows.slice(0, 12).map(renderKpiLine).join('')}
-          </div>
+          <ul class="list compact">${openEventsMarkup}</ul>
         </article>
         <article class="tile ops-panel">
           <div class="situation-card-title">
