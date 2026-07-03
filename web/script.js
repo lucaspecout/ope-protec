@@ -13545,10 +13545,21 @@ const SVC_CAT_COLORS = {
 };
 
 /* Détail déplié pour chaque service (listes d'alertes / stations / etc.) */
-const SERVICES_PANEL_HIDDEN_CATEGORIES = new Set(['ActualitÃ©s', 'DonnÃ©es', 'SantÃ©']);
+const SERVICES_PANEL_HIDDEN_CATEGORIES = new Set(['actualites', 'donnees', 'sante']);
+
+function normalizeServicesPanelCategory(value = '') {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/Ã©/g, 'e')
+    .replace(/Ã¨/g, 'e')
+    .replace(/Ãª/g, 'e')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+}
 
 function getServicesPanelFluxServices() {
-  return FLUX_SERVICES.filter((svc) => !SERVICES_PANEL_HIDDEN_CATEGORIES.has(svc.category));
+  return FLUX_SERVICES.filter((svc) => !SERVICES_PANEL_HIDDEN_CATEGORIES.has(normalizeServicesPanelCategory(svc.category)));
 }
 
 const SVC_DETAIL_LISTS = {
