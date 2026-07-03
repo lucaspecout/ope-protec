@@ -11847,71 +11847,30 @@ function renderSituationOverview() {
   const liveTimeline = activeLogs.slice(0, 6);
   const openEventsMarkup = buildOpenEventsSituationMarkup(cachedEvents);
   const criticalMarkup = buildCriticalRisksMarkup(dashboard, externalRisks);
+  const allKpiRows = [
+    ...kpiCards,
+    ...mobilityCards,
+    ...risquesNaturelsCards,
+  ];
+  const renderKpiLine = (card) => `
+    <article class="situation-kpi-line situation-kpi-line--${escapeHtml(normalizeLevel(card.css))}" role="button" tabindex="0" data-kpi-key="${escapeHtml(card.key)}" data-kpi-label="${escapeHtml(card.label)}">
+      <span class="situation-kpi-line__status"></span>
+      <span class="situation-kpi-line__label">${escapeHtml(card.label)}</span>
+      <strong class="situation-kpi-line__value ${escapeHtml(normalizeLevel(card.css))}">${escapeHtml(String(card.value))}</strong>
+    </article>`;
 
   setHtml('situation-content', `
     ${buildFrAlertTodayBanner(frAlert)}
-    <div class="situation-toolbar situation-toolbar--cards">
-      <div>
-        <p class="tag">Situation operationnelle</p>
-        <h3>Synthese Isere</h3>
-        <p class="muted">Vue par cartes, organisee par lignes pour lire chaque information directement. Mise a jour ${escapeHtml(generatedAt)}</p>
-      </div>
+    <div class="situation-toolbar situation-toolbar--kpi">
+      <strong>Situation operationnelle</strong>
       <div class="situation-toolbar__actions">
         <button id="situation-copy-sitrep-btn" type="button" class="btn-copy-sitrep ghost" title="Copier le SITREP en texte brut">Copier SITREP</button>
         <button id="situation-export-pdf-btn" type="button">Telecharger PDF</button>
       </div>
     </div>
 
-    <section class="situation-card-row">
-      <div class="situation-row-title">
-        <span>01</span>
-        <div>
-          <h3>Indicateurs essentiels</h3>
-          <p class="muted">Le niveau global et les signaux qui changent la posture operationnelle.</p>
-        </div>
-      </div>
-      <div class="situation-row-grid situation-row-grid--major">
-        ${kpiCards.map((card) => renderSituationTile(card, `situation-tile--bg-${escapeHtml(card.css)}`)).join('')}
-      </div>
-    </section>
-
-    <section class="situation-card-row">
-      <div class="situation-row-title">
-        <span>02</span>
-        <div>
-          <h3>Meteo, eau et reseaux</h3>
-          <p class="muted">Pluie intense, crues rapides, restrictions, qualite de l'air et reseaux critiques.</p>
-        </div>
-      </div>
-      <div class="situation-row-grid">
-        ${mobilityCards.slice(3).map((card) => renderSituationTile(card)).join('')}
-      </div>
-    </section>
-
-    <section class="situation-card-row">
-      <div class="situation-row-title">
-        <span>03</span>
-        <div>
-          <h3>Mobilite et acces</h3>
-          <p class="muted">Transport, routes et disponibilite des communications utiles aux deplacements terrain.</p>
-        </div>
-      </div>
-      <div class="situation-row-grid">
-        ${mobilityCards.slice(0, 3).map((card) => renderSituationTile(card)).join('')}
-      </div>
-    </section>
-
-    <section class="situation-card-row">
-      <div class="situation-row-title">
-        <span>04</span>
-        <div>
-          <h3>Risques naturels terrain</h3>
-          <p class="muted">Avalanches, feux, seismes, cols et signaux montagne.</p>
-        </div>
-      </div>
-      <div class="situation-row-grid">
-        ${risquesNaturelsCards.map((card) => renderSituationTile(card, card.key === 'meteo-forets' ? `situation-tile--bg-${escapeHtml(normalizeLevel(card.css))}` : '')).join('')}
-      </div>
+    <section class="situation-kpi-stack">
+      ${allKpiRows.map(renderKpiLine).join('')}
     </section>
 
     <div class="situation-middle-grid">
