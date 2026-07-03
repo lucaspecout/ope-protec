@@ -4330,7 +4330,97 @@ function renderSeismesLayer() {
 }
 
 // ── Feature 17 : Feux de forêt ───────────────────────────────────────────────
-function renderFeuxForetLayer() {
+function parseFeuxRelativeAgeMs(value) {
+  const text = String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/^il y a\s+/, '')
+    .replace(/\b(un|une)\b/g, '1')
+    .trim();
+  if (!text) return null;
+  if (/moins d.?une heure|quelques minutes|a l'instant|instant/.test(text)) return 30 * 60 * 1000;
+  const match = text.match(/(\d+(?:[,.]\d+)?)\s*(minute|min|heure|h|jour|j|semaine|sem|mois)/i);
+  if (!match) return null;
+  const valueNumber = Number(String(match[1]).replace(',', '.'));
+  if (!Number.isFinite(valueNumber)) return null;
+  const unit = match[2];
+  if (unit.startsWith('min')) return valueNumber * 60 * 1000;
+  if (unit === 'h' || unit.startsWith('heure')) return valueNumber * 60 * 60 * 1000;
+  if (unit === 'j' || unit.startsWith('jour')) return valueNumber * 24 * 60 * 60 * 1000;
+  if (unit.startsWith('sem')) return valueNumber * 7 * 24 * 60 * 60 * 1000;
+  if (unit.startsWith('mois')) return valueNumber * 30 * 24 * 60 * 60 * 1000;
+  return null;
+}
+
+function parseFeuxAbsoluteDate(item = {}) {
+  const direct = item.detected_at || item.published_at || item.created_at || item.updated_at || item.timestamp || item.date_time;
+  if (direct) {
+    const parsed = new Date(direct);
+    if (Number.isFinite(parsed.getTime())) return parsed;
+  }
+  const rawDate = String(item.date || '').trim();
+  if (!rawDate) return null;
+  const rawTime = String(item.time || '').trim().padStart(4, '0');
+  const isoTime = /^\d{4}$/.test(rawTime) ? `${rawTime.slice(0, 2)}:${rawTime.slice(2, 4)}:00` : '12:00:00';
+  const parsed = new Date(`${rawDate}T${isoTime}`);
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+}
+
+function feuxAgeMs(item = {}) {
+  const relative = parseFeuxRelativeAgeMs(item.recency || item.age || item.elapsed);
+  if (Number.isFinite(relative)) return relative;
+  const date = parseFeuxAbsoluteDate(item);
+  return date ? Date.now() - date.getTime() : null;
+}
+
+function feuxAgeStyle(item = {}, fallback = 'week') {
+  const age = feuxAgeMs(item);
+  if ((Number.isFinite(age) && age <= 24 * 60 * 60 * 1000) || (!Number.isFinite(age) && fallback === 'day')) {
+    return { color: '#e03131', label: 'Moins de 24h' };
+  }
+  if ((Number.isFinite(age) && age <= 7 * 24 * 60 * 60 * 1000) || (!Number.isFinite(age) && fallback === 'week')) {
+    return { color: '#2563eb', label: 'Moins de 7 jours' };
+  }
+  return { color: '#64748b', label: 'Plus ancien / date inconnue' };
+}
+
+function feuxMarkerIcon(style, source = 'satellite') {
+  const isSatellite = source === 'satellite';
+  const glyph = isSatellite ? '🔥' : 'FDF';
+  const size = isSatellite ? 32 : 34;
+  return window.L.divIcon({
+    className: '',
+    html: `<div style="width:${size}px;height:${size}px;border-radius:999px;display:grid;place-items:center;border:2px solid #fff;background:${style.color};color:#fff;font-size:${isSatellite ? 17 : 9}px;font-weight:900;line-height:1;box-shadow:0 0 0 4px ${style.color}33,0 8px 18px rgba(0,0,0,.32);">${glyph}</div>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+    popupAnchor: [0, -size / 2],
+  });
+}
+
+function findMunicipalityByName(name = '') {
+  const wanted = normalizeLooseCityKey(name);
+  if (!wanted) return null;
+  return (Array.isArray(cachedMunicipalities) ? cachedMunicipalities : []).find((municipality) => {
+    const current = normalizeLooseCityKey(municipality.name || municipality.commune || '');
+    return current === wanted || current.includes(wanted) || wanted.includes(current);
+  }) || null;
+}
+
+async function feuxIncidentPoint(item = {}) {
+  const direct = normalizeMapCoordinates(item.lat, item.lon)
+    || normalizeMapCoordinates(item.latitude, item.longitude);
+  if (direct) return direct;
+  const communeName = String(item.commune || item.city || item.title || '').replace(/\(38\)/g, '').trim();
+  const municipality = findMunicipalityByName(communeName);
+  if (municipality) {
+    const point = await geocodeMunicipality(municipality);
+    if (point) return point;
+  }
+  return geocodeTrafficLabel(communeName);
+}
+
+async function renderFeuxForetLayer() {
   if (!leafletMap || typeof window.L === 'undefined') return;
   const show = document.getElementById('filter-feux-foret')?.checked ?? false;
   if (!show) {
@@ -4340,18 +4430,28 @@ function renderFeuxForetLayer() {
   if (!feuxForetLayer) feuxForetLayer = window.L.layerGroup();
   if (!leafletMap.hasLayer(feuxForetLayer)) feuxForetLayer.addTo(leafletMap);
   feuxForetLayer.clearLayers();
-  const fires = Array.isArray(cachedExternalRisksSnapshot?.feux_foret_isere?.fires) ? cachedExternalRisksSnapshot.feux_foret_isere.fires : [];
+  const feuxData = cachedExternalRisksSnapshot?.feux_foret_isere || {};
+  const fires = Array.isArray(feuxData.fires) ? feuxData.fires : [];
   fires.forEach((f) => {
     const frp = f.frp != null ? `${Number(f.frp).toFixed(0)} MW` : '?';
     const conf = f.confidence || 'nominal';
-    const color = conf === 'high' ? '#c92a2a' : conf === 'low' ? '#f08c00' : '#e03131';
-    const icon = window.L.divIcon({
-      className: '',
-      html: `<span style="font-size:18px;filter:drop-shadow(0 1px 3px rgba(0,0,0,.5))">🔥</span>`,
-      iconSize: [22, 22], iconAnchor: [11, 11],
-    });
+    const style = feuxAgeStyle(f, 'day');
+    const icon = feuxMarkerIcon(style, 'satellite');
+    const dateLabel = [f.date, f.time ? String(f.time).padStart(4, '0').replace(/(\d{2})(\d{2})/, '$1h$2') : ''].filter(Boolean).join(' ');
     window.L.marker([f.lat, f.lon], { icon })
-      .bindPopup(`<strong>🔥 Foyer actif satellite</strong><br>Puissance : ${frp}<br>Confiance : ${conf}<br><span class="muted">${escapeHtml(f.date || '')}</span>`)
+      .bindPopup(`<strong>🔥 Foyer satellite · ${escapeHtml(style.label)}</strong><br>Source : ${escapeHtml(f.source || feuxData.data_source || 'EFFIS/Copernicus')}<br>Puissance : ${frp}<br>Confiance : ${escapeHtml(conf)}<br><span class="muted">${escapeHtml(dateLabel)}</span>`)
+      .addTo(feuxForetLayer);
+  });
+  const recentIncidents = Array.isArray(feuxData.recent_incidents) ? feuxData.recent_incidents : [];
+  const placed = await Promise.all(recentIncidents.map(async (item) => ({ item, point: await feuxIncidentPoint(item) })));
+  if (!(document.getElementById('filter-feux-foret')?.checked ?? false) || !feuxForetLayer) return;
+  placed.forEach(({ item, point }) => {
+    if (!point) return;
+    const style = feuxAgeStyle(item, 'week');
+    const icon = feuxMarkerIcon(style, 'feuxdeforet');
+    const link = item.link ? `<br><a href="${escapeHtml(item.link)}" target="_blank" rel="noreferrer">Voir la fiche FeuxDeForet.fr</a>` : '';
+    window.L.marker([point.lat, point.lon], { icon })
+      .bindPopup(`<strong>FeuxDeForet.fr · ${escapeHtml(style.label)}</strong><br>${escapeHtml(item.title || item.commune || 'Signalement Isère')}<br><span class="muted">${escapeHtml(item.recency || 'Signalement récent')} · position commune</span>${link}`)
       .addTo(feuxForetLayer);
   });
 }
