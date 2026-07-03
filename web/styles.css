@@ -5550,6 +5550,21 @@ body {
   height: 100dvh;
   overflow-y: auto;
   background-color: #071b44;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(191, 219, 254, .55) transparent;
+}
+.sidebar::-webkit-scrollbar {
+  width: 4px;
+}
+.sidebar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(191, 219, 254, .45);
+}
+.sidebar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, .7);
 }
 .side-nav {
   flex: 0 0 auto;
