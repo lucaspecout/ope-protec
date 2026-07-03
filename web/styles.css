@@ -6316,3 +6316,45 @@ body {
 #map-panel .map-layout {
   display: none;
 }
+
+@media (max-width: 980px) {
+  #app-sidebar.sidebar {
+    position: fixed !important;
+    top: 0;
+    right: auto;
+    bottom: 0;
+    left: 0;
+    z-index: 300;
+    width: min(320px, 88vw);
+    min-height: 100dvh;
+    height: 100dvh;
+    margin: 0;
+    border-radius: 0 14px 14px 0;
+    transform: translateX(-110%) !important;
+    transition: transform .24s ease;
+    box-shadow: none;
+  }
+
+  #app-sidebar.sidebar.open,
+  #app-sidebar.sidebar.mobile-open {
+    transform: translateX(0) !important;
+    box-shadow: 18px 0 38px rgba(4, 14, 32, .34);
+  }
+
+  #sidebar-backdrop.sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 299;
+    opacity: 0;
+    pointer-events: none;
+    background: rgba(4, 14, 32, .54);
+    transition: opacity .22s ease;
+  }
+
+  #sidebar-backdrop.sidebar-backdrop.open,
+  #sidebar-backdrop.sidebar-backdrop.mobile-open {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
