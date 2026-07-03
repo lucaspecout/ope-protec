@@ -509,6 +509,13 @@ label { display: block; margin-bottom: .8rem; }
   color: #10284f;
   font-size: 1.12rem;
 }
+.situation-toolbar--kpi-actions {
+  justify-content: flex-end;
+  padding: .35rem 0 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
 .situation-kpi-stack {
   display: grid;
   gap: .55rem;

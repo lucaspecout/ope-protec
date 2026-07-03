@@ -11861,17 +11861,16 @@ function renderSituationOverview() {
 
   setHtml('situation-content', `
     ${buildFrAlertTodayBanner(frAlert)}
-    <div class="situation-toolbar situation-toolbar--kpi">
-      <strong>Situation operationnelle</strong>
+    <section class="situation-kpi-stack">
+      ${allKpiRows.map(renderKpiLine).join('')}
+    </section>
+
+    <div class="situation-toolbar situation-toolbar--kpi situation-toolbar--kpi-actions">
       <div class="situation-toolbar__actions">
         <button id="situation-copy-sitrep-btn" type="button" class="btn-copy-sitrep ghost" title="Copier le SITREP en texte brut">Copier SITREP</button>
         <button id="situation-export-pdf-btn" type="button">Telecharger PDF</button>
       </div>
     </div>
-
-    <section class="situation-kpi-stack">
-      ${allKpiRows.map(renderKpiLine).join('')}
-    </section>
 
     <div class="situation-middle-grid">
       <article class="tile situation-feed-card situation-feed-card--alert">
