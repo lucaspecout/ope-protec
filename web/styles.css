@@ -3291,19 +3291,7 @@ select:focus {
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  background: linear-gradient(145deg, #1a3568, #0f2240);
-  display: grid;
-  place-items: center;
   flex-shrink: 0;
-  position: relative;
-}
-.login-logo__icon::after {
-  content: '';
-  position: absolute;
-  width: 0; height: 0;
-  border-left: 10px solid transparent;
-  border-right: 10px solid transparent;
-  border-bottom: 17px solid #f07800;
 }
 .login-logo__text strong {
   display: block;
@@ -5049,17 +5037,7 @@ body {
   box-shadow: none;
 }
 .sidebar-header::before {
-  content: "";
-  display: block;
-  width: 58px;
-  height: 58px;
-  margin: 0 auto 12px;
-  border-radius: 50%;
-  background:
-    linear-gradient(135deg, transparent 39%, #fff 40% 61%, transparent 62%),
-    conic-gradient(from 180deg, #f47a16 0 33%, #ffffff 0 66%, #1b4f9b 0 100%);
-  border: 4px solid rgba(255,255,255,.95);
-  box-shadow: 0 10px 24px rgba(0,0,0,.25);
+  content: none;
 }
 .sidebar-header .tag,
 .sidebar-header .muted { display: none; }
@@ -5544,4 +5522,52 @@ body {
     border-bottom: 1px solid var(--line);
   }
   .situation-bottom-strip span:last-child { border-bottom: 0; }
+}
+
+/* Protection Civile Isere logo mark */
+.pc-logo-mark {
+  position: relative;
+  display: inline-block;
+  width: 62px;
+  height: 62px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  overflow: hidden;
+  background: #f48a00;
+  box-shadow: 0 10px 24px rgba(7, 27, 68, .24);
+}
+.pc-logo-mark::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 51%;
+  width: 76%;
+  height: 79%;
+  transform: translate(-50%, -50%);
+  background: #ffffff;
+  clip-path: polygon(50% 0%, 100% 92%, 50% 100%, 0% 92%);
+}
+.pc-logo-mark::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 57%;
+  width: 43%;
+  height: 53%;
+  transform: translate(-50%, -50%);
+  background: #074783;
+  clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
+}
+.login-logo__icon.pc-logo-mark {
+  width: 48px;
+  height: 48px;
+  box-shadow: 0 8px 18px rgba(7, 27, 68, .18);
+}
+.sidebar-pc-logo {
+  display: block;
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 12px;
+  border: 3px solid rgba(255,255,255,.92);
+  box-shadow: 0 12px 28px rgba(0,0,0,.25);
 }
