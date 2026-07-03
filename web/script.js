@@ -13545,6 +13545,12 @@ const SVC_CAT_COLORS = {
 };
 
 /* Détail déplié pour chaque service (listes d'alertes / stations / etc.) */
+const SERVICES_PANEL_HIDDEN_CATEGORIES = new Set(['ActualitÃ©s', 'DonnÃ©es', 'SantÃ©']);
+
+function getServicesPanelFluxServices() {
+  return FLUX_SERVICES.filter((svc) => !SERVICES_PANEL_HIDDEN_CATEGORIES.has(svc.category));
+}
+
 const SVC_DETAIL_LISTS = {
   meteo_france:          [{ id: 'meteo-alerts-list',     label: 'Alertes météo' }],
   apic_isere:            [{ id: 'apic-list',             label: 'Alertes pluie intense' }],
