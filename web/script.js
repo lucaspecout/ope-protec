@@ -11291,9 +11291,21 @@ async function openMunicipalityDetailsModal(municipality) {
 
   // ── Assemble HTML ─────────────────────────────────────────
   setHtml('municipality-details-content', `
-    <div style="display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;margin-bottom:.5rem">
-      <h4 style="margin:0;font-size:1.05rem">${escapeHtml(municipality.name)}</h4>
-      ${municipality.postal_code ? `<span class="muted" style="font-size:.85rem">${escapeHtml(municipality.postal_code)}</span>` : ''}
+    <div class="muni-detail-hero">
+      <div>
+        <p class="muni-detail-eyebrow">Commune PCS</p>
+        <h4>${escapeHtml(municipality.name)}</h4>
+        ${municipality.postal_code ? `<span>${escapeHtml(municipality.postal_code)}${municipality.insee_code ? ` · INSEE ${escapeHtml(municipality.insee_code)}` : ''}</span>` : ''}
+      </div>
+      <details class="municipality-action-menu muni-detail-menu">
+        <summary>Menu</summary>
+        <div class="municipality-action-menu__list">
+          ${canEdit() ? `<button type="button" data-muni-edit="${municipality.id}">Modifier la fiche</button>` : ''}
+          ${canEdit() ? `<button type="button" data-muni-detail-crisis="${municipality.id}">${municipality.crisis_mode ? 'Sortir du mode crise' : 'Passer en crise'}</button>` : ''}
+          <button type="button" data-muni-tab-jump="events">Voir les évènements</button>
+          <button type="button" data-muni-tab-jump="mco">Voir la main courante</button>
+        </div>
+      </details>
     </div>
     <nav class="muni-detail-tabs" id="muni-tabs-nav-${municipality.id}">
       <button class="muni-tab-btn active" data-muni-tab="fiche">Fiche</button>
@@ -11314,6 +11326,12 @@ async function openMunicipalityDetailsModal(municipality) {
       btn.classList.add('active');
       const section = content.querySelector(`[data-muni-section="${tab}"]`);
       if (section) section.classList.add('active');
+    });
+  });
+  content.querySelectorAll('[data-muni-tab-jump]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const tab = btn.getAttribute('data-muni-tab-jump');
+      content.querySelector(`.muni-tab-btn[data-muni-tab="${tab}"]`)?.click();
     });
   });
 
@@ -15787,6 +15805,14 @@ function bindAppInteractions() {
   document.getElementById('user-create-role')?.addEventListener('change', syncUserCreateMunicipalityVisibility);
   document.getElementById('municipality-editor-close')?.addEventListener('click', () => {
     closeMunicipalityEditor();
+  });
+  document.getElementById('municipality-editor-menu-close')?.addEventListener('click', () => {
+    closeMunicipalityEditor();
+  });
+  document.getElementById('municipality-new-focus-btn')?.addEventListener('click', () => {
+    const form = document.getElementById('municipality-form');
+    form?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    form?.querySelector('input, select, textarea')?.focus();
   });
   document.getElementById('municipality-details-close')?.addEventListener('click', () => {
     requestMunicipalityDetailsCloseLikeEscape();

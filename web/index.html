@@ -391,9 +391,14 @@
           <p class="muted" style="display:none"><strong id="api-resync-ago"></strong></p>
         </section>
 
-        <section id="municipalities-panel" class="panel view hidden" hidden>
-          <h3>Communes & fiches pratiques</h3>
-          <p class="muted">Créez vos communes PCS, puis utilisez les actions rapides pour basculer en crise, enrichir la fiche et joindre des documents.</p>
+        <section id="municipalities-panel" class="panel view hidden municipalities-page" hidden>
+          <div class="municipalities-page-head">
+            <div>
+              <h3>Communes & fiches pratiques</h3>
+              <p class="muted">Créez vos communes PCS, puis utilisez les actions rapides pour basculer en crise, enrichir la fiche et joindre des documents.</p>
+            </div>
+            <button id="municipality-new-focus-btn" type="button" data-requires-edit>+ Nouvelle commune</button>
+          </div>
           <div id="municipality-filters" class="form municipality-filters">
             <input id="municipalities-search" type="search" placeholder="Rechercher une commune, responsable, contact..." />
             <select id="municipalities-status-filter">
@@ -408,22 +413,24 @@
             </select>
           </div>
           <div id="municipalities-summary-bar" class="muni-summary-bar hidden" hidden></div>
-          <p class="muted">Communes affichées: <strong id="municipalities-count">0</strong></p>
-          <form id="municipality-form" class="form" data-requires-edit>
-            <input name="postal_code" placeholder="Code postal" pattern="[0-9]{5}" maxlength="5" required />
-            <select name="municipality_lookup" data-municipality-lookup>
-              <option value="">Ville trouvée via code postal</option>
-            </select>
-            <input name="name" placeholder="Nom commune" required />
-            <input name="phone" placeholder="Téléphone" required />
-            <input name="email" placeholder="Email" type="email" required />
-            <input name="insee_code" placeholder="Code INSEE (auto)" pattern="[0-9]{5}" maxlength="5" readonly />
-            <input name="contacts" placeholder="Contacts d'astreinte (tel, mails)" />
-            <input name="additional_info" placeholder="Infos complémentaires (zones sensibles, écoles...)" />
-            <input name="population" type="number" placeholder="Population" min="0" />
-            <input name="shelter_capacity" type="number" placeholder="Capacité d'accueil" min="0" />
-            <button type="submit">Ajouter</button>
-          </form>
+          <p class="municipality-count-line">Communes affichées: <strong id="municipalities-count">0</strong></p>
+          <div class="municipality-create-card" data-requires-edit>
+            <form id="municipality-form" class="form" data-requires-edit>
+              <input name="postal_code" placeholder="Code postal" pattern="[0-9]{5}" maxlength="5" required />
+              <select name="municipality_lookup" data-municipality-lookup>
+                <option value="">Ville trouvée via code postal</option>
+              </select>
+              <input name="name" placeholder="Nom commune" required />
+              <input name="phone" placeholder="Téléphone" required />
+              <input name="email" placeholder="Email" type="email" required />
+              <input name="insee_code" placeholder="Code INSEE (auto)" pattern="[0-9]{5}" maxlength="5" readonly />
+              <input name="contacts" placeholder="Contacts d'astreinte (tel, mails)" />
+              <input name="additional_info" placeholder="Infos complémentaires (zones sensibles, écoles...)" />
+              <input name="population" type="number" placeholder="Population" min="0" />
+              <input name="shelter_capacity" type="number" placeholder="Capacité d'accueil" min="0" />
+              <button type="submit">Ajouter</button>
+            </form>
+          </div>
           <p id="municipality-feedback" class="muted"></p>
           <div id="municipalities-list" class="municipality-grid"></div>
 
@@ -431,7 +438,9 @@
           <dialog id="municipality-details-modal" class="municipality-details-modal">
             <div class="municipality-details-modal__head">
               <h4>Détail commune</h4>
-              <button type="button" id="municipality-details-close" class="ghost" onclick="window.requestMunicipalityDetailsCloseLikeEscape && window.requestMunicipalityDetailsCloseLikeEscape()">Fermer</button>
+              <div class="municipality-modal-head-actions">
+                <button type="button" id="municipality-details-close" class="ghost" onclick="window.requestMunicipalityDetailsCloseLikeEscape && window.requestMunicipalityDetailsCloseLikeEscape()">Fermer</button>
+              </div>
             </div>
             <div id="municipality-details-content"></div>
           </dialog>
@@ -439,7 +448,16 @@
           <aside id="municipality-editor" class="municipality-editor hidden" hidden>
             <div class="municipality-editor__head">
               <h4 id="municipality-editor-title">Fiche commune</h4>
-              <button type="button" id="municipality-editor-close" class="ghost" onclick="window.closeMunicipalityEditorFallback && window.closeMunicipalityEditorFallback()">Fermer</button>
+              <div class="municipality-editor__actions">
+                <details class="municipality-action-menu">
+                  <summary>Actions</summary>
+                  <div class="municipality-action-menu__list">
+                    <button type="submit" form="municipality-edit-form">Enregistrer</button>
+                    <button type="button" id="municipality-editor-menu-close">Fermer l'éditeur</button>
+                  </div>
+                </details>
+                <button type="button" id="municipality-editor-close" class="ghost" onclick="window.closeMunicipalityEditorFallback && window.closeMunicipalityEditorFallback()">Fermer</button>
+              </div>
             </div>
             <form id="municipality-edit-form" class="municipality-edit-form">
               <input type="hidden" name="id" />

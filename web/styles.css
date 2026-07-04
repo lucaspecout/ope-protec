@@ -3529,6 +3529,301 @@ select:focus {
   .municipality-upload-form button { grid-column: span 2; }
 }
 
+/* Page Communes - refonte compacte type tableau de fiches */
+#municipalities-panel.municipalities-page {
+  background:
+    radial-gradient(circle at 18% -10%, rgba(37, 99, 235, .08), transparent 34%),
+    linear-gradient(180deg, #fbfdff 0%, #f5f8fc 100%);
+}
+.municipalities-page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+.municipalities-page-head h3 {
+  margin: 0 0 .25rem;
+  color: #0b2b66;
+  font-size: 1.22rem;
+}
+.municipalities-page-head .muted {
+  margin: 0;
+  color: #4d6285;
+}
+.municipalities-page-head button {
+  min-width: 150px;
+  border-radius: 8px;
+  background: #071d52;
+  box-shadow: 0 8px 18px rgba(7, 29, 82, .22);
+}
+.municipality-filters.form {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.15fr) minmax(190px, .9fr) minmax(190px, .9fr);
+  gap: .65rem;
+  margin: 0 0 .75rem;
+}
+.municipality-filters input,
+.municipality-filters select,
+.municipality-create-card input,
+.municipality-create-card select {
+  height: 42px;
+  margin: 0;
+  border-color: #d6e0ef;
+  border-radius: 7px;
+  background-color: #fff;
+  color: #172b4d;
+  box-shadow: 0 1px 0 rgba(13, 35, 69, .03);
+}
+.municipality-count-line {
+  margin: .15rem 0 .65rem;
+  color: #0f2e66;
+  font-size: .9rem;
+  font-weight: 800;
+}
+.municipality-count-line::before {
+  content: "";
+  display: inline-block;
+  width: 3px;
+  height: 18px;
+  margin-right: .55rem;
+  border-radius: 999px;
+  vertical-align: -4px;
+  background: #ff8a00;
+}
+.municipality-create-card {
+  margin: .75rem 0 1rem;
+  padding: .95rem;
+  border: 1px solid #e2eaf5;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .9);
+  box-shadow: 0 12px 32px rgba(23, 43, 77, .06);
+}
+.municipality-create-card #municipality-form.form {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(110px, 1fr));
+  gap: .65rem;
+}
+.municipality-create-card #municipality-form button[type="submit"] {
+  border-radius: 8px;
+  background: #092b67;
+  box-shadow: 0 8px 16px rgba(9, 43, 103, .22);
+}
+.muni-summary-bar {
+  border-radius: 8px;
+  background: rgba(255,255,255,.82);
+  box-shadow: 0 8px 22px rgba(23, 43, 77, .04);
+}
+.municipality-grid {
+  gap: .9rem;
+}
+.municipality-card {
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .96);
+  box-shadow: 0 10px 24px rgba(21, 42, 76, .07);
+  transition: box-shadow .15s, transform .1s, border-color .15s;
+}
+.municipality-card:hover {
+  box-shadow: 0 16px 34px rgba(16,43,94,.13);
+}
+.municipality-card header h4 {
+  color: #0b2b66;
+  line-height: 1.25;
+}
+.municipality-card .badge {
+  border-radius: 999px;
+  padding: .22rem .58rem;
+  font-size: .7rem;
+  text-transform: lowercase;
+}
+.municipality-actions {
+  gap: .42rem;
+  padding-top: .55rem;
+  border-top: 1px solid #edf2f8;
+}
+.municipality-actions .inline-action {
+  margin-top: 0;
+  border-radius: 7px;
+  background: #fff;
+  border-color: #d9e4f3;
+  color: #0f3c7a;
+  font-weight: 800;
+  box-shadow: 0 2px 7px rgba(15, 60, 122, .05);
+}
+.municipality-actions .inline-action.danger {
+  color: #d21f3c;
+  border-color: #f2c6cf;
+  background: #fffafb;
+}
+.municipality-action-menu {
+  position: relative;
+  display: inline-block;
+}
+.municipality-action-menu summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  border: 1px solid #d5e0f0;
+  border-radius: 8px;
+  padding: .48rem .72rem;
+  color: #0f326d;
+  background: #fff;
+  font-size: .82rem;
+  font-weight: 900;
+  box-shadow: 0 4px 12px rgba(15, 50, 109, .08);
+}
+.municipality-action-menu summary::-webkit-details-marker {
+  display: none;
+}
+.municipality-action-menu[open] summary {
+  border-color: #9fbbe3;
+  color: #082b66;
+}
+.municipality-action-menu__list {
+  position: absolute;
+  top: calc(100% + 7px);
+  right: 0;
+  z-index: 20;
+  min-width: 210px;
+  padding: .35rem;
+  border: 1px solid #d9e4f3;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 18px 40px rgba(10, 31, 68, .18);
+}
+.municipality-action-menu__list button {
+  width: 100%;
+  margin: 0;
+  padding: .55rem .65rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #17345f;
+  box-shadow: none;
+  text-align: left;
+  font-size: .84rem;
+  font-weight: 800;
+}
+.municipality-action-menu__list button:hover {
+  background: #f1f6ff;
+  filter: none;
+}
+.municipality-details-modal {
+  width: min(920px, 94vw);
+  border-radius: 10px;
+  border-color: #d7e2f0;
+  box-shadow: 0 28px 80px rgba(4, 17, 45, .32);
+}
+.municipality-details-modal__head {
+  background: #fbfdff;
+}
+.municipality-modal-head-actions,
+.municipality-editor__actions {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+}
+.muni-detail-hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin: -.15rem 0 .7rem;
+  padding: .85rem .9rem;
+  border: 1px solid #e2eaf5;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #f8fbff, #eef5ff);
+}
+.muni-detail-hero h4 {
+  margin: .08rem 0 .18rem;
+  color: #092b66;
+  font-size: 1.2rem;
+}
+.muni-detail-hero span {
+  color: #536987;
+  font-size: .84rem;
+  font-weight: 800;
+}
+.muni-detail-eyebrow {
+  margin: 0;
+  color: #ff8a00;
+  font-size: .72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+.muni-detail-menu {
+  flex: 0 0 auto;
+}
+.municipality-editor {
+  border-color: #d8e4f4;
+  border-radius: 10px;
+  background: #fbfdff;
+  box-shadow: 0 14px 34px rgba(23, 43, 77, .08);
+}
+.municipality-editor__head {
+  padding-bottom: .75rem;
+  margin-bottom: .85rem;
+  border-bottom: 1px solid #e3ebf6;
+}
+.municipality-editor__head h4 {
+  margin: 0;
+  color: #0b2b66;
+}
+.municipality-edit-form {
+  grid-template-columns: repeat(4, minmax(170px, 1fr));
+}
+.municipality-edit-form label {
+  color: #42546f;
+  font-size: .78rem;
+  font-weight: 900;
+}
+.municipality-edit-form input,
+.municipality-edit-form select,
+.municipality-edit-form textarea {
+  margin-top: .25rem;
+  border-color: #d7e2f0;
+  border-radius: 7px;
+  background: #fff;
+}
+.municipality-edit-form textarea[name="contacts"],
+.municipality-edit-form textarea[name="additional_info"] {
+  grid-column: span 2;
+}
+.municipality-edit-form button[type="submit"] {
+  align-self: end;
+  border-radius: 8px;
+  background: #092b67;
+}
+
+@media (max-width: 1180px) {
+  .municipality-create-card #municipality-form.form {
+    grid-template-columns: repeat(3, minmax(150px, 1fr));
+  }
+  .municipality-edit-form {
+    grid-template-columns: repeat(2, minmax(180px, 1fr));
+  }
+}
+@media (max-width: 760px) {
+  .municipalities-page-head,
+  .muni-detail-hero {
+    flex-direction: column;
+  }
+  .municipality-filters.form,
+  .municipality-create-card #municipality-form.form,
+  .municipality-edit-form {
+    grid-template-columns: 1fr;
+  }
+  .municipality-edit-form textarea[name="contacts"],
+  .municipality-edit-form textarea[name="additional_info"] {
+    grid-column: auto;
+  }
+  .municipality-action-menu__list {
+    left: 0;
+    right: auto;
+  }
+}
+
 /* ══════════════════════════════════════════════════════
    NEWS PANEL — Actualités Isère (redesign 2026)
 ══════════════════════════════════════════════════════ */
