@@ -83,6 +83,8 @@ services:
       dockerfile: web/Dockerfile
     restart: always
     mem_limit: 512m
+    volumes:
+      - ./web:/usr/share/nginx/html:ro
     depends_on:
       api:
         condition: service_healthy
