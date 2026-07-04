@@ -438,6 +438,7 @@ let cachedLogs = [];
 let mcoEventFilter = 'open'; // 'open' | 'all' | 'clos'
 let cachedDashboardSnapshot = {};
 let cachedExternalRisksSnapshot = {};
+let initialServerSnapshotReady = false;
 let cachedWeeklyMeteo = null;
 let weeklyMeteoInFlight = null;
 const meteoAirQualityCache = new Map();
@@ -13644,6 +13645,45 @@ async function loadDashboard(forceRefresh = false) {
   }
 }
 
+async function loadInitialServerSnapshot() {
+  const jobs = [
+    api('/external/isere/risks', {
+      bypassCache: true,
+      cacheTtlMs: 0,
+      timeoutMs: API_SLOW_ENDPOINT_TIMEOUT_MS,
+      maxRetries: 0,
+    }).then((payload) => {
+      cachedExternalRisksSnapshot = payload && typeof payload === 'object' ? payload : {};
+      renderExternalRisks(cachedExternalRisksSnapshot);
+      renderApiInterconnections(cachedExternalRisksSnapshot);
+      saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
+      saveSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot, cachedExternalRisksSnapshot);
+      return payload;
+    }),
+    api('/dashboard', {
+      bypassCache: true,
+      cacheTtlMs: 0,
+      timeoutMs: API_SLOW_ENDPOINT_TIMEOUT_MS,
+      maxRetries: 0,
+    }).then((dashboard) => {
+      cachedDashboardSnapshot = dashboard || {};
+      renderDashboard(cachedDashboardSnapshot);
+      saveSnapshot(STORAGE_KEYS.dashboardSnapshot, cachedDashboardSnapshot);
+      return dashboard;
+    }),
+  ];
+
+  const results = await Promise.allSettled(jobs);
+  const ok = results.some((result) => result.status === 'fulfilled');
+  if (ok) {
+    initialServerSnapshotReady = true;
+    markServerSnapshotFresh(cachedExternalRisksSnapshot);
+    renderSituationOverview();
+    setServerSnapshotSyncing(false);
+  }
+  return ok;
+}
+
 /* ── Services panel — cards builder & groundwater renderers ──────────────── */
 
 const SVC_CARD_META = {
@@ -15212,10 +15252,11 @@ async function refreshAll(forceRefresh = false) {
   refreshAllInFlight = withPreservedScroll(async () => {
     // Phase visible : relire vite le snapshot applicatif. Les couches carte et
     // les flux externes forcés continuent en arrière-plan pour garder l'UI fluide.
-    startStartupQueue(2);
     const activePanelId = localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel';
-    setPanelLoading(activePanelId, true, forceRefresh ? 'Actualisation en cours...' : 'Mise à jour des données...');
-    setServerSnapshotSyncing(true, forceRefresh ? 'Synchronisation demandée…' : 'Lecture du snapshot serveur…');
+    const showBlockingLoader = forceRefresh || !initialServerSnapshotReady;
+    if (showBlockingLoader) startStartupQueue(2);
+    if (showBlockingLoader) setPanelLoading(activePanelId, true, forceRefresh ? 'Actualisation en cours...' : 'Lecture des données serveur...');
+    setServerSnapshotSyncing(true, forceRefresh ? 'Synchronisation demandée...' : (initialServerSnapshotReady ? 'Synchronisation discrète...' : 'Lecture du snapshot serveur...'));
     if (forceRefresh) requestExternalRisksBackgroundRefresh();
 
     // Effacer toute erreur résiduelle du cycle précédent dès le début.
@@ -15227,7 +15268,7 @@ async function refreshAll(forceRefresh = false) {
     let bootstrapError = null;
     let fallbackFailedCount = 0;
 
-    setStartupQueueCurrent('Lecture du snapshot serveur…');
+    if (showBlockingLoader) setStartupQueueCurrent('Lecture du snapshot serveur...');
     try {
       const bsData = await loadOperationsBootstrap(false);
 
@@ -15264,12 +15305,12 @@ async function refreshAll(forceRefresh = false) {
       ]);
       fallbackFailedCount = fallbackResults.filter((r) => r.status === 'rejected').length;
     }
-    advanceStartupQueue('données initiales');
+    if (showBlockingLoader) advanceStartupQueue('données initiales');
 
     refreshMapDataInBackground();
 
     renderResources();
-    advanceStartupQueue('pages applicatives');
+    if (showBlockingLoader) advanceStartupQueue('pages applicatives');
     _ensureStaticDataLoaded();
 
     // N'afficher "Chargement dégradé" que si le fallback a aussi échoué (≥3 sources en erreur).
@@ -15284,8 +15325,8 @@ async function refreshAll(forceRefresh = false) {
       || isPendingServicePayload(cachedExternalRisksSnapshot?.vigicrues || {})
       || cachedExternalRisksSnapshot?.refresh?.in_progress
     );
-    setPanelLoading(activePanelId, false);
-    finishStartupQueue();
+    if (showBlockingLoader) setPanelLoading(activePanelId, false);
+    if (showBlockingLoader) finishStartupQueue();
   });
 
   try {
@@ -16745,9 +16786,15 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
   syncLogOtherFields();
   prefillEventTime();
 
-  const refreshPromise = refreshAll().catch((error) => {
+  const snapshotPromise = loadInitialServerSnapshot().catch((error) => {
+    if (isTransientBackendError(error)) return false;
+    document.getElementById('dashboard-error').textContent = `Snapshot serveur indisponible: ${sanitizeErrorMessage(error.message)}`;
+    return false;
+  });
+
+  const refreshPromise = snapshotPromise.then(() => refreshAll()).catch((error) => {
     if (isTransientBackendError(error)) return;
-    document.getElementById('dashboard-error').textContent = `Actualisation différée: ${sanitizeErrorMessage(error.message)}`;
+    document.getElementById('dashboard-error').textContent = `Synchronisation différée: ${sanitizeErrorMessage(error.message)}`;
   });
 
   if (!runRefreshInBackground) await refreshPromise;
