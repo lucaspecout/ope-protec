@@ -12037,12 +12037,63 @@ function renderSituationOverview() {
           <h3>Carte des alertes</h3>
           <span>Isère</span>
         </div>
-        <div class="situation-mini-map" aria-hidden="true">
-          <span class="map-pin map-pin--green"></span>
-          <span class="map-pin map-pin--orange"></span>
-          <span class="map-pin map-pin--red"></span>
-          <span class="map-badge map-badge--north">14</span>
-          <span class="map-badge map-badge--east">75</span>
+        <div class="situation-mini-map" aria-label="Carte schématique des secteurs d'alerte de l'Isère" role="img">
+          <svg class="isere-alert-svg" viewBox="0 0 360 430" focusable="false" aria-hidden="true">
+            <rect class="isere-map-bg" x="0" y="0" width="360" height="430" rx="18"></rect>
+            <g class="isere-prefecture-mark">
+              <rect x="20" y="18" width="10" height="7"></rect>
+              <rect x="31" y="18" width="10" height="7"></rect>
+              <rect x="42" y="18" width="10" height="7"></rect>
+              <text x="20" y="42">PREFET</text>
+              <text x="20" y="55">DE L'ISERE</text>
+            </g>
+            <path class="isere-north" d="M292 22 L305 62 L292 53 L279 62 Z"></path>
+            <line class="isere-north-line" x1="292" y1="25" x2="292" y2="70"></line>
+            <g class="isere-map-shape">
+              <path class="isere-sector isere-sector--watch" d="M75 118 L55 96 L70 70 L96 58 L120 74 L128 108 L107 136 Z"></path>
+              <path class="isere-sector isere-sector--quiet" d="M96 58 L132 34 L164 52 L178 88 L163 122 L128 108 L120 74 Z"></path>
+              <path class="isere-sector isere-sector--quiet" d="M55 96 L75 118 L72 168 L44 198 L20 176 L30 134 Z"></path>
+              <path class="isere-sector isere-sector--watch" d="M107 136 L163 122 L192 148 L178 194 L128 206 L72 168 L75 118 Z"></path>
+              <path class="isere-sector isere-sector--alert" d="M192 148 L232 128 L258 156 L248 202 L206 214 L178 194 Z"></path>
+              <path class="isere-sector isere-sector--quiet" d="M248 202 L302 190 L330 226 L314 272 L260 280 L206 214 Z"></path>
+              <path class="isere-sector isere-sector--quiet" d="M128 206 L178 194 L206 214 L190 258 L150 278 L110 250 Z"></path>
+              <path class="isere-sector isere-sector--watch" d="M150 278 L190 258 L260 280 L254 338 L200 365 L154 342 Z"></path>
+              <path class="isere-sector isere-sector--quiet" d="M110 250 L150 278 L154 342 L104 330 L76 288 Z"></path>
+            </g>
+            <g class="isere-map-lines">
+              <path d="M75 118 L128 108 L163 122 L192 148 L178 194 L128 206 L72 168 Z"></path>
+              <path d="M206 214 L248 202 L260 280 L190 258"></path>
+              <path d="M150 278 L110 250"></path>
+            </g>
+            <g class="isere-map-labels">
+              <text x="50" y="146">VALLEE DU RHONE</text>
+              <text x="112" y="104">NORD ISERE</text>
+              <text x="204" y="166">CHARTREUSE</text>
+              <text x="168" y="228">AGGLO.</text>
+              <text x="164" y="241">GRENOBLOISE</text>
+              <text x="111" y="238">ISERE AVAL</text>
+              <text x="259" y="260">OISANS</text>
+              <text x="236" y="274">BELLEDONNE</text>
+              <text x="145" y="320">TRIEVES</text>
+              <text x="178" y="333">MATHEYSINE</text>
+            </g>
+            <g class="isere-map-scale">
+              <text x="36" y="390">0</text>
+              <rect x="48" y="394" width="28" height="7"></rect>
+              <rect x="76" y="394" width="28" height="7" class="isere-scale-light"></rect>
+              <text x="72" y="390">10</text>
+              <text x="104" y="390">20 km</text>
+            </g>
+            <g class="isere-map-source">
+              <rect x="214" y="378" width="114" height="32"></rect>
+              <text x="224" y="397">Source(s) : DDT38 - SDIS</text>
+            </g>
+          </svg>
+          <div class="isere-alert-legend" aria-hidden="true">
+            <span><i class="legend-dot legend-dot--quiet"></i>veille</span>
+            <span><i class="legend-dot legend-dot--watch"></i>surveillance</span>
+            <span><i class="legend-dot legend-dot--alert"></i>alerte</span>
+          </div>
         </div>
         <button type="button" class="ghost situation-map-link" data-target-panel="map-panel">Voir la carte interactive</button>
       </article>

@@ -5943,50 +5943,105 @@ body {
 }
 .situation-mini-map {
   position: relative;
-  height: 128px;
+  min-height: 252px;
+  padding: 10px;
   border-radius: 12px;
   overflow: hidden;
   border: 1px solid #dfe8f4;
-  background:
-    linear-gradient(130deg, transparent 0 42%, rgba(10,166,87,.18) 42% 49%, transparent 49%),
-    linear-gradient(35deg, rgba(245,173,0,.18) 0 9%, transparent 9% 100%),
-    repeating-linear-gradient(18deg, #eaf1ea 0 14px, #f5efe6 14px 28px, #e9f1f7 28px 42px);
+  background: #f9fbff;
 }
-.situation-mini-map::before {
-  content: "";
-  position: absolute;
-  inset: 16px 26px 18px 38px;
-  border: 3px solid #20b66a;
-  border-radius: 48% 42% 55% 37%;
-  background: rgba(32, 182, 106, .11);
+.isere-alert-svg {
+  display: block;
+  width: 100%;
+  height: 232px;
 }
-.map-pin,
-.map-badge {
-  position: absolute;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  color: #fff;
+.isere-map-bg {
+  fill: #fff;
+  stroke: #e4ebf5;
+  stroke-width: 1;
+}
+.isere-prefecture-mark rect:nth-child(1) { fill: #1e3a8a; }
+.isere-prefecture-mark rect:nth-child(2) { fill: #fff; stroke: #e2e8f0; stroke-width: .6; }
+.isere-prefecture-mark rect:nth-child(3) { fill: #ef3340; }
+.isere-prefecture-mark text {
+  fill: #1f2937;
+  font-size: 10px;
   font-weight: 900;
+  letter-spacing: .02em;
 }
-.map-pin {
-  width: 22px;
-  height: 22px;
-  border: 3px solid #fff;
-  box-shadow: 0 4px 14px rgba(8,35,92,.22);
+.isere-north {
+  fill: #111827;
 }
-.map-pin--green { left: 58%; top: 38%; background: #0aa657; }
-.map-pin--orange { left: 28%; top: 20%; background: #f5ad00; }
-.map-pin--red { left: 48%; top: 68%; background: #ec3f55; }
-.map-badge {
-  width: 26px;
-  height: 26px;
-  font-size: .75rem;
-  background: #f5ad00;
-  border: 2px solid #fff;
+.isere-north-line {
+  stroke: #111827;
+  stroke-width: 1.2;
 }
-.map-badge--north { left: 32%; top: 10%; }
-.map-badge--east { right: 28%; top: 29%; }
+.isere-sector {
+  stroke: #1f2937;
+  stroke-width: 2.4;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.isere-sector--quiet { fill: #eef8f2; }
+.isere-sector--watch { fill: #fff3c9; }
+.isere-sector--alert { fill: #ffe0e3; }
+.isere-map-lines path {
+  fill: none;
+  stroke: #2f3744;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.isere-map-labels text {
+  fill: #596273;
+  font-size: 9px;
+  font-weight: 800;
+  text-anchor: middle;
+}
+.isere-map-scale text,
+.isere-map-source text {
+  fill: #374151;
+  font-size: 9px;
+  font-weight: 800;
+}
+.isere-map-scale rect {
+  fill: #111827;
+}
+.isere-map-scale .isere-scale-light {
+  fill: #fff;
+  stroke: #111827;
+  stroke-width: 1;
+}
+.isere-map-source rect {
+  fill: #fff;
+  stroke: #374151;
+  stroke-width: 1;
+}
+.isere-alert-legend {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 5px;
+  color: #4f6386;
+  font-size: .68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+.isere-alert-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid rgba(31, 41, 55, .28);
+}
+.legend-dot--quiet { background: #bdeccf; }
+.legend-dot--watch { background: #f8c849; }
+.legend-dot--alert { background: #f27983; }
 .situation-map-link {
   width: 100%;
   margin-top: 10px;
