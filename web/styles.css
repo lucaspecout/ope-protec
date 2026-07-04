@@ -3735,6 +3735,12 @@ select:focus {
   background: #f1f6ff;
   filter: none;
 }
+.municipality-action-menu__list button.danger {
+  color: #c51632;
+}
+.municipality-action-menu__list button.danger:hover {
+  background: #fff1f3;
+}
 .municipality-details-modal {
   width: min(920px, 94vw);
   border-radius: 10px;
@@ -3781,6 +3787,160 @@ select:focus {
 }
 .muni-detail-menu {
   flex: 0 0 auto;
+}
+.muni-profile-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(260px, .8fr);
+  gap: .9rem;
+  align-items: start;
+}
+.muni-profile-main,
+.muni-profile-side {
+  display: grid;
+  gap: .75rem;
+}
+.muni-status-strip--modern {
+  margin: 0;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(23, 43, 77, .06);
+}
+.muni-status-text {
+  color: #335071;
+  font-size: .86rem;
+  font-weight: 900;
+}
+.muni-status-text.is-crisis {
+  color: #c51632;
+}
+.muni-detail-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: .55rem;
+}
+.muni-detail-kpis article {
+  min-height: 82px;
+  padding: .7rem;
+  border: 1px solid #e1eaf5;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #fff, #f8fbff);
+}
+.muni-detail-kpis span,
+.muni-detail-kpis small {
+  display: block;
+  color: #667996;
+  font-size: .72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .02em;
+}
+.muni-detail-kpis strong {
+  display: block;
+  margin: .22rem 0 .12rem;
+  color: #092b66;
+  font-size: 1.35rem;
+  line-height: 1;
+}
+.muni-detail-card {
+  padding: .85rem;
+  border: 1px solid #e1eaf5;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 22px rgba(23, 43, 77, .05);
+}
+.muni-detail-card h5 {
+  margin: 0 0 .65rem;
+  color: #092b66;
+  font-size: .9rem;
+}
+.muni-detail-card .muni-info-grid {
+  margin-bottom: 0;
+}
+.muni-detail-card a {
+  color: #0f56b3;
+  font-weight: 800;
+  text-decoration: none;
+}
+.muni-note {
+  margin-top: .7rem;
+  padding: .65rem;
+  border-radius: 7px;
+  background: #f6f9ff;
+  color: #243b59;
+  font-size: .86rem;
+}
+.muni-note strong {
+  display: block;
+  margin-bottom: .18rem;
+  color: #667996;
+  font-size: .72rem;
+  text-transform: uppercase;
+}
+.muni-contact-panel p {
+  margin: 0;
+  white-space: pre-wrap;
+  color: #243b59;
+  line-height: 1.4;
+}
+.muni-side-actions,
+.muni-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .45rem;
+  margin-top: .7rem;
+}
+.muni-side-actions a,
+.muni-detail-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: .42rem .68rem;
+  border: 1px solid #d9e4f3;
+  border-radius: 7px;
+  background: #f8fbff;
+  color: #0f3c7a;
+  font-size: .8rem;
+  font-weight: 900;
+  text-decoration: none;
+}
+.muni-detail-actions button {
+  margin-top: 0;
+}
+.muni-public-section--modern {
+  padding: .85rem;
+  border: 1px solid #e1eaf5;
+  border-radius: 8px;
+  background: #fff;
+}
+.municipality-editor-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+  margin-bottom: .9rem;
+  padding: .85rem;
+  border: 1px solid #dfe8f4;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #f8fbff, #eef5ff);
+}
+.municipality-editor-summary__main {
+  display: grid;
+  gap: .1rem;
+}
+.municipality-editor-summary__main strong {
+  color: #092b66;
+  font-size: 1.05rem;
+}
+.municipality-editor-summary__main span:last-child {
+  color: #536987;
+  font-size: .82rem;
+  font-weight: 800;
+}
+.municipality-editor-summary__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+  justify-content: flex-end;
 }
 .municipality-editor {
   border-color: #d8e4f4;
@@ -3849,6 +4009,14 @@ select:focus {
   .municipality-action-menu__list {
     left: 0;
     right: auto;
+  }
+  .muni-profile-layout,
+  .muni-detail-kpis {
+    grid-template-columns: 1fr;
+  }
+  .municipality-editor-summary {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 

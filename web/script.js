@@ -10885,6 +10885,19 @@ function openMunicipalityEditor(municipality) {
   setMunicipalityLookupOptions(form, [], municipality.name || '');
   autofillMunicipalityFromPostalCode(form).catch(() => {});
   setText('municipality-editor-title', `Éditer ${municipality.name}`);
+  const editLevel = normalizeLevel(municipality.vigilance_color || 'vert');
+  const editBadgeClass = editLevel === 'rouge' ? 'red' : editLevel === 'orange' ? 'orange' : editLevel === 'jaune' ? 'yellow' : 'green';
+  setHtml('municipality-editor-summary', `
+    <div class="municipality-editor-summary__main">
+      <span class="muni-detail-eyebrow">Modification fiche PCS</span>
+      <strong>${escapeHtml(municipality.postal_code ? `${municipality.postal_code} · ` : '')}${escapeHtml(municipality.name || 'Commune')}</strong>
+      <span>${municipality.insee_code ? `INSEE ${escapeHtml(municipality.insee_code)} · ` : ''}${municipality.crisis_mode ? 'Mode crise actif' : 'Veille opérationnelle'}</span>
+    </div>
+    <div class="municipality-editor-summary__chips">
+      <span class="badge ${editBadgeClass}">${escapeHtml(editLevel)}</span>
+      <span class="muni-pill ${municipality.pcs_active ? 'pcs-on' : 'pcs-off'}">${municipality.pcs_active ? 'PCS actif' : 'PCS inactif'}</span>
+    </div>
+  `);
   setVisibility(panel, true);
 }
 
@@ -11066,6 +11079,8 @@ function closeMunicipalityDetailsModal() {
 function openMunicipalityCreateModal() {
   const modal = document.getElementById('municipality-create-modal');
   if (!modal) return;
+  modal.hidden = false;
+  modal.classList.remove('hidden');
   if (typeof modal.showModal === 'function') {
     if (!modal.open) modal.showModal();
   } else {
@@ -11252,7 +11267,7 @@ async function openMunicipalityDetailsModal(municipality) {
        <button type="button" class="ghost inline-action" data-muni-edit="${municipality.id}" style="margin-top:.6rem">Éditer la fiche</button>`
     : '';
 
-  const ficheTab = `
+  const legacyFicheTab = `
     <div class="muni-status-strip">
       <span class="badge ${badgeClass}">${level}</span>
       ${municipality.crisis_mode ? '<span style="font-weight:700;color:#c91c2e;font-size:.85rem">🔴 MODE CRISE</span>' : '<span style="color:#5f7190;font-size:.85rem">🟢 Veille normale</span>'}
@@ -11278,6 +11293,60 @@ async function openMunicipalityDetailsModal(municipality) {
     </div>
     ${municipality.additional_info ? `<p style="margin:.3rem 0"><strong style="font-size:.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Informations complémentaires</strong><br><span style="white-space:pre-wrap;font-size:.88rem">${escapeHtml(municipality.additional_info)}</span></p>` : ''}
     ${crisisActions}
+  `;
+
+  const ficheTab = `
+    <div class="muni-profile-layout">
+      <section class="muni-profile-main">
+        <div class="muni-status-strip muni-status-strip--modern">
+          <span class="badge ${badgeClass}">${escapeHtml(level)}</span>
+          <span class="muni-status-text ${municipality.crisis_mode ? 'is-crisis' : ''}">${municipality.crisis_mode ? 'Mode crise actif' : 'Veille opérationnelle'}</span>
+          <span class="muni-pill ${municipality.pcs_active ? 'pcs-on' : 'pcs-off'}">${municipality.pcs_active ? 'PCS actif' : 'PCS inactif'}</span>
+        </div>
+        <div class="muni-detail-kpis">
+          <article><span>Population</span><strong>${municipality.population ? Number(municipality.population).toLocaleString('fr-FR') : '-'}</strong><small>habitants</small></article>
+          <article><span>Accueil</span><strong>${municipality.shelter_capacity ? Number(municipality.shelter_capacity).toLocaleString('fr-FR') : '-'}</strong><small>places</small></article>
+          <article><span>Évènements</span><strong>${municipalityEvents.length}</strong><small>ouverts</small></article>
+          <article><span>MCO</span><strong>${municipalityLogs.length}</strong><small>entrées récentes</small></article>
+        </div>
+        <div class="muni-detail-card">
+          <h5>Informations opérationnelles</h5>
+          <div class="muni-info-grid">
+            <p class="muni-info-item"><strong>Code postal</strong>${escapeHtml(municipality.postal_code || '-')}</p>
+            <p class="muni-info-item"><strong>Code INSEE</strong>${escapeHtml(municipality.insee_code || '-')}</p>
+            <p class="muni-info-item"><strong>Téléphone mairie</strong>${municipality.phone ? `<a href="tel:${encodeURIComponent(municipality.phone.replace(/\s/g,''))}">${escapeHtml(municipality.phone)}</a>` : '-'}</p>
+            <p class="muni-info-item"><strong>Email mairie</strong>${municipality.email ? `<a href="mailto:${encodeURIComponent(municipality.email)}">${escapeHtml(municipality.email)}</a>` : '-'}</p>
+          </div>
+          ${municipality.additional_info ? `<div class="muni-note"><strong>Notes</strong><span>${escapeHtml(municipality.additional_info)}</span></div>` : ''}
+        </div>
+      </section>
+      <aside class="muni-profile-side">
+        <div class="muni-detail-card muni-contact-panel">
+          <h5>Contacts d'astreinte</h5>
+          ${municipality.contacts ? `<p>${escapeHtml(municipality.contacts)}</p>` : '<p class="muted">Aucun contact d’astreinte renseigné.</p>'}
+          <div class="muni-side-actions">
+            ${municipality.phone ? `<a href="tel:${encodeURIComponent(municipality.phone.replace(/\s/g,''))}">Appeler</a>` : ''}
+            ${municipality.email ? `<a href="mailto:${encodeURIComponent(municipality.email)}">Écrire</a>` : ''}
+          </div>
+        </div>
+        <div class="muni-detail-card">
+          <h5>Actions rapides</h5>
+          <div class="muni-detail-actions">
+            ${canEdit() ? `<button type="button" class="ghost inline-action" data-muni-edit="${municipality.id}">Modifier la fiche</button>` : ''}
+            ${canEdit() ? `<button type="button" class="ghost inline-action${municipality.crisis_mode ? ' danger' : ''}" data-muni-detail-crisis="${municipality.id}">${municipality.crisis_mode ? 'Sortir de crise' : 'Passer en crise'}</button>` : ''}
+          </div>
+        </div>
+      </aside>
+    </div>
+    ${emergencyMarkup}
+    <div class="muni-public-section muni-public-section--modern">
+      <h5>Services publics utiles de la commune</h5>
+      ${municipalityContactsMarkup}
+    </div>
+    <div class="muni-public-section muni-public-section--modern">
+      <h5>Numéros et contacts importants Isère</h5>
+      ${importantContactsMarkup}
+    </div>
   `;
 
   // ── Tab: Événements ──────────────────────────────────────
@@ -11326,6 +11395,7 @@ async function openMunicipalityDetailsModal(municipality) {
           ${canEdit() ? `<button type="button" data-muni-detail-crisis="${municipality.id}">${municipality.crisis_mode ? 'Sortir du mode crise' : 'Passer en crise'}</button>` : ''}
           <button type="button" data-muni-tab-jump="events">Voir les évènements</button>
           <button type="button" data-muni-tab-jump="mco">Voir la main courante</button>
+          ${canEdit() ? `<button type="button" class="danger" data-muni-delete="${municipality.id}">Supprimer la commune</button>` : ''}
         </div>
       </details>
     </div>
@@ -14573,7 +14643,6 @@ function renderMunicipalitiesList(municipalities = []) {
            <button type="button" class="ghost inline-action" data-muni-view="${m.id}">Voir la fiche</button>
            <button type="button" class="ghost inline-action" data-muni-edit="${m.id}">Éditer</button>
            <button type="button" class="ghost inline-action${m.crisis_mode ? ' danger' : ''}" data-muni-crisis="${m.id}">${m.crisis_mode ? '🔴 Sortir de crise' : '⚠️ Passer en crise'}</button>
-           <button type="button" class="ghost inline-action danger" data-muni-delete="${m.id}">Supprimer</button>
          </div>`
       : canMunicipalityFiles()
         ? `<div class="municipality-actions"><button type="button" class="ghost inline-action" data-muni-view="${m.id}">Voir la fiche</button></div>`
@@ -15871,7 +15940,8 @@ function bindAppInteractions() {
     const crisisButton = event.target.closest('[data-muni-detail-crisis]');
     const editButton = event.target.closest('[data-muni-edit]');
     const openEventButton = event.target.closest('[data-muni-open-event]');
-    if (!crisisButton && !editButton && !openEventButton) return;
+    const deleteButton = event.target.closest('[data-muni-delete]');
+    if (!crisisButton && !editButton && !openEventButton && !deleteButton) return;
 
     const getMunicipality = (id) => cachedMunicipalityRecords.find((m) => String(m.id) === String(id));
 
@@ -15891,6 +15961,19 @@ function bindAppInteractions() {
         if (!eventId) return;
         closeMunicipalityDetailsModal();
         openOperationalEventMcoForm(eventId);
+        return;
+      }
+
+      if (deleteButton) {
+        if (!canEdit()) return;
+        const municipalityId = deleteButton.getAttribute('data-muni-delete');
+        const municipality = getMunicipality(municipalityId);
+        const confirmed = window.confirm(`Supprimer définitivement la commune ${municipality?.name || municipalityId} ?`);
+        if (!confirmed) return;
+        await api(`/municipalities/${municipalityId}`, { method: 'DELETE' });
+        closeMunicipalityDetailsModal();
+        document.getElementById('municipality-feedback').textContent = `Commune ${municipality?.name || municipalityId} supprimée.`;
+        await loadMunicipalities();
         return;
       }
 

@@ -414,7 +414,7 @@
           </div>
           <div id="municipalities-summary-bar" class="muni-summary-bar hidden" hidden></div>
           <p class="municipality-count-line">Communes affichées: <strong id="municipalities-count">0</strong></p>
-          <dialog id="municipality-create-modal" class="municipality-details-modal municipality-create-modal" data-requires-edit>
+          <dialog id="municipality-create-modal" class="municipality-details-modal municipality-create-modal">
             <div class="municipality-details-modal__head">
               <div>
                 <h4>Nouvelle commune</h4>
@@ -471,6 +471,7 @@
                 <button type="button" id="municipality-editor-close" class="ghost" onclick="window.closeMunicipalityEditorFallback && window.closeMunicipalityEditorFallback()">Fermer</button>
               </div>
             </div>
+            <div id="municipality-editor-summary" class="municipality-editor-summary"></div>
             <form id="municipality-edit-form" class="municipality-edit-form">
               <input type="hidden" name="id" />
               <label>Code postal<input name="postal_code" maxlength="5" pattern="[0-9]{5}" /></label>
