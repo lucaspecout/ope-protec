@@ -11063,6 +11063,28 @@ function closeMunicipalityDetailsModal() {
   modal.removeAttribute('open');
 }
 
+function openMunicipalityCreateModal() {
+  const modal = document.getElementById('municipality-create-modal');
+  if (!modal) return;
+  if (typeof modal.showModal === 'function') {
+    if (!modal.open) modal.showModal();
+  } else {
+    modal.setAttribute('open', 'open');
+  }
+  const form = document.getElementById('municipality-form');
+  setTimeout(() => form?.querySelector('input, select, textarea')?.focus(), 50);
+}
+
+function closeMunicipalityCreateModal() {
+  const modal = document.getElementById('municipality-create-modal');
+  if (!modal) return;
+  if (typeof modal.close === 'function' && modal.open) {
+    modal.close();
+    return;
+  }
+  modal.removeAttribute('open');
+}
+
 function requestMunicipalityDetailsCloseLikeEscape() {
   const modal = document.getElementById('municipality-details-modal');
   if (!modal) return;
@@ -15810,9 +15832,16 @@ function bindAppInteractions() {
     closeMunicipalityEditor();
   });
   document.getElementById('municipality-new-focus-btn')?.addEventListener('click', () => {
-    const form = document.getElementById('municipality-form');
-    form?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    form?.querySelector('input, select, textarea')?.focus();
+    openMunicipalityCreateModal();
+  });
+  document.getElementById('municipality-create-close')?.addEventListener('click', () => {
+    closeMunicipalityCreateModal();
+  });
+  document.getElementById('municipality-create-cancel')?.addEventListener('click', () => {
+    closeMunicipalityCreateModal();
+  });
+  document.getElementById('municipality-create-modal')?.addEventListener('click', (event) => {
+    if (event.target?.id === 'municipality-create-modal') closeMunicipalityCreateModal();
   });
   document.getElementById('municipality-details-close')?.addEventListener('click', () => {
     requestMunicipalityDetailsCloseLikeEscape();
@@ -16883,6 +16912,7 @@ document.getElementById('municipality-form').addEventListener('submit', async (e
     setMunicipalityLookupOptions(event.target, []);
     if (errorTarget) errorTarget.textContent = '';
     document.getElementById('municipality-feedback').textContent = 'Commune créée avec succès. Vous pouvez maintenant lancer des actions depuis la fiche.';
+    closeMunicipalityCreateModal();
     await loadMunicipalities();
   } catch (error) {
     if (errorTarget) errorTarget.textContent = sanitizeErrorMessage(error.message);

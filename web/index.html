@@ -414,23 +414,35 @@
           </div>
           <div id="municipalities-summary-bar" class="muni-summary-bar hidden" hidden></div>
           <p class="municipality-count-line">Communes affichées: <strong id="municipalities-count">0</strong></p>
-          <div class="municipality-create-card" data-requires-edit>
-            <form id="municipality-form" class="form" data-requires-edit>
-              <input name="postal_code" placeholder="Code postal" pattern="[0-9]{5}" maxlength="5" required />
-              <select name="municipality_lookup" data-municipality-lookup>
-                <option value="">Ville trouvée via code postal</option>
-              </select>
-              <input name="name" placeholder="Nom commune" required />
-              <input name="phone" placeholder="Téléphone" required />
-              <input name="email" placeholder="Email" type="email" required />
-              <input name="insee_code" placeholder="Code INSEE (auto)" pattern="[0-9]{5}" maxlength="5" readonly />
-              <input name="contacts" placeholder="Contacts d'astreinte (tel, mails)" />
-              <input name="additional_info" placeholder="Infos complémentaires (zones sensibles, écoles...)" />
-              <input name="population" type="number" placeholder="Population" min="0" />
-              <input name="shelter_capacity" type="number" placeholder="Capacité d'accueil" min="0" />
-              <button type="submit">Ajouter</button>
-            </form>
-          </div>
+          <dialog id="municipality-create-modal" class="municipality-details-modal municipality-create-modal" data-requires-edit>
+            <div class="municipality-details-modal__head">
+              <div>
+                <h4>Nouvelle commune</h4>
+                <p class="muted">Ajoutez une commune PCS à partir du code postal, puis complétez les contacts utiles.</p>
+              </div>
+              <button type="button" id="municipality-create-close" class="ghost">Fermer</button>
+            </div>
+            <div class="municipality-create-modal__body">
+              <form id="municipality-form" class="form" data-requires-edit>
+                <input name="postal_code" placeholder="Code postal" pattern="[0-9]{5}" maxlength="5" required />
+                <select name="municipality_lookup" data-municipality-lookup>
+                  <option value="">Ville trouvée via code postal</option>
+                </select>
+                <input name="name" placeholder="Nom commune" required />
+                <input name="phone" placeholder="Téléphone" required />
+                <input name="email" placeholder="Email" type="email" required />
+                <input name="insee_code" placeholder="Code INSEE (auto)" pattern="[0-9]{5}" maxlength="5" readonly />
+                <input name="contacts" placeholder="Contacts d'astreinte (tel, mails)" />
+                <input name="additional_info" placeholder="Infos complémentaires (zones sensibles, écoles...)" />
+                <input name="population" type="number" placeholder="Population" min="0" />
+                <input name="shelter_capacity" type="number" placeholder="Capacité d'accueil" min="0" />
+                <div class="municipality-create-modal__footer">
+                  <button type="button" id="municipality-create-cancel" class="ghost">Annuler</button>
+                  <button type="submit">Créer la commune</button>
+                </div>
+              </form>
+            </div>
+          </dialog>
           <p id="municipality-feedback" class="muted"></p>
           <div id="municipalities-list" class="municipality-grid"></div>
 

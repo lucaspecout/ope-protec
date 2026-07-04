@@ -3565,8 +3565,8 @@ select:focus {
 }
 .municipality-filters input,
 .municipality-filters select,
-.municipality-create-card input,
-.municipality-create-card select {
+.municipality-create-modal input,
+.municipality-create-modal select {
   height: 42px;
   margin: 0;
   border-color: #d6e0ef;
@@ -3591,21 +3591,48 @@ select:focus {
   vertical-align: -4px;
   background: #ff8a00;
 }
-.municipality-create-card {
-  margin: .75rem 0 1rem;
-  padding: .95rem;
-  border: 1px solid #e2eaf5;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, .9);
-  box-shadow: 0 12px 32px rgba(23, 43, 77, .06);
+.municipality-create-modal {
+  width: min(880px, 94vw);
 }
-.municipality-create-card #municipality-form.form {
+.municipality-create-modal::backdrop {
+  background: rgba(7, 24, 52, .48);
+  backdrop-filter: blur(3px);
+}
+.municipality-create-modal .municipality-details-modal__head {
+  align-items: flex-start;
+  background: linear-gradient(135deg, #fbfdff, #edf5ff);
+}
+.municipality-create-modal .municipality-details-modal__head h4 {
+  margin: 0 0 .2rem;
+  color: #092b66;
+}
+.municipality-create-modal .municipality-details-modal__head .muted {
+  margin: 0;
+  max-width: 560px;
+}
+.municipality-create-modal__body {
+  padding: 1rem;
+}
+.municipality-create-modal #municipality-form.form {
   display: grid;
-  grid-template-columns: repeat(8, minmax(110px, 1fr));
-  gap: .65rem;
+  grid-template-columns: repeat(3, minmax(160px, 1fr));
+  gap: .7rem;
 }
-.municipality-create-card #municipality-form button[type="submit"] {
+.municipality-create-modal #municipality-form input[name="contacts"],
+.municipality-create-modal #municipality-form input[name="additional_info"] {
+  grid-column: span 3;
+}
+.municipality-create-modal__footer {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: .55rem;
+  padding-top: .4rem;
+}
+.municipality-create-modal__footer button {
   border-radius: 8px;
+}
+.municipality-create-modal__footer button[type="submit"] {
   background: #092b67;
   box-shadow: 0 8px 16px rgba(9, 43, 103, .22);
 }
@@ -3797,9 +3824,6 @@ select:focus {
 }
 
 @media (max-width: 1180px) {
-  .municipality-create-card #municipality-form.form {
-    grid-template-columns: repeat(3, minmax(150px, 1fr));
-  }
   .municipality-edit-form {
     grid-template-columns: repeat(2, minmax(180px, 1fr));
   }
@@ -3810,9 +3834,13 @@ select:focus {
     flex-direction: column;
   }
   .municipality-filters.form,
-  .municipality-create-card #municipality-form.form,
+  .municipality-create-modal #municipality-form.form,
   .municipality-edit-form {
     grid-template-columns: 1fr;
+  }
+  .municipality-create-modal #municipality-form input[name="contacts"],
+  .municipality-create-modal #municipality-form input[name="additional_info"] {
+    grid-column: auto;
   }
   .municipality-edit-form textarea[name="contacts"],
   .municipality-edit-form textarea[name="additional_info"] {
