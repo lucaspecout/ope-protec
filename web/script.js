@@ -13718,6 +13718,7 @@ const SVC_DETAIL_LISTS = {
   vigicrues:             [{ id: 'stations-list',         label: 'Stations' }, { id: 'troncons-list', label: 'Tronçons' }],
   vigicrues_flash_isere: [{ id: 'vigicrues-flash-list',  label: 'Alertes crues rapides' }],
   vigieau:               [{ id: 'vigieau-list',          label: 'Restrictions eau' }],
+  itinisere:             [{ id: 'itinisere-events-list',  label: 'Evénements Itinisère en cours' }],
   autoroutes_isere:      [{ id: 'autoroutes-list',       label: 'Événements grands axes Isère' }],
   sncf_isere:            [{ id: 'sncf-alerts-list',      label: 'Alertes voie ferrée' }],
   prefecture_isere:      [{ id: 'prefecture-news-list',  label: 'Actualités', titleId: 'prefecture-news-title' }],
@@ -14045,9 +14046,11 @@ function renderGroundwaterDetail(gw = {}) {
     const trend = gw.trend_summary || {};
     const total = gw.stations_total ?? 0;
     const status = gw.status || 'inconnu';
+    const measurementYear = gw.measurement_year || new Date().getFullYear();
     const statusClass = status === 'online' ? 'svc-gw-kpi--ok' : 'svc-gw-kpi--muted';
     summary.innerHTML = [
       `<span class="svc-gw-kpi"><strong>${total}</strong> station${total !== 1 ? 's' : ''}</span>`,
+      `<span class="svc-gw-kpi svc-gw-kpi--muted">mesures ${escapeHtml(measurementYear)}</span>`,
       `<span class="svc-gw-kpi svc-gw-kpi--up">↑ ${trend.hausse ?? 0} hausse</span>`,
       `<span class="svc-gw-kpi svc-gw-kpi--stable">= ${trend.stable ?? 0} stable</span>`,
       `<span class="svc-gw-kpi svc-gw-kpi--down">↓ ${trend.baisse ?? 0} baisse</span>`,
@@ -14059,7 +14062,8 @@ function renderGroundwaterDetail(gw = {}) {
   if (!stationsEl) return;
   const stations = Array.isArray(gw.stations) ? gw.stations : [];
   if (!stations.length) {
-    stationsEl.innerHTML = '<p class="muted" style="padding:.6rem 0">Aucune donnée de nappe phréatique disponible.</p>';
+    const measurementYear = gw.measurement_year || new Date().getFullYear();
+    stationsEl.innerHTML = `<p class="muted" style="padding:.6rem 0">Aucune donnée de nappe phréatique mesurée en ${escapeHtml(measurementYear)}.</p>`;
     return;
   }
   const trendIcon  = (t) => t === 'hausse' ? '↑' : t === 'baisse' ? '↓' : '=';
@@ -14363,6 +14367,7 @@ function renderExternalRisks(data = {}) {
   renderMeteoAlerts(meteo);
   renderWeeklyWeatherPanel(mergedData).catch(() => {});
   renderItinisereEvents(itinisereEvents);
+  renderItinisereEvents(itinisereEvents, 'itinisere-events-list');
   setText('meteo-level', normalizeLevel(isPendingServicePayload(meteo) ? 'gris' : (meteo.level || 'gris')));
   setText('meteo-hazards', (meteo.hazards || []).join(', ') || 'non précisé');
   setText('river-level', normalizeLevel(isPendingServicePayload(vigicrues) ? 'gris' : (vigicrues.water_alert_level || 'gris')));

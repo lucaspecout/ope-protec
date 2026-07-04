@@ -8150,6 +8150,7 @@ def _groundwater_trend(current: dict[str, Any], previous: dict[str, Any] | None)
 
 
 def _fetch_hubeau_isere_groundwater_live(station_limit: int = 8) -> dict[str, Any]:
+    current_year = datetime.now().year
     stations_url = f"https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/stations?code_departement=38&size={max(5, min(station_limit, 30))}"
     stations_payload = _http_get_json(stations_url, timeout=18)
     stations = stations_payload.get("data") if isinstance(stations_payload, dict) else []
@@ -8161,6 +8162,7 @@ def _fetch_hubeau_isere_groundwater_live(station_limit: int = 8) -> dict[str, An
             "error": "Aucune station piézométrique renvoyée pour l'Isère",
             "stations": [],
             "stations_total": 0,
+            "measurement_year": current_year,
             "trend_summary": {"hausse": 0, "baisse": 0, "stable": 0},
         }
 
@@ -8177,14 +8179,22 @@ def _fetch_hubeau_isere_groundwater_live(station_limit: int = 8) -> dict[str, An
         if not code_bss:
             continue
 
-        chronicles_url = f"https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/chroniques?code_bss={quote_plus(code_bss)}&size=2&sort=desc"
+        chronicles_url = f"https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/chroniques?code_bss={quote_plus(code_bss)}&size=8&sort=desc"
         chronicles_payload = _http_get_json(chronicles_url, timeout=18)
         chroniques = chronicles_payload.get("data") if isinstance(chronicles_payload, dict) else []
         if not isinstance(chroniques, list) or not chroniques:
             continue
 
-        current = chroniques[0] if isinstance(chroniques[0], dict) else {}
-        previous = chroniques[1] if len(chroniques) > 1 and isinstance(chroniques[1], dict) else None
+        current_year_chroniques = [
+            row for row in chroniques
+            if isinstance(row, dict)
+            and str(row.get("date_mesure") or "").startswith(f"{current_year}-")
+        ]
+        if not current_year_chroniques:
+            continue
+
+        current = current_year_chroniques[0]
+        previous = current_year_chroniques[1] if len(current_year_chroniques) > 1 else None
         trend = _groundwater_trend(current, previous)
         trend_summary[trend] += 1
 
@@ -8197,6 +8207,7 @@ def _fetch_hubeau_isere_groundwater_live(station_limit: int = 8) -> dict[str, An
                 "latitude": _safe_float(station.get("latitude") or station.get("latitude_station") or station.get("lat")),
                 "longitude": _safe_float(station.get("longitude") or station.get("longitude_station") or station.get("lon")),
                 "date_measure": current.get("date_mesure"),
+                "measurement_year": current_year,
                 "groundwater_level_m_ngf": current.get("niveau_nappe_eau"),
                 "depth_m": current.get("profondeur_nappe"),
                 "trend": trend,
@@ -8212,6 +8223,7 @@ def _fetch_hubeau_isere_groundwater_live(station_limit: int = 8) -> dict[str, An
             "error": "Aucune chronique piézométrique exploitable pour les stations Isère",
             "stations": [],
             "stations_total": 0,
+            "measurement_year": current_year,
             "trend_summary": trend_summary,
         }
 
@@ -8220,6 +8232,7 @@ def _fetch_hubeau_isere_groundwater_live(station_limit: int = 8) -> dict[str, An
         "updated_at": datetime.utcnow().isoformat() + "Z",
         "source": "https://hubeau.eaufrance.fr/api/v1/niveaux_nappes",
         "stations_total": len(station_rows),
+        "measurement_year": current_year,
         "trend_summary": trend_summary,
         "stations": station_rows,
     }
