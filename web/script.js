@@ -11908,7 +11908,7 @@ function renderSituationOverview() {
       ${progressHtml}
     </article>`;
   };
-  const renderIllustratedCard = (card) => `<article class="tile situation-tile situation-tile--visual situation-tile--visual-${escapeHtml(card.key)} situation-tile--interactive situation-tile--bg-${escapeHtml(normalizeLevel(card.css))}" role="button" tabindex="0" data-kpi-key="${escapeHtml(card.key)}" data-kpi-label="${escapeHtml(card.label)}">
+  const renderIllustratedCard = (card) => `<article class="tile situation-tile situation-tile--visual situation-tile--nature situation-tile--visual-${escapeHtml(card.key)} situation-tile--interactive situation-tile--bg-${escapeHtml(normalizeLevel(card.css))}" role="button" tabindex="0" data-kpi-key="${escapeHtml(card.key)}" data-kpi-label="${escapeHtml(card.label)}">
       <div class="situation-tile__top">
         <span class="situation-tile__icon situation-tile__icon--${escapeHtml(normalizeLevel(card.css))}">${escapeHtml(card.icon || '•')}</span>
         <h3>${escapeHtml(card.label)}</h3>

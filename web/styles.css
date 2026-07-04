@@ -5213,7 +5213,7 @@ body {
   grid-template-columns: repeat(7, minmax(132px, 1fr));
 }
 .situation-top-grid--visuals {
-  grid-template-columns: repeat(5, minmax(170px, 1fr));
+  grid-template-columns: repeat(5, minmax(145px, 1fr));
 }
 .situation-tile {
   position: relative;
@@ -5229,6 +5229,10 @@ body {
 }
 .situation-tile--visual {
   min-height: 150px;
+}
+.situation-tile--nature {
+  min-height: 118px;
+  padding: 14px;
 }
 .situation-tile--interactive:hover,
 .situation-tile--interactive:focus-visible {
@@ -5288,6 +5292,18 @@ body {
   height: 42px;
   font-size: 1.18rem;
 }
+.situation-tile--nature .situation-tile__top {
+  gap: 9px;
+  margin-bottom: 6px;
+}
+.situation-tile--nature .situation-tile__icon {
+  width: 34px;
+  height: 34px;
+  font-size: 1rem;
+}
+.situation-tile--nature h3 {
+  font-size: .78rem;
+}
 .situation-tile .kpi-value {
   position: relative;
   z-index: 1;
@@ -5297,6 +5313,11 @@ body {
 }
 .situation-tile--compact .kpi-value {
   font-size: 1.42rem;
+}
+.situation-tile--nature .kpi-value {
+  margin: .15rem 0 .18rem;
+  font-size: 1.08rem;
+  line-height: 1.15;
 }
 .situation-tile .muted {
   position: relative;
@@ -5362,6 +5383,11 @@ body {
   opacity: .5;
   clip-path: polygon(0 100%, 18% 54%, 34% 74%, 52% 28%, 70% 70%, 86% 42%, 100% 100%);
   background: linear-gradient(135deg, #b9c7d8, #eef2f7);
+}
+.situation-tile--nature::after {
+  width: 34%;
+  height: 52%;
+  opacity: .32;
 }
 .situation-tile--visual-avalanche { background: linear-gradient(135deg, #f7fbff 35%, #e5f1ff); }
 .situation-tile--visual-meteo-forets { background: linear-gradient(135deg, #fff 35%, #fff3cc); }

@@ -610,7 +610,7 @@ def compute_global_risk(*levels: str) -> str:
 
 
 def _risk_rank(level: str | None) -> int:
-    return {"vert": 0, "jaune": 1, "orange": 2, "rouge": 3}.get(str(level or "").lower(), 0)
+    return {"vert": 0, "jaune": 1, "orange": 2, "rouge": 3, "noir": 4}.get(str(level or "").lower(), 0)
 
 
 def _risk_level_from_score(score: int) -> str:
@@ -651,7 +651,7 @@ def compute_global_risk_details(
     """Calcule un score opérationnel 0-100 sans remplacer les niveaux officiels.
 
     Le score est une pondération de signaux hétérogènes : vigilance officielle,
-    crues observées, alertes flash, crises PCS et impacts de mobilité/réseaux.
+    crues observées, alertes flash, crises PCS, trafic routier et qualité de l'air.
     """
     risks = external_risks or {}
     vigicrues = risks.get("vigicrues") if isinstance(risks.get("vigicrues"), dict) else {}
@@ -711,9 +711,20 @@ def compute_global_risk_details(
     sncf_total = _safe_int(sncf.get("alerts_total"), len(sncf.get("alerts") or []))
     add_factor("SNCF Isère", min(10, sncf_total * 3), f"{sncf_total} alerte(s)")
 
-    arcep = risks.get("arcep_isere") if isinstance(risks.get("arcep_isere"), dict) else {}
-    outages = _safe_int(arcep.get("outages_total"))
-    add_factor("Réseau mobile", min(10, outages * 2), f"{outages} site(s)")
+    bison = risks.get("bison_fute") if isinstance(risks.get("bison_fute"), dict) else {}
+    bison_today = bison.get("today") if isinstance(bison.get("today"), dict) else {}
+    bison_isere = bison_today.get("isere") if isinstance(bison_today.get("isere"), dict) else {}
+    bison_departure = str(bison_isere.get("departure") or "vert").lower()
+    bison_return = str(bison_isere.get("return") or "vert").lower()
+    bison_level = _max_level(bison_departure, bison_return)
+    bison_points = {"jaune": 5, "orange": 10, "rouge": 16, "noir": 22}.get(bison_level, 0)
+    add_factor("Bison Futé Isère", bison_points, f"départ {bison_departure} / retour {bison_return}")
+
+    atmo = risks.get("atmo_aura") if isinstance(risks.get("atmo_aura"), dict) else {}
+    atmo_today = atmo.get("today") if isinstance(atmo.get("today"), dict) else {}
+    atmo_level = str(atmo_today.get("level") or "").lower()
+    atmo_label = str(atmo_today.get("label") or atmo_level or "indice indisponible")
+    add_factor("Qualité de l'air", {"jaune": 4, "orange": 8, "rouge": 14}.get(atmo_level, 0), atmo_label)
 
     fr_alert = risks.get("fr_alert_isere") if isinstance(risks.get("fr_alert_isere"), dict) else {}
     fr_today = _safe_int(fr_alert.get("today_count"), len(fr_alert.get("today_events") or []))
