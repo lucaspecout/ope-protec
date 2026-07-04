@@ -11237,15 +11237,8 @@ async function openMunicipalityDetailsModal(municipality) {
   const level = normalizeLevel(municipality.vigilance_color || 'vert');
   const badgeClass = level === 'rouge' ? 'red' : level === 'orange' ? 'orange' : level === 'jaune' ? 'yellow' : 'green';
   const municipalityContacts = Array.isArray(publicServices?.municipality_contacts) ? publicServices.municipality_contacts : [];
-  const importantContacts = Array.isArray(publicServices?.important_contacts) ? publicServices.important_contacts : [];
   const emergencyNumbers = Array.isArray(publicServices?.emergency_numbers) ? publicServices.emergency_numbers : [];
   const filteredMunicipalityContacts = municipalityContacts.filter((item) => {
-    const phoneValue = normalizeDisplayPhone(item?.phone);
-    const emailValue = normalizeDisplayMail(item?.email);
-    const addressValue = normalizeDisplayAddress(item?.address);
-    return Boolean(phoneValue || emailValue || addressValue);
-  });
-  const filteredImportantContacts = importantContacts.filter((item) => {
     const phoneValue = normalizeDisplayPhone(item?.phone);
     const emailValue = normalizeDisplayMail(item?.email);
     const addressValue = normalizeDisplayAddress(item?.address);
@@ -11257,43 +11250,6 @@ async function openMunicipalityDetailsModal(municipality) {
   const municipalityContactsMarkup = filteredMunicipalityContacts.length
     ? `<div class="muni-public-grid">${filteredMunicipalityContacts.map((item) => renderPublicServiceCard(item)).join('')}</div>`
     : '<p class="muted">Aucun contact public complémentaire trouvé pour cette commune.</p>';
-  const importantContactsMarkup = filteredImportantContacts.length
-    ? `<div class="muni-public-grid">${filteredImportantContacts.map((item) => renderPublicServiceCard(item)).join('')}</div>`
-    : '<p class="muted">Aucun contact départemental clé récupéré pour le moment.</p>';
-
-  // ── Tab: Fiche ────────────────────────────────────────────
-  const crisisActions = canEdit()
-    ? `<button type="button" class="ghost inline-action${municipality.crisis_mode ? ' danger' : ''}" data-muni-detail-crisis="${municipality.id}" style="margin-top:.6rem">${municipality.crisis_mode ? '🔴 Sortir de crise' : '⚠️ Passer en crise'}</button>
-       <button type="button" class="ghost inline-action" data-muni-edit="${municipality.id}" style="margin-top:.6rem">Éditer la fiche</button>`
-    : '';
-
-  const legacyFicheTab = `
-    <div class="muni-status-strip">
-      <span class="badge ${badgeClass}">${level}</span>
-      ${municipality.crisis_mode ? '<span style="font-weight:700;color:#c91c2e;font-size:.85rem">🔴 MODE CRISE</span>' : '<span style="color:#5f7190;font-size:.85rem">🟢 Veille normale</span>'}
-      <span class="muni-pill ${municipality.pcs_active ? 'pcs-on' : 'pcs-off'}">${municipality.pcs_active ? '✅ PCS actif' : '⬜ PCS inactif'}</span>
-    </div>
-    ${municipality.contacts ? `<p style="margin:.35rem 0 .65rem"><strong style="font-size:.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Contacts d'astreinte</strong><br><span style="white-space:pre-wrap">${escapeHtml(municipality.contacts)}</span></p>` : ''}
-    <div class="muni-info-grid">
-      <p class="muni-info-item"><strong>Code postal</strong>${escapeHtml(municipality.postal_code || '-')}</p>
-      <p class="muni-info-item"><strong>Code INSEE</strong>${escapeHtml(municipality.insee_code || '-')}</p>
-      <p class="muni-info-item"><strong>Population</strong>${municipality.population ? Number(municipality.population).toLocaleString('fr-FR') + ' hab.' : '-'}</p>
-      <p class="muni-info-item"><strong>Capacité d'accueil</strong>${municipality.shelter_capacity ? Number(municipality.shelter_capacity).toLocaleString('fr-FR') + ' places' : '-'}</p>
-      <p class="muni-info-item"><strong>Téléphone</strong>${municipality.phone ? `<a href="tel:${encodeURIComponent(municipality.phone.replace(/\s/g,''))}" style="color:var(--primary)">${escapeHtml(municipality.phone)}</a>` : '-'}</p>
-      <p class="muni-info-item"><strong>Email</strong>${municipality.email ? `<a href="mailto:${encodeURIComponent(municipality.email)}" style="color:var(--primary)">${escapeHtml(municipality.email)}</a>` : '-'}</p>
-    </div>
-    ${emergencyMarkup}
-    <div class="muni-public-section">
-      <h5>Services publics utiles de la commune</h5>
-      ${municipalityContactsMarkup}
-    </div>
-    <div class="muni-public-section">
-      <h5>Numéros et contacts importants Isère</h5>
-      ${importantContactsMarkup}
-    </div>
-    ${municipality.additional_info ? `<p style="margin:.3rem 0"><strong style="font-size:.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Informations complémentaires</strong><br><span style="white-space:pre-wrap;font-size:.88rem">${escapeHtml(municipality.additional_info)}</span></p>` : ''}
-    ${crisisActions}
-  `;
 
   const ficheTab = `
     <div class="muni-profile-layout">
@@ -11342,10 +11298,6 @@ async function openMunicipalityDetailsModal(municipality) {
     <div class="muni-public-section muni-public-section--modern">
       <h5>Services publics utiles de la commune</h5>
       ${municipalityContactsMarkup}
-    </div>
-    <div class="muni-public-section muni-public-section--modern">
-      <h5>Numéros et contacts importants Isère</h5>
-      ${importantContactsMarkup}
     </div>
   `;
 
@@ -17961,4 +17913,3 @@ function renderAuditDetails(log) {
     });
   }
 })();
-

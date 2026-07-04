@@ -6942,3 +6942,99 @@ body {
     pointer-events: auto;
   }
 }
+
+/* Communes: overrides finaux pour neutraliser le panneau blanc global */
+#municipalities-panel.panel.view.municipalities-page {
+  width: 100%;
+  min-height: calc(100vh - 48px);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(37, 99, 235, .10), transparent 30%),
+    linear-gradient(180deg, #f8fbff 0%, #eef4fb 100%);
+  box-shadow: none;
+}
+
+#municipalities-panel.panel.view.municipalities-page:hover {
+  box-shadow: none;
+}
+
+#municipalities-panel .municipalities-page-head,
+#municipalities-panel .municipality-filters,
+#municipalities-panel .muni-summary-bar,
+#municipalities-panel .municipality-count-line,
+#municipalities-panel #municipality-feedback,
+#municipalities-panel .municipality-grid {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+#municipalities-panel .municipalities-page-head {
+  padding: 1.1rem 1.2rem .85rem;
+  margin-bottom: 0;
+  border-bottom: 1px solid #dfe8f4;
+  background: rgba(255,255,255,.72);
+}
+
+#municipalities-panel .municipality-filters {
+  padding: 1rem 1.2rem 0;
+}
+
+#municipalities-panel .muni-summary-bar {
+  margin: 1rem 1.2rem .8rem;
+}
+
+#municipalities-panel .municipality-count-line {
+  margin: 0 1.2rem .75rem;
+}
+
+#municipalities-panel #municipality-feedback {
+  margin: 0 1.2rem .8rem;
+}
+
+#municipalities-panel .municipality-grid {
+  padding: 0 1.2rem 1.2rem;
+  grid-template-columns: repeat(auto-fit, minmax(315px, 1fr));
+}
+
+#municipalities-panel .municipality-card {
+  border: 1px solid #dfe8f4;
+  border-left-width: 4px !important;
+  border-radius: 10px;
+  background: #fff;
+}
+
+#municipality-details-modal.municipality-details-modal {
+  width: min(1280px, calc(100vw - 24px));
+  max-width: none;
+  max-height: calc(100vh - 24px);
+  border: 0;
+  border-radius: 12px;
+  background: #f6f9fe;
+  overflow: hidden;
+}
+
+#municipality-details-modal .municipality-details-modal__head {
+  padding: 1rem 1.2rem;
+  background: rgba(255,255,255,.82);
+}
+
+#municipality-details-content {
+  max-height: calc(100vh - 94px);
+  padding: 1rem 1.2rem 1.2rem;
+  overflow: auto;
+}
+
+@media (max-width: 720px) {
+  #municipality-details-modal.municipality-details-modal {
+    width: 100vw;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+
+  #municipality-details-content {
+    max-height: calc(100vh - 82px);
+    padding: .85rem;
+  }
+}
