@@ -700,7 +700,7 @@ def compute_global_risk_details(
 
     feux = risks.get("feux_foret_isere") if isinstance(risks.get("feux_foret_isere"), dict) else {}
     fires_total = _safe_int(feux.get("fires_total"))
-    add_factor("Feux détectés", 16 if fires_total > 5 else 8 if fires_total > 0 else 0, f"{fires_total} foyer(s)")
+    add_factor("Feux FeuxDeForet.fr", 16 if fires_total > 5 else 8 if fires_total > 0 else 0, f"{fires_total} foyer(s) sur 3 jours")
 
     seismes = risks.get("seismes_isere") if isinstance(risks.get("seismes_isere"), dict) else {}
     magnitudes = [_safe_float(item.get("magnitude")) for item in (seismes.get("items") or []) if isinstance(item, dict)]
@@ -2012,7 +2012,7 @@ def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str])
         "mreseau": (lambda: fetch_mreseau_disruptions(force_refresh=refresh), {"status": "pending", "disruptions": [], "disruptions_total": 0, "normal_service": True}),
         "cars_region_aura": (lambda: fetch_cars_region_aura_disruptions(force_refresh=refresh), {"status": "pending", "disruptions": [], "disruptions_total": 0}),
         "avalanche_isere": (lambda: fetch_avalanche_isere(force_refresh=refresh), {"status": "pending", "massifs": [], "massifs_total": 0, "niveau_global": "gris"}),
-        "feux_foret_isere": (lambda: fetch_feux_foret_isere(force_refresh=refresh), {"status": "pending", "fires": [], "fires_total": 0, "top_fires": [], "recent_incidents": [], "recent_incidents_total": 0, "info_items": [], "info_items_total": 0}),
+        "feux_foret_isere": (lambda: fetch_feux_foret_isere(force_refresh=refresh), {"status": "pending", "fires": [], "fires_total": 0, "fires_window_days": 3, "satellite_fires_total": 0, "top_fires": [], "recent_incidents": [], "recent_incidents_total": 0, "recent_incidents_3d": [], "recent_incidents_3d_total": 0, "info_items": [], "info_items_total": 0}),
         "cols_alpins_isere": (lambda: fetch_cols_alpins_isere(force_refresh=refresh), {"status": "pending", "cols": [], "cols_total": 0, "dangereux_total": 0}),
         "copernicus_ems": (lambda: fetch_copernicus_ems_france(force_refresh=refresh), {"status": "pending", "activations": [], "activations_total": 0, "france_total": 0, "france_activations": []}),
     }

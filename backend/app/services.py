@@ -10684,6 +10684,7 @@ _FEUX_FORET_CACHE_TTL_SECONDS = 600
 _feux_foret_cache_lock = Lock()
 _feux_foret_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "feux_foret_isere"}
 _FEUXDEFORET_ISERE_URL = "https://feuxdeforet.fr/auvergne-rhone-alpes/isere/"
+_FEUXDEFORET_FIRES_WINDOW_DAYS = 3
 
 
 _ISERE_BBOX = (44.4, 4.9, 45.7, 6.4)  # lat_min, lon_min, lat_max, lon_max
@@ -10817,13 +10818,91 @@ def _parse_feuxdeforet_isere_page(raw_html: str) -> dict[str, Any]:
             "source": "FeuxDeForet.fr",
         })
 
+    recent_incidents_3d = _feuxdeforet_filter_recent_incidents(
+        recent_incidents,
+        max_age=timedelta(days=_FEUXDEFORET_FIRES_WINDOW_DAYS),
+    )
+
     return {
         "source": _FEUXDEFORET_ISERE_URL,
         "recent_incidents": recent_incidents[:12],
         "recent_incidents_total": len(recent_incidents),
+        "recent_incidents_3d": recent_incidents_3d[:12],
+        "recent_incidents_3d_total": len(recent_incidents_3d),
         "info_items": info_items[:8],
         "info_items_total": len(info_items),
     }
+
+
+def _feuxdeforet_filter_recent_incidents(
+    incidents: list[dict[str, Any]],
+    max_age: timedelta,
+) -> list[dict[str, Any]]:
+    recent: list[dict[str, Any]] = []
+    for item in incidents:
+        age = _parse_feuxdeforet_recency(item.get("recency"))
+        if age is None or age > max_age:
+            continue
+        enriched = dict(item)
+        enriched["recency_hours"] = round(age.total_seconds() / 3600, 2)
+        recent.append(enriched)
+    return recent
+
+
+def _parse_feuxdeforet_recency(value: Any) -> timedelta | None:
+    text = str(value or "").strip().lower()
+    if not text:
+        return None
+    normalized = unicodedata.normalize("NFKD", text)
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    normalized = normalized.replace("il y a", " ").replace("environ", " ")
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+
+    if any(token in normalized for token in ("instant", "quelques secondes", "a l'instant")):
+        return timedelta(seconds=0)
+    if "hier" in normalized:
+        return timedelta(days=1)
+
+    word_numbers = {
+        "un": 1,
+        "une": 1,
+        "deux": 2,
+        "trois": 3,
+        "quatre": 4,
+        "cinq": 5,
+        "six": 6,
+        "sept": 7,
+        "huit": 8,
+        "neuf": 9,
+        "dix": 10,
+    }
+    match = re.search(
+        r"\b(\d+|un|une|deux|trois|quatre|cinq|six|sept|huit|neuf|dix)\s+"
+        r"(seconde|secondes|minute|minutes|heure|heures|jour|jours|semaine|semaines|mois|an|ans)\b",
+        normalized,
+    )
+    if not match:
+        return None
+
+    amount_raw, unit = match.groups()
+    amount = int(amount_raw) if amount_raw.isdigit() else word_numbers.get(amount_raw, 0)
+    if amount <= 0:
+        return None
+    if unit.startswith("seconde"):
+        return timedelta(seconds=amount)
+    if unit.startswith("minute"):
+        return timedelta(minutes=amount)
+    if unit.startswith("heure"):
+        return timedelta(hours=amount)
+    if unit.startswith("jour"):
+        return timedelta(days=amount)
+    if unit.startswith("semaine"):
+        return timedelta(weeks=amount)
+    if unit == "mois":
+        return timedelta(days=amount * 31)
+    if unit.startswith("an"):
+        return timedelta(days=amount * 365)
+    return None
 
 
 def _fetch_feuxdeforet_isere_page() -> dict[str, Any]:
@@ -11207,6 +11286,8 @@ def _fetch_feux_foret_live() -> dict[str, Any]:
         "source": _FEUXDEFORET_ISERE_URL,
         "recent_incidents": [],
         "recent_incidents_total": 0,
+        "recent_incidents_3d": [],
+        "recent_incidents_3d_total": 0,
         "info_items": [],
         "info_items_total": 0,
     }
@@ -11266,10 +11347,14 @@ def _fetch_feux_foret_live() -> dict[str, Any]:
             "source": "https://effis.jrc.ec.europa.eu",
             "sources": ["https://effis.jrc.ec.europa.eu", _FEUXDEFORET_ISERE_URL],
             "fires": [],
-            "fires_total": 0,
+            "fires_total": feuxdeforet.get("recent_incidents_3d_total") or 0,
+            "fires_window_days": _FEUXDEFORET_FIRES_WINDOW_DAYS,
+            "satellite_fires_total": 0,
             "top_fires": [],
             "recent_incidents": feuxdeforet.get("recent_incidents") or [],
             "recent_incidents_total": feuxdeforet.get("recent_incidents_total") or 0,
+            "recent_incidents_3d": feuxdeforet.get("recent_incidents_3d") or [],
+            "recent_incidents_3d_total": feuxdeforet.get("recent_incidents_3d_total") or 0,
             "info_items": feuxdeforet.get("info_items") or [],
             "info_items_total": feuxdeforet.get("info_items_total") or 0,
             "feuxdeforet_source": feuxdeforet.get("source") or _FEUXDEFORET_ISERE_URL,
@@ -11299,10 +11384,14 @@ def _fetch_feux_foret_live() -> dict[str, Any]:
         "sources": ["https://effis.jrc.ec.europa.eu", _FEUXDEFORET_ISERE_URL],
         "data_source": data_source,
         "fires": fires_sorted,
-        "fires_total": len(fires_sorted),
+        "fires_total": feuxdeforet.get("recent_incidents_3d_total") or 0,
+        "fires_window_days": _FEUXDEFORET_FIRES_WINDOW_DAYS,
+        "satellite_fires_total": len(fires_sorted),
         "top_fires": fires_sorted[:3],
         "recent_incidents": feuxdeforet.get("recent_incidents") or [],
         "recent_incidents_total": feuxdeforet.get("recent_incidents_total") or 0,
+        "recent_incidents_3d": feuxdeforet.get("recent_incidents_3d") or [],
+        "recent_incidents_3d_total": feuxdeforet.get("recent_incidents_3d_total") or 0,
         "info_items": feuxdeforet.get("info_items") or [],
         "info_items_total": feuxdeforet.get("info_items_total") or 0,
         "feuxdeforet_source": feuxdeforet.get("source") or _FEUXDEFORET_ISERE_URL,
