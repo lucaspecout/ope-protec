@@ -9387,6 +9387,9 @@ function updateIsoZoneButtons() {
     isochroneBtn.classList.toggle('active', mapIsoMode === 'isochrone');
     isochroneBtn.setAttribute('aria-pressed', String(mapIsoMode === 'isochrone'));
   }
+  if (leafletMap && !mapStreetViewMode) {
+    leafletMap.getContainer().style.cursor = mapIsoMode ? 'crosshair' : '';
+  }
 }
 
 function clearIsoZones(showFeedback = true) {
@@ -9450,6 +9453,17 @@ async function startIsoZoneMode(mode) {
   setMapFeedback(mapIsoMode === 'isochrone'
     ? 'Isochrone actif: cliquez le point de depart sur la carte.'
     : 'Isodistance active: cliquez le centre sur la carte.');
+}
+
+function handleIsoZoneControlClick(button) {
+  if (!button) return;
+  if (button.id === 'map-isodistance-start') {
+    startIsoZoneMode('isodistance').catch((error) => setMapFeedback(`Outil iso indisponible: ${sanitizeErrorMessage(error.message)}`, true));
+  } else if (button.id === 'map-isochrone-start') {
+    startIsoZoneMode('isochrone').catch((error) => setMapFeedback(`Outil iso indisponible: ${sanitizeErrorMessage(error.message)}`, true));
+  } else if (button.id === 'map-iso-clear') {
+    clearIsoZones(true);
+  }
 }
 
 function drawIsoZone(lat, lon, radiusMeters, mode) {
@@ -15761,18 +15775,27 @@ function bindAppInteractions() {
   document.getElementById('map-route-start')?.addEventListener('click', startMapRouteMode);
   document.getElementById('map-route-refresh')?.addEventListener('click', () => refreshAllMapRoutes(true));
   document.getElementById('map-route-clear')?.addEventListener('click', () => clearMapRoute(true));
+  document.getElementById('map-isodistance-start')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    handleIsoZoneControlClick(event.currentTarget);
+  });
+  document.getElementById('map-isochrone-start')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    handleIsoZoneControlClick(event.currentTarget);
+  });
+  document.getElementById('map-iso-clear')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    handleIsoZoneControlClick(event.currentTarget);
+  });
   document.getElementById('map-controls-panel')?.addEventListener('click', (event) => {
     const target = event.target instanceof Element ? event.target : null;
     const button = target?.closest('#map-isodistance-start, #map-isochrone-start, #map-iso-clear');
     if (!button) return;
     event.preventDefault();
-    if (button.id === 'map-isodistance-start') {
-      startIsoZoneMode('isodistance').catch((error) => setMapFeedback(`Outil iso indisponible: ${sanitizeErrorMessage(error.message)}`, true));
-    } else if (button.id === 'map-isochrone-start') {
-      startIsoZoneMode('isochrone').catch((error) => setMapFeedback(`Outil iso indisponible: ${sanitizeErrorMessage(error.message)}`, true));
-    } else {
-      clearIsoZones(true);
-    }
+    handleIsoZoneControlClick(button);
   });
   document.getElementById('map-route-list')?.addEventListener('click', (event) => {
     const btn = event.target.closest('[data-route-action]');
