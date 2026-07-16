@@ -6887,6 +6887,15 @@ body {
   font-size: .74rem;
 }
 
+#map-panel .filter-tool-row--iso {
+  align-items: center;
+}
+
+#map-panel .filter-tool-row--iso .evacuation-radius-field input {
+  width: 68px;
+  min-width: 0;
+}
+
 #map-panel .map-poi-shapes-title {
   margin: 10px 0 5px;
   color: #eff6ff;

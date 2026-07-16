@@ -392,6 +392,8 @@ let mapZoneImpactReportData = null; // stocke les données brutes pour l'export
 let mapEvacuationCircleLayer = null;
 let mapEvacuationCircleMode = false;
 let mapEvacuationCircle = null;
+let mapIsoLayer = null;
+let mapIsoMode = null;
 let mapMeasureLayer = null;
 let mapMeasureMode = false;
 let mapMeasurePoints = [];
@@ -4792,6 +4794,7 @@ function initMap() {
   mapAnnotationFeatureGroup = window.L.featureGroup().addTo(leafletMap);
   mapZoneImpactLayer = window.L.layerGroup().addTo(leafletMap);
   mapEvacuationCircleLayer = window.L.layerGroup().addTo(leafletMap);
+  mapIsoLayer = window.L.layerGroup().addTo(leafletMap);
   mapMeasureLayer = window.L.layerGroup().addTo(leafletMap);
   mapRouteLayer = window.L.layerGroup().addTo(leafletMap);
   initMapAnnotationModule();
@@ -4811,6 +4814,7 @@ function initMap() {
   colsAlpinsLayer = window.L.layerGroup();
   meteoCitiesLayer = window.L.layerGroup();
   leafletMap.on('click', onMapClickEvacuationCircle);
+  leafletMap.on('click', onMapClickIsoZone);
   leafletMap.on('click', onMapClickMeasure);
   leafletMap.on('click', onMapClickRoute);
   leafletMap.on('click', onMapClickAddPoint);
@@ -4895,7 +4899,7 @@ async function handleOsmDetailsClick(event) {
 }
 
 function isMapToolActive() {
-  if (mapAddPointMode || mapEvacuationCircleMode || mapMeasureMode || mapRouteMode || mapStreetViewMode) return true;
+  if (mapAddPointMode || mapEvacuationCircleMode || mapIsoMode || mapMeasureMode || mapRouteMode || mapStreetViewMode) return true;
   if (mapZoneImpactDrawHandler?.enabled && mapZoneImpactDrawHandler.enabled()) return true;
   const drawToolbarModes = mapDrawControl?._toolbars?.draw?._modes;
   if (drawToolbarModes && typeof drawToolbarModes === 'object') {
@@ -4944,6 +4948,10 @@ function setStreetViewMode(enabled) {
       document.getElementById('map-add-point-btn')?.setAttribute('aria-pressed', 'false');
     }
     if (mapEvacuationCircleMode) mapEvacuationCircleMode = false;
+    if (mapIsoMode) {
+      mapIsoMode = null;
+      updateIsoZoneButtons();
+    }
     if (mapMeasureMode) clearMapMeasure(false);
     if (mapRouteMode) clearMapRoute(false);
     if (typeof _mapWeatherMode !== 'undefined' && _mapWeatherMode) _toggleMapWeatherMode();
@@ -5127,6 +5135,7 @@ async function resetMapFilters() {
   renderMapChecks([]);
   clearZoneImpactSelection();
   clearEvacuationCircle(false);
+  clearIsoZones(false);
   clearMapMeasure(false);
   setMapFeedback('Filtres carte réinitialisés.');
 }
@@ -9354,6 +9363,39 @@ function updateEvacuationCircleButtons() {
   }
 }
 
+function currentIsodistanceMeters() {
+  const raw = Number(document.getElementById('map-isodistance-km')?.value || 0);
+  if (!Number.isFinite(raw) || raw <= 0) return 0;
+  return raw * 1000;
+}
+
+function currentIsochroneMeters() {
+  const minutes = Number(document.getElementById('map-isochrone-min')?.value || 0);
+  const speedKmh = Number(document.getElementById('map-isochrone-speed-kmh')?.value || 0);
+  if (!Number.isFinite(minutes) || minutes <= 0 || !Number.isFinite(speedKmh) || speedKmh <= 0) return 0;
+  return (speedKmh * 1000 / 60) * minutes;
+}
+
+function updateIsoZoneButtons() {
+  const isodistanceBtn = document.getElementById('map-isodistance-start');
+  if (isodistanceBtn) {
+    isodistanceBtn.classList.toggle('active', mapIsoMode === 'isodistance');
+    isodistanceBtn.setAttribute('aria-pressed', String(mapIsoMode === 'isodistance'));
+  }
+  const isochroneBtn = document.getElementById('map-isochrone-start');
+  if (isochroneBtn) {
+    isochroneBtn.classList.toggle('active', mapIsoMode === 'isochrone');
+    isochroneBtn.setAttribute('aria-pressed', String(mapIsoMode === 'isochrone'));
+  }
+}
+
+function clearIsoZones(showFeedback = true) {
+  mapIsoMode = null;
+  if (mapIsoLayer) mapIsoLayer.clearLayers();
+  updateIsoZoneButtons();
+  if (showFeedback) setMapFeedback('Isochrone / isodistance effacee.');
+}
+
 function updateMeasureButtons() {
   const startBtn = document.getElementById('map-measure-start');
   if (startBtn) {
@@ -9370,6 +9412,99 @@ function clearMapMeasure(showFeedback = true) {
   if (showFeedback) setMapFeedback('Mesure effacée.');
 }
 
+function startIsoZoneMode(mode) {
+  const nextMode = mapIsoMode === mode ? null : mode;
+  if (mapAddPointMode) {
+    mapAddPointMode = false;
+    pendingMapPointCoords = null;
+    document.getElementById('map-add-point-btn')?.classList.remove('active');
+    document.getElementById('map-add-point-btn')?.setAttribute('aria-pressed', 'false');
+  }
+  if (mapEvacuationCircleMode) {
+    mapEvacuationCircleMode = false;
+    updateEvacuationCircleButtons();
+  }
+  if (mapIsoMode) {
+    mapIsoMode = null;
+    updateIsoZoneButtons();
+  }
+  if (mapMeasureMode) clearMapMeasure(false);
+  if (mapRouteMode) clearMapRoute(false);
+  if (mapStreetViewMode) setStreetViewMode(false);
+  mapIsoMode = nextMode;
+  updateIsoZoneButtons();
+  if (!mapIsoMode) {
+    setMapFeedback('Outil iso desactive.');
+    return;
+  }
+  setMapFeedback(mapIsoMode === 'isochrone'
+    ? 'Isochrone actif: cliquez le point de depart sur la carte.'
+    : 'Isodistance active: cliquez le centre sur la carte.');
+}
+
+function drawIsoZone(lat, lon, radiusMeters, mode) {
+  if (!leafletMap || typeof window.L === 'undefined' || !Number.isFinite(radiusMeters) || radiusMeters <= 0) return;
+  if (!mapIsoLayer) mapIsoLayer = window.L.layerGroup().addTo(leafletMap);
+  const isIsochrone = mode === 'isochrone';
+  const color = isIsochrone ? '#7048e8' : '#0b7285';
+  const fillColor = isIsochrone ? '#d0bfff' : '#99e9f2';
+  const title = isIsochrone ? 'Isochrone estimee' : 'Isodistance';
+  const minutes = Number(document.getElementById('map-isochrone-min')?.value || 0);
+  const speedKmh = Number(document.getElementById('map-isochrone-speed-kmh')?.value || 0);
+  const detail = isIsochrone
+    ? `${Number.isFinite(minutes) ? minutes : '?'} min a ${Number.isFinite(speedKmh) ? speedKmh : '?'} km/h moyen`
+    : `${formatDistanceMeters(radiusMeters)} autour du point`;
+
+  window.L.circle([lat, lon], {
+    radius: radiusMeters,
+    color,
+    weight: 2,
+    opacity: 0.95,
+    fillColor,
+    fillOpacity: 0.18,
+    dashArray: isIsochrone ? '10 7' : '4 6',
+  }).bindPopup(`<strong>${escapeHtml(title)}</strong><br>${escapeHtml(detail)}<br>${escapeHtml(formatCoordinates(lat, lon))}`)
+    .addTo(mapIsoLayer);
+
+  window.L.circleMarker([lat, lon], {
+    radius: 5,
+    color,
+    weight: 2,
+    fillColor: '#fff',
+    fillOpacity: 1,
+  }).addTo(mapIsoLayer);
+
+  window.L.marker([lat, lon], {
+    icon: window.L.divIcon({
+      className: 'map-measure-label',
+      html: `<span>${escapeHtml(isIsochrone ? `${Math.round(minutes)} min` : formatDistanceMeters(radiusMeters))}</span>`,
+      iconSize: null,
+    }),
+  }).addTo(mapIsoLayer);
+}
+
+function onMapClickIsoZone(event) {
+  if (!mapIsoMode || !leafletMap || typeof window.L === 'undefined') return;
+  const lat = Number(event?.latlng?.lat);
+  const lon = Number(event?.latlng?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+  const radiusMeters = mapIsoMode === 'isochrone' ? currentIsochroneMeters() : currentIsodistanceMeters();
+  if (!radiusMeters) {
+    setMapFeedback(mapIsoMode === 'isochrone'
+      ? 'Parametres isochrone invalides.'
+      : 'Distance isodistance invalide.', true);
+    mapIsoMode = null;
+    updateIsoZoneButtons();
+    return;
+  }
+  drawIsoZone(lat, lon, radiusMeters, mapIsoMode);
+  const feedback = mapIsoMode === 'isochrone'
+    ? `Isochrone estimee affichee (${formatDistanceMeters(radiusMeters)}).`
+    : `Isodistance affichee (${formatDistanceMeters(radiusMeters)}).`;
+  mapIsoMode = null;
+  updateIsoZoneButtons();
+  setMapFeedback(feedback);
+}
 function formatDistanceMeters(distanceMeters = 0) {
   const distance = Number(distanceMeters);
   if (!Number.isFinite(distance) || distance <= 0) return '0 m';
@@ -9387,6 +9522,10 @@ function startMapMeasureMode() {
   if (mapEvacuationCircleMode) {
     mapEvacuationCircleMode = false;
     updateEvacuationCircleButtons();
+  }
+  if (mapIsoMode) {
+    mapIsoMode = null;
+    updateIsoZoneButtons();
   }
   if (mapRouteMode) clearMapRoute(false);
   mapMeasureMode = !mapMeasureMode;
@@ -9541,6 +9680,10 @@ function startMapRouteMode() {
   if (mapEvacuationCircleMode) {
     mapEvacuationCircleMode = false;
     updateEvacuationCircleButtons();
+  }
+  if (mapIsoMode) {
+    mapIsoMode = null;
+    updateIsoZoneButtons();
   }
   if (mapMeasureMode) clearMapMeasure(false);
   if (mapStreetViewMode) setStreetViewMode(false);
@@ -9908,6 +10051,10 @@ function startEvacuationCircleMode() {
   }
   if (mapMeasureMode) clearMapMeasure(false);
   if (mapRouteMode) clearMapRoute(false);
+  if (mapIsoMode) {
+    mapIsoMode = null;
+    updateIsoZoneButtons();
+  }
   mapEvacuationCircleMode = !mapEvacuationCircleMode;
   updateEvacuationCircleButtons();
   setMapFeedback(
@@ -15604,6 +15751,9 @@ function bindAppInteractions() {
   document.getElementById('map-route-start')?.addEventListener('click', startMapRouteMode);
   document.getElementById('map-route-refresh')?.addEventListener('click', () => refreshAllMapRoutes(true));
   document.getElementById('map-route-clear')?.addEventListener('click', () => clearMapRoute(true));
+  document.getElementById('map-isodistance-start')?.addEventListener('click', () => startIsoZoneMode('isodistance'));
+  document.getElementById('map-isochrone-start')?.addEventListener('click', () => startIsoZoneMode('isochrone'));
+  document.getElementById('map-iso-clear')?.addEventListener('click', () => clearIsoZones(true));
   document.getElementById('map-route-list')?.addEventListener('click', (event) => {
     const btn = event.target.closest('[data-route-action]');
     if (!btn) return;
@@ -15636,6 +15786,10 @@ function bindAppInteractions() {
     }
     if (mapMeasureMode) clearMapMeasure(false);
     if (mapRouteMode) clearMapRoute(false);
+    if (mapIsoMode) {
+      mapIsoMode = null;
+      updateIsoZoneButtons();
+    }
     mapAddPointMode = !mapAddPointMode;
     pendingMapPointCoords = null;
     const button = document.getElementById('map-add-point-btn');
