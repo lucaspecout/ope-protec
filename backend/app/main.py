@@ -419,7 +419,7 @@ SERVICE_REFRESH_INTERVALS: dict[str, int] = {
     "ars_aura":             300,    # ARS AURA – alertes sanitaires
     "seismes_isere":        600,    # Séismes Isère (BCSF-RéNaSS)
     "avalanche_isere":     1800,    # BRA Météo-France massifs Isère
-    "feux_foret_isere":     600,    # Feux de forêt EFFIS/JRC + FeuxDeForet.fr Isère
+    "feux_foret_isere":     300,    # Feux de forêt FeuxDeForet.fr Isère
     "cols_alpins_isere":   1800,    # État cols alpins Isère (couche officielle Itinisère)
     "copernicus_ems":      1800,    # Copernicus EMS cartographie d'urgence
 }
@@ -700,7 +700,7 @@ def compute_global_risk_details(
 
     feux = risks.get("feux_foret_isere") if isinstance(risks.get("feux_foret_isere"), dict) else {}
     fires_total = _safe_int(feux.get("fires_total"))
-    add_factor("Feux FeuxDeForet.fr", 16 if fires_total > 5 else 8 if fires_total > 0 else 0, f"{fires_total} foyer(s) sur 3 jours")
+    add_factor("Feux FeuxDeForet.fr", 16 if fires_total > 5 else 8 if fires_total > 0 else 0, f"{fires_total} foyer(s) sur 2 jours")
 
     seismes = risks.get("seismes_isere") if isinstance(risks.get("seismes_isere"), dict) else {}
     magnitudes = [_safe_float(item.get("magnitude")) for item in (seismes.get("items") or []) if isinstance(item, dict)]
@@ -2012,7 +2012,7 @@ def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str])
         "mreseau": (lambda: fetch_mreseau_disruptions(force_refresh=refresh), {"status": "pending", "disruptions": [], "disruptions_total": 0, "normal_service": True}),
         "cars_region_aura": (lambda: fetch_cars_region_aura_disruptions(force_refresh=refresh), {"status": "pending", "disruptions": [], "disruptions_total": 0}),
         "avalanche_isere": (lambda: fetch_avalanche_isere(force_refresh=refresh), {"status": "pending", "massifs": [], "massifs_total": 0, "niveau_global": "gris"}),
-        "feux_foret_isere": (lambda: fetch_feux_foret_isere(force_refresh=refresh), {"status": "pending", "fires": [], "fires_total": 0, "fires_window_days": 3, "satellite_fires_total": 0, "top_fires": [], "recent_incidents": [], "recent_incidents_total": 0, "recent_incidents_3d": [], "recent_incidents_3d_total": 0, "info_items": [], "info_items_total": 0}),
+        "feux_foret_isere": (lambda: fetch_feux_foret_isere(force_refresh=refresh), {"status": "pending", "fires": [], "fires_total": 0, "fires_window_days": 2, "top_fires": [], "recent_incidents": [], "recent_incidents_total": 0, "recent_incidents_2d": [], "recent_incidents_2d_total": 0, "recent_incidents_3d": [], "recent_incidents_3d_total": 0, "info_items": [], "info_items_total": 0}),
         "cols_alpins_isere": (lambda: fetch_cols_alpins_isere(force_refresh=refresh), {"status": "pending", "cols": [], "cols_total": 0, "dangereux_total": 0}),
         "copernicus_ems": (lambda: fetch_copernicus_ems_france(force_refresh=refresh), {"status": "pending", "activations": [], "activations_total": 0, "france_total": 0, "france_activations": []}),
     }
@@ -3146,6 +3146,9 @@ def _extract_service_level(key: str, data: dict) -> str:
         return worst
     if key == "sncf_isere":
         return "jaune" if len(data.get("alerts") or []) > 0 else "vert"
+    if key == "feux_foret_isere":
+        n = int(data.get("fires_total") or data.get("recent_incidents_2d_total") or 0)
+        return "orange" if n > 5 else "jaune" if n > 0 else "vert"
 
     if key == "fr_alert_isere":
         return "rouge" if int(data.get("today_count") or 0) > 0 else "vert"
@@ -3165,6 +3168,19 @@ def _latest_news_fingerprint(data: dict) -> tuple[str | None, dict | None]:
     link = str(latest.get("link") or latest.get("url") or "").strip()
     published = str(latest.get("published_at") or latest.get("date") or latest.get("pubDate") or "").strip()
     fingerprint = "|".join(part for part in (link, published, title) if part)
+    return (fingerprint or None), latest
+
+
+def _latest_feux_foret_fingerprint(data: dict) -> tuple[str | None, dict | None]:
+    """Retourne une signature stable du dernier signalement FeuxDeForet.fr."""
+    items = data.get("recent_incidents_2d") or data.get("recent_incidents") or []
+    if not items:
+        return None, None
+    latest = items[0] if isinstance(items[0], dict) else {}
+    title = str(latest.get("title") or latest.get("commune") or "").strip()
+    link = str(latest.get("link") or "").strip()
+    recency = str(latest.get("recency") or latest.get("recency_hours") or "").strip()
+    fingerprint = "|".join(part for part in (link, title, recency) if part)
     return (fingerprint or None), latest
 
 
@@ -3188,6 +3204,7 @@ def _build_discord_embed(service_key: str, level: str, data: dict, reason: str =
         desc_map = {
             "nouvelle alerte": "🆕 Nouvelle alerte déclenchée",
             "nouvelle actualité": "🆕 Nouvelle actualité détectée",
+            "nouveau feu": "🆕 Nouveau feu détecté en Isère",
             "retour alerte après retour au vert": "🔁 Alerte réapparue après retour au vert",
         }
         desc_reason = desc_map.get(reason) or f"📢 {reason.capitalize()}"
@@ -3357,6 +3374,18 @@ def _build_discord_embed(service_key: str, level: str, data: dict, reason: str =
             fields.append(_f("📋 Dernières actualités", "\n".join(lines), inline=False))
 
     # ── Géorisques ────────────────────────────────────────────────────────────
+    elif service_key == "feux_foret_isere":
+        recent = data.get("recent_incidents_2d") or data.get("recent_incidents") or []
+        total = int(data.get("fires_total") or len(recent))
+        fields.append(_f("Foyers < 2 jours", str(total), inline=True))
+        fields.append(_f("Source", "FeuxDeForet.fr Isere", inline=True))
+        if recent:
+            lines = []
+            for item in recent[:5]:
+                title = _trunc(item.get("title") or item.get("commune") or "Isere", 90)
+                recency = str(item.get("recency") or "Signalement recent")
+                lines.append(f"- **{title}** - {recency}")
+            fields.append(_f("Derniers signalements", "\n".join(lines), inline=False))
     elif service_key == "georisques":
         details = data.get("details") or []
         seismic = data.get("highest_seismic_zone_label") or "?"
@@ -3544,8 +3573,12 @@ def _check_and_send_notifications(service_key: str, data: dict) -> None:
                         except Exception:
                             state = {}
 
-                if service_key == "prefecture_isere":
-                    latest_fingerprint, latest_item = _latest_news_fingerprint(data)
+                if service_key in ("prefecture_isere", "feux_foret_isere"):
+                    latest_fingerprint, latest_item = (
+                        _latest_feux_foret_fingerprint(data)
+                        if service_key == "feux_foret_isere"
+                        else _latest_news_fingerprint(data)
+                    )
                     if not latest_fingerprint:
                         continue
 
@@ -3563,7 +3596,7 @@ def _check_and_send_notifications(service_key: str, data: dict) -> None:
                     if previous_fingerprint == latest_fingerprint:
                         continue
 
-                    reason = "nouvelle actualité"
+                    reason = "nouveau feu" if service_key == "feux_foret_isere" else "nouvelle actualité"
                     embed_payload = _build_discord_embed(service_key, "jaune", data, reason=reason)
                     ok, detail = _send_discord_webhook(webhook_url, embed_payload)
                     log_entry = {

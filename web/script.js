@@ -107,7 +107,7 @@ const FLUX_SERVICES = [
   { key: 'ars_aura',               label: 'ARS AURA · Santé',          icon: '🏥', category: 'Actualités',   interval: 300,   metric: (d) => `${(d.items || []).length} alerte(s) sanitaire(s)` },
   { key: 'seismes_isere',          label: 'Séismes Isère',             icon: '🌍', category: 'Risques',       interval: 600,   metric: (d) => `${(d.items || []).length} séisme(s) détecté(s)` },
   { key: 'avalanche_isere',        label: 'Avalanches BRA · Isère',    icon: '🏔️', category: 'Risques',       interval: 1800,  metric: (d) => `Niveau max ${d.niveau_max_bra ?? '?'}/5 · ${(d.massifs || []).length} massif(s)` },
-  { key: 'feux_foret_isere',       label: 'Feux de forêt Isère',       icon: '🔥', category: 'Risques',       interval: 600,   metric: (d) => `${d.fires_total ?? 0} foyer(s) FeuxDeForet.fr 3j · ${d.satellite_fires_total ?? 0} détection(s) satellite` },
+  { key: 'feux_foret_isere',       label: 'Feux de forêt Isère',       icon: '🔥', category: 'Risques',       interval: 300,   metric: (d) => `${d.fires_total ?? 0} foyer(s) FeuxDeForet.fr < 2j` },
   { key: 'copernicus_ems',         label: 'GDACS · Catastrophes Europe',  icon: '🛰️', category: 'Risques',    interval: 1800,  metric: (d) => `${d.france_total ?? 0} événement(s) France · ${d.activations_total ?? 0} Europe` },
   { key: 'cols_alpins_isere',      label: 'Cols alpins Isère',         icon: '⛰️', category: 'Transport',     interval: 1800,  metric: (d) => `${d.cols_total ?? 0} cols · ${d.dangereux_total ?? 0} à surveiller` },
   { key: 'anfr_isere',             label: 'ANFR · Antennes mobiles',   icon: '📡', category: 'Télécom',       interval: 21600, metric: (d) => `${d.supports_total ?? 0} support(s) mobile recensés` },
@@ -1115,12 +1115,13 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
       fires: keepPreviousArray(p.fires, n.fires),
       top_fires: keepPreviousArray(p.top_fires, n.top_fires),
       recent_incidents: keepPreviousArray(p.recent_incidents, n.recent_incidents),
+      recent_incidents_2d: keepPreviousArray(p.recent_incidents_2d, n.recent_incidents_2d),
       recent_incidents_3d: keepPreviousArray(p.recent_incidents_3d, n.recent_incidents_3d),
       info_items: keepPreviousArray(p.info_items, n.info_items),
       fires_total: keepPreviousValue(p.fires_total, n.fires_total),
       fires_window_days: keepPreviousValue(p.fires_window_days, n.fires_window_days),
-      satellite_fires_total: keepPreviousValue(p.satellite_fires_total, n.satellite_fires_total),
       recent_incidents_total: keepPreviousValue(p.recent_incidents_total, n.recent_incidents_total),
+      recent_incidents_2d_total: keepPreviousValue(p.recent_incidents_2d_total, n.recent_incidents_2d_total),
       recent_incidents_3d_total: keepPreviousValue(p.recent_incidents_3d_total, n.recent_incidents_3d_total),
       info_items_total: keepPreviousValue(p.info_items_total, n.info_items_total),
     })),
@@ -4427,13 +4428,11 @@ function feuxAgeStyle(item = {}, fallback = 'week') {
   return { color: '#64748b', label: 'Plus ancien / date inconnue' };
 }
 
-function feuxMarkerIcon(style, source = 'satellite') {
-  const isSatellite = source === 'satellite';
-  const glyph = isSatellite ? '🔥' : 'FDF';
-  const size = isSatellite ? 32 : 34;
+function feuxMarkerIcon(style) {
+  const size = 34;
   return window.L.divIcon({
     className: '',
-    html: `<div style="width:${size}px;height:${size}px;border-radius:999px;display:grid;place-items:center;border:2px solid #fff;background:${style.color};color:#fff;font-size:${isSatellite ? 17 : 9}px;font-weight:900;line-height:1;box-shadow:0 0 0 4px ${style.color}33,0 8px 18px rgba(0,0,0,.32);">${glyph}</div>`,
+    html: `<div style="width:${size}px;height:${size}px;border-radius:999px;display:grid;place-items:center;border:2px solid #fff;background:${style.color};color:#fff;font-size:9px;font-weight:900;line-height:1;box-shadow:0 0 0 4px ${style.color}33,0 8px 18px rgba(0,0,0,.32);">FDF</div>`,
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
     popupAnchor: [0, -size / 2],
@@ -4473,24 +4472,13 @@ async function renderFeuxForetLayer() {
   if (!leafletMap.hasLayer(feuxForetLayer)) feuxForetLayer.addTo(leafletMap);
   feuxForetLayer.clearLayers();
   const feuxData = cachedExternalRisksSnapshot?.feux_foret_isere || {};
-  const fires = Array.isArray(feuxData.fires) ? feuxData.fires : [];
-  fires.forEach((f) => {
-    const frp = f.frp != null ? `${Number(f.frp).toFixed(0)} MW` : '?';
-    const conf = f.confidence || 'nominal';
-    const style = feuxAgeStyle(f, 'day');
-    const icon = feuxMarkerIcon(style, 'satellite');
-    const dateLabel = [f.date, f.time ? String(f.time).padStart(4, '0').replace(/(\d{2})(\d{2})/, '$1h$2') : ''].filter(Boolean).join(' ');
-    window.L.marker([f.lat, f.lon], { icon })
-      .bindPopup(`<strong>🔥 Détection satellite · ${escapeHtml(style.label)}</strong><br>Source : ${escapeHtml(f.source || feuxData.data_source || 'EFFIS/Copernicus')}<br>Puissance : ${frp}<br>Confiance : ${escapeHtml(conf)}<br><span class="muted">${escapeHtml(dateLabel)}</span>`)
-      .addTo(feuxForetLayer);
-  });
   const recentIncidents = Array.isArray(feuxData.recent_incidents) ? feuxData.recent_incidents : [];
   const placed = await Promise.all(recentIncidents.map(async (item) => ({ item, point: await feuxIncidentPoint(item) })));
   if (!(document.getElementById('filter-feux-foret')?.checked ?? false) || !feuxForetLayer) return;
   placed.forEach(({ item, point }) => {
     if (!point) return;
     const style = feuxAgeStyle(item, 'week');
-    const icon = feuxMarkerIcon(style, 'feuxdeforet');
+    const icon = feuxMarkerIcon(style);
     const link = item.link ? `<br><a href="${escapeHtml(item.link)}" target="_blank" rel="noreferrer">Voir la fiche FeuxDeForet.fr</a>` : '';
     window.L.marker([point.lat, point.lon], { icon })
       .bindPopup(`<strong>FeuxDeForet.fr · ${escapeHtml(style.label)}</strong><br>${escapeHtml(item.title || item.commune || 'Signalement Isère')}<br><span class="muted">${escapeHtml(item.recency || 'Signalement récent')} · position commune</span>${link}`)
@@ -11764,24 +11752,14 @@ function buildSituationKpiModalContent(key, externalRisks = {}) {
     }
     case 'feux': {
       const feuxData = externalRisks?.feux_foret_isere || {};
-      const fires = Array.isArray(feuxData.top_fires) && feuxData.top_fires.length ? feuxData.top_fires
-                   : Array.isArray(feuxData.fires) ? feuxData.fires.slice(0, 8) : [];
-      const satelliteItems = fires.map((f) => {
-        const zone = escapeHtml(f.zone || `${f.lat?.toFixed(2)}°N ${f.lon?.toFixed(2)}°E`);
-        const frp = f.frp != null ? `${Number(f.frp).toFixed(0)} MW` : '–';
-        const conf = escapeHtml(f.confidence || '?');
-        const confColor = conf === 'high' ? '#c92a2a' : conf === 'nominal' ? '#e67700' : '#868e96';
-        return `<li style="padding:4px 0;border-bottom:1px solid #eee"><strong>🔥 ${zone}</strong><br><span class="muted">Puissance : ${frp} · Confiance : <span style="color:${confColor};font-weight:600">${conf}</span></span></li>`;
-      }).join('');
       const recentIncidents = Array.isArray(feuxData.recent_incidents) ? feuxData.recent_incidents : [];
-      const recentIncidents3d = Array.isArray(feuxData.recent_incidents_3d) ? feuxData.recent_incidents_3d : recentIncidents;
-      const firesTotal = feuxData.fires_total ?? feuxData.recent_incidents_3d_total ?? recentIncidents3d.length;
-      const satelliteTotal = feuxData.satellite_fires_total ?? (Array.isArray(feuxData.fires) ? feuxData.fires.length : 0);
+      const recentIncidents2d = Array.isArray(feuxData.recent_incidents_2d) ? feuxData.recent_incidents_2d : recentIncidents;
+      const firesTotal = feuxData.fires_total ?? feuxData.recent_incidents_2d_total ?? recentIncidents2d.length;
       const recentItems = recentIncidents.slice(0, 8).map((item) => {
         const href = item.link ? ` href="${escapeHtml(item.link)}" target="_blank" rel="noreferrer"` : '';
         return `<li style="padding:4px 0;border-bottom:1px solid #eee"><strong>🔥 ${escapeHtml(item.title || item.commune || 'Isère')}</strong><br><span class="muted">${escapeHtml(item.recency || 'Signalement récent')} · FeuxDeForet.fr</span>${href ? `<br><a${href}>Voir la fiche</a>` : ''}</li>`;
       }).join('');
-      return `<p><strong>Foyers FeuxDeForet.fr (3 derniers jours) :</strong> ${firesTotal}</p><p><strong>Signalements récents FeuxDeForet.fr :</strong> ${feuxData.recent_incidents_total ?? recentIncidents.length}</p><p><strong>Détections satellite affichées :</strong> ${satelliteTotal}</p><p><strong>Sources :</strong> FeuxDeForet.fr Isère + EFFIS / Copernicus / VIIRS satellite</p><h4>Signalements Isère</h4><ul class="situation-kpi-modal__list">${recentItems || '<li>Aucun signalement récent FeuxDeForet.fr pour l’Isère.</li>'}</ul><h4>Détections satellite (non comptabilisées comme foyers)</h4><ul class="situation-kpi-modal__list">${satelliteItems || '<li>Aucune détection satellite dans la région.</li>'}</ul>`;
+      return `<p><strong>Foyers FeuxDeForet.fr en moins de 2 jours :</strong> ${firesTotal}</p><p><strong>Signalements récents FeuxDeForet.fr :</strong> ${feuxData.recent_incidents_total ?? recentIncidents.length}</p><p><strong>Source :</strong> FeuxDeForet.fr Isère</p><h4>Derniers feux Isère</h4><ul class="situation-kpi-modal__list">${recentItems || '<li>Aucun signalement récent FeuxDeForet.fr pour l’Isère.</li>'}</ul>`;
     }
     case 'seismes': {
       const seismesData = externalRisks?.seismes_isere || {};
@@ -11955,7 +11933,7 @@ function renderSituationOverview() {
   const risquesNaturelsCards = [
     { key: 'avalanche', icon: '▲', label: 'Avalanches BRA', value: braNiveauMax ? `${braNiveauMax}/5 — ${braLabel}` : 'Indisponible', info: `${(braData.massifs || []).length} massif(s) Isère`, css: braLevel },
     { key: 'meteo-forets', icon: '🌲', label: 'Météo des forêts · Isère', value: meteoForetsToday?.danger || 'Indisponible', info: meteoForetsTomorrow ? `Demain : ${meteoForetsTomorrow.danger}` : 'Danger prévu par Météo-France', css: meteoForetsToday?.level || 'gris' },
-    { key: 'feux', icon: '🔥', label: 'Feux de forêt Isère', value: `${feuxData.fires_total ?? 0} foyer(s) 3j`, info: `${feuxData.satellite_fires_total ?? 0} détection(s) satellite affichée(s)`, css: (feuxData.fires_total ?? 0) > 5 ? 'rouge' : (feuxData.fires_total ?? 0) > 0 ? 'orange' : 'vert' },
+    { key: 'feux', icon: '🔥', label: 'Feux de forêt Isère', value: `${feuxData.fires_total ?? 0} foyer(s) < 2j`, info: 'FeuxDeForet.fr · derniers signalements', css: (feuxData.fires_total ?? 0) > 5 ? 'rouge' : (feuxData.fires_total ?? 0) > 0 ? 'orange' : 'vert' },
     { key: 'seismes', icon: '⌁', label: 'Séismes récents', value: dernierSeisme ? `M${dernierSeisme.magnitude} ${escapeHtml(dernierSeisme.place?.split(',')[0] || '')}` : 'Aucun', info: `${(seismesData.items || []).length} séisme(s) détecté(s)`, css: seismeLevel },
     { key: 'cols', icon: '▲', label: 'Cols alpins', value: `${colsData.dangereux_total ?? 0} à surveiller`, info: `${colsData.cols_total ?? 0} cols suivis`, css: (colsData.dangereux_total ?? 0) > 3 ? 'orange' : (colsData.dangereux_total ?? 0) > 0 ? 'jaune' : 'vert' },
   ];
@@ -12665,19 +12643,15 @@ function renderAvalancheIsere(data = {}) {
 
 function renderFeuxForetWidget(data = {}) {
   const total = data.fires_total ?? 0;
-  const satelliteTotal = data.satellite_fires_total ?? (Array.isArray(data.fires) ? data.fires.length : 0);
   const color = total > 5 ? 'rouge' : total > 0 ? 'orange' : 'vert';
-  const src = data.data_source ? ` · ${escapeHtml(data.data_source)}` : '';
-  setRiskText('feux-svc-status', `${data.status || 'inconnu'} · ${total} foyer(s) FeuxDeForet.fr sur 3j · ${satelliteTotal} détection(s) satellite${src}`, color);
+  setRiskText('feux-svc-status', `${data.status || 'inconnu'} · ${total} foyer(s) FeuxDeForet.fr en moins de 2 jours`, color);
 
-  const top = Array.isArray(data.top_fires) && data.top_fires.length ? data.top_fires
-              : Array.isArray(data.fires) ? data.fires.slice(0, 3) : [];
-  const recent = Array.isArray(data.recent_incidents_3d)
-    ? data.recent_incidents_3d.slice(0, 5)
+  const recent = Array.isArray(data.recent_incidents_2d)
+    ? data.recent_incidents_2d.slice(0, 5)
     : (Array.isArray(data.recent_incidents) ? data.recent_incidents.slice(0, 5) : []);
 
-  if (!top.length && !recent.length) {
-    setHtml('feux-svc-list', '<li class="muted">Aucun foyer FeuxDeForet.fr sur 3 jours ni détection satellite dans le département.</li>');
+  if (!recent.length) {
+    setHtml('feux-svc-list', '<li class="muted">Aucun foyer FeuxDeForet.fr en moins de 2 jours dans le département.</li>');
     return;
   }
 
@@ -12691,22 +12665,7 @@ function renderFeuxForetWidget(data = {}) {
     </li>`;
   }).join('');
 
-  const satelliteHtml = top.map((f, i) => {
-    const zone    = escapeHtml(f.zone || `${f.lat?.toFixed(2)}°N ${f.lon?.toFixed(2)}°E`);
-    const frp     = f.frp != null ? `<strong>${Number(f.frp).toFixed(0)} MW</strong>` : '– MW';
-    const conf    = escapeHtml(f.confidence || '?');
-    const confColor = conf === 'high' ? '#c92a2a' : conf === 'nominal' ? '#e67700' : '#868e96';
-    const dateStr = f.date ? escapeHtml(f.date) + (f.time ? ` ${String(f.time).padStart(4,'0').replace(/(\d{2})(\d{2})/, '$1h$2')}` : '') : '–';
-    const label   = i === 0 ? 'Dernière détection satellite' : i === 1 ? 'Détection précédente' : 'Détection antérieure';
-    return `<li style="padding:4px 0;border-bottom:1px solid #eee">
-      <span style="font-size:0.7em;font-weight:600;color:#888;text-transform:uppercase">${label}</span><br>
-      <strong>📍 ${zone}</strong><br>
-      <span class="muted">Puissance : ${frp} · Confiance : <span style="color:${confColor};font-weight:600">${conf}</span></span><br>
-      <span class="muted">Détecté le ${dateStr}</span>
-    </li>`;
-  }).join('');
-
-  setHtml('feux-svc-list', `${recentHtml}${satelliteHtml}`);
+  setHtml('feux-svc-list', recentHtml);
 }
 
 function renderColsAlpinsWidget(data = {}) {
@@ -13784,7 +13743,7 @@ const SVC_DETAIL_LISTS = {
   ars_aura:              [{ id: 'ars-aura-svc-list',     label: 'Alertes sanitaires ARS AURA' }],
   seismes_isere:         [{ id: 'seismes-svc-list',      label: 'Séismes récents Isère' }],
   avalanche_isere:       [{ id: 'avalanche-svc-list',    label: 'BRA — Risque avalanche massifs Isère' }],
-  feux_foret_isere:      [{ id: 'feux-svc-list',         label: 'Feux de forêt Isère · signalements et foyers satellite' }],
+  feux_foret_isere:      [{ id: 'feux-svc-list',         label: 'Feux de forêt Isère · FeuxDeForet.fr' }],
   copernicus_ems:        [{ id: 'copernicus-svc-list',   label: 'Catastrophes actives — GDACS' }],
   cols_alpins_isere:     [{ id: 'cols-svc-list',         label: 'État des cols alpins Isère' }],
 };
@@ -17244,6 +17203,7 @@ const _NOTIF_SERVICES = [
   { key: 'ter_aura',              label: 'TER SNCF · AURA',            icon: '🚄', cat: 'Transport' },
   { key: 'mreseau',               label: 'M Réseau · Grenoble',        icon: '🚊', cat: 'Transport' },
   { key: 'cars_region_aura',      label: 'Cars Région · AURA',         icon: '🚐', cat: 'Transport' },
+  { key: 'feux_foret_isere',      label: 'Feux de forêt Isère',        icon: '🔥', cat: 'Risques', notifyOnNew: true },
   { key: 'prefecture_isere',      label: 'Préfecture Isère',           icon: '🏛️', cat: 'Actualités', notifyOnNew: true },
   { key: 'france_bleu_isere',     label: 'France Bleu Isère',          icon: '📻', cat: 'Actualités' },
 ];
@@ -17299,8 +17259,9 @@ function _notifRuleCardHtml(rule) {
   const svcRows = _NOTIF_SERVICES.map(svc => {
     const cfg = svcs[svc.key] || {};
     const checked = cfg.enabled ? 'checked' : '';
+    const newLabel = svc.key === 'feux_foret_isere' ? 'Nouveau feu' : 'Nouvelle actualité';
     const thresholdCell = svc.notifyOnNew
-      ? `<span style="display:inline-flex;align-items:center;gap:.3rem;font-size:.78rem;padding:.2rem .45rem;border-radius:999px;background:#edf3ff;color:#1a3568;font-weight:600">🆕 Nouvelle actualité</span>
+      ? `<span style="display:inline-flex;align-items:center;gap:.3rem;font-size:.78rem;padding:.2rem .45rem;border-radius:999px;background:#edf3ff;color:#1a3568;font-weight:600">🆕 ${escapeHtml(newLabel)}</span>
          <input type="hidden" data-svc-key="${escapeHtml(svc.key)}" class="nrs-threshold" value="jaune" />`
       : `<select data-svc-key="${escapeHtml(svc.key)}" class="nrs-threshold"
           style="font-size:.78rem;padding:.2rem .35rem;border:1.5px solid #d1d9e0;border-radius:6px;background:#fff">${_NOTIF_LEVELS.map(l =>

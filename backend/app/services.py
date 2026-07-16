@@ -10678,91 +10678,53 @@ def load_risks_snapshot() -> dict[str, Any] | None:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# FEUX DE FORÊT — EFFIS/JRC Copernicus (Feature 17)
+# FEUX DE FORÊT — FeuxDeForet.fr Isère (Feature 17)
 # ══════════════════════════════════════════════════════════════════════════════
 _FEUX_FORET_CACHE_TTL_SECONDS = 600
 _feux_foret_cache_lock = Lock()
 _feux_foret_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "feux_foret_isere"}
 _FEUXDEFORET_ISERE_URL = "https://feuxdeforet.fr/auvergne-rhone-alpes/isere/"
-_FEUXDEFORET_FIRES_WINDOW_DAYS = 3
-
-
-_ISERE_BBOX = (44.4, 4.9, 45.7, 6.4)  # lat_min, lon_min, lat_max, lon_max
-
-_ISERE_ZONES = [
-    ((45.2, 5.5, 45.5, 5.9), "Chartreuse"),
-    ((44.7, 5.0, 45.2, 5.6), "Vercors"),
-    ((45.0, 5.8, 45.7, 6.3), "Belledonne"),
-    ((44.8, 5.9, 45.2, 6.4), "Oisans"),
-    ((44.7, 5.5, 45.0, 5.9), "Trièves / Matheysine"),
-    ((45.1, 5.8, 45.5, 6.1), "Grésivaudan"),
-    ((45.0, 5.0, 45.5, 5.5), "Bièvre-Valloire"),
-    ((45.1, 5.4, 45.3, 5.8), "Agglomération grenobloise"),
-]
-
-
-def _fire_zone(lat: float, lon: float) -> str:
-    for (lat_min, lon_min, lat_max, lon_max), name in _ISERE_ZONES:
-        if lat_min <= lat <= lat_max and lon_min <= lon <= lon_max:
-            return name
-    return f"Isère ({lat:.2f}°N {lon:.2f}°E)"
-
-
-def _parse_effis_geojson(data: dict) -> list[dict]:
-    lat_min, lon_min, lat_max, lon_max = _ISERE_BBOX
-    fires = []
-    for f in data.get("features") or []:
-        coords = (f.get("geometry") or {}).get("coordinates") or []
-        props = f.get("properties") or {}
-        if len(coords) < 2:
-            continue
-        lat, lon = round(float(coords[1]), 5), round(float(coords[0]), 5)
-        if not (lat_min <= lat <= lat_max and lon_min <= lon <= lon_max):
-            continue
-        fires.append({
-            "lat": lat,
-            "lon": lon,
-            "zone": _fire_zone(lat, lon),
-            "confidence": str(props.get("confidence") or "nominal"),
-            "date": str(props.get("acq_date") or ""),
-            "frp": _safe_float(props.get("frp")),
-            "source": "EFFIS/Copernicus",
-        })
-    return fires
-
-
-def _parse_firms_csv(text: str) -> list[dict]:
-    """Parse NASA FIRMS area CSV response — filtré sur la bbox Isère élargie."""
-    fires = []
-    try:
-        reader = csv.DictReader(io.StringIO(text))
-        for row in reader:
-            try:
-                lat = float(row.get("latitude") or row.get("lat") or 0)
-                lon = float(row.get("longitude") or row.get("lon") or 0)
-            except ValueError:
-                continue
-            # Isère élargie : 44.4–45.7 N, 4.9–6.4 E
-            if not (44.4 <= lat <= 45.7 and 4.9 <= lon <= 6.4):
-                continue
-            fires.append({
-                "lat": round(lat, 5),
-                "lon": round(lon, 5),
-                "zone": _fire_zone(lat, lon),
-                "confidence": str(row.get("confidence") or "nominal"),
-                "date": str(row.get("acq_date") or ""),
-                "time": str(row.get("acq_time") or ""),
-                "frp": _safe_float(row.get("frp")),
-                "source": "NASA FIRMS/VIIRS",
-            })
-    except Exception:
-        pass
-    return fires
-
+_FEUXDEFORET_FIRES_WINDOW_DAYS = 2
 
 def _parse_feuxdeforet_isere_page(raw_html: str) -> dict[str, Any]:
     anchors: list[dict[str, str]] = []
     seen_recent: set[tuple[str, str]] = set()
+    recent_incidents: list[dict[str, Any]] = []
+
+    marker = "window.__INITIAL_DATA__="
+    marker_idx = (raw_html or "").find(marker)
+    if marker_idx >= 0:
+        try:
+            json_start = marker_idx + len(marker)
+            initial_data, _ = json.JSONDecoder().raw_decode((raw_html or "")[json_start:])
+            page_data = initial_data.get("data") if isinstance(initial_data, dict) else {}
+            feux_items = page_data.get("feux") if isinstance(page_data, dict) else []
+            for item in feux_items if isinstance(feux_items, list) else []:
+                if not isinstance(item, dict):
+                    continue
+                commune = re.sub(r"\s+", " ", str(item.get("commune") or "")).strip(" -")
+                recency = re.sub(r"\s+", " ", str(item.get("timeAgo") or "")).strip()
+                title = re.sub(r"\s+", " ", str(item.get("title") or commune or "Signalement Isère")).strip()
+                href = str(item.get("url") or "").strip()
+                if not commune and not title:
+                    continue
+                dedupe_key = ((href or commune or title).lower(), recency.lower())
+                if dedupe_key in seen_recent:
+                    continue
+                seen_recent.add(dedupe_key)
+                recent_incidents.append({
+                    "commune": commune,
+                    "title": title,
+                    "recency": recency or "Signalement récent",
+                    "date": item.get("dateIso") or "",
+                    "department": str(item.get("dept") or "38"),
+                    "link": urljoin(_FEUXDEFORET_ISERE_URL, href),
+                    "source": "FeuxDeForet.fr",
+                    "active": bool(item.get("enCours")),
+                })
+        except Exception:
+            pass
+
     for match in re.finditer(
         r"<a\b[^>]*href=[\"']([^\"']+)[\"'][^>]*>(.*?)</a>",
         raw_html or "",
@@ -10774,7 +10736,6 @@ def _parse_feuxdeforet_isere_page(raw_html: str) -> dict[str, Any]:
         if label:
             anchors.append({"href": urljoin(_FEUXDEFORET_ISERE_URL, href), "label": label})
 
-    recent_incidents: list[dict[str, Any]] = []
     for anchor in anchors:
         recent_match = re.match(r"^R[ée]cent\s+38\s+(.+?)\s+il y a\s+(.+)$", anchor["label"], flags=re.IGNORECASE)
         if not recent_match:
@@ -10827,6 +10788,8 @@ def _parse_feuxdeforet_isere_page(raw_html: str) -> dict[str, Any]:
         "source": _FEUXDEFORET_ISERE_URL,
         "recent_incidents": recent_incidents[:12],
         "recent_incidents_total": len(recent_incidents),
+        "recent_incidents_2d": recent_incidents_3d[:12],
+        "recent_incidents_2d_total": len(recent_incidents_3d),
         "recent_incidents_3d": recent_incidents_3d[:12],
         "recent_incidents_3d_total": len(recent_incidents_3d),
         "info_items": info_items[:8],
@@ -11286,6 +11249,8 @@ def _fetch_feux_foret_live() -> dict[str, Any]:
         "source": _FEUXDEFORET_ISERE_URL,
         "recent_incidents": [],
         "recent_incidents_total": 0,
+        "recent_incidents_2d": [],
+        "recent_incidents_2d_total": 0,
         "recent_incidents_3d": [],
         "recent_incidents_3d_total": 0,
         "info_items": [],
@@ -11297,107 +11262,31 @@ def _fetch_feux_foret_live() -> dict[str, Any]:
     except Exception as exc:
         feuxdeforet_error = str(exc)
 
-    # 1. EFFIS/Copernicus — deux endpoints WFS GeoJSON
-    _EFFIS_URLS = [
-        (
-            "https://maps.effis.emergency.copernicus.eu/effis/ows?SERVICE=WFS&VERSION=2.0.0"
-            "&REQUEST=GetFeature&TYPENAMES=activefires:viirsFires24h"
-            "&outputFormat=application/json&COUNT=500"
-            "&BBOX=43.0,4.0,47.5,8.0,EPSG:4326"
-        ),
-        (
-            "https://ows.jrc.ec.europa.eu/effis/ows?SERVICE=WFS&VERSION=2.0.0"
-            "&REQUEST=GetFeature&TYPENAMES=activefires:viirsFires24h"
-            "&outputFormat=application/json&COUNT=500"
-            "&BBOX=43.0,4.0,47.5,8.0,EPSG:4326"
-        ),
-    ]
-    fires: list[dict] = []
-    data_source = "EFFIS/Copernicus"
-
-    for url in _EFFIS_URLS:
-        try:
-            data = _http_get_json(url, timeout=12)
-            fires = _parse_effis_geojson(data)
-            break
-        except Exception:
-            pass
-
-    # 2. Fallback NASA FIRMS si EFFIS inaccessible
-    if not fires:
-        map_key = (settings.firms_map_key or "").strip()
-        if map_key:
-            # BBOX : west,south,east,north — SE France élargi
-            firms_url = (
-                f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/"
-                f"{map_key}/VIIRS_SNPP_NRT/4.0,43.0,8.0,47.5/2"
-            )
-            try:
-                text = _http_get_text(firms_url, timeout=20)
-                fires = _parse_firms_csv(text)
-                data_source = "NASA FIRMS/VIIRS"
-            except Exception:
-                pass
-
-    if not fires and not (settings.firms_map_key or "").strip():
-        # Aucune source disponible — indiquer clairement le statut
-        payload = {
-            "service": "Feux de forêt Isère",
-            "status": "online" if feuxdeforet.get("recent_incidents") or feuxdeforet.get("info_items") else "degraded",
-            "source": "https://effis.jrc.ec.europa.eu",
-            "sources": ["https://effis.jrc.ec.europa.eu", _FEUXDEFORET_ISERE_URL],
-            "fires": [],
-            "fires_total": feuxdeforet.get("recent_incidents_3d_total") or 0,
-            "fires_window_days": _FEUXDEFORET_FIRES_WINDOW_DAYS,
-            "satellite_fires_total": 0,
-            "top_fires": [],
-            "recent_incidents": feuxdeforet.get("recent_incidents") or [],
-            "recent_incidents_total": feuxdeforet.get("recent_incidents_total") or 0,
-            "recent_incidents_3d": feuxdeforet.get("recent_incidents_3d") or [],
-            "recent_incidents_3d_total": feuxdeforet.get("recent_incidents_3d_total") or 0,
-            "info_items": feuxdeforet.get("info_items") or [],
-            "info_items_total": feuxdeforet.get("info_items_total") or 0,
-            "feuxdeforet_source": feuxdeforet.get("source") or _FEUXDEFORET_ISERE_URL,
-            "note": (
-                "Sources EFFIS/JRC inaccessibles depuis ce réseau. "
-                "Configurez FIRMS_MAP_KEY (gratuit sur firms.modaps.eosdis.nasa.gov) pour activer le fallback NASA."
-            ),
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
-        if feuxdeforet_error:
-            payload["feuxdeforet_error"] = feuxdeforet_error
-        return payload
-
-    # Trier par date desc puis FRP desc pour mettre les plus récents/intenses en premier
-    def _fire_sort_key(f: dict):
-        d = str(f.get("date") or "")
-        t = str(f.get("time") or "")
-        frp = float(f.get("frp") or 0)
-        return (d + t, frp)
-
-    fires_sorted = sorted(fires, key=_fire_sort_key, reverse=True)
-
-    return {
-        "service": "Feux de forêt Isère",
-        "status": "online",
-        "source": "https://effis.jrc.ec.europa.eu",
-        "sources": ["https://effis.jrc.ec.europa.eu", _FEUXDEFORET_ISERE_URL],
-        "data_source": data_source,
-        "fires": fires_sorted,
-        "fires_total": feuxdeforet.get("recent_incidents_3d_total") or 0,
+    payload = {
+        "service": "Feux de foret Isere",
+        "status": "online" if feuxdeforet.get("recent_incidents") or feuxdeforet.get("info_items") else "degraded",
+        "source": feuxdeforet.get("source") or _FEUXDEFORET_ISERE_URL,
+        "sources": [feuxdeforet.get("source") or _FEUXDEFORET_ISERE_URL],
+        "data_source": "FeuxDeForet.fr",
+        "fires": [],
+        "fires_total": feuxdeforet.get("recent_incidents_2d_total") or 0,
         "fires_window_days": _FEUXDEFORET_FIRES_WINDOW_DAYS,
-        "satellite_fires_total": len(fires_sorted),
-        "top_fires": fires_sorted[:3],
+        "top_fires": [],
         "recent_incidents": feuxdeforet.get("recent_incidents") or [],
         "recent_incidents_total": feuxdeforet.get("recent_incidents_total") or 0,
+        "recent_incidents_2d": feuxdeforet.get("recent_incidents_2d") or [],
+        "recent_incidents_2d_total": feuxdeforet.get("recent_incidents_2d_total") or 0,
         "recent_incidents_3d": feuxdeforet.get("recent_incidents_3d") or [],
         "recent_incidents_3d_total": feuxdeforet.get("recent_incidents_3d_total") or 0,
         "info_items": feuxdeforet.get("info_items") or [],
         "info_items_total": feuxdeforet.get("info_items_total") or 0,
         "feuxdeforet_source": feuxdeforet.get("source") or _FEUXDEFORET_ISERE_URL,
-        **({"feuxdeforet_error": feuxdeforet_error} if feuxdeforet_error else {}),
         "updated_at": datetime.utcnow().isoformat() + "Z",
     }
+    if feuxdeforet_error:
+        payload["feuxdeforet_error"] = feuxdeforet_error
+        payload["status"] = "error"
+    return payload
 
 
 def fetch_feux_foret_isere(force_refresh: bool = False) -> dict[str, Any]:
