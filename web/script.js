@@ -279,6 +279,7 @@ let refreshAllInFlight = null;
 let _lastRefreshAllTs = 0;
 let _lastServerSnapshotAt = 0;
 let _serverSnapshotSyncing = false;
+let _situationAwaitingFreshSnapshot = false;
 let _liveEventsFailCount = 0;
 let lastApiResyncAt = null;
 let isLoginSubmitting = false;
@@ -2226,6 +2227,7 @@ function markServerSnapshotFresh(payload = {}) {
 
 function setServerSnapshotSyncing(syncing, label = '') {
   _serverSnapshotSyncing = Boolean(syncing);
+  if (_serverSnapshotSyncing) _situationAwaitingFreshSnapshot = true;
   if (label) setStartupQueueCurrent(label);
   // Ne pas laisser les anciennes valeurs visibles comme si elles étaient actuelles
   // pendant qu'un nouveau snapshot serveur est en cours de chargement.
@@ -12005,7 +12007,7 @@ function renderSituationOverview() {
     : (readSnapshot(STORAGE_KEYS.externalRisksSnapshot) || {});
 
   const situationPayloadReady = (payload) => {
-    if (_serverSnapshotSyncing) return false;
+    if (_situationAwaitingFreshSnapshot) return false;
     if (!payload || typeof payload !== 'object' || !Object.keys(payload).length) return false;
     const status = String(payload.status || '').toLowerCase();
     return !['pending', 'unavailable', 'offline', 'error', 'failed'].includes(status);
@@ -12794,6 +12796,7 @@ function bindSituationActions() {
 
 function renderDashboard(dashboard = {}) {
   cachedDashboardSnapshot = dashboard && typeof dashboard === 'object' ? dashboard : {};
+  _situationAwaitingFreshSnapshot = false;
   renderSituationOverview();
   // Mettre à jour le badge de vigilance dans le header dès que le dashboard change.
   const dashboardHasData = dashboard && typeof dashboard === 'object' && Object.keys(dashboard).length
@@ -14490,6 +14493,7 @@ function renderTransportFlux(data = {}) {
 }
 
 function renderExternalRisks(data = {}) {
+  _situationAwaitingFreshSnapshot = false;
   const mergedData = mergeExternalRisksSnapshot(
     cachedExternalRisksSnapshot,
     data && typeof data === 'object' ? data : {},
