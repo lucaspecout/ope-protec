@@ -11998,6 +11998,10 @@ function openSituationKpiModal(key, label) {
 function renderSituationOverview() {
   const target = document.getElementById('situation-content');
   if (!target) return;
+  // Le contenu Situation peut être recréé par les flux live. Conserver exactement
+  // l'heure déjà affichée évite un saut visuel entre deux ticks de l'horloge.
+  const currentSituationDateTime = document.getElementById('situation-live-datetime')?.textContent
+    || safeDateToLocale(Date.now(), { dateStyle: 'full', timeStyle: 'medium' });
 
   const dashboard = cachedDashboardSnapshot && Object.keys(cachedDashboardSnapshot).length
     ? cachedDashboardSnapshot
@@ -12201,7 +12205,7 @@ function renderSituationOverview() {
     <div class="situation-toolbar situation-toolbar--hero">
       <div>
         <h2>SITREP prêt à diffusion · Isère</h2>
-        <p class="muted"><span id="situation-live-datetime">${escapeHtml(safeDateToLocale(Date.now(), { dateStyle: 'full', timeStyle: 'medium' }))}</span></p>
+        <p class="muted"><span id="situation-live-datetime">${escapeHtml(currentSituationDateTime)}</span></p>
       </div>
       <div class="situation-toolbar__actions">
         <button id="situation-copy-sitrep-btn" type="button" class="btn-copy-sitrep ghost" title="Copier le SITREP en texte brut">Copier SITREP</button>
