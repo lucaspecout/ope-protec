@@ -2227,6 +2227,19 @@ function markServerSnapshotFresh(payload = {}) {
 function setServerSnapshotSyncing(syncing, label = '') {
   _serverSnapshotSyncing = Boolean(syncing);
   if (label) setStartupQueueCurrent(label);
+  // Ne pas laisser les anciennes valeurs visibles comme si elles étaient actuelles
+  // pendant qu'un nouveau snapshot serveur est en cours de chargement.
+  if (_serverSnapshotSyncing) {
+    updateHeaderVigilanceBadge('');
+    if (document.getElementById('situation-content')) renderSituationOverview();
+  } else {
+    if (document.getElementById('situation-content')) renderSituationOverview();
+    const dashboard = cachedDashboardSnapshot || {};
+    const level = Object.keys(dashboard).length
+      ? (dashboard.global_risk || dashboard.vigilance || '')
+      : '';
+    updateHeaderVigilanceBadge(level);
+  }
 }
 
 function renderApiResyncClock() {
@@ -11992,6 +12005,7 @@ function renderSituationOverview() {
     : (readSnapshot(STORAGE_KEYS.externalRisksSnapshot) || {});
 
   const situationPayloadReady = (payload) => {
+    if (_serverSnapshotSyncing) return false;
     if (!payload || typeof payload !== 'object' || !Object.keys(payload).length) return false;
     const status = String(payload.status || '').toLowerCase();
     return !['pending', 'unavailable', 'offline', 'error', 'failed'].includes(status);
