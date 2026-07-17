@@ -11765,3 +11765,43 @@ def fetch_route_estimate(start_lat: float, start_lon: float, end_lat: float, end
     except Exception as exc:
         return _local_route_estimate(start_lat, start_lon, end_lat, end_lon, error=str(exc))
 
+
+def fetch_road_isochrone(lat: float, lon: float, mode: str, value: float) -> dict[str, Any]:
+    """Return the area reachable by car along the road network as GeoJSON."""
+    lat, lon = _validate_route_coord(lat, lon)
+    normalized_mode = str(mode or "").strip().lower()
+    value_num = float(value)
+    if normalized_mode not in {"isochrone", "isodistance"}:
+        raise ValueError("Mode iso invalide")
+    maximum = 240 if normalized_mode == "isochrone" else 200
+    if not (0 < value_num <= maximum):
+        unit = "minutes" if normalized_mode == "isochrone" else "kilometres"
+        raise ValueError(f"Valeur invalide (maximum {maximum} {unit})")
+
+    contour = {"time": value_num} if normalized_mode == "isochrone" else {"distance": value_num}
+    request_payload = {
+        "locations": [{"lat": lat, "lon": lon}],
+        "costing": "auto",
+        "contours": [contour],
+        "polygons": True,
+        "denoise": 0.5,
+        "generalize": 80,
+        "show_locations": True,
+    }
+    base_url = (settings.valhalla_url or "https://valhalla1.openstreetmap.de").strip().rstrip("/")
+    response = _requests.post(
+        f"{base_url}/isochrone",
+        json=request_payload,
+        headers={"Accept": "application/geo+json, application/json", "User-Agent": "OpeProtec/1.0"},
+        timeout=25,
+    )
+    response.raise_for_status()
+    geojson = response.json()
+    if not isinstance(geojson, dict) or geojson.get("type") != "FeatureCollection" or not geojson.get("features"):
+        raise RuntimeError("Le moteur routier n'a retourne aucune zone accessible")
+    return {
+        "status": "online", "provider": "valhalla", "source": "Valhalla / OpenStreetMap",
+        "mode": normalized_mode, "value": value_num, "geojson": geojson,
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
+

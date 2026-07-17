@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     firms_map_key: str = ""
     # TomTom Routing API. If configured, route estimates include live traffic.
     tomtom_api_key: str = ""
+    # Valhalla-compatible endpoint for road isochrones and isodistances.
+    valhalla_url: str = "https://valhalla1.openstreetmap.de"
     # LDAP / LLDAP authentication. Local users remain available when enabled.
     ldap_enabled: bool = False
     ldap_url: str = "ldap://lldap:3890"

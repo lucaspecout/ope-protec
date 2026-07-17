@@ -9371,9 +9371,8 @@ function currentIsodistanceMeters() {
 
 function currentIsochroneMeters() {
   const minutes = Number(document.getElementById('map-isochrone-min')?.value || 0);
-  const speedKmh = Number(document.getElementById('map-isochrone-speed-kmh')?.value || 0);
-  if (!Number.isFinite(minutes) || minutes <= 0 || !Number.isFinite(speedKmh) || speedKmh <= 0) return 0;
-  return (speedKmh * 1000 / 60) * minutes;
+  if (!Number.isFinite(minutes) || minutes <= 0) return 0;
+  return minutes;
 }
 
 function updateIsoZoneButtons() {
@@ -9466,27 +9465,20 @@ function handleIsoZoneControlClick(button) {
   }
 }
 
-function drawIsoZone(lat, lon, radiusMeters, mode) {
-  if (!leafletMap || typeof window.L === 'undefined' || !Number.isFinite(radiusMeters) || radiusMeters <= 0) return;
+function drawIsoZone(lat, lon, geojson, mode, value) {
+  if (!leafletMap || typeof window.L === 'undefined' || !geojson) return;
   if (!mapIsoLayer) mapIsoLayer = window.L.layerGroup().addTo(leafletMap);
   const isIsochrone = mode === 'isochrone';
   const color = isIsochrone ? '#7048e8' : '#0b7285';
   const fillColor = isIsochrone ? '#d0bfff' : '#99e9f2';
   const title = isIsochrone ? 'Isochrone estimee' : 'Isodistance';
   const minutes = Number(document.getElementById('map-isochrone-min')?.value || 0);
-  const speedKmh = Number(document.getElementById('map-isochrone-speed-kmh')?.value || 0);
   const detail = isIsochrone
-    ? `${Number.isFinite(minutes) ? minutes : '?'} min a ${Number.isFinite(speedKmh) ? speedKmh : '?'} km/h moyen`
-    : `${formatDistanceMeters(radiusMeters)} autour du point`;
+    ? `${Number.isFinite(minutes) ? minutes : '?'} min en voiture sur le reseau routier`
+    : `${Number(value).toLocaleString('fr-FR')} km en voiture sur le reseau routier`;
 
-  window.L.circle([lat, lon], {
-    radius: radiusMeters,
-    color,
-    weight: 2,
-    opacity: 0.95,
-    fillColor,
-    fillOpacity: 0.18,
-    dashArray: isIsochrone ? '10 7' : '4 6',
+  window.L.geoJSON(geojson, {
+    style: { color, weight: 2, opacity: 0.95, fillColor, fillOpacity: 0.22 },
   }).bindPopup(`<strong>${escapeHtml(title)}</strong><br>${escapeHtml(detail)}<br>${escapeHtml(formatCoordinates(lat, lon))}`)
     .addTo(mapIsoLayer);
 
@@ -9501,19 +9493,20 @@ function drawIsoZone(lat, lon, radiusMeters, mode) {
   window.L.marker([lat, lon], {
     icon: window.L.divIcon({
       className: 'map-measure-label',
-      html: `<span>${escapeHtml(isIsochrone ? `${Math.round(minutes)} min` : formatDistanceMeters(radiusMeters))}</span>`,
+      html: `<span>${escapeHtml(isIsochrone ? `${Math.round(minutes)} min` : `${Number(value).toLocaleString('fr-FR')} km`)}</span>`,
       iconSize: null,
     }),
   }).addTo(mapIsoLayer);
 }
 
-function onMapClickIsoZone(event) {
+async function onMapClickIsoZone(event) {
   if (!mapIsoMode || !leafletMap || typeof window.L === 'undefined') return;
   const lat = Number(event?.latlng?.lat);
   const lon = Number(event?.latlng?.lng);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
-  const radiusMeters = mapIsoMode === 'isochrone' ? currentIsochroneMeters() : currentIsodistanceMeters();
-  if (!radiusMeters) {
+  const selectedMode = mapIsoMode;
+  const value = selectedMode === 'isochrone' ? currentIsochroneMeters() : currentIsodistanceMeters() / 1000;
+  if (!value) {
     setMapFeedback(mapIsoMode === 'isochrone'
       ? 'Parametres isochrone invalides.'
       : 'Distance isodistance invalide.', true);
@@ -9521,13 +9514,19 @@ function onMapClickIsoZone(event) {
     updateIsoZoneButtons();
     return;
   }
-  drawIsoZone(lat, lon, radiusMeters, mapIsoMode);
-  const feedback = mapIsoMode === 'isochrone'
-    ? `Isochrone estimee affichee (${formatDistanceMeters(radiusMeters)}).`
-    : `Isodistance affichee (${formatDistanceMeters(radiusMeters)}).`;
   mapIsoMode = null;
   updateIsoZoneButtons();
-  setMapFeedback(feedback);
+  setMapFeedback('Calcul de la zone accessible par la route...');
+  try {
+    const params = new URLSearchParams({ lat: String(lat), lon: String(lon), mode: selectedMode, value: String(value) });
+    const payload = await api(`/api/routes/isochrone?${params.toString()}`, { bypassCache: true, cacheTtlMs: 0 });
+    drawIsoZone(lat, lon, payload.geojson, selectedMode, value);
+    setMapFeedback(selectedMode === 'isochrone'
+      ? `Zone accessible en voiture en ${Number(value).toLocaleString('fr-FR')} min affichee.`
+      : `Zone accessible en voiture sur ${Number(value).toLocaleString('fr-FR')} km affichee.`);
+  } catch (error) {
+    setMapFeedback(`Calcul routier indisponible: ${sanitizeErrorMessage(error.message)}`, true);
+  }
 }
 function formatDistanceMeters(distanceMeters = 0) {
   const distance = Number(distanceMeters);

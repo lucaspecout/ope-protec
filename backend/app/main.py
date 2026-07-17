@@ -116,6 +116,7 @@ from .services import (
     fetch_rnb_buildings_bbox,
     fetch_pr_autoroutes,
     fetch_route_estimate,
+    fetch_road_isochrone,
     _redis,
     _REDIS_OK,
 )
@@ -2374,6 +2375,22 @@ def interactive_map_route_estimate(
         return fetch_route_estimate(start_lat, start_lon, end_lat, end_lon)
     except Exception as exc:
         raise HTTPException(502, f"Calcul trajet indisponible: {exc}") from exc
+
+
+@app.get("/api/routes/isochrone")
+def interactive_map_road_isochrone(
+    lat: float = Query(..., ge=-90, le=90),
+    lon: float = Query(..., ge=-180, le=180),
+    mode: str = Query(..., pattern="^(isochrone|isodistance)$"),
+    value: float = Query(..., gt=0),
+    _: User = Depends(require_roles(*READ_ROLES)),
+):
+    try:
+        return fetch_road_isochrone(lat, lon, mode, value)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(502, f"Calcul de zone routiere indisponible: {exc}") from exc
 
 
 @app.get("/api/itinisere/events")
