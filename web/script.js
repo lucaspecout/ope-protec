@@ -11991,6 +11991,14 @@ function renderSituationOverview() {
     ? cachedExternalRisksSnapshot
     : (readSnapshot(STORAGE_KEYS.externalRisksSnapshot) || {});
 
+  const situationPayloadReady = (payload) => {
+    if (!payload || typeof payload !== 'object' || !Object.keys(payload).length) return false;
+    const status = String(payload.status || '').toLowerCase();
+    return !['pending', 'unavailable', 'offline', 'error', 'failed'].includes(status);
+  };
+  const situationValue = (ready, value) => ready ? String(value) : '—';
+  const situationCss = (ready, value) => ready ? value : 'gris';
+
   const vigilance = normalizeLevel(dashboard.vigilance || externalRisks?.meteo_france?.level || 'vert');
 
   // ── Niveau crues : niveau max réellement observé sur tronçons AN et stations ──
@@ -12107,6 +12115,36 @@ function renderSituationOverview() {
     { key: 'seismes', icon: '⌁', label: 'Séismes récents', value: dernierSeisme ? `M${dernierSeisme.magnitude} ${escapeHtml(dernierSeisme.place?.split(',')[0] || '')}` : 'Aucun', info: `${(seismesData.items || []).length} séisme(s) détecté(s)`, css: seismeLevel },
     { key: 'cols', icon: '▲', label: 'Cols alpins', value: `${colsData.dangereux_total ?? 0} à surveiller`, info: `${colsData.cols_total ?? 0} cols suivis`, css: (colsData.dangereux_total ?? 0) > 3 ? 'orange' : (colsData.dangereux_total ?? 0) > 0 ? 'jaune' : 'vert' },
   ];
+
+  // Chaque tuile reste neutre tant que sa propre source n'a pas répondu.
+  // Un zéro reçu du serveur reste en revanche une vraie valeur et est affiché.
+  const situationCardReady = {
+    meteo: situationPayloadReady(dashboard) || situationPayloadReady(externalRisks?.meteo_france),
+    crues: situationPayloadReady(dashboard) || situationPayloadReady(externalRisks?.vigicrues),
+    'global-risk': situationPayloadReady(dashboard),
+    'communes-crise': situationPayloadReady(dashboard),
+    bison: situationPayloadReady(externalRisks?.bison_fute),
+    sncf: situationPayloadReady(externalRisks?.sncf_isere),
+    arcep: situationPayloadReady(externalRisks?.arcep_isere),
+    vigieau: situationPayloadReady(externalRisks?.vigieau),
+    atmo: situationPayloadReady(externalRisks?.atmo_aura),
+    apic: situationPayloadReady(externalRisks?.apic_isere),
+    'vigicrues-flash': situationPayloadReady(externalRisks?.vigicrues_flash_isere),
+    avalanche: situationPayloadReady(externalRisks?.avalanche_isere),
+    'meteo-forets': situationPayloadReady(externalRisks?.meteo_forets_isere),
+    feux: situationPayloadReady(externalRisks?.feux_foret_isere),
+    seismes: situationPayloadReady(externalRisks?.seismes_isere),
+    cols: situationPayloadReady(externalRisks?.cols_alpins_isere),
+  };
+  [...kpiCards, ...mobilityCards, ...risquesNaturelsCards].forEach((card) => {
+    const ready = Boolean(situationCardReady[card.key]);
+    card.value = situationValue(ready, card.value);
+    card.css = situationCss(ready, card.css);
+    if (!ready) {
+      card.progress = undefined;
+      card.line = '';
+    }
+  });
 
   const renderSparkline = (path, css = 'vert') => path
     ? `<svg class="situation-sparkline situation-sparkline--${escapeHtml(normalizeLevel(css))}" viewBox="0 0 350 88" aria-hidden="true"><path d="${escapeHtml(path)}"></path></svg>`
@@ -12744,7 +12782,11 @@ function renderDashboard(dashboard = {}) {
   cachedDashboardSnapshot = dashboard && typeof dashboard === 'object' ? dashboard : {};
   renderSituationOverview();
   // Mettre à jour le badge de vigilance dans le header dès que le dashboard change.
-  const globalLevel = normalizeLevel(dashboard?.global_risk || dashboard?.vigilance || 'vert');
+  const dashboardHasData = dashboard && typeof dashboard === 'object' && Object.keys(dashboard).length
+    && String(dashboard.status || '').toLowerCase() !== 'pending';
+  const globalLevel = dashboardHasData
+    ? normalizeLevel(dashboard?.global_risk || dashboard?.vigilance || 'inconnu')
+    : '';
   updateHeaderVigilanceBadge(globalLevel);
 }
 
@@ -16615,8 +16657,9 @@ function startLiveClock() {
 /** Badge de vigilance globale dans le header — mis à jour à chaque renderDashboard. */
 function updateHeaderVigilanceBadge(level) {
   const badge = document.getElementById('header-vigilance-badge');
-  const lvl = normalizeLevel(level || 'vert');
-  const labels = { vert: 'VERT', jaune: 'JAUNE', orange: 'ORANGE', rouge: 'ROUGE', gris: 'SYNC' };
+  const hasLevel = Boolean(level) && String(level).toLowerCase() !== 'pending';
+  const lvl = hasLevel ? normalizeLevel(level) : 'gris';
+  const labels = { vert: 'VERT', jaune: 'JAUNE', orange: 'ORANGE', rouge: 'ROUGE', gris: '—' };
   if (badge) {
     badge.textContent = labels[lvl] || lvl.toUpperCase();
     ['vert', 'jaune', 'orange', 'rouge', 'gris'].forEach((l) => badge.classList.toggle(`header-vigilance-badge--${l}`, l === lvl));
