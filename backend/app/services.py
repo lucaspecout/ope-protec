@@ -11792,8 +11792,12 @@ def fetch_road_isochrone(lat: float, lon: float, mode: str, value: float) -> dic
     response = _requests.post(
         f"{base_url}/isochrone",
         json=request_payload,
-        headers={"Accept": "application/geo+json, application/json", "User-Agent": "OpeProtec/1.0"},
-        timeout=25,
+        headers={
+            "Accept": "application/geo+json, application/json",
+            "User-Agent": "OpeProtec/1.0",
+            "X-Client-Id": "opeprotec.fr",
+        },
+        timeout=60,
     )
     response.raise_for_status()
     geojson = response.json()

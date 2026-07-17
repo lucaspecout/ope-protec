@@ -9514,6 +9514,43 @@ function drawIsoZone(lat, lon, geojson, mode, value) {
   }).addTo(mapIsoLayer);
 }
 
+async function fetchRoadIsochrone(lat, lon, mode, value) {
+  const params = new URLSearchParams({ lat: String(lat), lon: String(lon), mode, value: String(value) });
+  try {
+    return await api(`/api/routes/isochrone?${params.toString()}`, {
+      bypassCache: true,
+      cacheTtlMs: 0,
+      timeoutMs: 70000,
+      maxRetries: 0,
+    });
+  } catch (backendError) {
+    const contour = mode === 'isochrone' ? { time: value } : { distance: value };
+    const response = await fetchWithTimeout('https://valhalla1.openstreetmap.de/isochrone', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/geo+json, application/json',
+        'X-Client-Id': 'opeprotec.fr',
+      },
+      body: JSON.stringify({
+        locations: [{ lat, lon }],
+        costing: 'auto',
+        contours: [contour],
+        polygons: true,
+        denoise: 0.5,
+        generalize: 80,
+        show_locations: true,
+      }),
+    }, 70000);
+    if (!response.ok) throw new Error(`Moteur routier HTTP ${response.status}`);
+    const geojson = await response.json();
+    if (geojson?.type !== 'FeatureCollection' || !Array.isArray(geojson.features) || !geojson.features.length) {
+      throw new Error("Le moteur routier n'a retourne aucune zone");
+    }
+    return { status: 'online', provider: 'valhalla-direct', geojson, backend_error: backendError.message };
+  }
+}
+
 async function onMapClickIsoZone(event) {
   if (!mapIsoMode || !leafletMap || typeof window.L === 'undefined') return;
   const lat = Number(event?.latlng?.lat);
@@ -9533,8 +9570,7 @@ async function onMapClickIsoZone(event) {
   updateIsoZoneButtons();
   setMapFeedback('Calcul de la zone accessible par la route...');
   try {
-    const params = new URLSearchParams({ lat: String(lat), lon: String(lon), mode: selectedMode, value: String(value) });
-    const payload = await api(`/api/routes/isochrone?${params.toString()}`, { bypassCache: true, cacheTtlMs: 0 });
+    const payload = await fetchRoadIsochrone(lat, lon, selectedMode, value);
     drawIsoZone(lat, lon, payload.geojson, selectedMode, value);
     setMapFeedback(selectedMode === 'isochrone'
       ? `Zone accessible en voiture en ${Number(value).toLocaleString('fr-FR')} min affichee.`
