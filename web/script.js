@@ -15853,13 +15853,6 @@ function bindAppInteractions() {
     event.stopPropagation();
     handleIsoZoneControlClick(event.currentTarget);
   });
-  document.getElementById('map-controls-panel')?.addEventListener('click', (event) => {
-    const target = event.target instanceof Element ? event.target : null;
-    const button = target?.closest('#map-isodistance-start, #map-isochrone-start, #map-iso-clear');
-    if (!button) return;
-    event.preventDefault();
-    handleIsoZoneControlClick(button);
-  });
   document.getElementById('map-route-list')?.addEventListener('click', (event) => {
     const btn = event.target.closest('[data-route-action]');
     if (!btn) return;
