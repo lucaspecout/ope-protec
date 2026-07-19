@@ -2725,6 +2725,13 @@ select:focus {
   display: none;
 }
 #network-offline-banner.visible { display: block; }
+#network-offline-banner.sync-pending { background: #a16207; }
+.mco-pending-sync {
+  background: #fef3c7;
+  border-color: #f59e0b;
+  color: #92400e;
+  font-weight: 700;
+}
 
 /* ── Skeleton loading ────────────────────────────────────────── */
 @keyframes skeleton-pulse {

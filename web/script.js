@@ -47,6 +47,8 @@ const STORAGE_KEYS = {
   staticBarrageCache: 'staticBarrageCacheV1',
   staticPrAutoroutesCache: 'staticPrAutoroutesCacheV1',
   serviceStatusHistory: 'serviceStatusHistory',
+  contactsOfflineCache: 'contactsOfflineCacheV1',
+  pendingLogsQueue: 'pendingLogsQueueV1',
 };
 const AUTO_REFRESH_MS = 45000;
 const EVENTS_LIVE_REFRESH_MS = 10000;
@@ -2297,10 +2299,86 @@ function normalizeApiErrorMessage(payload, status) {
 }
 
 
-// Données toujours servies par le serveur — aucun cache navigateur.
-function saveSnapshot(key, payload) {} // no-op intentionnel
-function readSnapshot(key) { return null; }
-function readFreshSnapshot(key, ttlMs) { return null; }
+// Cache local horodaté pour assurer la continuité en mode dégradé.
+function saveSnapshot(key, payload) {
+  if (key === STORAGE_KEYS.usersSnapshot) return;
+  try {
+    localStorage.setItem(key, JSON.stringify({ savedAt: new Date().toISOString(), payload }));
+  } catch (_) {}
+}
+function readSnapshotRecord(key) {
+  if (key === STORAGE_KEYS.usersSnapshot) return null;
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || 'null');
+    return parsed && typeof parsed === 'object' && 'payload' in parsed ? parsed : null;
+  } catch (_) { return null; }
+}
+function readSnapshot(key) { return readSnapshotRecord(key)?.payload ?? null; }
+function readFreshSnapshot(key, ttlMs) {
+  const record = readSnapshotRecord(key);
+  if (!record) return null;
+  const age = Date.now() - new Date(record.savedAt || 0).getTime();
+  return Number.isFinite(age) && age <= ttlMs ? record.payload : null;
+}
+
+function getLastSituationTimestamp() {
+  return [STORAGE_KEYS.dashboardSnapshot, STORAGE_KEYS.externalRisksSnapshot]
+    .map((key) => readSnapshotRecord(key)?.savedAt).filter(Boolean).sort().reverse()[0] || null;
+}
+function readPendingLogsQueue() {
+  const queue = readSnapshot(STORAGE_KEYS.pendingLogsQueue);
+  return Array.isArray(queue) ? queue : [];
+}
+function writePendingLogsQueue(queue) {
+  saveSnapshot(STORAGE_KEYS.pendingLogsQueue, Array.isArray(queue) ? queue : []);
+  updateOfflineBanner();
+}
+function queuePendingLog(payload) {
+  const clientId = `offline-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const queuedAt = new Date().toISOString();
+  const queue = readPendingLogsQueue();
+  queue.push({ clientId, queuedAt, payload });
+  writePendingLogsQueue(queue);
+  return { ...payload, id: clientId, created_at: queuedAt, _pendingSync: true };
+}
+function mergePendingLogs(logs = []) {
+  const base = Array.isArray(logs) ? logs : [];
+  const existingIds = new Set(base.map((log) => String(log.id)));
+  const pending = readPendingLogsQueue()
+    .filter((item) => !existingIds.has(String(item.clientId)))
+    .map((item) => ({ ...item.payload, id: item.clientId, created_at: item.queuedAt, _pendingSync: true }));
+  return [...pending, ...base];
+}
+let pendingLogsSyncInFlight = false;
+async function syncPendingLogs() {
+  if (pendingLogsSyncInFlight || !navigator.onLine || !token) return;
+  pendingLogsSyncInFlight = true;
+  try {
+    const queue = readPendingLogsQueue();
+    const remaining = [];
+    for (let index = 0; index < queue.length; index += 1) {
+      const item = queue[index];
+      try {
+        const saved = await api('/logs', {
+          method: 'POST', highPriority: true, maxRetries: 0,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(item.payload),
+        });
+        removeCachedLog(item.clientId);
+        upsertCachedLog(saved);
+      } catch (_) {
+        remaining.push(...queue.slice(index));
+        break;
+      }
+    }
+    const initialIds = new Set(queue.map((item) => item.clientId));
+    const newlyQueued = readPendingLogsQueue().filter((item) => !initialIds.has(item.clientId));
+    writePendingLogsQueue([...remaining, ...newlyQueued]);
+  } finally {
+    pendingLogsSyncInFlight = false;
+    updateOfflineBanner();
+  }
+}
 
 function clonePayload(payload) {
   if (payload == null) return payload;
@@ -13804,6 +13882,8 @@ async function loadAndRenderContactsPanel(city = '', forceRefresh = false) {
   selectedContactsCity = normalizedCity;
   const cacheKey = normalizedCity.toLowerCase();
   const seq = ++contactsPanelLoadSeq;
+  const storedContacts = readSnapshot(STORAGE_KEYS.contactsOfflineCache) || {};
+  const offlinePayload = storedContacts[cacheKey]?.payload;
 
   setText('contacts-results-title', normalizedCity);
   setText('contacts-results-meta', 'Chargement des contacts publics utiles…');
@@ -13814,6 +13894,8 @@ async function loadAndRenderContactsPanel(city = '', forceRefresh = false) {
     const matchedMunicipality = findMunicipalityByLooseName(normalizedCity);
     const payload = !forceRefresh && contactsPanelCache.has(cacheKey)
       ? contactsPanelCache.get(cacheKey)
+      : !forceRefresh && !navigator.onLine && offlinePayload
+        ? offlinePayload
       : matchedMunicipality
         ? await api(`/municipalities/${encodeURIComponent(matchedMunicipality.id)}/public-services${forceRefresh ? '?force_refresh=true' : ''}`, {
           bypassCache: forceRefresh,
@@ -13831,6 +13913,10 @@ async function loadAndRenderContactsPanel(city = '', forceRefresh = false) {
         });
     if (seq !== contactsPanelLoadSeq) return;
     contactsPanelCache.set(cacheKey, payload);
+    saveSnapshot(STORAGE_KEYS.contactsOfflineCache, {
+      ...storedContacts,
+      [cacheKey]: { savedAt: new Date().toISOString(), payload },
+    });
 
     const contacts = Array.isArray(payload?.contacts)
       ? payload.contacts
@@ -13852,6 +13938,12 @@ async function loadAndRenderContactsPanel(city = '', forceRefresh = false) {
       : '<p class="muted">Aucun contact public exploitable trouvé pour cette ville iséroise.</p>');
   } catch (error) {
     if (seq !== contactsPanelLoadSeq) return;
+    if (offlinePayload) {
+      contactsPanelCache.set(cacheKey, offlinePayload);
+      await loadAndRenderContactsPanel(normalizedCity, false);
+      setText('contacts-results-meta', `Contacts en cache · dernière mise à jour ${new Date(storedContacts[cacheKey].savedAt).toLocaleString('fr-FR')}`);
+      return;
+    }
     renderContactsEmergencyNumbers([]);
     setText('contacts-results-title', normalizedCity);
     setText('contacts-results-meta', 'Recherche impossible.');
@@ -14984,7 +15076,10 @@ function applyMunicipalityFilters() {
 }
 
 async function loadMunicipalities(preloaded = null) {
-  const previousMunicipalities = Array.isArray(cachedMunicipalityRecords) ? cachedMunicipalityRecords : [];
+  const storedMunicipalities = readSnapshot(STORAGE_KEYS.municipalitiesCache);
+  const previousMunicipalities = Array.isArray(cachedMunicipalityRecords) && cachedMunicipalityRecords.length
+    ? cachedMunicipalityRecords
+    : (Array.isArray(storedMunicipalities) ? storedMunicipalities : []);
   let municipalities = [];
   if (Array.isArray(preloaded)) {
     municipalities = keepPreviousArray(previousMunicipalities, preloaded);
@@ -15000,6 +15095,7 @@ async function loadMunicipalities(preloaded = null) {
 
   cachedMunicipalityRecords = municipalities;
   cachedMunicipalities = municipalities;
+  if (municipalities.length) saveSnapshot(STORAGE_KEYS.municipalitiesCache, municipalities);
   populateUserMunicipalityOptions();
   renderContactsCitySuggestions();
   const georisquesPayload = cachedExternalRisksSnapshot?.georisques || {};
@@ -15036,7 +15132,8 @@ function buildLogTableRow(log = {}) {
     log.next_update_due ? `<span class="mco-meta-chip">⏱️ MAJ ${safeDateToLocale(log.next_update_due, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>` : '',
   ].filter(Boolean).join('');
 
-  const actionsBtns = canEdit()
+  const pendingChip = log._pendingSync ? '<span class="mco-meta-chip mco-pending-sync">En attente de synchronisation</span>' : '';
+  const actionsBtns = canEdit() && !log._pendingSync
     ? `<button type="button" class="mco-entry-btn" data-log-edit="${log.id}">Modifier</button>
        <button type="button" class="mco-entry-btn danger" data-log-delete="${log.id}">Supprimer</button>`
     : '';
@@ -15049,7 +15146,7 @@ function buildLogTableRow(log = {}) {
       <span class="mco-entry-scope">${escapeHtml(scopeLabel)}</span>
     </div>
     ${log.description ? `<div class="mco-entry-desc">${escapeHtml(log.description)}</div>` : ''}
-    ${metaChips ? `<div class="mco-entry-meta">${metaChips}</div>` : ''}
+    ${(metaChips || pendingChip) ? `<div class="mco-entry-meta">${pendingChip}${metaChips}</div>` : ''}
     ${log.actions_taken ? `<div class="mco-entry-actions-text">${escapeHtml(log.actions_taken)}</div>` : ''}
     ${actionsBtns ? `<div class="mco-entry-btns">${actionsBtns}</div>` : ''}
   </div>`;
@@ -15246,7 +15343,7 @@ function renderLogsList() {
 async function loadLogs(preloaded = null) {
   const previousLogs = Array.isArray(cachedLogs) ? cachedLogs : [];
   const logs = Array.isArray(preloaded) ? preloaded : await api('/logs');
-  cachedLogs = keepPreviousArray(previousLogs, logs);
+  cachedLogs = mergePendingLogs(keepPreviousArray(previousLogs, logs));
   saveSnapshot(STORAGE_KEYS.logsSnapshot, cachedLogs);
   renderLogsList();
   renderSituationOverview();
@@ -16857,7 +16954,7 @@ async function refreshLiveEvents() {
       // avait été posée par ce même chemin (et non par refreshAll).
       _liveEventsFailCount = 0;
 
-      cachedLogs = keepPreviousArray(cachedLogs, logs);
+      cachedLogs = mergePendingLogs(keepPreviousArray(cachedLogs, logs));
       renderLogsList();
 
       cachedDashboardSnapshot = dashboard && typeof dashboard === 'object'
@@ -17010,7 +17107,8 @@ function hydrateAppFromSnapshots() {
   if (Array.isArray(events)) cachedEvents = events;
 
   const logs = readSnapshot(STORAGE_KEYS.logsSnapshot);
-  if (Array.isArray(logs)) cachedLogs = logs;
+  if (Array.isArray(logs)) cachedLogs = mergePendingLogs(logs);
+  else cachedLogs = mergePendingLogs(cachedLogs);
 
   if (Array.isArray(cachedEvents) && cachedEvents.length && !selectedOperationalEventId) {
     const firstOpen = sortOperationalEvents(cachedEvents).find((event) => String(event.status || '').toLowerCase() !== 'clos');
@@ -17033,6 +17131,7 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
   showApp();
   buildServiceCards();
   hydrateAppFromSnapshots();
+  syncPendingLogs();
   initMobileNav();
   initMobileGeoLocate();
   startAgentMarkersPolling();
@@ -17343,6 +17442,15 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
     };
     const editingLogId = formElement.dataset.editLogId;
     let savedLog = null;
+    if (!editingLogId && !navigator.onLine) {
+      savedLog = queuePendingLog(payload);
+      formElement.reset();
+      resetLogFormState();
+      if (errorTarget) errorTarget.textContent = 'Entrée enregistrée hors connexion : synchronisation automatique en attente.';
+      syncLogScopeFields();
+      upsertCachedLog(savedLog);
+      return;
+    }
     if (editingLogId) {
       savedLog = await api(`/logs/${editingLogId}`, {
         method: 'PUT',
@@ -17364,7 +17472,15 @@ document.getElementById('log-form').addEventListener('submit', async (event) => 
     syncLogScopeFields();
     upsertCachedLog(savedLog);
   } catch (error) {
-    if (errorTarget) errorTarget.textContent = sanitizeErrorMessage(error.message);
+    const editingLogId = formElement.dataset.editLogId;
+    if (!editingLogId && (!navigator.onLine || !error.status)) {
+      const pendingLog = queuePendingLog(payload);
+      formElement.reset();
+      resetLogFormState();
+      syncLogScopeFields();
+      upsertCachedLog(pendingLog);
+      if (errorTarget) errorTarget.textContent = 'Serveur indisponible : entrée conservée localement et mise en attente.';
+    } else if (errorTarget) errorTarget.textContent = sanitizeErrorMessage(error.message);
   } finally {
     setFormBusy(formElement, false);
   }
@@ -17400,25 +17516,29 @@ document.getElementById('event-form')?.addEventListener('submit', async (event) 
   }
 });
 
-(function initNetworkOfflineBanner() {
+function updateOfflineBanner() {
   const banner = document.getElementById('network-offline-banner');
   if (!banner) return;
-  function update() {
-    banner.classList.toggle('visible', !navigator.onLine);
-  }
-  window.addEventListener('online', update);
-  window.addEventListener('offline', update);
-  update();
+  const pending = readPendingLogsQueue().length;
+  const lastUpdate = getLastSituationTimestamp();
+  const lastLabel = lastUpdate ? new Date(lastUpdate).toLocaleString('fr-FR') : 'inconnue';
+  banner.classList.toggle('visible', !navigator.onLine || pending > 0);
+  banner.classList.toggle('sync-pending', navigator.onLine && pending > 0);
+  banner.textContent = !navigator.onLine
+    ? `Mode hors connexion — dernière situation connue : ${lastLabel}. ${pending} entrée(s) de main courante en attente.`
+    : `${pending} entrée(s) de main courante en cours de synchronisation…`;
+}
+
+(function initNetworkOfflineBanner() {
+  window.addEventListener('online', () => { updateOfflineBanner(); syncPendingLogs(); });
+  window.addEventListener('offline', updateOfflineBanner);
+  updateOfflineBanner();
 })();
 
 (async function bootstrap() {
   // Purger seulement les caches statiques/volumineux. Les snapshots opérationnels
   // restent disponibles pour afficher l'accueil immédiatement pendant le refresh.
-  [
-    'mapPointsCache', 'municipalitiesCache',
-    'staticInstitutionsCacheV3', 'staticFinessCacheV3', 'staticTelecomCacheV1',
-    'staticMontagneCacheV1', 'staticHelipadCacheV1', 'staticBarrageCacheV1',
-  ].forEach((k) => { try { localStorage.removeItem(k); } catch (_) {} });
+  // Les caches opérationnels et de ressources restent disponibles en mode dégradé.
 
   _loadGeocodeCache();
   bindAppInteractions();
