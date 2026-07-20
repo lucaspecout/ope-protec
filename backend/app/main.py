@@ -3110,6 +3110,7 @@ _SERVICE_LABELS: dict[str, str] = {
     "atmo_aura": "Atmo AURA · Qualité air",
     "georisques": "Géorisques",
     "itinisere": "Itinisère · Transports",
+    "autoroutes_isere": "Autoroutes Isère",  # ancienne clé, conservée pour les règles existantes
     "sncf_isere": "SNCF Isère",
     "ter_aura": "TER SNCF · AURA",
     "mreseau": "M Réseau · Grenoble",
@@ -3150,7 +3151,7 @@ def _extract_service_level(key: str, data: dict) -> str:
     if key in ("ter_aura", "mreseau", "cars_region_aura"):
         n = int(data.get("disruptions_total") or len(data.get("disruptions") or []))
         return "jaune" if n > 0 else "vert"
-    if key in ("aprr_isere", "vinci_autoroutes", "itinisere"):
+    if key in ("aprr_isere", "vinci_autoroutes", "autoroutes_isere", "itinisere"):
         n = int(data.get("events_total") or len(data.get("events") or []))
         if n == 0:
             return "vert"
@@ -3215,6 +3216,49 @@ def _build_discord_embed(service_key: str, level: str, data: dict, reason: str =
         s = str(s or "").strip()
         return s[:n] + "…" if len(s) > n else s
 
+    def _value(item: dict, *keys: str) -> str:
+        """Retourne la première valeur exploitable parmi plusieurs variantes de schéma."""
+        for key in keys:
+            value = item.get(key)
+            if isinstance(value, (list, tuple)):
+                value = ", ".join(str(part) for part in value if part not in (None, ""))
+            if value not in (None, "", []):
+                return str(value).strip()
+        return ""
+
+    def _detail_line(item: dict, *, title_keys: tuple[str, ...], icon: str = "•") -> str:
+        """Formate une alerte avec les informations opérationnelles disponibles."""
+        title = _trunc(_value(item, *title_keys) or "Alerte sans titre", 120)
+        meta = []
+        location = _value(item, "commune", "zone", "location", "area", "department")
+        axis = _value(item, "road", "axis", "axes", "line", "route", "river")
+        kind = _value(item, "type", "category", "cause", "severity_raw")
+        alert_level = _value(item, "level", "severity", "level_color")
+        if location and location.lower() not in title.lower():
+            meta.append(f"📍 {location}")
+        if axis and axis.lower() not in title.lower():
+            meta.append(f"🧭 {axis}")
+        if kind:
+            meta.append(f"Nature : {kind}")
+        if alert_level:
+            meta.append(f"Niveau : **{alert_level.upper()}**")
+
+        period_start = _value(item, "valid_from", "start_at", "started_at", "published_at", "date")
+        period_end = _value(item, "valid_until", "end_at", "ended_at")
+        if period_start or period_end:
+            meta.append(f"🕒 {period_start or '?'}{(' → ' + period_end) if period_end else ''}")
+
+        description_text = _value(item, "description", "message", "detail", "measure", "restriction", "impact")
+        link = _value(item, "link", "url", "source_url")
+        parts = [f"{icon} **{title}**"]
+        if meta:
+            parts.append("  " + " · ".join(meta))
+        if description_text and description_text.lower() != title.lower():
+            parts.append("  " + _trunc(description_text, 240))
+        if link.startswith("http"):
+            parts.append(f"  [Consulter le détail]({link[:300]})")
+        return "\n".join(parts)
+
     fields: list[dict] = []
     description = f"**Niveau : {level.upper()}**"
     if reason:
@@ -3236,28 +3280,39 @@ def _build_discord_embed(service_key: str, level: str, data: dict, reason: str =
             for a in current[:6]:
                 ph = str(a.get("phenomenon") or a.get("title") or "?")
                 lv = str(a.get("level") or "?")
-                lines.append(f"• **{ph}** — {lv}")
+                details = a.get("details") or []
+                if isinstance(details, str):
+                    details = [details]
+                detail = "; ".join(str(value) for value in details if value)
+                lines.append(f"• **{ph}** — **{lv.upper()}**{(chr(10) + '  ' + _trunc(detail, 220)) if detail else ''}")
             fields.append(_f("⚠️ Alertes J0 (en cours)", "\n".join(lines), inline=False))
         if tomorrow:
             lines2 = []
             for a in tomorrow[:4]:
                 ph = str(a.get("phenomenon") or a.get("title") or "?")
                 lv = str(a.get("level") or "?")
-                lines2.append(f"• **{ph}** — {lv}")
+                details = a.get("details") or []
+                if isinstance(details, str):
+                    details = [details]
+                detail = "; ".join(str(value) for value in details if value)
+                lines2.append(f"• **{ph}** — **{lv.upper()}**{(chr(10) + '  ' + _trunc(detail, 180)) if detail else ''}")
             fields.append(_f("📅 Alertes J1 (demain)", "\n".join(lines2), inline=False))
         if data.get("bulletin_title"):
             fields.append(_f("📋 Bulletin", _trunc(data["bulletin_title"], 150), inline=False))
 
     # ── Vigicrues ─────────────────────────────────────────────────────────────
     elif service_key == "vigicrues":
-        alert_stations = [s for s in (data.get("stations") or []) if _LEVEL_ORDER.get(str(s.get("level") or "vert"), 0) >= _LEVEL_ORDER.get("orange", 1)]
-        troncons = [t for t in (data.get("troncons") or []) if _LEVEL_ORDER.get(str(t.get("level") or "vert"), 0) >= _LEVEL_ORDER.get("orange", 1)]
+        minimum_rank = max(1, _LEVEL_ORDER.get(level, 1))
+        alert_stations = [s for s in (data.get("stations") or []) if _LEVEL_ORDER.get(str(s.get("level") or "vert").lower(), 0) >= minimum_rank]
+        troncons = [t for t in (data.get("troncons") or data.get("alerts") or []) if _LEVEL_ORDER.get(str(t.get("level") or "vert").lower(), 0) >= minimum_rank]
         if alert_stations:
             lines = []
             for s in alert_stations[:6]:
                 lv = str(s.get("level") or "?")
                 h = s.get("height_m") or s.get("current_level_m") or "?"
-                lines.append(f"• **{s.get('station') or s.get('code', '?')}** ({s.get('river','')}) — {lv} — {h} m")
+                trend = _value(s, "trend", "tendance")
+                updated = _value(s, "observed_at", "updated_at", "date")
+                lines.append(f"• **{s.get('station') or s.get('name') or s.get('code', '?')}** ({s.get('river','')}) — **{lv.upper()}** — {h} m{(' · tendance ' + trend) if trend else ''}{(chr(10) + '  Mesure : ' + updated) if updated else ''}")
             fields.append(_f(f"🌊 Stations en alerte ({len(alert_stations)})", "\n".join(lines), inline=False))
         if troncons:
             lines2 = [f"• **{t.get('name') or t.get('code','?')}** — {t.get('level','?')}" for t in troncons[:4]]
@@ -3269,7 +3324,7 @@ def _build_discord_embed(service_key: str, level: str, data: dict, reason: str =
         total = int(data.get("alerts_total") or len(alerts))
         fields.append(_f("⚡ Crues rapides", f"{total} avertissement(s)", inline=True))
         if alerts:
-            lines = [f"• **{a.get('zone') or a.get('commune','?')}** — {a.get('level','?')}" for a in alerts[:5]]
+            lines = [_detail_line(a, title_keys=("zone", "commune", "title"), icon="•") for a in alerts[:5]]
             fields.append(_f("📍 Zones concernées", "\n".join(lines), inline=False))
 
     # ── APIC ─────────────────────────────────────────────────────────────────
@@ -3278,7 +3333,7 @@ def _build_discord_embed(service_key: str, level: str, data: dict, reason: str =
         total = int(data.get("alerts_total") or len(alerts))
         fields.append(_f("🌧️ Pluie intense", f"{total} avertissement(s)", inline=True))
         if alerts:
-            lines = [f"• **{a.get('zone') or a.get('commune','?')}** — {a.get('level','?')}" for a in alerts[:5]]
+            lines = [_detail_line(a, title_keys=("zone", "commune", "title"), icon="•") for a in alerts[:5]]
             fields.append(_f("📍 Communes concernées", "\n".join(lines), inline=False))
 
     # ── Itinisère / Transports ────────────────────────────────────────────────
@@ -3289,9 +3344,7 @@ def _build_discord_embed(service_key: str, level: str, data: dict, reason: str =
         if events:
             lines = []
             for e in events[:5]:
-                title = _trunc(e.get("title") or e.get("description") or "?", 90)
-                cat = str(e.get("category") or e.get("type") or "")
-                lines.append(f"• **{title}**{(' · ' + cat) if cat else ''}")
+                lines.append(_detail_line(e, title_keys=("title", "description")))
             fields.append(_f("📋 Détail", "\n".join(lines), inline=False))
 
     # ── SNCF ──────────────────────────────────────────────────────────────────
@@ -3302,9 +3355,7 @@ def _build_discord_embed(service_key: str, level: str, data: dict, reason: str =
         if alerts:
             lines = []
             for a in alerts[:5]:
-                title = _trunc(a.get("title") or "?", 90)
-                desc = _trunc(a.get("description") or "", 60)
-                lines.append(f"• **{title}**{(chr(10) + '  ' + desc) if desc else ''}")
+                lines.append(_detail_line(a, title_keys=("title", "description")))
             fields.append(_f("📋 Alertes", "\n".join(lines), inline=False))
 
     # ── TER AURA / M Réseau / Cars Région ────────────────────────────────────
@@ -3318,13 +3369,11 @@ def _build_discord_embed(service_key: str, level: str, data: dict, reason: str =
         if disruptions:
             lines = []
             for d in disruptions[:5]:
-                title = _trunc(d.get("title") or d.get("description") or "?", 90)
-                cause = str(d.get("cause") or d.get("type") or "")
-                lines.append(f"• **{title}**{(' · ' + cause) if cause else ''}")
+                lines.append(_detail_line(d, title_keys=("title", "description")))
             fields.append(_f("📋 Perturbations", "\n".join(lines), inline=False))
 
     # ── APRR / Vinci Autoroutes ───────────────────────────────────────────────
-    elif service_key in ("aprr_isere", "vinci_autoroutes"):
+    elif service_key in ("aprr_isere", "vinci_autoroutes", "autoroutes_isere"):
         events = data.get("events") or []
         total = int(data.get("events_total") or len(events))
         routes = ", ".join(data.get("routes") or [])
@@ -3334,9 +3383,7 @@ def _build_discord_embed(service_key: str, level: str, data: dict, reason: str =
         if events:
             lines = []
             for e in events[:5]:
-                road = str(e.get("road") or "")
-                title = _trunc(e.get("title") or e.get("description") or "?", 80)
-                lines.append(f"• **{road} — {title}**")
+                lines.append(_detail_line(e, title_keys=("title", "description", "type")))
             fields.append(_f("📋 Événements", "\n".join(lines), inline=False))
 
     # ── Bison Futé ────────────────────────────────────────────────────────────
@@ -3357,10 +3404,7 @@ def _build_discord_embed(service_key: str, level: str, data: dict, reason: str =
         if alerts:
             lines = []
             for a in alerts[:5]:
-                zone = str(a.get("zone") or a.get("department") or "Isère")
-                lv = str(a.get("level") or "?")
-                measure = _trunc(a.get("measure") or a.get("restriction") or "", 70)
-                lines.append(f"• **{zone}** — {lv}{(chr(10) + '  ' + measure) if measure else ''}")
+                lines.append(_detail_line(a, title_keys=("zone", "department")))
             fields.append(_f("📋 Restrictions", "\n".join(lines), inline=False))
 
     # ── Qualité de l'air ──────────────────────────────────────────────────────
@@ -3387,7 +3431,7 @@ def _build_discord_embed(service_key: str, level: str, data: dict, reason: str =
         icon = {"prefecture_isere": "🏛️", "dauphine_isere": "📰", "france_bleu_isere": "📻"}.get(service_key, "📰")
         fields.append(_f(f"{icon} Articles/Actualités", str(len(items)), inline=True))
         if items:
-            lines = [f"• {_trunc(i.get('title') or i.get('headline') or '?', 100)}" for i in items[:4]]
+            lines = [_detail_line(i, title_keys=("title", "headline")) for i in items[:4]]
             fields.append(_f("📋 Dernières actualités", "\n".join(lines), inline=False))
 
     # ── Géorisques ────────────────────────────────────────────────────────────
@@ -3397,11 +3441,7 @@ def _build_discord_embed(service_key: str, level: str, data: dict, reason: str =
         fields.append(_f("Foyers < 2 jours", str(total), inline=True))
         fields.append(_f("Source", "FeuxDeForet.fr Isere", inline=True))
         if recent:
-            lines = []
-            for item in recent[:5]:
-                title = _trunc(item.get("title") or item.get("commune") or "Isere", 90)
-                recency = str(item.get("recency") or "Signalement recent")
-                lines.append(f"- **{title}** - {recency}")
+            lines = [_detail_line(item, title_keys=("title", "commune"), icon="🔥") for item in recent[:5]]
             fields.append(_f("Derniers signalements", "\n".join(lines), inline=False))
     elif service_key == "georisques":
         details = data.get("details") or []
@@ -3426,6 +3466,23 @@ def _build_discord_embed(service_key: str, level: str, data: dict, reason: str =
     if not fields:
         if data.get("error"):
             fields.append(_f("❌ Erreur", _trunc(str(data["error"]), 200), inline=False))
+        else:
+            summary_parts = []
+            for key, display in (
+                ("title", "Titre"), ("message", "Message"), ("description", "Description"),
+                ("alert_level", "Niveau source"), ("events_total", "Événements"),
+                ("alerts_total", "Alertes"), ("disruptions_total", "Perturbations"),
+            ):
+                if data.get(key) not in (None, "", []):
+                    summary_parts.append(f"**{display} :** {_trunc(str(data[key]), 220)}")
+            fields.append(_f("📋 Détails transmis par le service", "\n".join(summary_parts) or "Aucun détail complémentaire fourni par la source.", inline=False))
+
+    service_status = str(data.get("status") or "").strip()
+    updated_at = str(data.get("updated_at") or data.get("observed_at") or "").strip()
+    if service_status:
+        fields.append(_f("État du service", service_status, inline=True))
+    if updated_at:
+        fields.append(_f("Dernière mise à jour", updated_at, inline=True))
 
     # ── Source / lien ─────────────────────────────────────────────────────────
     source_url = str(data.get("source") or data.get("source_url") or data.get("link") or "")
