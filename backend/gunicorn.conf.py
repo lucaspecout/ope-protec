@@ -15,6 +15,8 @@ keepalive = 30
 
 # Connexions simultanées max par worker (pour UvicornWorker = worker asyncio).
 worker_connections = 1000
+max_requests = 1200
+max_requests_jitter = 150
 
 # Temps accordé aux workers pour finir leurs requêtes en cours avant arrêt forcé.
 graceful_timeout = 30

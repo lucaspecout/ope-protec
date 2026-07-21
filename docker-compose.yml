@@ -2,7 +2,10 @@ services:
   db:
     image: postgres:16-alpine
     restart: always
-    mem_limit: 1g
+    mem_limit: ${DB_MEMORY_LIMIT:-768m}
+    mem_reservation: ${DB_MEMORY_RESERVATION:-384m}
+    cpus: ${DB_CPU_LIMIT:-1.0}
+    command: ["postgres", "-c", "shared_buffers=192MB", "-c", "effective_cache_size=512MB", "-c", "work_mem=4MB", "-c", "maintenance_work_mem=64MB"]
     environment:
       POSTGRES_DB: veille
       POSTGRES_USER: postgres
@@ -17,10 +20,12 @@ services:
       retries: 5
 
   redis:
-    image: redis:latest
+    image: redis:7-alpine
     restart: always
-    mem_limit: 1g
-    command: ["redis-server", "--appendonly", "yes"]
+    mem_limit: ${REDIS_MEMORY_LIMIT:-256m}
+    mem_reservation: ${REDIS_MEMORY_RESERVATION:-96m}
+    cpus: ${REDIS_CPU_LIMIT:-0.50}
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "160mb", "--maxmemory-policy", "allkeys-lru", "--save", "60", "1000"]
     volumes:
       - redis_data:/data
     healthcheck:
@@ -34,7 +39,10 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: always
-    mem_limit: 1g
+    mem_limit: ${API_MEMORY_LIMIT:-768m}
+    mem_reservation: ${API_MEMORY_RESERVATION:-384m}
+    cpus: ${API_CPU_LIMIT:-1.5}
+    pids_limit: 256
     volumes:
       - app_data:/data
       - ./backend/app:/app/app:ro
@@ -42,6 +50,10 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/veille
       REDIS_URL: redis://redis:6379/0
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-3}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-3}
+      EXTERNAL_FETCH_WORKERS: ${EXTERNAL_FETCH_WORKERS:-6}
+      BACKGROUND_REFRESH_WORKERS: ${BACKGROUND_REFRESH_WORKERS:-4}
       SECRET_KEY: change-me-in-production
       GEORISQUES_API_TOKEN: ${GEORISQUES_API_TOKEN:-eyJhbGciOiJIUzI1NiJ9.eyJub20iOiJQRUNPVVQiLCJwcmVub20iOiJMdWNhcyBGZXJuYW5kIiwiZW1haWwiOiJsdWNhc3BlY291dEBnbWFpbC5jb20iLCJleHAiOjE4MDQ2MzY4MDAsImlhdCI6MTc3MzE0MDE1NX0.QZwqLatikYGopYKcUh3JhZHKE-xGAMlfrcAxy1jm980}
       RTE_ECOWATT_B64: MzZlODVlNmEtMThmMi00MWUxLWEwZTItNjIyMDE3MzliMzNjOjAzMGExNmI5LWU2ZWItNDEwOC05ZDA4LTI3ZmQzYTdjMDkwZg==
@@ -82,7 +94,9 @@ services:
       context: .
       dockerfile: web/Dockerfile
     restart: always
-    mem_limit: 512m
+    mem_limit: ${WEB_MEMORY_LIMIT:-128m}
+    mem_reservation: ${WEB_MEMORY_RESERVATION:-32m}
+    cpus: ${WEB_CPU_LIMIT:-0.50}
     volumes:
       - ./web:/usr/share/nginx/html:ro
     depends_on:

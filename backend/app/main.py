@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 import secrets
 import socket
-from threading import Lock, Thread
+from threading import Event, Lock, Thread
 from time import monotonic, sleep
 from typing import Callable
 from urllib.parse import urlparse
@@ -475,6 +475,8 @@ _external_risks_refresh_lock = Lock()
 _external_risks_refresh_in_progress = False
 _service_runtime_lock = Lock()
 _service_runtime: dict[str, dict] = {}
+_refresh_stop_event = Event()
+_refresh_executor = ThreadPoolExecutor(max_workers=settings.background_refresh_workers)
 
 # SSE broadcast registry — clients abonnés aux mises à jour temps réel
 _sse_risk_clients: set[asyncio.Queue] = set()
@@ -1256,11 +1258,15 @@ def _update_service_slot(key: str, result: dict) -> None:
 def _refresh_one_service(key: str) -> None:
     """Récupère les données d'un seul service externe et met à jour son slot."""
     db: Session | None = None
+    distributed_lock_key = f"svc:refresh-lock:{key}"
+    distributed_lock_token: str | None = None
     try:
         now_mono = monotonic()
         now_utc = datetime.utcnow()
         with _service_runtime_lock:
             runtime = _service_runtime.setdefault(key, {})
+            if runtime.get("refreshing"):
+                return
             next_retry_mono = float(runtime.get("next_retry_mono") or 0)
             if next_retry_mono and now_mono < next_retry_mono:
                 runtime["circuit_open"] = int(runtime.get("failure_count") or 0) >= SERVICE_CIRCUIT_BREAKER_OPEN_AFTER
@@ -1268,6 +1274,16 @@ def _refresh_one_service(key: str) -> None:
             runtime["refreshing"] = True
             runtime["circuit_open"] = False
             runtime["started_at"] = now_utc.isoformat() + "Z"
+        # Gunicorn workers each run a scheduler. Redis elects one worker per feed,
+        # avoiding duplicate downloads and duplicate in-memory parsing.
+        if _REDIS_OK and _redis is not None:
+            candidate_token = secrets.token_hex(16)
+            try:
+                if not _redis.set(distributed_lock_key, candidate_token, nx=True, ex=300):
+                    return
+                distributed_lock_token = candidate_token
+            except Exception:
+                pass
         with _external_risks_snapshot_lock:
             pending_payload = dict((_external_risks_snapshot.get("payload") or {}).get(key) or {})
         if pending_payload:
@@ -1351,18 +1367,31 @@ def _refresh_one_service(key: str) -> None:
                 _service_runtime[key]["refreshing"] = False
         if db is not None:
             db.close()
+        if distributed_lock_token and _redis is not None:
+            try:
+                _redis.eval(
+                    "if redis.call('get', KEYS[1]) == ARGV[1] then "
+                    "return redis.call('del', KEYS[1]) else return 0 end",
+                    1,
+                    distributed_lock_key,
+                    distributed_lock_token,
+                )
+            except Exception:
+                pass
 
 
-def _service_loop(key: str, interval: int, initial_delay: float = 0.0) -> None:
-    """Boucle perpétuelle : première récupération après `initial_delay` secondes,
-    puis toutes les `interval` secondes. Indépendante des autres services.
-    Le délai initial permet d'échelonner les 22 services pour éviter le thundering
-    herd au démarrage (66 requêtes externes simultanées × 3 workers)."""
-    if initial_delay > 0:
-        sleep(initial_delay)
-    while True:
-        _refresh_one_service(key)
-        sleep(interval)
+def _service_scheduler() -> None:
+    """Run all periodic feeds through one scheduler and a bounded worker pool."""
+    services = sorted(SERVICE_REFRESH_INTERVALS.items(), key=lambda item: item[1])
+    now = monotonic()
+    next_runs = {key: now + index * 0.4 for index, (key, _) in enumerate(services)}
+    while not _refresh_stop_event.is_set():
+        now = monotonic()
+        for key, interval in services:
+            if now >= next_runs[key]:
+                _refresh_executor.submit(_refresh_one_service, key)
+                next_runs[key] = now + interval
+        _refresh_stop_event.wait(0.5)
 
 
 @app.on_event("startup")
@@ -1396,13 +1425,10 @@ def startup_warmup_external_sources() -> None:
         initial_payload["updated_at"] = utc_timestamp()
         _set_external_risks_snapshot(initial_payload)
 
-    # Démarrer une boucle indépendante par service.
-    # Tri par intervalle croissant : les services les plus fréquents (météo, crues…)
-    # démarrent en premier, puis on échelonne de 400ms entre chaque service.
-    # Résultat : 22 services répartis sur ~9s au lieu de tous démarrer à 0s.
-    sorted_services = sorted(SERVICE_REFRESH_INTERVALS.items(), key=lambda kv: kv[1])
-    for i, (key, interval) in enumerate(sorted_services):
-        Thread(target=_service_loop, args=(key, interval, i * 0.4), daemon=True).start()
+    # Start one scheduler; its bounded pool staggers services by 400 ms and
+    # prevents large external responses from being parsed concurrently without limit.
+    _refresh_stop_event.clear()
+    Thread(target=_service_scheduler, name="external-refresh-scheduler", daemon=True).start()
 
     # Préchauffer toutes les données statiques au démarrage.
     # Priorité : fichier JSON (immédiat) → Redis → Overpass/CSV (réseau, seulement si nécessaire).
@@ -1426,6 +1452,12 @@ def startup_warmup_external_sources() -> None:
                 pass
 
     Thread(target=_warmup_static_data, daemon=True).start()
+
+
+@app.on_event("shutdown")
+def shutdown_background_refreshes() -> None:
+    _refresh_stop_event.set()
+    _refresh_executor.shutdown(wait=False, cancel_futures=True)
 
 
 @app.get("/health")
@@ -2132,11 +2164,12 @@ def trigger_external_risks_refresh(db: Session | None = None) -> None:
             priority = [key for key in HIGH_REFRESH_SERVICES if key in SERVICE_REFRESH_INTERVALS]
             remaining = [key for key in SERVICE_REFRESH_INTERVALS if key not in priority]
             for group in (priority, remaining):
-                threads = [Thread(target=_refresh_one_service, args=(key,), daemon=True) for key in group]
-                for t in threads:
-                    t.start()
-                for t in threads:
-                    t.join(timeout=15 if group is priority else 25)
+                futures = [_refresh_executor.submit(_refresh_one_service, key) for key in group]
+                for future in futures:
+                    try:
+                        future.result(timeout=25)
+                    except Exception:
+                        pass
         finally:
             with _external_risks_refresh_lock:
                 _external_risks_refresh_in_progress = False
@@ -2184,7 +2217,7 @@ def isere_refresh_one_service(
     if service_key not in SERVICE_REFRESH_INTERVALS:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail=f"Service inconnu : {service_key}")
-    Thread(target=_refresh_one_service, args=(service_key,), daemon=True).start()
+    _refresh_executor.submit(_refresh_one_service, service_key)
     snapshot = _annotate_external_snapshot(_get_external_risks_snapshot())
     return {
         "service_key": service_key,

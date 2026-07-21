@@ -162,3 +162,25 @@ Retourne un bloc consolidé :
 - `GET /api/vigieau/alerts` : restrictions d'eau Vigieau pour l'Isère (actualisation optionnelle avec `?refresh=true`).
 - `GET /api/hubeau/isere/groundwater` : synthèse des nappes phréatiques Isère via Hub'Eau (actualisation avec `?refresh=true`, taille d'échantillon avec `?station_limit=`).
 - `GET /api/opendata/isere/resilience` : indicateurs de résilience territoriale depuis opendata.isere.fr (`?refresh=true`, `?limit=` pour la taille de l'échantillon).
+## Ressources des conteneurs
+
+Le déploiement applique par défaut des plafonds CPU/RAM à chaque service. Ils peuvent
+être adaptés à la capacité du serveur sans modifier le fichier Compose, par exemple :
+
+```env
+API_MEMORY_LIMIT=768m
+API_CPU_LIMIT=1.5
+DB_MEMORY_LIMIT=768m
+DB_CPU_LIMIT=1.0
+REDIS_MEMORY_LIMIT=256m
+REDIS_CPU_LIMIT=0.5
+WEB_MEMORY_LIMIT=128m
+WEB_CPU_LIMIT=0.5
+EXTERNAL_FETCH_WORKERS=6
+BACKGROUND_REFRESH_WORKERS=4
+```
+
+Redis évince les clés les moins récemment utilisées à partir de 160 Mo. L'API borne
+également ses récupérations externes et recycle périodiquement ses workers Gunicorn.
+Après déploiement, surveiller la marge avec `docker stats` et augmenter un plafond
+uniquement si le conteneur atteint régulièrement sa limite sous une charge normale.

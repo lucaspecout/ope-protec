@@ -1516,6 +1516,17 @@ _hubeau_water_services_cache_lock = Lock()
 _hubeau_water_services_cache: dict[str, Any] = {"by_commune": {}, "expires_at": datetime.min}
 _rnb_buildings_cache_lock = Lock()
 _rnb_buildings_cache: dict[str, Any] = {"by_bbox": {}, "expires_at": datetime.min}
+
+
+def _store_bounded_cache_entry(cache: dict[str, Any], bucket: str, key: str, value: Any, max_entries: int) -> None:
+    """Prevent caches keyed by user parameters from growing for the process lifetime."""
+    entries = cache.get(bucket)
+    if not isinstance(entries, dict):
+        entries = {}
+        cache[bucket] = entries
+    if key not in entries and len(entries) >= max_entries:
+        entries.pop(next(iter(entries)), None)
+    entries[key] = deepcopy(value)
 _AVALANCHE_ISERE_CACHE_TTL_SECONDS = 1800
 _avalanche_isere_cache_lock = Lock()
 _avalanche_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "avalanche_isere"}
@@ -11011,9 +11022,7 @@ def fetch_hubeau_water_quality(
         }
 
     with _hubeau_water_quality_cache_lock:
-        if not isinstance(_hubeau_water_quality_cache.get("by_commune"), dict):
-            _hubeau_water_quality_cache["by_commune"] = {}
-        _hubeau_water_quality_cache["by_commune"][cache_key] = deepcopy(result)
+        _store_bounded_cache_entry(_hubeau_water_quality_cache, "by_commune", cache_key, result, 128)
         _hubeau_water_quality_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_HUBEAU_WATER_QUALITY_CACHE_TTL_SECONDS)
     return result
 
@@ -11123,9 +11132,7 @@ def fetch_hubeau_water_services(
         }
 
     with _hubeau_water_services_cache_lock:
-        if not isinstance(_hubeau_water_services_cache.get("by_commune"), dict):
-            _hubeau_water_services_cache["by_commune"] = {}
-        _hubeau_water_services_cache["by_commune"][cache_key] = deepcopy(result)
+        _store_bounded_cache_entry(_hubeau_water_services_cache, "by_commune", cache_key, result, 128)
         _hubeau_water_services_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_HUBEAU_WATER_SERVICES_CACHE_TTL_SECONDS)
     return result
 
@@ -11215,9 +11222,7 @@ def fetch_rnb_buildings_bbox(
         }
 
     with _rnb_buildings_cache_lock:
-        if not isinstance(_rnb_buildings_cache.get("by_bbox"), dict):
-            _rnb_buildings_cache["by_bbox"] = {}
-        _rnb_buildings_cache["by_bbox"][cache_key] = deepcopy(result)
+        _store_bounded_cache_entry(_rnb_buildings_cache, "by_bbox", cache_key, result, 64)
         _rnb_buildings_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_RNB_BUILDINGS_CACHE_TTL_SECONDS)
     return result
 

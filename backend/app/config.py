@@ -14,14 +14,13 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("GEORISQUES_API_TOKEN", "GEORISQUE_API_TOKEN"),
     )
-    # Pool par worker × 3 workers gunicorn.
-    # pool_size=5 → 15 connexions de base, max_overflow=10 → 30 en pic = 45 total max.
-    # PostgreSQL par défaut accepte max 100 connexions — on reste bien en-dessous.
-    db_pool_size: int = 5
-    db_max_overflow: int = 10
+    # Pool par worker Gunicorn. Keep the total bounded across all workers.
+    db_pool_size: int = 3
+    db_max_overflow: int = 3
     db_pool_timeout_seconds: int = 30
     db_pool_recycle_seconds: int = 1800
-    external_fetch_workers: int = 18
+    external_fetch_workers: int = 6
+    background_refresh_workers: int = 4
     # NASA FIRMS — clé gratuite sur https://firms.modaps.eosdis.nasa.gov/api/map_key/
     firms_map_key: str = ""
     # TomTom Routing API. If configured, route estimates include live traffic.
