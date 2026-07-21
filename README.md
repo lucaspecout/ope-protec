@@ -22,9 +22,9 @@ Pour améliorer la fluidité des requêtes et réduire les bugs en production, a
    - Aujourd'hui, le service `web` mélange Nginx + backend Python.
    - Créer un service `api` dédié (Uvicorn/Gunicorn) + un service `web` statique simplifie le debug, améliore l'isolation des pannes et permet de scaler uniquement l'API.
 
-2. **Utiliser une image Redis figée et plus sûre**
-   - Remplacer `redis:latest` par `redis:7-alpine` pour éviter les changements inattendus lors des mises à jour.
-   - Ajouter `--maxmemory` et une politique d’éviction (`allkeys-lru` par exemple) pour éviter les saturations mémoire.
+2. **Borner Redis**
+   - Conserver une version compatible avec le volume persistant existant.
+   - Utiliser `--maxmemory` et une politique d’éviction (`allkeys-lru`) pour éviter les saturations mémoire.
 
 3. **Durcir les limites ressources + réservations**
    - Conserver des limites (`mem_limit`) mais ajouter aussi des contraintes CPU et des réservations minimales.

@@ -20,7 +20,9 @@ services:
       retries: 5
 
   redis:
-    image: redis:7-alpine
+    # Keep compatibility with the existing persisted volume, which may have
+    # been written by a newer Redis version previously pulled through :latest.
+    image: redis:latest
     restart: always
     mem_limit: ${REDIS_MEMORY_LIMIT:-256m}
     mem_reservation: ${REDIS_MEMORY_RESERVATION:-96m}
@@ -32,7 +34,8 @@ services:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 60s
 
   api:
     build:
