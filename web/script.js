@@ -17689,8 +17689,6 @@ function _notifRuleCardHtml(rule) {
 
   const qh = rule.quiet_hours || {};
   const qChecked = qh.enabled ? 'checked' : '';
-  const cooldown = rule.cooldown_minutes || 60;
-
   // Tous les boutons utilisent data-action + data-rule-id pour la délégation d'événements
   return `<div class="notif-rule-card" data-rule-id="${escapeHtml(id)}">
     <div class="notif-rule-head" data-action="toggle-card" data-rule-id="${escapeHtml(id)}">
@@ -17722,10 +17720,10 @@ function _notifRuleCardHtml(rule) {
           style="background:#5865f2;color:#fff;border:none;padding:.5rem .9rem;border-radius:8px;font-weight:600;cursor:pointer;font-size:.85rem;white-space:nowrap;align-self:flex-end">📤 Tester</button>
       </div>
       <div class="notif-field-row" style="display:flex;gap:1rem;flex-wrap:wrap;align-items:flex-end;margin-bottom:.75rem">
-        <label style="min-width:200px">Cooldown entre 2 alertes (min)
-          <input type="number" class="nrb-cooldown" value="${cooldown}" min="5" max="1440"
-            style="width:100px;display:block;margin-top:.25rem" />
-        </label>
+        <div style="font-size:.82rem;color:#51606f;background:#eef6ff;border:1px solid #cfe3f7;border-radius:8px;padding:.55rem .75rem">
+          Une notification est envoyée uniquement si le statut change vers jaune, orange ou rouge,
+          ou si de nouvelles informations sont détectées. Aucun rappel identique n'est renvoyé.
+        </div>
         <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;background:#f7f9fc;border:1px solid #e4e7eb;border-radius:8px;padding:.5rem .75rem">
           <span style="font-size:.83rem;font-weight:600">🌙 Heures silencieuses :</span>
           <label style="display:flex;align-items:center;gap:.35rem;margin:0;cursor:pointer;font-size:.82rem">
@@ -17764,7 +17762,6 @@ function _notifRuleCardHtml(rule) {
 function _notifCollectFromBody(body) {
   const name = (body.querySelector('.nrb-name')?.value || '').trim() || 'Notification';
   const webhook = (body.querySelector('.nrb-webhook')?.value || '').trim();
-  const cooldown = parseInt(body.querySelector('.nrb-cooldown')?.value) || 60;
   const quietEnabled = !!(body.querySelector('.nrb-quiet-enabled')?.checked);
   const quietStart = body.querySelector('.nrb-quiet-start')?.value || '22:00';
   const quietEnd = body.querySelector('.nrb-quiet-end')?.value || '07:00';
@@ -17774,7 +17771,7 @@ function _notifCollectFromBody(body) {
     const sel = body.querySelector(`.nrs-threshold[data-svc-key="${key}"]`);
     services[key] = { enabled: cb.checked, threshold: sel ? sel.value : 'orange' };
   });
-  return { name, discord_webhook: webhook, cooldown_minutes: cooldown,
+  return { name, discord_webhook: webhook,
     quiet_hours: { enabled: quietEnabled, start: quietStart, end: quietEnd }, services };
 }
 

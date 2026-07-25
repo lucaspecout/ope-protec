@@ -12,6 +12,7 @@ from typing import Callable
 from urllib.parse import urlparse
 
 import asyncio
+import hashlib
 import json
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
@@ -3229,10 +3230,47 @@ def _latest_feux_foret_fingerprint(data: dict) -> tuple[str | None, dict | None]
         return None, None
     latest = items[0] if isinstance(items[0], dict) else {}
     title = str(latest.get("title") or latest.get("commune") or "").strip()
-    link = str(latest.get("link") or "").strip()
-    recency = str(latest.get("recency") or latest.get("recency_hours") or "").strip()
-    fingerprint = "|".join(part for part in (link, title, recency) if part)
+    link = str(latest.get("link") or latest.get("url") or "").strip()
+    incident_id = str(latest.get("id") or latest.get("incident_id") or "").strip()
+    commune = str(latest.get("commune") or "").strip()
+    # Ne jamais inclure "il y a X heures" : cette valeur change à chaque
+    # collecte alors que le signalement reste strictement identique.
+    fingerprint = "|".join(part for part in (incident_id, link, title, commune) if part)
     return (fingerprint or None), latest
+
+
+_NOTIF_VOLATILE_FIELDS = {
+    "checked_at", "fetched_at", "last_checked_at", "last_refresh_at",
+    "observed_at", "refreshed_at", "retrieved_at", "updated_at",
+    "elapsed_ms", "latency_ms", "meta", "status",
+}
+
+
+def _notification_content_fingerprint(data: dict) -> str:
+    """Return a stable business-content signature, excluding refresh metadata."""
+    def _stable(value):
+        if isinstance(value, dict):
+            return {
+                str(key): _stable(item)
+                for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+                if str(key).lower() not in _NOTIF_VOLATILE_FIELDS
+            }
+        if isinstance(value, (list, tuple, set)):
+            items = [_stable(item) for item in value]
+            return sorted(
+                items,
+                key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True, default=str),
+            )
+        return value
+
+    canonical = json.dumps(
+        _stable(data),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _build_discord_embed(service_key: str, level: str, data: dict, reason: str = "") -> dict:
@@ -3633,13 +3671,9 @@ def _check_notif_quiet(quiet: dict, now_utc: "datetime") -> bool:
 def _check_and_send_notifications(service_key: str, data: dict) -> None:
     """Vérifie si une notification doit être envoyée pour chaque règle active.
 
-    Logique de déduplication par niveau :
-    - Nouvelle alerte (vert → orange/rouge) → envoie immédiatement
-    - Escalade (orange → rouge) → envoie immédiatement
-    - Même niveau déjà notifié → envoie seulement si cooldown expiré
-    - Alerte revenue au vert puis réapparue → envoie immédiatement (reset détecté)
-    - De-escalade (rouge → orange, toujours ≥ seuil) → envoie après cooldown
-    - Préfecture : envoie uniquement quand la dernière actualité change
+    Envoie uniquement lors d'un changement vers un niveau jaune/orange/rouge
+    configuré, ou lorsque le contenu métier change. Il n'y a aucun rappel
+    périodique pour un état inchangé.
 
     Clés Redis utilisées :
     - notif:state:{rule_id}:{service_key} → JSON {"notified_level":"orange","seen_below":false,"notified_at":"..."}
@@ -3720,57 +3754,59 @@ def _check_and_send_notifications(service_key: str, data: dict) -> None:
                     _save_notif_log(log_entry)
 
                     if _REDIS_OK and _redis is not None:
-                        _redis.setex(state_key, 30 * 86400, json.dumps({
+                        new_state = {
                             **state,
-                            "latest_fingerprint": latest_fingerprint,
-                            "latest_title": (latest_item or {}).get("title") or (latest_item or {}).get("headline") or "",
-                            "notified_at": now_utc.isoformat(),
                             "last_seen_at": now_utc.isoformat(),
-                        }))
+                        }
+                        if ok:
+                            new_state["latest_fingerprint"] = latest_fingerprint
+                            new_state["latest_title"] = (latest_item or {}).get("title") or (latest_item or {}).get("headline") or ""
+                            new_state["notified_at"] = now_utc.isoformat()
+                        _redis.setex(state_key, 30 * 86400, json.dumps(new_state))
                     continue
 
-                notified_level = str(state.get("notified_level") or "vert")
-                seen_below = bool(state.get("seen_below", True))  # True = était sous le seuil
-                notified_rank = _LEVEL_ORDER.get(notified_level, 0)
+                last_seen_level = str(state.get("last_seen_level") or "vert")
+                content_fingerprint = _notification_content_fingerprint(data)
 
                 # ── Mettre à jour seen_below ────────────────────────────────
                 if current_rank < threshold_rank:
-                    # Niveau actuel sous le seuil → mémoriser le reset, pas de notification
-                    new_state = {**state, "seen_below": True, "last_seen_level": current_level}
+                    # Sous le seuil : mémoriser la transition sans notifier.
+                    new_state = {
+                        **state,
+                        "seen_below": True,
+                        "last_seen_level": current_level,
+                        "last_seen_fingerprint": content_fingerprint,
+                    }
                     if _REDIS_OK and _redis is not None:
-                        _redis.setex(state_key, 7 * 86400, json.dumps(new_state))
+                        _redis.setex(state_key, 30 * 86400, json.dumps(new_state))
                     continue
 
                 # ── Décider si on envoie ────────────────────────────────────
-                cooldown_min = int(rule.get("cooldown_minutes") or 60)
-                last_notif_at: datetime | None = None
-                if state.get("notified_at"):
-                    try:
-                        last_notif_at = datetime.fromisoformat(str(state["notified_at"]).rstrip("Z"))
-                    except Exception:
-                        pass
+                # Migration silencieuse des états créés avant les empreintes :
+                # ne pas renvoyer une alerte déjà reçue lors du déploiement.
+                if (
+                    state.get("notified_at")
+                    and not state.get("notified_fingerprint")
+                    and str(state.get("notified_level") or "") == current_level
+                ):
+                    state["notified_fingerprint"] = content_fingerprint
+                    state["last_seen_fingerprint"] = content_fingerprint
+                    state["last_seen_level"] = current_level
+                    if _REDIS_OK and _redis is not None:
+                        _redis.setex(state_key, 30 * 86400, json.dumps(state))
+                    continue
 
-                cooldown_ok = (
-                    last_notif_at is None
-                    or (now_utc - last_notif_at).total_seconds() >= cooldown_min * 60
+                level_changed = current_level != last_seen_level
+                new_information = (
+                    content_fingerprint
+                    != str(state.get("notified_fingerprint") or "")
                 )
-
-                reason = ""
-                if seen_below or notified_rank < threshold_rank:
-                    # Alerte nouvelle ou revenue après un passage sous le seuil
-                    should_send = True
-                    reason = "nouvelle alerte" if notified_rank < threshold_rank else "retour alerte après retour au vert"
-                elif current_rank > notified_rank:
-                    # Escalade (orange → rouge)
-                    should_send = True
-                    reason = f"escalade {notified_level}→{current_level}"
-                elif cooldown_ok:
-                    # Même niveau ou de-escalade, cooldown expiré → rappel
-                    should_send = True
-                    reason = "rappel (cooldown expiré)"
-                else:
-                    # Même alerte déjà notifiée, cooldown pas expiré → silence
-                    should_send = False
+                should_send = level_changed or new_information
+                reason = (
+                    f"changement de statut {last_seen_level}→{current_level}"
+                    if level_changed
+                    else "nouvelles informations"
+                )
 
                 if not should_send:
                     continue
@@ -3792,15 +3828,19 @@ def _check_and_send_notifications(service_key: str, data: dict) -> None:
                 }
                 _save_notif_log(log_entry)
 
-                # ── Sauvegarder le nouvel état ──────────────────────────────
+                # Ne marquer le contenu comme notifié qu'après un envoi réussi.
                 if _REDIS_OK and _redis is not None:
                     new_state = {
+                        **state,
                         "notified_level": current_level,
                         "seen_below": False,
-                        "notified_at": now_utc.isoformat(),
                         "last_seen_level": current_level,
+                        "last_seen_fingerprint": content_fingerprint,
                     }
-                    _redis.setex(state_key, 7 * 86400, json.dumps(new_state))
+                    if ok:
+                        new_state["notified_at"] = now_utc.isoformat()
+                        new_state["notified_fingerprint"] = content_fingerprint
+                    _redis.setex(state_key, 30 * 86400, json.dumps(new_state))
 
             except Exception:
                 continue
