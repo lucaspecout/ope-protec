@@ -479,10 +479,10 @@ _VIGIEAU_CACHE_TTL_SECONDS = 900
 _ATMO_AURA_CACHE_TTL_SECONDS = 900
 _SNCF_ISERE_CACHE_TTL_SECONDS = 180
 _SNCF_STATION_TIMETABLE_CACHE_TTL_SECONDS = 60
-_FINESS_ISERE_CACHE_TTL_SECONDS = 43200
+_FINESS_ISERE_CACHE_TTL_SECONDS = 604800
 _FINESS_ISERE_MAX_LIMIT = 20000
 _FINESS_ISERE_STABLE_CSV_URL = "https://static.data.gouv.fr/resources/finess-extraction-du-fichier-des-etablissements/20260312-094547/etalab-cs1100507-stock-20260311-0343.csv"
-_GEODAE_ISERE_CACHE_TTL_SECONDS = 21600
+_GEODAE_ISERE_CACHE_TTL_SECONDS = 604800
 _GEODAE_ISERE_MAX_LIMIT = 20000
 _GEODAE_CSV_URL = "https://www.data.gouv.fr/api/1/datasets/r/edb6a9e1-2f16-4bbf-99e7-c3eb6b90794c"
 _GEODAE_TABULAR_API_URL = "https://tabular-api.data.gouv.fr/api/resources/edb6a9e1-2f16-4bbf-99e7-c3eb6b90794c/data/"
@@ -6279,7 +6279,7 @@ _METEO_FORETS_IMAGE_URL = (
     "https://rwg.meteofrance.com/gdss/v1/init_internet/blob"
     "?blob_filename=carte-meteo-foretJ1J2.png&reference_time-max=1&token={token}"
 )
-_METEO_FORETS_CACHE_TTL_SECONDS = 1800
+_METEO_FORETS_CACHE_TTL_SECONDS = 3600
 _meteo_forets_cache_lock = Lock()
 _meteo_forets_cache: dict[str, Any] = {
     "payload": None,
@@ -10691,7 +10691,7 @@ def load_risks_snapshot() -> dict[str, Any] | None:
 # ══════════════════════════════════════════════════════════════════════════════
 # FEUX DE FORÊT — FeuxDeForet.fr Isère (Feature 17)
 # ══════════════════════════════════════════════════════════════════════════════
-_FEUX_FORET_CACHE_TTL_SECONDS = 600
+_FEUX_FORET_CACHE_TTL_SECONDS = 180
 _feux_foret_cache_lock = Lock()
 _feux_foret_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "feux_foret_isere"}
 _FEUXDEFORET_ISERE_URL = "https://feuxdeforet.fr/auvergne-rhone-alpes/isere/"
@@ -11307,7 +11307,7 @@ def fetch_feux_foret_isere(force_refresh: bool = False) -> dict[str, Any]:
 # ══════════════════════════════════════════════════════════════════════════════
 # COLS ALPINS — État officiel Itinisère + fallback météo (Feature 19)
 # ══════════════════════════════════════════════════════════════════════════════
-_COLS_CACHE_TTL_SECONDS = 1800
+_COLS_CACHE_TTL_SECONDS = 21600
 _cols_cache_lock = Lock()
 _cols_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "cols_alpins_isere_v3"}
 _ITINISERE_COLS_LAYER_URL = "https://itinisere.fr/mod_turbolead/mod/inforoute/index.php?action=367&layer=Layer-repere_cols"
