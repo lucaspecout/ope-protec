@@ -4583,7 +4583,7 @@ async function renderFeuxForetLayer() {
   });
 }
 
-function renderFeuxSatelliteLayer() {
+async function renderFeuxSatelliteLayer({ forceRefresh = false, showFeedback = false } = {}) {
   if (!leafletMap || typeof window.L === 'undefined') return;
   const show = document.getElementById('filter-feux-satellite')?.checked ?? false;
   if (!show) {
@@ -4593,8 +4593,34 @@ function renderFeuxSatelliteLayer() {
   if (!feuxSatelliteLayer) feuxSatelliteLayer = window.L.layerGroup();
   if (!leafletMap.hasLayer(feuxSatelliteLayer)) feuxSatelliteLayer.addTo(leafletMap);
   feuxSatelliteLayer.clearLayers();
-  const feuxData = cachedExternalRisksSnapshot?.feux_foret_isere || {};
+  let feuxData = cachedExternalRisksSnapshot?.feux_foret_isere || {};
+  const snapshotHasSatelliteData = Object.prototype.hasOwnProperty.call(feuxData, 'satellite_detections');
+  if (forceRefresh || !snapshotHasSatelliteData) {
+    if (showFeedback) setMapFeedback('Chargement des détections satellite NASA FIRMS…');
+    try {
+      const refreshed = await api(`/feux-foret-isere?refresh=true`, {
+        bypassCache: true,
+        cacheTtlMs: 0,
+      });
+      if (!(document.getElementById('filter-feux-satellite')?.checked ?? false)) return;
+      cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(
+        cachedExternalRisksSnapshot,
+        { feux_foret_isere: refreshed },
+      );
+      feuxData = refreshed || {};
+    } catch (error) {
+      setMapFeedback(`Détections satellite indisponibles : ${sanitizeErrorMessage(error.message)}`, true);
+      return;
+    }
+  }
   const satelliteDetections = Array.isArray(feuxData.satellite_detections) ? feuxData.satellite_detections : [];
+  if (!satelliteDetections.length) {
+    const detail = feuxData.firms_error
+      ? `Flux NASA FIRMS indisponible : ${sanitizeErrorMessage(feuxData.firms_error)}`
+      : 'Aucune détection thermique satellite en Isère pendant les dernières 24 heures.';
+    if (showFeedback || forceRefresh || !snapshotHasSatelliteData) setMapFeedback(detail, Boolean(feuxData.firms_error));
+    return;
+  }
   satelliteDetections.forEach((item) => {
     const point = normalizeMapCoordinates(item.latitude, item.longitude);
     if (!point) return;
@@ -4620,6 +4646,9 @@ function renderFeuxSatelliteLayer() {
       + `Cercle = empreinte approximative du pixel (${Number(item.scan_km || 0).toFixed(2)} × ${Number(item.track_km || 0).toFixed(2)} km), pas le périmètre réel du feu.</span>`
     ).addTo(feuxSatelliteLayer);
   });
+  if (showFeedback || forceRefresh || !snapshotHasSatelliteData) {
+    setMapFeedback(`${satelliteDetections.length} détection(s) thermique(s) NASA FIRMS affichée(s) sur les dernières 24 heures.`);
+  }
 }
 
 // ── Feature 19 : Cols alpins ──────────────────────────────────────────────────
@@ -16132,7 +16161,9 @@ function bindAppInteractions() {
   });
   document.getElementById('filter-seismes')?.addEventListener('change', () => renderSeismesLayer());
   document.getElementById('filter-feux-foret')?.addEventListener('change', () => renderFeuxForetLayer());
-  document.getElementById('filter-feux-satellite')?.addEventListener('change', () => renderFeuxSatelliteLayer());
+  document.getElementById('filter-feux-satellite')?.addEventListener('change', (event) => {
+    renderFeuxSatelliteLayer({ forceRefresh: event.target.checked, showFeedback: event.target.checked });
+  });
   document.getElementById('filter-cols-alpins')?.addEventListener('change', () => renderColsAlpinsLayer());
   document.getElementById('filter-resources-telecom')?.addEventListener('change', () => {
     syncTelecomFilterState();
@@ -16754,6 +16785,7 @@ function bindAppInteractions() {
   ]);
   ['filter-hydro', 'filter-pcs', 'filter-meteo-cities', 'filter-meteo-layer-type', 'filter-seismes', 'filter-feux-foret', 'filter-feux-satellite', 'filter-resources-active', 'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type', 'filter-resources-hosting-capacity', 'filter-resources-hosting-surface', 'filter-resources-hosting-accessibility', 'filter-resources-hosting-sanitary', 'filter-resources-hosting-heating', 'filter-resources-hosting-parking', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-dae', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-resources-protcivile', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras', 'filter-autoroutes', 'filter-autoroutes-type', 'filter-pr-autoroutes', 'filter-tchoo-trains'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
+      if (id === 'filter-feux-satellite') return; // géré par son rafraîchissement FIRMS dédié
       if (RESOURCE_ONLY_FILTERS.has(id)) {
         // Rendu immédiat depuis le cache
         renderResources();

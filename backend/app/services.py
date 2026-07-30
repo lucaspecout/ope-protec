@@ -10710,7 +10710,9 @@ def _fetch_firms_isere_detections() -> list[dict[str, Any]]:
     detections: list[dict[str, Any]] = []
     seen: set[tuple[str, str, str, str]] = set()
     for source in _FIRMS_SOURCES:
-        url = f"{_FIRMS_AREA_API}/{map_key}/{source}/{_FIRMS_ISERE_BBOX}/1"
+        # Deux jours calendaires sont nécessaires pour couvrir les dernières
+        # 24 heures lorsque la journée UTC vient de changer.
+        url = f"{_FIRMS_AREA_API}/{map_key}/{source}/{_FIRMS_ISERE_BBOX}/2"
         raw_csv = _http_get_text(url, timeout=20, retries=1)
         for row in csv.DictReader(io.StringIO(raw_csv)):
             try:
@@ -10722,6 +10724,8 @@ def _fetch_firms_isere_detections() -> list[dict[str, Any]]:
                 continue
             acq_date = str(row.get("acq_date") or "")
             acq_time = str(row.get("acq_time") or "").zfill(4)
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", acq_date) or not re.fullmatch(r"\d{4}", acq_time):
+                continue
             satellite = str(row.get("satellite") or source.replace("_NRT", ""))
             fingerprint = (f"{lat:.4f}", f"{lon:.4f}", acq_date, acq_time)
             if fingerprint in seen:
@@ -10743,6 +10747,11 @@ def _fetch_firms_isere_detections() -> list[dict[str, Any]]:
                 "track_km": track_km,
                 "footprint_radius_m": round(math.hypot(scan_km, track_km) * 500),
             })
+    cutoff = datetime.utcnow() - timedelta(hours=24)
+    detections = [
+        item for item in detections
+        if datetime.strptime(item["detected_at"], "%Y-%m-%dT%H:%M:%SZ") >= cutoff
+    ]
     detections.sort(key=lambda item: item["detected_at"], reverse=True)
     return detections
 
