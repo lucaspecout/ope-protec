@@ -1119,6 +1119,7 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
     feux_foret_isere: mergeServiceSlot(previous.feux_foret_isere || {}, next.feux_foret_isere || {}, (p, n) => ({
       ...p, ...n,
       satellite_detections: keepPreviousArray(p.satellite_detections, n.satellite_detections),
+      fire_perimeters: n.fire_perimeters?.features?.length ? n.fire_perimeters : (p.fire_perimeters || n.fire_perimeters),
       fires: keepPreviousArray(p.fires, n.fires),
       top_fires: keepPreviousArray(p.top_fires, n.top_fires),
       recent_incidents: keepPreviousArray(p.recent_incidents, n.recent_incidents),
@@ -4614,13 +4615,103 @@ async function renderFeuxSatelliteLayer({ forceRefresh = false, showFeedback = f
     }
   }
   const satelliteDetections = Array.isArray(feuxData.satellite_detections) ? feuxData.satellite_detections : [];
-  if (!satelliteDetections.length) {
+  const perimeterFeatures = Array.isArray(feuxData.fire_perimeters?.features) ? feuxData.fire_perimeters.features : [];
+  if (!satelliteDetections.length && !perimeterFeatures.length) {
     const detail = feuxData.firms_error
-      ? `Flux NASA FIRMS indisponible : ${sanitizeErrorMessage(feuxData.firms_error)}`
-      : 'Aucune détection thermique satellite en Isère pendant les dernières 24 heures.';
-    if (showFeedback || forceRefresh || !snapshotHasSatelliteData) setMapFeedback(detail, Boolean(feuxData.firms_error));
+      ? `Flux satellite indisponible : ${sanitizeErrorMessage(feuxData.firms_error)}`
+      : 'Aucun feu ni périmètre brûlé détecté en Isère pendant les dernières 24 heures.';
+    if (showFeedback || forceRefresh || !snapshotHasSatelliteData) setMapFeedback(detail, Boolean(feuxData.firms_error && feuxData.effis_error));
     return;
   }
+
+  if (perimeterFeatures.length) {
+    window.L.geoJSON({ type: 'FeatureCollection', features: perimeterFeatures }, {
+      style: {
+        color: '#991b1b',
+        weight: 3,
+        fillColor: '#ef4444',
+        fillOpacity: 0.42,
+      },
+      onEachFeature: (feature, layer) => {
+        const properties = feature?.properties || {};
+        const area = properties.area_ha || properties.AREA_HA || properties.area || properties.AREA || '';
+        const date = properties.firedate || properties.FIREDATE || properties.date || properties.DATE || '';
+        layer.bindPopup(
+          `<strong>🔥 Périmètre brûlé Copernicus EFFIS</strong>`
+          + `${date ? `<br>Date : ${escapeHtml(date)}` : ''}`
+          + `${area ? `<br>Surface : ${escapeHtml(area)} ha` : ''}`
+          + '<br><span class="muted">Contour satellite de la surface brûlée, mis à jour par EFFIS.</span>'
+        );
+      },
+    }).addTo(feuxSatelliteLayer);
+  }
+
+  // Regrouper les pixels proches afin de dessiner l'enveloppe rouge du front
+  // thermique. Ce contour est une estimation immédiate, distincte du RDA EFFIS.
+  const activePoints = satelliteDetections.map((item) => ({
+    item,
+    lat: Number(item.latitude),
+    lon: Number(item.longitude),
+  })).filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lon));
+  const clusters = [];
+  activePoints.forEach((point) => {
+    const cluster = clusters.find((candidate) => candidate.some((other) => (
+      leafletMap.distance([point.lat, point.lon], [other.lat, other.lon]) <= 5000
+    )));
+    if (cluster) cluster.push(point);
+    else clusters.push([point]);
+  });
+  const convexHull = (points) => {
+    const sorted = [...points].sort((a, b) => a.lon - b.lon || a.lat - b.lat);
+    if (sorted.length <= 2) return sorted;
+    const cross = (origin, a, b) => (
+      (a.lon - origin.lon) * (b.lat - origin.lat) - (a.lat - origin.lat) * (b.lon - origin.lon)
+    );
+    const lower = [];
+    sorted.forEach((point) => {
+      while (lower.length >= 2 && cross(lower.at(-2), lower.at(-1), point) <= 0) lower.pop();
+      lower.push(point);
+    });
+    const upper = [];
+    [...sorted].reverse().forEach((point) => {
+      while (upper.length >= 2 && cross(upper.at(-2), upper.at(-1), point) <= 0) upper.pop();
+      upper.push(point);
+    });
+    lower.pop();
+    upper.pop();
+    return lower.concat(upper);
+  };
+  clusters.forEach((cluster) => {
+    if (cluster.length >= 3) {
+      const hull = convexHull(cluster);
+      window.L.polygon(hull.map((point) => [point.lat, point.lon]), {
+        color: '#7f1d1d',
+        weight: 4,
+        fillColor: '#dc2626',
+        fillOpacity: 0.5,
+      }).bindPopup(
+        `<strong>🔥 Contour thermique estimé</strong><br>${cluster.length} pixels VIIRS actifs`
+        + '<br><span class="muted">Enveloppe calculée à partir des détections satellite ; ce n’est pas encore un relevé terrain.</span>'
+      ).addTo(feuxSatelliteLayer);
+    } else {
+      const centerLat = cluster.reduce((sum, point) => sum + point.lat, 0) / cluster.length;
+      const centerLon = cluster.reduce((sum, point) => sum + point.lon, 0) / cluster.length;
+      const radius = cluster.length === 2
+        ? Math.max(400, leafletMap.distance([cluster[0].lat, cluster[0].lon], [cluster[1].lat, cluster[1].lon]) / 2 + 300)
+        : Math.max(300, Number(cluster[0].item.footprint_radius_m) || 265);
+      window.L.circle([centerLat, centerLon], {
+        radius,
+        color: '#7f1d1d',
+        weight: 4,
+        fillColor: '#dc2626',
+        fillOpacity: 0.5,
+      }).bindPopup(
+        `<strong>🔥 Zone thermique estimée</strong><br>${cluster.length} pixel(s) VIIRS actif(s)`
+        + '<br><span class="muted">Étendue minimale détectée par satellite.</span>'
+      ).addTo(feuxSatelliteLayer);
+    }
+  });
+
   satelliteDetections.forEach((item) => {
     const point = normalizeMapCoordinates(item.latitude, item.longitude);
     if (!point) return;
@@ -4637,7 +4728,7 @@ async function renderFeuxSatelliteLayer({ forceRefresh = false, showFeedback = f
       color,
       weight: 2,
       fillColor: color,
-      fillOpacity: 0.38,
+      fillOpacity: 0.22,
       bubblingMouseEvents: false,
     }).bindPopup(
       `<strong>🔥 Détection satellite VIIRS</strong><br>`
@@ -4647,7 +4738,9 @@ async function renderFeuxSatelliteLayer({ forceRefresh = false, showFeedback = f
     ).addTo(feuxSatelliteLayer);
   });
   if (showFeedback || forceRefresh || !snapshotHasSatelliteData) {
-    setMapFeedback(`${satelliteDetections.length} détection(s) thermique(s) NASA FIRMS affichée(s) sur les dernières 24 heures.`);
+    setMapFeedback(
+      `${perimeterFeatures.length} périmètre(s) EFFIS et ${clusters.length} zone(s) thermique(s) satellite affichés en rouge.`
+    );
   }
 }
 

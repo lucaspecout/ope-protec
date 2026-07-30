@@ -10700,6 +10700,38 @@ _FIRMS_AREA_API = "https://firms.modaps.eosdis.nasa.gov/api/area/csv"
 # Emprise légèrement plus large que l'Isère pour ne pas couper un foyer en limite.
 _FIRMS_ISERE_BBOX = "4.65,44.65,6.45,46.00"
 _FIRMS_SOURCES = ("VIIRS_SNPP_NRT", "VIIRS_NOAA20_NRT", "VIIRS_NOAA21_NRT")
+_EFFIS_BURNT_AREAS_WFS = "https://maps.effis.emergency.copernicus.eu/effis"
+
+
+def _fetch_effis_isere_perimeters() -> dict[str, Any]:
+    """Périmètres de surfaces brûlées publiés en temps réel par EFFIS."""
+    query = urlencode({
+        "service": "WFS",
+        "version": "1.1.0",
+        "request": "GetFeature",
+        "typeName": "ms:modis.ba.poly",
+        "outputFormat": "application/json",
+        "srsName": "CRS:84",
+        "bbox": f"{_FIRMS_ISERE_BBOX},CRS:84",
+        "maxFeatures": "500",
+    })
+    payload = _http_get_json(f"{_EFFIS_BURNT_AREAS_WFS}?{query}", timeout=30)
+    features = payload.get("features") if isinstance(payload, dict) else []
+    if not isinstance(features, list):
+        raise RuntimeError("Réponse EFFIS sans collection de périmètres")
+    current_year = str(datetime.utcnow().year)
+    current_features: list[dict[str, Any]] = []
+    for feature in features:
+        if not isinstance(feature, dict) or not isinstance(feature.get("geometry"), dict):
+            continue
+        properties = feature.get("properties") if isinstance(feature.get("properties"), dict) else {}
+        searchable = " ".join(str(value) for value in properties.values())
+        if current_year in searchable:
+            current_features.append(feature)
+    return {
+        "type": "FeatureCollection",
+        "features": current_features,
+    }
 
 
 def _fetch_firms_isere_detections() -> list[dict[str, Any]]:
@@ -11335,6 +11367,12 @@ def _fetch_feux_foret_live() -> dict[str, Any]:
         firms_detections = _fetch_firms_isere_detections()
     except Exception as exc:
         firms_error = str(exc)
+    effis_error = ""
+    effis_perimeters: dict[str, Any] = {"type": "FeatureCollection", "features": []}
+    try:
+        effis_perimeters = _fetch_effis_isere_perimeters()
+    except Exception as exc:
+        effis_error = str(exc)
 
     payload = {
         "service": "Feux de foret Isere",
@@ -11359,13 +11397,18 @@ def _fetch_feux_foret_live() -> dict[str, Any]:
         "satellite_detections_total": len(firms_detections),
         "satellite_source": "NASA FIRMS · VIIRS NRT",
         "satellite_window_hours": 24,
+        "fire_perimeters": effis_perimeters,
+        "fire_perimeters_total": len(effis_perimeters.get("features") or []),
+        "fire_perimeters_source": "Copernicus EFFIS · Rapid Damage Assessment",
         "updated_at": datetime.utcnow().isoformat() + "Z",
     }
     if feuxdeforet_error:
         payload["feuxdeforet_error"] = feuxdeforet_error
     if firms_error:
         payload["firms_error"] = firms_error
-    if feuxdeforet_error and firms_error:
+    if effis_error:
+        payload["effis_error"] = effis_error
+    if feuxdeforet_error and firms_error and effis_error:
         payload["status"] = "error"
     return payload
 
