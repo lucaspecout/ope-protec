@@ -10714,7 +10714,12 @@ def _fetch_firms_isere_detections() -> list[dict[str, Any]]:
         # 24 heures lorsque la journée UTC vient de changer.
         url = f"{_FIRMS_AREA_API}/{map_key}/{source}/{_FIRMS_ISERE_BBOX}/2"
         raw_csv = _http_get_text(url, timeout=20, retries=1)
-        for row in csv.DictReader(io.StringIO(raw_csv)):
+        reader = csv.DictReader(io.StringIO(raw_csv))
+        required_columns = {"latitude", "longitude", "acq_date", "acq_time"}
+        if not required_columns.issubset(set(reader.fieldnames or [])):
+            detail = re.sub(r"\s+", " ", raw_csv).strip()[:180] or "réponse vide"
+            raise RuntimeError(f"Réponse NASA FIRMS invalide pour {source}: {detail}")
+        for row in reader:
             try:
                 lat = float(row.get("latitude") or "")
                 lon = float(row.get("longitude") or "")
