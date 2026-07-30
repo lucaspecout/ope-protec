@@ -10697,36 +10697,46 @@ _feux_foret_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min
 _FEUXDEFORET_ISERE_URL = "https://feuxdeforet.fr/auvergne-rhone-alpes/isere/"
 _FEUXDEFORET_FIRES_WINDOW_DAYS = 2
 _FIRMS_AREA_API = "https://firms.modaps.eosdis.nasa.gov/api/area/csv"
-# Emprise légèrement plus large que l'Isère pour ne pas couper un foyer en limite.
-_FIRMS_ISERE_BBOX = "4.65,44.65,6.45,46.00"
+# France métropolitaine, avec une emprise séparée pour la Corse afin de limiter
+# les détections provenant des pays voisins.
+_FIRMS_FRANCE_BBOXES = (
+    "-5.30,42.20,8.30,51.20",
+    "8.50,41.30,9.70,43.10",
+)
 _FIRMS_SOURCES = ("VIIRS_SNPP_NRT", "VIIRS_NOAA20_NRT", "VIIRS_NOAA21_NRT")
 _EFFIS_BURNT_AREAS_WFS = "https://maps.effis.emergency.copernicus.eu/effis"
 
 
-def _fetch_effis_isere_perimeters() -> dict[str, Any]:
-    """Périmètres de surfaces brûlées publiés en temps réel par EFFIS."""
-    query = urlencode({
-        "service": "WFS",
-        "version": "1.1.0",
-        "request": "GetFeature",
-        "typeName": "ms:modis.ba.poly",
-        "outputFormat": "application/json",
-        "srsName": "CRS:84",
-        "bbox": f"{_FIRMS_ISERE_BBOX},CRS:84",
-        "maxFeatures": "500",
-    })
-    payload = _http_get_json(f"{_EFFIS_BURNT_AREAS_WFS}?{query}", timeout=30)
-    features = payload.get("features") if isinstance(payload, dict) else []
-    if not isinstance(features, list):
-        raise RuntimeError("Réponse EFFIS sans collection de périmètres")
+def _fetch_effis_france_perimeters() -> dict[str, Any]:
+    """Périmètres de surfaces brûlées publiés en temps réel par EFFIS en France."""
+    features: list[dict[str, Any]] = []
+    for bbox in _FIRMS_FRANCE_BBOXES:
+        query = urlencode({
+            "service": "WFS",
+            "version": "1.1.0",
+            "request": "GetFeature",
+            "typeName": "ms:modis.ba.poly",
+            "outputFormat": "application/json",
+            "srsName": "CRS:84",
+            "bbox": f"{bbox},CRS:84",
+            "maxFeatures": "1000",
+        })
+        payload = _http_get_json(f"{_EFFIS_BURNT_AREAS_WFS}?{query}", timeout=30)
+        bbox_features = payload.get("features") if isinstance(payload, dict) else []
+        if not isinstance(bbox_features, list):
+            raise RuntimeError("Réponse EFFIS sans collection de périmètres")
+        features.extend(bbox_features)
     current_year = str(datetime.utcnow().year)
     current_features: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
     for feature in features:
         if not isinstance(feature, dict) or not isinstance(feature.get("geometry"), dict):
             continue
         properties = feature.get("properties") if isinstance(feature.get("properties"), dict) else {}
         searchable = " ".join(str(value) for value in properties.values())
-        if current_year in searchable:
+        feature_id = str(feature.get("id") or json.dumps(feature.get("geometry"), sort_keys=True))
+        if current_year in searchable and feature_id not in seen_ids:
+            seen_ids.add(feature_id)
             current_features.append(feature)
     return {
         "type": "FeatureCollection",
@@ -10734,56 +10744,57 @@ def _fetch_effis_isere_perimeters() -> dict[str, Any]:
     }
 
 
-def _fetch_firms_isere_detections() -> list[dict[str, Any]]:
-    """Détections thermiques VIIRS NRT sur l'Isère (empreinte du pixel, pas périmètre brûlé)."""
+def _fetch_firms_france_detections() -> list[dict[str, Any]]:
+    """Détections thermiques VIIRS NRT en France métropolitaine et Corse."""
     map_key = str(settings.firms_map_key or "").strip()
     if not map_key:
         return []
     detections: list[dict[str, Any]] = []
     seen: set[tuple[str, str, str, str]] = set()
     for source in _FIRMS_SOURCES:
-        # Deux jours calendaires sont nécessaires pour couvrir les dernières
-        # 24 heures lorsque la journée UTC vient de changer.
-        url = f"{_FIRMS_AREA_API}/{map_key}/{source}/{_FIRMS_ISERE_BBOX}/2"
-        raw_csv = _http_get_text(url, timeout=20, retries=1)
-        reader = csv.DictReader(io.StringIO(raw_csv))
-        required_columns = {"latitude", "longitude", "acq_date", "acq_time"}
-        if not required_columns.issubset(set(reader.fieldnames or [])):
-            detail = re.sub(r"\s+", " ", raw_csv).strip()[:180] or "réponse vide"
-            raise RuntimeError(f"Réponse NASA FIRMS invalide pour {source}: {detail}")
-        for row in reader:
-            try:
-                lat = float(row.get("latitude") or "")
-                lon = float(row.get("longitude") or "")
-                scan_km = max(0.1, float(row.get("scan") or 0.375))
-                track_km = max(0.1, float(row.get("track") or 0.375))
-            except (TypeError, ValueError):
-                continue
-            acq_date = str(row.get("acq_date") or "")
-            acq_time = str(row.get("acq_time") or "").zfill(4)
-            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", acq_date) or not re.fullmatch(r"\d{4}", acq_time):
-                continue
-            satellite = str(row.get("satellite") or source.replace("_NRT", ""))
-            fingerprint = (f"{lat:.4f}", f"{lon:.4f}", acq_date, acq_time)
-            if fingerprint in seen:
-                continue
-            seen.add(fingerprint)
-            detections.append({
-                "latitude": lat,
-                "longitude": lon,
-                "acq_date": acq_date,
-                "acq_time": acq_time,
-                "detected_at": f"{acq_date}T{acq_time[:2]}:{acq_time[2:]}:00Z",
-                "satellite": satellite,
-                "instrument": row.get("instrument") or "VIIRS",
-                "confidence": row.get("confidence") or "n",
-                "frp": float(row.get("frp") or 0),
-                "brightness": float(row.get("bright_ti4") or 0),
-                "daynight": row.get("daynight") or "",
-                "scan_km": scan_km,
-                "track_km": track_km,
-                "footprint_radius_m": round(math.hypot(scan_km, track_km) * 500),
-            })
+        for bbox in _FIRMS_FRANCE_BBOXES:
+            # Deux jours calendaires sont nécessaires pour couvrir les dernières
+            # 24 heures lorsque la journée UTC vient de changer.
+            url = f"{_FIRMS_AREA_API}/{map_key}/{source}/{bbox}/2"
+            raw_csv = _http_get_text(url, timeout=20, retries=1)
+            reader = csv.DictReader(io.StringIO(raw_csv))
+            required_columns = {"latitude", "longitude", "acq_date", "acq_time"}
+            if not required_columns.issubset(set(reader.fieldnames or [])):
+                detail = re.sub(r"\s+", " ", raw_csv).strip()[:180] or "réponse vide"
+                raise RuntimeError(f"Réponse NASA FIRMS invalide pour {source}: {detail}")
+            for row in reader:
+                try:
+                    lat = float(row.get("latitude") or "")
+                    lon = float(row.get("longitude") or "")
+                    scan_km = max(0.1, float(row.get("scan") or 0.375))
+                    track_km = max(0.1, float(row.get("track") or 0.375))
+                except (TypeError, ValueError):
+                    continue
+                acq_date = str(row.get("acq_date") or "")
+                acq_time = str(row.get("acq_time") or "").zfill(4)
+                if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", acq_date) or not re.fullmatch(r"\d{4}", acq_time):
+                    continue
+                satellite = str(row.get("satellite") or source.replace("_NRT", ""))
+                fingerprint = (f"{lat:.4f}", f"{lon:.4f}", acq_date, acq_time)
+                if fingerprint in seen:
+                    continue
+                seen.add(fingerprint)
+                detections.append({
+                    "latitude": lat,
+                    "longitude": lon,
+                    "acq_date": acq_date,
+                    "acq_time": acq_time,
+                    "detected_at": f"{acq_date}T{acq_time[:2]}:{acq_time[2:]}:00Z",
+                    "satellite": satellite,
+                    "instrument": row.get("instrument") or "VIIRS",
+                    "confidence": row.get("confidence") or "n",
+                    "frp": float(row.get("frp") or 0),
+                    "brightness": float(row.get("bright_ti4") or 0),
+                    "daynight": row.get("daynight") or "",
+                    "scan_km": scan_km,
+                    "track_km": track_km,
+                    "footprint_radius_m": round(math.hypot(scan_km, track_km) * 500),
+                })
     cutoff = datetime.utcnow() - timedelta(hours=24)
     detections = [
         item for item in detections
@@ -11364,13 +11375,13 @@ def _fetch_feux_foret_live() -> dict[str, Any]:
     firms_error = ""
     firms_detections: list[dict[str, Any]] = []
     try:
-        firms_detections = _fetch_firms_isere_detections()
+        firms_detections = _fetch_firms_france_detections()
     except Exception as exc:
         firms_error = str(exc)
     effis_error = ""
     effis_perimeters: dict[str, Any] = {"type": "FeatureCollection", "features": []}
     try:
-        effis_perimeters = _fetch_effis_isere_perimeters()
+        effis_perimeters = _fetch_effis_france_perimeters()
     except Exception as exc:
         effis_error = str(exc)
 

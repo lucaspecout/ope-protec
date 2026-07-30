@@ -4619,7 +4619,7 @@ async function renderFeuxSatelliteLayer({ forceRefresh = false, showFeedback = f
   if (!satelliteDetections.length && !perimeterFeatures.length) {
     const detail = feuxData.firms_error
       ? `Flux satellite indisponible : ${sanitizeErrorMessage(feuxData.firms_error)}`
-      : 'Aucun feu ni périmètre brûlé détecté en Isère pendant les dernières 24 heures.';
+      : 'Aucun feu ni périmètre brûlé détecté en France pendant les dernières 24 heures.';
     if (showFeedback || forceRefresh || !snapshotHasSatelliteData) setMapFeedback(detail, Boolean(feuxData.firms_error && feuxData.effis_error));
     return;
   }
