@@ -376,6 +376,7 @@ let montagneLayer = null;
 let helipadLayer = null;
 let seismesLayer = null;
 let feuxForetLayer = null;
+let feuxSatelliteLayer = null;
 let colsAlpinsLayer = null;
 let meteoCitiesLayer = null;
 let populationHeatLayer = null;
@@ -4568,6 +4569,31 @@ async function renderFeuxForetLayer() {
   if (!leafletMap.hasLayer(feuxForetLayer)) feuxForetLayer.addTo(leafletMap);
   feuxForetLayer.clearLayers();
   const feuxData = cachedExternalRisksSnapshot?.feux_foret_isere || {};
+  const recentIncidents = Array.isArray(feuxData.recent_incidents) ? feuxData.recent_incidents : [];
+  const placed = await Promise.all(recentIncidents.map(async (item) => ({ item, point: await feuxIncidentPoint(item) })));
+  if (!(document.getElementById('filter-feux-foret')?.checked ?? false) || !feuxForetLayer) return;
+  placed.forEach(({ item, point }) => {
+    if (!point) return;
+    const style = feuxAgeStyle(item, 'week');
+    const icon = feuxMarkerIcon(style);
+    const link = item.link ? `<br><a href="${escapeHtml(item.link)}" target="_blank" rel="noreferrer">Voir la fiche FeuxDeForet.fr</a>` : '';
+    window.L.marker([point.lat, point.lon], { icon })
+      .bindPopup(`<strong>FeuxDeForet.fr · ${escapeHtml(style.label)}</strong><br>${escapeHtml(item.title || item.commune || 'Signalement Isère')}<br><span class="muted">${escapeHtml(item.recency || 'Signalement récent')} · position commune</span>${link}`)
+      .addTo(feuxForetLayer);
+  });
+}
+
+function renderFeuxSatelliteLayer() {
+  if (!leafletMap || typeof window.L === 'undefined') return;
+  const show = document.getElementById('filter-feux-satellite')?.checked ?? false;
+  if (!show) {
+    if (feuxSatelliteLayer && leafletMap.hasLayer(feuxSatelliteLayer)) leafletMap.removeLayer(feuxSatelliteLayer);
+    return;
+  }
+  if (!feuxSatelliteLayer) feuxSatelliteLayer = window.L.layerGroup();
+  if (!leafletMap.hasLayer(feuxSatelliteLayer)) feuxSatelliteLayer.addTo(leafletMap);
+  feuxSatelliteLayer.clearLayers();
+  const feuxData = cachedExternalRisksSnapshot?.feux_foret_isere || {};
   const satelliteDetections = Array.isArray(feuxData.satellite_detections) ? feuxData.satellite_detections : [];
   satelliteDetections.forEach((item) => {
     const point = normalizeMapCoordinates(item.latitude, item.longitude);
@@ -4592,19 +4618,7 @@ async function renderFeuxForetLayer() {
       + `${escapeHtml(detectedLabel)} · confiance ${escapeHtml(confidence)}<br>`
       + `<span class="muted">${escapeHtml(item.satellite || 'NASA')} · puissance radiative ${Number(item.frp || 0).toFixed(1)} MW<br>`
       + `Cercle = empreinte approximative du pixel (${Number(item.scan_km || 0).toFixed(2)} × ${Number(item.track_km || 0).toFixed(2)} km), pas le périmètre réel du feu.</span>`
-    ).addTo(feuxForetLayer);
-  });
-  const recentIncidents = Array.isArray(feuxData.recent_incidents) ? feuxData.recent_incidents : [];
-  const placed = await Promise.all(recentIncidents.map(async (item) => ({ item, point: await feuxIncidentPoint(item) })));
-  if (!(document.getElementById('filter-feux-foret')?.checked ?? false) || !feuxForetLayer) return;
-  placed.forEach(({ item, point }) => {
-    if (!point) return;
-    const style = feuxAgeStyle(item, 'week');
-    const icon = feuxMarkerIcon(style);
-    const link = item.link ? `<br><a href="${escapeHtml(item.link)}" target="_blank" rel="noreferrer">Voir la fiche FeuxDeForet.fr</a>` : '';
-    window.L.marker([point.lat, point.lon], { icon })
-      .bindPopup(`<strong>FeuxDeForet.fr · ${escapeHtml(style.label)}</strong><br>${escapeHtml(item.title || item.commune || 'Signalement Isère')}<br><span class="muted">${escapeHtml(item.recency || 'Signalement récent')} · position commune</span>${link}`)
-      .addTo(feuxForetLayer);
+    ).addTo(feuxSatelliteLayer);
   });
 }
 
@@ -4931,6 +4945,7 @@ function initMap() {
   barrageMarkerLayer = window.L.layerGroup();
   seismesLayer = window.L.layerGroup();
   feuxForetLayer = window.L.layerGroup();
+  feuxSatelliteLayer = window.L.layerGroup();
   colsAlpinsLayer = window.L.layerGroup();
   meteoCitiesLayer = window.L.layerGroup();
   leafletMap.on('click', onMapClickEvacuationCircle);
@@ -5207,6 +5222,7 @@ async function resetMapFilters() {
   const tchooTrains = document.getElementById('filter-tchoo-trains');
   const seismes = document.getElementById('filter-seismes');
   const feuxForet = document.getElementById('filter-feux-foret');
+  const feuxSatellite = document.getElementById('filter-feux-satellite');
   const healthResources = document.getElementById('filter-resources-health');
   const daeResources = document.getElementById('filter-resources-dae');
   const commandResources = document.getElementById('filter-resources-command');
@@ -5229,6 +5245,7 @@ async function resetMapFilters() {
   if (tchooTrains) tchooTrains.checked = false;
   if (seismes) seismes.checked = false;
   if (feuxForet) feuxForet.checked = false;
+  if (feuxSatellite) feuxSatellite.checked = false;
   if (healthResources) healthResources.checked = false;
   if (daeResources) daeResources.checked = false;
   if (commandResources) commandResources.checked = true;
@@ -5249,6 +5266,7 @@ async function resetMapFilters() {
   await renderMeteoCitiesLayer();
   renderSeismesLayer();
   renderFeuxForetLayer();
+  renderFeuxSatelliteLayer();
   await renderMunicipalitiesOnMap(cachedMunicipalities);
   await renderPopulationByCityLayer();
   await renderTrafficOnMap();
@@ -5287,7 +5305,7 @@ function toggleMapContrast() {
 
 function fitMapToData(showFeedback = false) {
   if (!leafletMap) return;
-  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsBoundaryLayer, pcsLayer, resourceLayer, institutionLayer, populationLayer, searchLayer, customPointsLayer, mapPointsLayer, itinisereLayer, bisonLayer, bisonCameraLayer, seismesLayer, feuxForetLayer, tchooTrainLayer].filter(Boolean);
+  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsBoundaryLayer, pcsLayer, resourceLayer, institutionLayer, populationLayer, searchLayer, customPointsLayer, mapPointsLayer, itinisereLayer, bisonLayer, bisonCameraLayer, seismesLayer, feuxForetLayer, feuxSatelliteLayer, tchooTrainLayer].filter(Boolean);
   const bounds = window.L.latLngBounds([]);
   layers.forEach((layer) => {
     if (layer?.getBounds) {
@@ -14732,6 +14750,7 @@ function renderExternalRisks(data = {}) {
     applyAvalancheZoneLayer();
     renderSeismesLayer();
     renderFeuxForetLayer();
+    renderFeuxSatelliteLayer();
   }
   renderNewsPanel(prefecture, dauphine, franceBleu, placegrenet, grenobleMétropole, arsAura, seismesIsere);
   renderSncfAlerts(sncf);
@@ -16113,6 +16132,7 @@ function bindAppInteractions() {
   });
   document.getElementById('filter-seismes')?.addEventListener('change', () => renderSeismesLayer());
   document.getElementById('filter-feux-foret')?.addEventListener('change', () => renderFeuxForetLayer());
+  document.getElementById('filter-feux-satellite')?.addEventListener('change', () => renderFeuxSatelliteLayer());
   document.getElementById('filter-cols-alpins')?.addEventListener('change', () => renderColsAlpinsLayer());
   document.getElementById('filter-resources-telecom')?.addEventListener('change', () => {
     syncTelecomFilterState();
@@ -16732,7 +16752,7 @@ function bindAppInteractions() {
     'filter-resources-telecom', 'filter-resources-telecom-type',
     'filter-resources-active', 'filter-resources-protcivile',
   ]);
-  ['filter-hydro', 'filter-pcs', 'filter-meteo-cities', 'filter-meteo-layer-type', 'filter-seismes', 'filter-feux-foret', 'filter-resources-active', 'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type', 'filter-resources-hosting-capacity', 'filter-resources-hosting-surface', 'filter-resources-hosting-accessibility', 'filter-resources-hosting-sanitary', 'filter-resources-hosting-heating', 'filter-resources-hosting-parking', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-dae', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-resources-protcivile', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras', 'filter-autoroutes', 'filter-autoroutes-type', 'filter-pr-autoroutes', 'filter-tchoo-trains'].forEach((id) => {
+  ['filter-hydro', 'filter-pcs', 'filter-meteo-cities', 'filter-meteo-layer-type', 'filter-seismes', 'filter-feux-foret', 'filter-feux-satellite', 'filter-resources-active', 'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type', 'filter-resources-hosting-capacity', 'filter-resources-hosting-surface', 'filter-resources-hosting-accessibility', 'filter-resources-hosting-sanitary', 'filter-resources-hosting-heating', 'filter-resources-hosting-parking', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-dae', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-resources-protcivile', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras', 'filter-autoroutes', 'filter-autoroutes-type', 'filter-pr-autoroutes', 'filter-tchoo-trains'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
       if (RESOURCE_ONLY_FILTERS.has(id)) {
         // Rendu immédiat depuis le cache
@@ -16744,6 +16764,7 @@ function bindAppInteractions() {
       await renderMeteoCitiesLayer();
       renderSeismesLayer();
       renderFeuxForetLayer();
+      renderFeuxSatelliteLayer();
       await renderMunicipalitiesOnMap(cachedMunicipalities);
       renderResources();
       await renderPopulationByCityLayer();
