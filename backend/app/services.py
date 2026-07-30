@@ -10696,6 +10696,55 @@ _feux_foret_cache_lock = Lock()
 _feux_foret_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "feux_foret_isere"}
 _FEUXDEFORET_ISERE_URL = "https://feuxdeforet.fr/auvergne-rhone-alpes/isere/"
 _FEUXDEFORET_FIRES_WINDOW_DAYS = 2
+_FIRMS_AREA_API = "https://firms.modaps.eosdis.nasa.gov/api/area/csv"
+# Emprise légèrement plus large que l'Isère pour ne pas couper un foyer en limite.
+_FIRMS_ISERE_BBOX = "4.65,44.65,6.45,46.00"
+_FIRMS_SOURCES = ("VIIRS_SNPP_NRT", "VIIRS_NOAA20_NRT", "VIIRS_NOAA21_NRT")
+
+
+def _fetch_firms_isere_detections() -> list[dict[str, Any]]:
+    """Détections thermiques VIIRS NRT sur l'Isère (empreinte du pixel, pas périmètre brûlé)."""
+    map_key = str(settings.firms_map_key or "").strip()
+    if not map_key:
+        return []
+    detections: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for source in _FIRMS_SOURCES:
+        url = f"{_FIRMS_AREA_API}/{map_key}/{source}/{_FIRMS_ISERE_BBOX}/1"
+        raw_csv = _http_get_text(url, timeout=20, retries=1)
+        for row in csv.DictReader(io.StringIO(raw_csv)):
+            try:
+                lat = float(row.get("latitude") or "")
+                lon = float(row.get("longitude") or "")
+                scan_km = max(0.1, float(row.get("scan") or 0.375))
+                track_km = max(0.1, float(row.get("track") or 0.375))
+            except (TypeError, ValueError):
+                continue
+            acq_date = str(row.get("acq_date") or "")
+            acq_time = str(row.get("acq_time") or "").zfill(4)
+            satellite = str(row.get("satellite") or source.replace("_NRT", ""))
+            fingerprint = (f"{lat:.4f}", f"{lon:.4f}", acq_date, acq_time)
+            if fingerprint in seen:
+                continue
+            seen.add(fingerprint)
+            detections.append({
+                "latitude": lat,
+                "longitude": lon,
+                "acq_date": acq_date,
+                "acq_time": acq_time,
+                "detected_at": f"{acq_date}T{acq_time[:2]}:{acq_time[2:]}:00Z",
+                "satellite": satellite,
+                "instrument": row.get("instrument") or "VIIRS",
+                "confidence": row.get("confidence") or "n",
+                "frp": float(row.get("frp") or 0),
+                "brightness": float(row.get("bright_ti4") or 0),
+                "daynight": row.get("daynight") or "",
+                "scan_km": scan_km,
+                "track_km": track_km,
+                "footprint_radius_m": round(math.hypot(scan_km, track_km) * 500),
+            })
+    detections.sort(key=lambda item: item["detected_at"], reverse=True)
+    return detections
 
 def _parse_feuxdeforet_isere_page(raw_html: str) -> dict[str, Any]:
     anchors: list[dict[str, str]] = []
@@ -11266,10 +11315,16 @@ def _fetch_feux_foret_live() -> dict[str, Any]:
         feuxdeforet = _fetch_feuxdeforet_isere_page()
     except Exception as exc:
         feuxdeforet_error = str(exc)
+    firms_error = ""
+    firms_detections: list[dict[str, Any]] = []
+    try:
+        firms_detections = _fetch_firms_isere_detections()
+    except Exception as exc:
+        firms_error = str(exc)
 
     payload = {
         "service": "Feux de foret Isere",
-        "status": "online" if feuxdeforet.get("recent_incidents") or feuxdeforet.get("info_items") else "degraded",
+        "status": "online" if firms_detections or feuxdeforet.get("recent_incidents") or feuxdeforet.get("info_items") else "degraded",
         "source": feuxdeforet.get("source") or _FEUXDEFORET_ISERE_URL,
         "sources": [feuxdeforet.get("source") or _FEUXDEFORET_ISERE_URL],
         "data_source": "FeuxDeForet.fr",
@@ -11286,10 +11341,17 @@ def _fetch_feux_foret_live() -> dict[str, Any]:
         "info_items": feuxdeforet.get("info_items") or [],
         "info_items_total": feuxdeforet.get("info_items_total") or 0,
         "feuxdeforet_source": feuxdeforet.get("source") or _FEUXDEFORET_ISERE_URL,
+        "satellite_detections": firms_detections,
+        "satellite_detections_total": len(firms_detections),
+        "satellite_source": "NASA FIRMS · VIIRS NRT",
+        "satellite_window_hours": 24,
         "updated_at": datetime.utcnow().isoformat() + "Z",
     }
     if feuxdeforet_error:
         payload["feuxdeforet_error"] = feuxdeforet_error
+    if firms_error:
+        payload["firms_error"] = firms_error
+    if feuxdeforet_error and firms_error:
         payload["status"] = "error"
     return payload
 

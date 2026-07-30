@@ -1117,6 +1117,7 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
     })),
     feux_foret_isere: mergeServiceSlot(previous.feux_foret_isere || {}, next.feux_foret_isere || {}, (p, n) => ({
       ...p, ...n,
+      satellite_detections: keepPreviousArray(p.satellite_detections, n.satellite_detections),
       fires: keepPreviousArray(p.fires, n.fires),
       top_fires: keepPreviousArray(p.top_fires, n.top_fires),
       recent_incidents: keepPreviousArray(p.recent_incidents, n.recent_incidents),
@@ -4567,6 +4568,32 @@ async function renderFeuxForetLayer() {
   if (!leafletMap.hasLayer(feuxForetLayer)) feuxForetLayer.addTo(leafletMap);
   feuxForetLayer.clearLayers();
   const feuxData = cachedExternalRisksSnapshot?.feux_foret_isere || {};
+  const satelliteDetections = Array.isArray(feuxData.satellite_detections) ? feuxData.satellite_detections : [];
+  satelliteDetections.forEach((item) => {
+    const point = normalizeMapCoordinates(item.latitude, item.longitude);
+    if (!point) return;
+    const confidenceKey = String(item.confidence || 'n').toLowerCase();
+    const confidence = ({ h: 'élevée', n: 'nominale', l: 'faible' })[confidenceKey] || confidenceKey;
+    const color = confidenceKey === 'h' ? '#dc2626' : confidenceKey === 'l' ? '#f59e0b' : '#f97316';
+    const radius = Math.max(180, Number(item.footprint_radius_m) || 265);
+    const detectedAt = parseFeuxAbsoluteDate(item);
+    const detectedLabel = detectedAt
+      ? detectedAt.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })
+      : `${item.acq_date || ''} ${item.acq_time || ''}`.trim();
+    window.L.circle([point.lat, point.lon], {
+      radius,
+      color,
+      weight: 2,
+      fillColor: color,
+      fillOpacity: 0.38,
+      bubblingMouseEvents: false,
+    }).bindPopup(
+      `<strong>🔥 Détection satellite VIIRS</strong><br>`
+      + `${escapeHtml(detectedLabel)} · confiance ${escapeHtml(confidence)}<br>`
+      + `<span class="muted">${escapeHtml(item.satellite || 'NASA')} · puissance radiative ${Number(item.frp || 0).toFixed(1)} MW<br>`
+      + `Cercle = empreinte approximative du pixel (${Number(item.scan_km || 0).toFixed(2)} × ${Number(item.track_km || 0).toFixed(2)} km), pas le périmètre réel du feu.</span>`
+    ).addTo(feuxForetLayer);
+  });
   const recentIncidents = Array.isArray(feuxData.recent_incidents) ? feuxData.recent_incidents : [];
   const placed = await Promise.all(recentIncidents.map(async (item) => ({ item, point: await feuxIncidentPoint(item) })));
   if (!(document.getElementById('filter-feux-foret')?.checked ?? false) || !feuxForetLayer) return;
