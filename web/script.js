@@ -4591,7 +4591,10 @@ async function renderFeuxSatelliteLayer({ forceRefresh = false, showFeedback = f
     if (feuxSatelliteLayer && leafletMap.hasLayer(feuxSatelliteLayer)) leafletMap.removeLayer(feuxSatelliteLayer);
     return;
   }
-  if (!feuxSatelliteLayer) feuxSatelliteLayer = window.L.layerGroup();
+  if (showFeedback) {
+    leafletMap.fitBounds([[41.30, -5.30], [51.20, 9.70]], { padding: [18, 18] });
+  }
+  if (!feuxSatelliteLayer) feuxSatelliteLayer = window.L.featureGroup();
   if (!leafletMap.hasLayer(feuxSatelliteLayer)) feuxSatelliteLayer.addTo(leafletMap);
   feuxSatelliteLayer.clearLayers();
   let feuxData = cachedExternalRisksSnapshot?.feux_foret_isere || {};
@@ -5067,7 +5070,7 @@ function initMap() {
   barrageMarkerLayer = window.L.layerGroup();
   seismesLayer = window.L.layerGroup();
   feuxForetLayer = window.L.layerGroup();
-  feuxSatelliteLayer = window.L.layerGroup();
+  feuxSatelliteLayer = window.L.featureGroup();
   colsAlpinsLayer = window.L.layerGroup();
   meteoCitiesLayer = window.L.layerGroup();
   leafletMap.on('click', onMapClickEvacuationCircle);
