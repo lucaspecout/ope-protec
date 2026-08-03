@@ -6721,6 +6721,18 @@ body {
   backdrop-filter: blur(12px);
 }
 
+#map-panel .map-zone-impact > .muted {
+  color: #a9bddb;
+}
+
+#map-panel .map-zone-impact .zone-impact-light-card {
+  color: #183153;
+}
+
+#map-panel .map-zone-impact .zone-impact-light-card .muted {
+  color: #526b91;
+}
+
 #map-panel .map-feedback-bar,
 #map-panel .map-selected-location {
   color: #dfeaff;

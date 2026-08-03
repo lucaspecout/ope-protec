@@ -3730,11 +3730,11 @@ async function computeZoneImpact() {
     ['Sites sensibles', (schools.length + ehpads.length + dangers.length).toLocaleString('fr-FR')],
   ];
   parts.push(`<li style="margin-bottom:.7em;display:grid;grid-template-columns:repeat(auto-fit,minmax(92px,1fr));gap:.35em">
-    ${kpis.map(([label, value]) => `<span style="display:block;padding:.45em;background:#f8faff;border:1px solid #dbe7fb;border-radius:6px"><strong style="display:block;font-size:1rem">${escapeHtml(value)}</strong><span class="muted">${escapeHtml(label)}</span></span>`).join('')}
+    ${kpis.map(([label, value]) => `<span class="zone-impact-light-card zone-impact-kpi" style="display:block;padding:.45em;background:#f8faff;border:1px solid #dbe7fb;border-radius:6px"><strong style="display:block;font-size:1rem">${escapeHtml(value)}</strong><span class="muted">${escapeHtml(label)}</span></span>`).join('')}
   </li>`);
 
   // 1. Identification de la zone
-  parts.push(`<li style="margin-bottom:.7em;padding:.5em;background:#f0f4ff;border-radius:6px">
+  parts.push(`<li class="zone-impact-light-card" style="margin-bottom:.7em;padding:.5em;background:#f0f4ff;border-radius:6px">
     <strong>${scaleIcons[scale]} ${scaleLabels[scale]}${geoLabel ? ` · ${escapeHtml(geoLabel)}` : ''}</strong><br>
     ${zoneAreaM2 > 0 ? `Surface : <strong>${(zoneAreaM2 / 1_000_000).toFixed(2).replace('.', ',')} km²</strong> · ` : ''}
     ${municipalitiesInZone.length} commune(s) couverte(s)${municipalitiesInZone.length ? ` (${municipalitiesInZone.slice(0, 3).map((m) => escapeHtml(m.name || m.commune || '')).filter(Boolean).join(', ')}${municipalitiesInZone.length > 3 ? '…' : ''})` : ''}
@@ -3749,13 +3749,13 @@ async function computeZoneImpact() {
   }
 
   // 2. Population
-  parts.push(`<li style="margin-bottom:.6em;padding:.4em;background:#fff7e6;border-radius:6px">
+  parts.push(`<li class="zone-impact-light-card" style="margin-bottom:.6em;padding:.4em;background:#fff7e6;border-radius:6px">
     <strong>👥 Population exposée : <span style="font-size:1.2em;color:#c05900">${population > 0 ? population.toLocaleString('fr-FR') : 'inconnue'}</span> habitants</strong><br>
     <span class="muted">${popSource}</span><br>
     ${childrenEstimate > 0 ? `👶 ~${childrenEstimate.toLocaleString('fr-FR')} enfants scolarisés estimés · ` : ''}
     ${ehpadResidents > 0 ? `🧓 ~${ehpadResidents.toLocaleString('fr-FR')} résidents EHPAD (personnes à mobilité réduite)` : ''}
   </li>`);
-  parts.push(`<li style="margin-bottom:.6em;padding:.4em;background:#eef7ff;border-radius:6px">
+  parts.push(`<li class="zone-impact-light-card" style="margin-bottom:.6em;padding:.4em;background:#eef7ff;border-radius:6px">
     <strong>🏢 Bâtiments sélectionnés : <span style="font-size:1.15em;color:#0b4daa">${buildingCount.toLocaleString('fr-FR')}</span></strong><br>
     <span class="muted">Calculé à partir du Référentiel National des Bâtiments dans l'emprise tracée.</span>
   </li>`);
