@@ -826,8 +826,11 @@ def _fetch_institutions_isere_live() -> dict[str, Any]:
             continue
 
         name = str(tags.get("name") or "").strip() or "Établissement"
-        address_parts = [tags.get("addr:housenumber"), tags.get("addr:street"), tags.get("addr:city")]
-        address = " ".join(p for p in address_parts if p) or "Adresse non renseignée"
+        street = tags.get("addr:street") or tags.get("contact:street") or tags.get("addr:place")
+        city = tags.get("addr:city") or tags.get("contact:city")
+        address_parts = [tags.get("addr:housenumber") or tags.get("contact:housenumber"), street]
+        locality = " ".join(p for p in [postcode or tags.get("contact:postcode"), city] if p)
+        address = ", ".join(p for p in [" ".join(p for p in address_parts if p), locality] if p) or "Adresse non renseignée"
         amenity_tag = str(tags.get("amenity") or tags.get("leisure") or tags.get("building") or tags.get("railway") or tags.get("aeroway") or "-")
         priority = "vital" if resource_type in {
             "caserne_pompier", "gendarmerie", "commissariat_police_nationale",

@@ -3513,18 +3513,27 @@ function zoneImpactMunicipalityPostalLabel(input = {}) {
     : null;
   const record = byCode || byName || {};
   const city = String(name || record.name || record.commune || '').trim();
-  const postalCode = String(commune.postal_code || commune.code_postal || record.postal_code || record.code_postal || '').trim();
+  const postalCode = String(commune.postal_code || commune.code_postal || commune.postcode || record.postal_code || record.code_postal || '').trim();
   if (postalCode && city) return `${postalCode} (${city})`;
   if (city) return city;
   if (postalCode) return postalCode;
   return 'Commune non identifiée';
 }
 
+function zoneImpactResourceAddress(resource = {}) {
+  const details = resource.details && typeof resource.details === 'object' ? resource.details : {};
+  const value = resource.address || resource.adresse || resource.full_address
+    || resource.formatted_address || details.address || details.adresse || '';
+  const address = String(value).trim();
+  if (/^adresse non renseign[ée]e?$/i.test(address)) return '';
+  return address;
+}
+
 function zoneImpactResourceCity(resource = {}) {
   const direct = resource.city || resource.commune || resource.municipality || resource.town || resource.locality;
   if (direct) return String(direct).trim();
 
-  const address = String(resource.address || '').trim();
+  const address = zoneImpactResourceAddress(resource);
   const postcodeMatch = address.match(/\b38\d{3}\s+([^,;]+)/i);
   if (postcodeMatch?.[1]) return postcodeMatch[1].trim();
 
@@ -3538,10 +3547,10 @@ function zoneImpactResourceCity(resource = {}) {
 
 function zoneImpactResourceDetails(resource = {}) {
   const city = zoneImpactResourceCity(resource);
-  const address = String(resource.address || '').trim();
+  const address = zoneImpactResourceAddress(resource);
   return [
     city ? `Ville : ${escapeHtml(city)}` : '',
-    address ? `Adresse : ${escapeHtml(address)}` : '',
+    address ? `Adresse : ${escapeHtml(address)}` : 'Adresse non renseignée',
   ].filter(Boolean).join(' · ');
 }
 
@@ -3569,14 +3578,8 @@ async function computeZoneMunicipalityBreakdown(geometry, municipalitiesInZone =
     const zoneFeature = window.turf.feature(geometry);
     const zoneAreaM2 = Number(window.turf.area(zoneFeature) || 0);
     const communesGeometry = await loadIsereCommunesGeometry();
-    const selectedCodes = new Set(
-      municipalitiesInZone
-        .map((municipality) => String(municipality.code_insee || municipality.insee || '').trim())
-        .filter(Boolean),
-    );
-    const source = selectedCodes.size
-      ? communesGeometry.filter((commune) => selectedCodes.has(commune.code))
-      : communesGeometry;
+    // Une commune peut être intersectée même si son centre est hors du dessin.
+    const source = communesGeometry;
 
     return source
       .map((commune) => {
@@ -3596,8 +3599,9 @@ async function computeZoneMunicipalityBreakdown(geometry, municipalitiesInZone =
             : 0;
           return {
             code: commune.code,
-            name: sourceMunicipality.name || sourceMunicipality.commune || zoneImpactMunicipalityNameFromCode(commune.code),
-            displayLabel: zoneImpactMunicipalityPostalLabel({ ...sourceMunicipality, code: commune.code }),
+            name: sourceMunicipality.name || sourceMunicipality.commune || commune.name || zoneImpactMunicipalityNameFromCode(commune.code),
+            postal_code: sourceMunicipality.postal_code || commune.postal_code || '',
+            displayLabel: zoneImpactMunicipalityPostalLabel({ ...commune, ...sourceMunicipality, code: commune.code }),
             overlapAreaM2,
             overlapKm2: overlapAreaM2 / 1_000_000,
             estimatedPopulation,
@@ -3637,9 +3641,17 @@ async function computeZoneImpact() {
   ]);
   if (runSeq !== mapZoneImpactComputationSeq) return;
 
-  const municipalitiesInZone = zoneImpactDepartmentCommunesInZone(geometry);
+  let municipalitiesInZone = zoneImpactDepartmentCommunesInZone(geometry);
   const municipalityBreakdown = await computeZoneMunicipalityBreakdown(geometry, municipalitiesInZone, inseePopulationMap);
   if (runSeq !== mapZoneImpactComputationSeq) return;
+  if (municipalityBreakdown.length) {
+    municipalitiesInZone = municipalityBreakdown.map((row) => ({
+      ...(zoneImpactMunicipalityRecordFromCode(row.code) || {}),
+      code_insee: row.code,
+      name: row.name,
+      postal_code: row.postal_code,
+    }));
+  }
   const resources = getResourcesForZoneImpact();
   const resourcesInZone = resources.filter((r) => {
     const c = normalizeMapCoordinates(r.lat, r.lon);
@@ -3918,7 +3930,7 @@ function exportZoneImpactReport() {
       <tbody>${arr.map((r) => `<tr>
         <td>${toText(r.name || 'Sans nom')}</td>
         <td>${toText(zoneImpactResourceCity(r) || '–')}</td>
-        <td>${toText(r.address || '–')}</td>
+        <td>${toText(zoneImpactResourceAddress(r) || 'Adresse non renseignée')}</td>
         <td class="tag-${r.priority || 'standard'}">${priorityText(r.priority)}</td>
       </tr>`).join('')}</tbody>
     </table>`;
@@ -4064,7 +4076,7 @@ ${d.dangers.length ? `<div class="danger-block">
     <td>${toText(r.name || 'Sans nom')}</td>
     <td>${toText((RESOURCE_TYPE_META[r.type] || {}).label || r.type)}</td>
     <td>${toText(zoneImpactResourceCity(r) || '–')}</td>
-    <td>${toText(r.address || '–')}</td>
+    <td>${toText(zoneImpactResourceAddress(r) || 'Adresse non renseignée')}</td>
   </tr>`).join('')}</tbody>
 </table>` : '<p class="empty">⚠️ Aucun site dangereux détecté dans la zone.</p>'}
 
@@ -4081,19 +4093,19 @@ ${resourceTable('Nœuds de transport', '🚆', d.transports)}
 ${simpleTable('Pompiers proches', '🚒', d.nearbyFireStations || [], [
   { label: 'Nom', value: (row) => row.name },
   { label: 'Ville', value: (row) => zoneImpactResourceCity(row) },
-  { label: 'Adresse', value: (row) => row.address },
+  { label: 'Adresse', value: (row) => zoneImpactResourceAddress(row) || 'Adresse non renseignée' },
   { label: 'Distance depuis la zone', value: (row) => formatDistanceMeters(row.distanceMeters) },
 ])}
 ${simpleTable('Soins proches', '🏥', d.nearbyHospitals || [], [
   { label: 'Nom', value: (row) => row.name },
   { label: 'Ville', value: (row) => zoneImpactResourceCity(row) },
-  { label: 'Adresse', value: (row) => row.address },
+  { label: 'Adresse', value: (row) => zoneImpactResourceAddress(row) || 'Adresse non renseignée' },
   { label: 'Distance depuis la zone', value: (row) => formatDistanceMeters(row.distanceMeters) },
 ])}
 ${simpleTable('Accueil proche', '🏟️', d.nearbyHostings || [], [
   { label: 'Nom', value: (row) => row.name },
   { label: 'Ville', value: (row) => zoneImpactResourceCity(row) },
-  { label: 'Adresse', value: (row) => row.address },
+  { label: 'Adresse', value: (row) => zoneImpactResourceAddress(row) || 'Adresse non renseignée' },
   { label: 'Distance depuis la zone', value: (row) => formatDistanceMeters(row.distanceMeters) },
 ])}
 
@@ -4134,16 +4146,19 @@ ${simpleTable('Points ajoutés sur la carte', '📌', d.customPointsInZone || []
 async function loadIsereCommunesGeometry() {
   if (isereCommunesGeometryLoaded) return isereCommunesGeometryCache;
   try {
-    const response = await queueApiRequest(() => fetchWithTimeout('https://geo.api.gouv.fr/departements/38/communes?fields=code,population,contour&format=geojson&geometry=contour'));
+    const response = await queueApiRequest(() => fetchWithTimeout('https://geo.api.gouv.fr/departements/38/communes?fields=nom,code,codesPostaux,population,contour&format=geojson&geometry=contour'));
     const payload = await parseJsonResponse(response, 'geo-api-communes-contours');
     const features = Array.isArray(payload?.features) ? payload.features : [];
     isereCommunesGeometryCache = features
       .map((feature) => {
         const code = String(feature?.properties?.code || '').trim();
+        const name = String(feature?.properties?.nom || '').trim();
+        const postalCodes = Array.isArray(feature?.properties?.codesPostaux) ? feature.properties.codesPostaux : [];
+        const postalCode = String(postalCodes[0] || '').trim();
         const population = Number(feature?.properties?.population || 0);
         const geometry = feature?.geometry || null;
         if (!code || !geometry || !Number.isFinite(population) || population < 0) return null;
-        return { code, population, geometry };
+        return { code, name, postal_code: postalCode, population, geometry };
       })
       .filter(Boolean);
   } catch {
@@ -4164,14 +4179,9 @@ async function estimatePopulationInZoneByArea(geometry, municipalitiesInZone = [
     if (!Number.isFinite(zoneAreaM2) || zoneAreaM2 <= 0) return { zoneAreaM2: 0, estimatedPopulation: 0 };
 
     const communesGeometry = await loadIsereCommunesGeometry();
-    const targetedInsee = new Set(
-      municipalitiesInZone
-        .map((municipality) => String(municipality.code_insee || municipality.insee || '').trim())
-        .filter(Boolean),
-    );
-    const source = targetedInsee.size
-      ? communesGeometry.filter((commune) => targetedInsee.has(commune.code))
-      : communesGeometry;
+    // Toujours calculer sur les contours réellement intersectés. Le centroïde
+    // d'une commune n'est pas une preuve suffisante de présence dans la zone.
+    const source = communesGeometry;
 
     const estimatedPopulation = source.reduce((sum, commune) => {
       try {
