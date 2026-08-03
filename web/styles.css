@@ -5713,6 +5713,52 @@ body {
   gap: 12px;
   align-items: center;
 }
+
+.situation-wallboard-live {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  min-width: 210px;
+}
+
+.situation-wallboard-live small {
+  color: #60759a;
+  font-size: .68rem;
+  white-space: nowrap;
+}
+
+.situation-wallboard-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #137333;
+  font-size: .76rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.situation-wallboard-status::before {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #25a55f;
+  box-shadow: 0 0 0 4px rgba(37, 165, 95, .15);
+  content: '';
+  animation: situation-live-pulse 1.8s ease-out infinite;
+}
+
+.situation-wallboard-status.is-syncing { color: #245cff; }
+.situation-wallboard-status.is-syncing::before { background: #245cff; }
+.situation-wallboard-status.is-offline { color: #c92a2a; }
+.situation-wallboard-status.is-offline::before {
+  background: #c92a2a;
+  animation: none;
+}
+
+@keyframes situation-live-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(37, 165, 95, .42); }
+  70%, 100% { box-shadow: 0 0 0 7px rgba(37, 165, 95, 0); }
+}
 .situation-toolbar__actions button {
   border-radius: 10px;
   padding: .78rem 1.08rem;

@@ -272,6 +272,11 @@ const MAIRIE_ALLOWED_PANELS = new Set([
 let pendingCurrentPassword = '';
 let refreshTimer = null;
 let liveEventsTimer = null;
+let situationWallboardTimer = null;
+let situationWallboardStatusTimer = null;
+let situationWallboardRefreshInFlight = null;
+let situationWallboardLastSuccessAt = 0;
+let situationWallboardListenersBound = false;
 let homeLiveTimer = null;
 let stationTimetableTimer = null;
 let apiPanelTimer = null;
@@ -286,6 +291,7 @@ let _liveEventsFailCount = 0;
 let lastApiResyncAt = null;
 let isLoginSubmitting = false;
 let externalRisksRenderTimer = 0;
+const SITUATION_WALLBOARD_REFRESH_MS = 60 * 1000;
 const apiGetCache = new Map();
 const apiInFlight = new Map();
 const apiRequestQueue = [];
@@ -12659,6 +12665,10 @@ function renderSituationOverview() {
         <p class="muted"><span id="situation-live-datetime">${escapeHtml(currentSituationDateTime)}</span></p>
       </div>
       <div class="situation-toolbar__actions">
+        <div class="situation-wallboard-live" aria-live="polite">
+          <span id="situation-wallboard-status" class="situation-wallboard-status">Direct</span>
+          <small id="situation-wallboard-detail">Actualisation automatique</small>
+        </div>
         <button id="situation-copy-sitrep-btn" type="button" class="btn-copy-sitrep ghost" title="Copier le SITREP en texte brut">Copier SITREP</button>
         <button id="situation-export-pdf-btn" type="button">Télécharger PDF</button>
       </div>
@@ -17086,6 +17096,8 @@ function logout() {
   localStorage.removeItem(STORAGE_KEYS.token);
   if (refreshTimer) clearInterval(refreshTimer);
   if (liveEventsTimer) clearInterval(liveEventsTimer);
+  if (situationWallboardTimer) clearInterval(situationWallboardTimer);
+  if (situationWallboardStatusTimer) clearInterval(situationWallboardStatusTimer);
   if (stationTimetableTimer) clearInterval(stationTimetableTimer);
   if (apiPanelTimer) clearInterval(apiPanelTimer);
   if (apiResyncTimer) clearInterval(apiResyncTimer);
@@ -17348,6 +17360,70 @@ function startLiveEventsRefresh() {
   liveEventsTimer = setInterval(refreshLiveEvents, EVENTS_LIVE_REFRESH_MS);
 }
 
+function updateSituationWallboardStatus() {
+  const badge = document.getElementById('situation-wallboard-status');
+  const detail = document.getElementById('situation-wallboard-detail');
+  if (!badge || !detail) return;
+  const online = navigator.onLine !== false;
+  const syncing = Boolean(situationWallboardRefreshInFlight);
+  const ageMs = situationWallboardLastSuccessAt ? Date.now() - situationWallboardLastSuccessAt : Number.POSITIVE_INFINITY;
+  const stale = Boolean(situationWallboardLastSuccessAt) && ageMs > SITUATION_WALLBOARD_REFRESH_MS * 2.5;
+  badge.classList.toggle('is-offline', !online || stale);
+  badge.classList.toggle('is-syncing', syncing);
+  badge.textContent = !online ? 'Hors ligne' : syncing ? 'Synchronisation…' : 'Direct';
+  if (!situationWallboardLastSuccessAt) {
+    detail.textContent = online ? 'Première actualisation en cours' : 'En attente du réseau';
+    return;
+  }
+  const elapsedSeconds = Math.max(0, Math.floor(ageMs / 1000));
+  const remainingSeconds = Math.max(0, Math.ceil((SITUATION_WALLBOARD_REFRESH_MS - ageMs) / 1000));
+  detail.textContent = syncing
+    ? `Dernière réussite il y a ${elapsedSeconds}s`
+    : `Mis à jour il y a ${elapsedSeconds}s · prochain contrôle dans ${remainingSeconds}s`;
+}
+
+async function refreshSituationWallboard() {
+  if (!token || navigator.onLine === false || situationWallboardRefreshInFlight) return situationWallboardRefreshInFlight;
+  if ((localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel') !== 'situation-panel') return null;
+  situationWallboardRefreshInFlight = withPreservedScroll(async () => {
+    updateSituationWallboardStatus();
+    // Le backend orchestre lui-même les fournisseurs externes : cet appel relit
+    // seulement leur snapshot courant et sert de secours au flux SSE.
+    await Promise.all([
+      loadExternalRisks(true),
+      refreshLiveEvents(),
+    ]);
+    situationWallboardLastSuccessAt = Date.now();
+    renderSituationOverview();
+  }).catch((error) => {
+    if (!isTransientBackendError(error)) {
+      const errEl = document.getElementById('dashboard-error');
+      if (errEl && !errEl.textContent.trim()) errEl.textContent = `Écran Situation : ${sanitizeErrorMessage(error.message)}`;
+    }
+    return null;
+  }).finally(() => {
+    situationWallboardRefreshInFlight = null;
+    updateSituationWallboardStatus();
+  });
+  return situationWallboardRefreshInFlight;
+}
+
+function startSituationWallboardRefresh() {
+  if (situationWallboardTimer) clearInterval(situationWallboardTimer);
+  if (situationWallboardStatusTimer) clearInterval(situationWallboardStatusTimer);
+  situationWallboardTimer = setInterval(refreshSituationWallboard, SITUATION_WALLBOARD_REFRESH_MS);
+  situationWallboardStatusTimer = setInterval(updateSituationWallboardStatus, 1000);
+  if (!situationWallboardListenersBound) {
+    situationWallboardListenersBound = true;
+    window.addEventListener('online', refreshSituationWallboard);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) refreshSituationWallboard();
+    });
+  }
+  if ((localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel') === 'situation-panel') refreshSituationWallboard();
+  updateSituationWallboardStatus();
+}
+
 function startApiPanelAutoRefresh() {
   if (apiPanelTimer) clearInterval(apiPanelTimer);
   if (apiResyncTimer) clearInterval(apiResyncTimer);
@@ -17512,6 +17588,7 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
   startAutoRefresh();
   startStationTimetableRefresh();
   startLiveEventsRefresh();
+  startSituationWallboardRefresh();
   startExternalRisksSSE();
   startLiveClock();
   startDataFreshnessIndicator();
