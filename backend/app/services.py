@@ -553,6 +553,62 @@ _institutions_isere_cache_lock = Lock()
 _institutions_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
 _INSTITUTIONS_ISERE_CACHE_TTL_SECONDS = 86400  # 24h
 
+_FOREST_FIRE_MAP_PAGE_URL = (
+    "https://www.isere.gouv.fr/Actions-de-l-Etat/Environnement/Foret/"
+    "Prevention-contre-les-incendies-de-forets/Reglementation-des-usages-et-des-acces-en-ete/"
+    "Carte-quotidienne-Alea-Incendie-de-foret-et-vegetation"
+)
+_forest_fire_map_cache_lock = Lock()
+_forest_fire_map_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+
+
+def fetch_forest_fire_map_isere(force_refresh: bool = False) -> dict[str, Any]:
+    """Retourne l'image de la carte quotidienne publiée par la préfecture de l'Isère."""
+    now = datetime.utcnow()
+    with _forest_fire_map_cache_lock:
+        cached = _forest_fire_map_cache.get("payload")
+        if not force_refresh and cached and _forest_fire_map_cache["expires_at"] > now:
+            return deepcopy(cached)
+
+    try:
+        html = _http_get_text(_FOREST_FIRE_MAP_PAGE_URL, timeout=15, retries=2)
+        image_matches = re.findall(r'<img[^>]+src=["\']([^"\']+_imagefull\.(?:jpg|jpeg|png))["\']', html, re.IGNORECASE)
+        fire_image = next((src for src in image_matches if "alea-incendie" in unquote(src).lower()), "")
+        if not fire_image and image_matches:
+            fire_image = image_matches[0]
+        if not fire_image:
+            raise ValueError("Image quotidienne incendie introuvable")
+
+        download_match = re.search(
+            r'href=["\']([^"\']+\.pdf)["\'][^>]*>\s*Télécharger\s+Carte quotidienne[^<]*',
+            html,
+            re.IGNORECASE,
+        )
+        title_match = re.search(r'Télécharger\s+(Carte quotidienne de l[^<]+)', html, re.IGNORECASE)
+        payload = {
+            "status": "online",
+            "image_url": urljoin(_FOREST_FIRE_MAP_PAGE_URL, unescape(fire_image)),
+            "page_url": _FOREST_FIRE_MAP_PAGE_URL,
+            "pdf_url": urljoin(_FOREST_FIRE_MAP_PAGE_URL, unescape(download_match.group(1))) if download_match else None,
+            "title": unescape(re.sub(r"\s+", " ", title_match.group(1)).strip()) if title_match else "Carte quotidienne de l'aléa incendie",
+            "updated_at": now.isoformat() + "Z",
+        }
+    except Exception as exc:
+        payload = {
+            "status": "unavailable",
+            "image_url": None,
+            "page_url": _FOREST_FIRE_MAP_PAGE_URL,
+            "pdf_url": None,
+            "title": "Carte quotidienne de l'aléa incendie indisponible",
+            "error": str(exc),
+            "updated_at": now.isoformat() + "Z",
+        }
+
+    with _forest_fire_map_cache_lock:
+        _forest_fire_map_cache["payload"] = payload
+        _forest_fire_map_cache["expires_at"] = now + timedelta(minutes=15)
+    return deepcopy(payload)
+
 _INSTITUTIONS_ISERE_BBOX = "44.70,4.70,45.95,6.60"
 
 # Requête Overpass bbox Isère — nodes uniquement (rapide, couvre ~95% des établissements)

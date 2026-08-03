@@ -708,6 +708,8 @@ let iserePopulationByInseeCache = new Map();
 let iserePopulationByInseeLoaded = false;
 let isereCommunesGeometryCache = [];
 let isereCommunesGeometryLoaded = false;
+let forestFireMapCache = null;
+let forestFireMapLoading = null;
 let telecomPointsCache = [];
 let telecomLoaded = false;
 let cachedHomeLiveSnapshot = {};
@@ -12289,6 +12291,39 @@ function openSituationKpiModal(key, label) {
   else modal.setAttribute('open', 'open');
 }
 
+async function loadSituationForestFireMap() {
+  if (forestFireMapCache?.image_url) {
+    renderSituationForestFireMap(forestFireMapCache);
+    return forestFireMapCache;
+  }
+  if (forestFireMapLoading) return forestFireMapLoading;
+  forestFireMapLoading = api('/api/forest-fire-map/isere', { cacheTtlMs: 15 * 60 * 1000 })
+    .then((payload) => {
+      forestFireMapCache = payload && typeof payload === 'object' ? payload : null;
+      renderSituationForestFireMap(forestFireMapCache);
+      return forestFireMapCache;
+    })
+    .catch(() => {
+      renderSituationForestFireMap(null);
+      return null;
+    })
+    .finally(() => { forestFireMapLoading = null; });
+  return forestFireMapLoading;
+}
+
+function renderSituationForestFireMap(payload) {
+  const image = document.getElementById('situation-forest-fire-map-image');
+  const status = document.getElementById('situation-forest-fire-map-status');
+  const link = document.getElementById('situation-forest-fire-map-link');
+  if (image && payload?.image_url) {
+    image.src = payload.image_url;
+    image.hidden = false;
+    image.alt = payload.title || "Carte quotidienne de l'aléa incendie de forêt et de végétation en Isère";
+  }
+  if (status) status.textContent = payload?.image_url ? 'Carte officielle quotidienne' : 'Carte temporairement indisponible';
+  if (link && payload?.page_url) link.href = payload.page_url;
+}
+
 function renderSituationOverview() {
   const target = document.getElementById('situation-content');
   if (!target) return;
@@ -12542,10 +12577,11 @@ function renderSituationOverview() {
       </article>
       <article class="tile situation-alert-map">
         <div class="situation-card-head">
-          <h3>Carte des alertes</h3>
-          <span>Isère</span>
+          <h3>Aléa incendie de forêt</h3>
+          <span id="situation-forest-fire-map-status">Chargement…</span>
         </div>
         <div class="situation-mini-map" aria-label="Carte schématique des secteurs d'alerte de l'Isère" role="img">
+          <img id="situation-forest-fire-map-image" class="situation-fire-map-image" alt="Carte quotidienne de l'aléa incendie de forêt et de végétation en Isère" hidden />
           <svg class="isere-alert-svg" viewBox="0 0 360 430" focusable="false" aria-hidden="true">
             <rect class="isere-map-bg" x="0" y="0" width="360" height="430" rx="18"></rect>
             <g class="isere-prefecture-mark">
@@ -12603,7 +12639,7 @@ function renderSituationOverview() {
             <span><i class="legend-dot legend-dot--alert"></i>alerte</span>
           </div>
         </div>
-        <button type="button" class="ghost situation-map-link" data-target-panel="map-panel">Voir la carte interactive</button>
+        <a id="situation-forest-fire-map-link" class="ghost situation-map-link" href="https://www.isere.gouv.fr/Actions-de-l-Etat/Environnement/Foret/Prevention-contre-les-incendies-de-forets/Reglementation-des-usages-et-des-acces-en-ete/Carte-quotidienne-Alea-Incendie-de-foret-et-vegetation" target="_blank" rel="noreferrer">Voir la source officielle</a>
       </article>
       <article class="tile situation-quick-card">
         <h3>Accès rapides</h3>
@@ -12623,6 +12659,7 @@ function renderSituationOverview() {
     </div>
   `);
 
+  loadSituationForestFireMap();
   bindSituationActions();
 }
 

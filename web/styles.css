@@ -5957,6 +5957,17 @@ body {
   border: 1px solid #dfe8f4;
   background: #f9fbff;
 }
+.situation-fire-map-image {
+  display: block;
+  width: 100%;
+  height: 252px;
+  object-fit: contain;
+  background: #fff;
+}
+.situation-alert-map .situation-mini-map:has(.situation-fire-map-image:not([hidden])) .isere-alert-svg,
+.situation-alert-map .situation-mini-map:has(.situation-fire-map-image:not([hidden])) .isere-alert-legend {
+  display: none;
+}
 .isere-alert-svg {
   display: block;
   width: 100%;
@@ -6050,6 +6061,9 @@ body {
 .legend-dot--watch { background: #f8c849; }
 .legend-dot--alert { background: #f27983; }
 .situation-map-link {
+  display: block;
+  box-sizing: border-box;
+  text-align: center;
   width: 100%;
   margin-top: 10px;
   padding: .55rem .7rem;
