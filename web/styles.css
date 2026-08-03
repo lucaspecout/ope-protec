@@ -1285,6 +1285,29 @@ details[open] > .filter-group__title::after { transform: rotate(90deg); }
 .map-toggle-grid input { width: auto; margin: 0; flex-shrink: 0; margin-top: 2px; }
 .map-toggle-grid > select { min-height: 28px; font-size: .75rem; padding: .18rem .38rem; margin: .1rem 0 0; }
 
+.map-weather-visual-filter {
+  padding: .55rem;
+  border-color: rgba(94, 139, 214, .32);
+  background: linear-gradient(145deg, rgba(225, 239, 255, .92), rgba(244, 237, 255, .9));
+}
+
+.map-weather-visual-filter select,
+.map-weather-visual-filter input[type="range"] {
+  width: 100%;
+}
+
+.map-weather-opacity {
+  display: flex !important;
+  justify-content: space-between;
+  margin-top: .4rem;
+  font-size: .72rem;
+}
+
+.map-weather-opacity output {
+  color: #245cff;
+  font-weight: 800;
+}
+
 /* ── Recherche & navigation ── */
 .map-search-inline { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: .4rem; margin-bottom: .4rem; }
 .map-nav-btns { display: flex; gap: .4rem; }

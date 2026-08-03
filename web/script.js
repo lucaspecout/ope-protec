@@ -433,6 +433,16 @@ const TACTICAL_LAYER_CATEGORIES = new Set(['evacuation', 'rassemblement', 'roadb
 const GEORISQUES_WMS_URL = 'https://www.georisques.gouv.fr/services';
 const EUMETSAT_WMS_URL = 'https://view.eumetsat.int/geoserver/wms';
 const EUMETSAT_LIGHTNING_LAYER = 'mtg_fd:li_afa';
+const EUMETSAT_WEATHER_LAYERS = Object.freeze({
+  geocolour: { layer: 'mtg_fd:rgb_geocolour', label: 'Satellite couleur jour/nuit', attribution: '&copy; EUMETSAT & NASA' },
+  cloudtype: { layer: 'mtg_fd:rgb_cloudtype', label: 'Types de nuages' },
+  cloudphase: { layer: 'mtg_fd:rgb_cloudphase', label: 'Phase des nuages' },
+  precipitation: { layer: 'mtg_fd:h40b', label: 'Précipitations estimées' },
+  airmass: { layer: 'msg_fes:rgb_airmass', label: "Masses d'air" },
+  convection: { layer: 'msg_fes:rgb_convection', label: 'Convection / orages' },
+  dust: { layer: 'mtg_fd:rgb_dust', label: 'Poussières / aérosols' },
+  infrared: { layer: 'mtg_fd:ir105_hrfi', label: 'Infrarouge nocturne' },
+});
 const GEORISQUES_FLOOD_PPRI_LAYER = 'PPRN_ZONE_INOND';
 const GEORISQUES_FLOOD_TRI_LAYERS = [
   'ALEA_SYNT_01_01FOR_FXX',
@@ -442,6 +452,9 @@ const GEORISQUES_FLOOD_TRI_LAYERS = [
 let cachedCrisisPoints = [];
 let lightningLiveLayer = null;
 let lightningLiveRefreshTimer = null;
+let weatherVisualLayer = null;
+let weatherVisualLayerKey = '';
+let weatherVisualRefreshTimer = null;
 let cachedEvents = [];
 let selectedOperationalEventId = null;
 let cachedLogs = [];
@@ -5341,6 +5354,8 @@ async function resetMapFilters() {
     'filter-resources-hosting-accessibility': 'all',
     'filter-resources-telecom-type': 'all',
     'filter-meteo-layer-type': 'temperature',
+    'filter-weather-visual-layer': 'none',
+    'filter-weather-visual-opacity': '70',
     'map-basemap-select': 'osm',
   };
   Object.entries(defaults).forEach(([id, value]) => {
@@ -5348,6 +5363,8 @@ async function resetMapFilters() {
     if (!node) return;
     node.value = value;
   });
+  const weatherOpacityOutput = document.getElementById('filter-weather-visual-opacity-value');
+  if (weatherOpacityOutput) weatherOpacityOutput.textContent = '70 %';
   const hydro = document.getElementById('filter-hydro');
   const pcs = document.getElementById('filter-pcs');
   const meteoCities = document.getElementById('filter-meteo-cities');
@@ -5408,6 +5425,7 @@ async function resetMapFilters() {
   renderResources();
   await renderMeteoCitiesLayer();
   renderLightningLiveLayer();
+  renderWeatherVisualLayer();
   renderSeismesLayer();
   renderFeuxForetLayer();
   renderFeuxSatelliteLayer();
@@ -12365,6 +12383,56 @@ function renderLightningLiveLayer() {
   }, 60 * 1000);
 }
 
+function renderWeatherVisualLayer() {
+  if (!leafletMap || typeof window.L === 'undefined') return;
+  const key = document.getElementById('filter-weather-visual-layer')?.value || 'none';
+  const config = EUMETSAT_WEATHER_LAYERS[key];
+  const opacity = Math.max(0.2, Math.min(1, Number(document.getElementById('filter-weather-visual-opacity')?.value || 70) / 100));
+
+  if (!config) {
+    if (weatherVisualLayer && leafletMap.hasLayer(weatherVisualLayer)) leafletMap.removeLayer(weatherVisualLayer);
+    weatherVisualLayer = null;
+    weatherVisualLayerKey = '';
+    if (weatherVisualRefreshTimer) window.clearInterval(weatherVisualRefreshTimer);
+    weatherVisualRefreshTimer = null;
+    return;
+  }
+
+  if (!leafletMap.getPane('weatherVisualPane')) {
+    const pane = leafletMap.createPane('weatherVisualPane');
+    pane.style.zIndex = 425;
+    pane.style.pointerEvents = 'none';
+  }
+
+  if (!weatherVisualLayer || weatherVisualLayerKey !== key) {
+    if (weatherVisualLayer && leafletMap.hasLayer(weatherVisualLayer)) leafletMap.removeLayer(weatherVisualLayer);
+    weatherVisualLayerKey = key;
+    weatherVisualLayer = window.L.tileLayer.wms(EUMETSAT_WMS_URL, {
+      layers: config.layer,
+      styles: '',
+      format: 'image/png',
+      transparent: true,
+      version: '1.1.1',
+      opacity,
+      pane: 'weatherVisualPane',
+      cache_bust: Math.floor(Date.now() / 300000),
+      attribution: config.attribution || '&copy; EUMETSAT · Meteosat',
+    });
+    weatherVisualLayer.on('load', () => setMapFeedback(`${config.label} affiché · dernière image satellite disponible.`));
+    weatherVisualLayer.on('tileerror', () => setMapFeedback(`Le calque « ${config.label} » est temporairement indisponible.`, true));
+  } else {
+    weatherVisualLayer.setOpacity(opacity);
+  }
+
+  if (!leafletMap.hasLayer(weatherVisualLayer)) weatherVisualLayer.addTo(leafletMap);
+  weatherVisualLayer.setParams({ cache_bust: Math.floor(Date.now() / 300000) }, false);
+  if (weatherVisualRefreshTimer) window.clearInterval(weatherVisualRefreshTimer);
+  weatherVisualRefreshTimer = window.setInterval(() => {
+    if (!weatherVisualLayer || weatherVisualLayerKey !== key) return;
+    weatherVisualLayer.setParams({ cache_bust: Math.floor(Date.now() / 300000) }, false);
+  }, 5 * 60 * 1000);
+}
+
 function renderSituationForestFireMap(payload) {
   const image = document.getElementById('situation-forest-fire-map-image');
   const status = document.getElementById('situation-forest-fire-map-status');
@@ -16358,6 +16426,13 @@ function bindAppInteractions() {
   });
   document.getElementById('filter-seismes')?.addEventListener('change', () => renderSeismesLayer());
   document.getElementById('filter-lightning-live')?.addEventListener('change', () => renderLightningLiveLayer());
+  document.getElementById('filter-weather-visual-layer')?.addEventListener('change', () => renderWeatherVisualLayer());
+  document.getElementById('filter-weather-visual-opacity')?.addEventListener('input', (event) => {
+    const value = Math.max(20, Math.min(100, Number(event.target.value || 70)));
+    const output = document.getElementById('filter-weather-visual-opacity-value');
+    if (output) output.textContent = `${value} %`;
+    if (weatherVisualLayer) weatherVisualLayer.setOpacity(value / 100);
+  });
   document.getElementById('filter-feux-foret')?.addEventListener('change', () => renderFeuxForetLayer());
   document.getElementById('filter-feux-satellite')?.addEventListener('change', (event) => {
     renderFeuxSatelliteLayer({ forceRefresh: event.target.checked, showFeedback: event.target.checked });

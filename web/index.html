@@ -877,6 +877,23 @@
                     <option value="humidity">Humidité</option>
                     <option value="pollution">Pollution / qualité de l'air</option>
                   </select>
+                  <div class="filter-subgroup map-weather-visual-filter">
+                    <label for="filter-weather-visual-layer">🛰️ Imagerie météo temps réel</label>
+                    <select id="filter-weather-visual-layer" aria-label="Choisir l'imagerie météo satellite">
+                      <option value="none" selected>Aucun calque satellite</option>
+                      <option value="geocolour">🌍 Satellite couleur jour/nuit</option>
+                      <option value="cloudtype">☁️ Types de nuages</option>
+                      <option value="cloudphase">🧊 Phase des nuages</option>
+                      <option value="precipitation">🌧️ Précipitations estimées</option>
+                      <option value="airmass">🌬️ Masses d'air</option>
+                      <option value="convection">⛈️ Convection / orages</option>
+                      <option value="dust">🌫️ Poussières / aérosols</option>
+                      <option value="infrared">🌙 Infrarouge nocturne</option>
+                    </select>
+                    <label class="map-weather-opacity" for="filter-weather-visual-opacity">Transparence <output id="filter-weather-visual-opacity-value">70 %</output></label>
+                    <input id="filter-weather-visual-opacity" type="range" min="20" max="100" step="5" value="70" />
+                    <small class="filter-legend">Dernière image disponible · EUMETSAT Meteosat</small>
+                  </div>
                   <label>
                     <input id="filter-flood-zones" type="checkbox" />
                     Zones inondables détaillées
