@@ -274,6 +274,9 @@ let refreshTimer = null;
 let liveEventsTimer = null;
 let situationWallboardTimer = null;
 let situationWallboardStatusTimer = null;
+let mapLiveRefreshTimer = null;
+let mapLiveRefreshInFlight = null;
+let mapLiveListenersBound = false;
 let situationWallboardRefreshInFlight = null;
 let situationWallboardLastSuccessAt = 0;
 let situationWallboardListenersBound = false;
@@ -292,6 +295,7 @@ let lastApiResyncAt = null;
 let isLoginSubmitting = false;
 let externalRisksRenderTimer = 0;
 const SITUATION_WALLBOARD_REFRESH_MS = 60 * 1000;
+const MAP_LIVE_REFRESH_MS = SITUATION_WALLBOARD_REFRESH_MS;
 const apiGetCache = new Map();
 const apiInFlight = new Map();
 const apiRequestQueue = [];
@@ -422,7 +426,7 @@ const resourceVisibilityOverrides = new Map();
 let pendingMapPointCoords = null;
 let mapIconTouched = false;
 let cachedStations = [];
-let cachedVigicruesPayload = { stations: [], troncons: [] };
+let cachedVigicruesPayload = { status: 'pending', stations: [], troncons: [] };
 let cachedMunicipalities = [];
 let cachedMunicipalityRecords = [];
 let cachedItinisereEvents = [];
@@ -754,6 +758,13 @@ function keepPreviousArray(previousValue, nextValue) {
   return Array.isArray(previousValue) ? previousValue : [];
 }
 
+function keepLiveArray(previousValue, nextValue, servicePayload = {}) {
+  if (Array.isArray(nextValue) && nextValue.length > 0) return nextValue;
+  const status = String(servicePayload?.status || '').trim().toLowerCase();
+  if (Array.isArray(nextValue) && ['online', 'ok', 'active'].includes(status)) return [];
+  return Array.isArray(previousValue) ? previousValue : [];
+}
+
 /**
  * Fusionne un slot de service en préservant TOUTES les données précédentes si le
  * prochain état est "pending" — seul le champ `status` est mis à jour.
@@ -960,21 +971,21 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
       ...prevVigicrues,
       ...nextVigicrues,
       water_alert_level: keepPreviousValue(prevVigicrues.water_alert_level, nextVigicrues.water_alert_level),
-      stations: keepPreviousArray(prevVigicrues.stations, nextVigicrues.stations),
-      troncons: keepPreviousArray(prevVigicrues.troncons, nextVigicrues.troncons),
+      stations: keepLiveArray(prevVigicrues.stations, nextVigicrues.stations, nextVigicrues),
+      troncons: keepLiveArray(prevVigicrues.troncons, nextVigicrues.troncons, nextVigicrues),
     },
     itinisere: {
       ...prevItinisere,
       ...nextItinisere,
       status: keepPreviousValue(prevItinisere.status, nextItinisere.status),
       events_total: keepPreviousValue(prevItinisere.events_total, nextItinisere.events_total),
-      events: keepPreviousArray(prevItinisere.events, nextItinisere.events),
+      events: keepLiveArray(prevItinisere.events, nextItinisere.events, nextItinisere),
     },
     bison_fute: {
       ...prevBison,
       ...nextBison,
-      events: keepPreviousArray(prevBison.events, nextBison.events),
-      live_events: keepPreviousArray(prevBison.live_events, nextBison.live_events),
+      events: keepLiveArray(prevBison.events, nextBison.events, nextBison),
+      live_events: keepLiveArray(prevBison.live_events, nextBison.live_events, nextBison),
       today: {
         ...(prevBison.today || {}),
         ...(nextBison.today || {}),
@@ -1030,14 +1041,14 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
       ...nextApic,
       level: keepPreviousValue(prevApic.level, nextApic.level),
       alerts_total: keepPreviousValue(prevApic.alerts_total, nextApic.alerts_total),
-      alerts: keepPreviousArray(prevApic.alerts, nextApic.alerts),
+      alerts: keepLiveArray(prevApic.alerts, nextApic.alerts, nextApic),
     },
     vigicrues_flash_isere: {
       ...prevVigicruesFlash,
       ...nextVigicruesFlash,
       level: keepPreviousValue(prevVigicruesFlash.level, nextVigicruesFlash.level),
       alerts_total: keepPreviousValue(prevVigicruesFlash.alerts_total, nextVigicruesFlash.alerts_total),
-      alerts: keepPreviousArray(prevVigicruesFlash.alerts, nextVigicruesFlash.alerts),
+      alerts: keepLiveArray(prevVigicruesFlash.alerts, nextVigicruesFlash.alerts, nextVigicruesFlash),
     },
     prefecture_isere: {
       ...(previous.prefecture_isere || {}),
@@ -3055,9 +3066,8 @@ function setActivePanel(panelId) {
       }, 100);
       if (token) _refreshAgentMarkers();
       if (token && !stationsTimetableCache) loadAndRenderStationsPanel(false).catch(() => {});
-      renderApicLayer(cachedExternalRisksSnapshot?.apic_isere || {}).catch(() => {});
-      renderResources();
-      renderTrafficOnMap().catch(() => {});
+      renderMapLiveLayers().catch(() => {});
+      refreshMapLiveView().catch(() => {});
     })).catch((error) => {
       setMapFeedback(`Carte indisponible: ${sanitizeErrorMessage(error.message)}`, true);
     });
@@ -5680,7 +5690,7 @@ function renderStations(vigicruesPayload = []) {
 
   // Supprimer les marqueurs qui ne sont plus dans les données
   // Uniquement si on a reçu un jeu de données réel (non vide) — évite de tout supprimer en état pending.
-  if (incomingCodes.size > 0) {
+  if (incomingCodes.size > 0 || String(vigicruesPayload?.status || '').toLowerCase() === 'online') {
     hydroMarkersByCode.forEach((marker, code) => {
       if (!incomingCodes.has(code)) {
         hydroLayer.removeLayer(marker);
@@ -5717,7 +5727,7 @@ function renderStations(vigicruesPayload = []) {
     }
   });
 
-  if (incomingTroncons.size > 0) {
+  if (incomingTroncons.size > 0 || String(vigicruesPayload?.status || '').toLowerCase() === 'online') {
     hydroLinesByCode.forEach((line, code) => {
       if (!incomingTroncons.has(code)) {
         hydroLineLayer.removeLayer(line);
@@ -9471,7 +9481,7 @@ function scheduleExternalRisksRender({ map = false } = {}) {
     renderExternalRisks(cachedExternalRisksSnapshot);
     renderApiInterconnections(cachedExternalRisksSnapshot);
     saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
-    if (map && isMapPanelActive()) renderTrafficOnMap().catch(() => {});
+    if (map && isMapPanelActive()) renderMapLiveLayers().catch(() => {});
   }, 250);
 }
 
@@ -14972,6 +14982,7 @@ function renderExternalRisks(data = {}) {
   const meteo = mergedData?.meteo_france || {};
   const vigicrues = mergedData?.vigicrues || {};
   cachedVigicruesPayload = {
+    status: vigicrues.status || 'pending',
     stations: Array.isArray(vigicrues.stations) ? vigicrues.stations : [],
     troncons: Array.isArray(vigicrues.troncons) ? vigicrues.troncons : [],
   };
@@ -15422,7 +15433,7 @@ async function loadMunicipalities(preloaded = null) {
   } else {
     try {
       const payload = await api('/municipalities');
-      municipalities = keepPreviousArray(previousMunicipalities, payload);
+      municipalities = Array.isArray(payload) ? payload : previousMunicipalities;
     } catch (error) {
       municipalities = previousMunicipalities.length ? previousMunicipalities : [];
       setMapFeedback(`Liste des communes indisponible via API (${municipalities.length} en mémoire).`, true);
@@ -17086,6 +17097,9 @@ function logout() {
   if (liveEventsTimer) clearInterval(liveEventsTimer);
   if (situationWallboardTimer) clearInterval(situationWallboardTimer);
   if (situationWallboardStatusTimer) clearInterval(situationWallboardStatusTimer);
+  if (mapLiveRefreshTimer) clearInterval(mapLiveRefreshTimer);
+  mapLiveRefreshTimer = null;
+  mapLiveRefreshInFlight = null;
   if (stationTimetableTimer) clearInterval(stationTimetableTimer);
   if (apiPanelTimer) clearInterval(apiPanelTimer);
   if (apiResyncTimer) clearInterval(apiResyncTimer);
@@ -17412,6 +17426,57 @@ function startSituationWallboardRefresh() {
   updateSituationWallboardStatus();
 }
 
+async function renderMapLiveLayers() {
+  if (!leafletMap || !isMapPanelActive()) return;
+  renderStations(cachedVigicruesPayload);
+  await Promise.all([
+    renderApicLayer(cachedExternalRisksSnapshot?.apic_isere || {}),
+    renderMeteoCitiesLayer(),
+    renderFeuxForetLayer(),
+    renderTrafficOnMap(),
+  ]);
+  renderColsAlpinsLayer();
+  applyAvalancheZoneLayer();
+  renderSeismesLayer();
+  renderFeuxSatelliteLayer();
+  renderResources();
+  updateMapSummary();
+}
+
+async function refreshMapLiveView() {
+  if (!token || document.hidden || navigator.onLine === false || !isMapPanelActive()) return null;
+  if (mapLiveRefreshInFlight) return mapLiveRefreshInFlight;
+
+  mapLiveRefreshInFlight = (async () => {
+    // Même snapshot direct que la vue Situation, sans cache navigateur.
+    await loadExternalRisks(true);
+    await loadMunicipalities();
+    await renderMeteoCitiesLayer();
+    renderResources();
+    updateMapSummary();
+  })().catch((error) => {
+    if (!isTransientBackendError(error)) {
+      setMapFeedback(`Actualisation directe indisponible : ${sanitizeErrorMessage(error.message)}`, true);
+    }
+    return null;
+  }).finally(() => {
+    mapLiveRefreshInFlight = null;
+  });
+  return mapLiveRefreshInFlight;
+}
+
+function startMapLiveRefresh() {
+  if (mapLiveRefreshTimer) clearInterval(mapLiveRefreshTimer);
+  mapLiveRefreshTimer = setInterval(refreshMapLiveView, MAP_LIVE_REFRESH_MS);
+  if (!mapLiveListenersBound) {
+    mapLiveListenersBound = true;
+    window.addEventListener('online', refreshMapLiveView);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && isMapPanelActive()) refreshMapLiveView();
+    });
+  }
+}
+
 function startApiPanelAutoRefresh() {
   if (apiPanelTimer) clearInterval(apiPanelTimer);
   if (apiResyncTimer) clearInterval(apiResyncTimer);
@@ -17577,6 +17642,7 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
   startStationTimetableRefresh();
   startLiveEventsRefresh();
   startSituationWallboardRefresh();
+  startMapLiveRefresh();
   startExternalRisksSSE();
   startLiveClock();
   startDataFreshnessIndicator();
