@@ -7245,6 +7245,21 @@ def _apic_level_from_raw(value: Any) -> str:
     return "inconnu"
 
 
+def _fetch_isere_commune_names() -> dict[str, str]:
+    """Retourne les noms officiels indexés par code INSEE pour les alertes communales."""
+    payload = _http_get_json(
+        "https://geo.api.gouv.fr/departements/38/communes?fields=code,nom&format=json",
+        timeout=12,
+    )
+    if not isinstance(payload, list):
+        return {}
+    return {
+        str(item.get("code") or "").strip(): str(item.get("nom") or "").strip()
+        for item in payload
+        if isinstance(item, dict) and item.get("code") and item.get("nom")
+    }
+
+
 def _fetch_apic_family_isere_live(mode: str, service_label: str) -> dict[str, Any]:
     base_url = f"https://apic.meteofrance.fr/static/carto/{mode}/fr"
     reseaux_url = f"{base_url}/{mode}_fr_reseaux.json"
@@ -7265,6 +7280,13 @@ def _fetch_apic_family_isere_live(mode: str, service_label: str) -> dict[str, An
 
         dep38 = deps.get("38") if isinstance(deps, dict) else None
         dep38_level = _apic_level_from_raw((dep38 or {}).get("alert_level")) if isinstance(dep38, dict) else "vert"
+        commune_names: dict[str, str] = {}
+        if isinstance(grains, dict) and any(str(code).startswith("38") for code in grains):
+            try:
+                commune_names = _fetch_isere_commune_names()
+            except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError, TypeError):
+                # Une indisponibilité de geo.api.gouv.fr ne doit pas masquer les alertes APIC.
+                commune_names = {}
 
         alerts: list[dict[str, Any]] = []
         if isinstance(dep38, dict) and dep38_level in {"jaune", "orange", "rouge"}:
@@ -7283,9 +7305,13 @@ def _fetch_apic_family_isere_live(mode: str, service_label: str) -> dict[str, An
                 grain_level = _apic_level_from_raw(grain.get("alert_level"))
                 if grain_level not in {"jaune", "orange", "rouge"}:
                     continue
+                commune_code = str(code).strip()
+                commune_name = commune_names.get(commune_code, "")
                 alerts.append(
                     {
-                        "zone": f"Commune INSEE {code}",
+                        "zone": commune_name or f"Commune INSEE {commune_code}",
+                        "commune": commune_name,
+                        "insee_code": commune_code,
                         "level": grain_level,
                         "first_alert_at": grain.get("date_frst_alrt") or "",
                         "last_change_at": grain.get("date_alrt_inc") or "",

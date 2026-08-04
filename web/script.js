@@ -353,6 +353,8 @@ let leafletMap = null;
 let boundaryLayer = null;
 let hydroLayer = null;
 let hydroLineLayer = null;
+let apicLayer = null;
+let apicRenderSequence = 0;
 // Index des marqueurs/polylines existants pour mise à jour sans clearLayers
 const hydroMarkersByCode = new Map();
 const hydroLinesByCode = new Map();
@@ -3053,6 +3055,7 @@ function setActivePanel(panelId) {
       }, 100);
       if (token) _refreshAgentMarkers();
       if (token && !stationsTimetableCache) loadAndRenderStationsPanel(false).catch(() => {});
+      renderApicLayer(cachedExternalRisksSnapshot?.apic_isere || {}).catch(() => {});
       renderResources();
       renderTrafficOnMap().catch(() => {});
     })).catch((error) => {
@@ -5076,6 +5079,7 @@ function initMap() {
   applyBasemap(document.getElementById('map-basemap-select')?.value || 'osm');
   hydroLayer = window.L.layerGroup().addTo(leafletMap);
   hydroLineLayer = window.L.layerGroup().addTo(leafletMap);
+  apicLayer = window.L.layerGroup().addTo(leafletMap);
   pcsBoundaryLayer = window.L.layerGroup().addTo(leafletMap);
   pcsLayer = window.L.layerGroup().addTo(leafletMap);
   resourceLayer = window.L.layerGroup().addTo(leafletMap);
@@ -5370,6 +5374,7 @@ async function resetMapFilters() {
   if (weatherOpacityOutput) weatherOpacityOutput.textContent = '70 %';
   const hydro = document.getElementById('filter-hydro');
   const pcs = document.getElementById('filter-pcs');
+  const apic = document.getElementById('filter-apic');
   const meteoCities = document.getElementById('filter-meteo-cities');
   const activeOnly = document.getElementById('filter-resources-active');
   const schools = document.getElementById('filter-resources-schools');
@@ -5394,6 +5399,7 @@ async function resetMapFilters() {
   const telecomResources = document.getElementById('filter-resources-telecom');
   if (hydro) hydro.checked = true;
   if (pcs) pcs.checked = true;
+  if (apic) apic.checked = true;
   if (meteoCities) meteoCities.checked = false;
   if (activeOnly) activeOnly.checked = true;
   if (schools) schools.checked = false;
@@ -5422,6 +5428,7 @@ async function resetMapFilters() {
   if (searchLayer) searchLayer.clearLayers();
   applyBasemap('osm');
   renderStations(cachedVigicruesPayload);
+  await renderApicLayer(cachedExternalRisksSnapshot?.apic_isere || {});
   renderCustomPoints();
   renderResources();
   await renderMeteoCitiesLayer();
@@ -5467,7 +5474,7 @@ function toggleMapContrast() {
 
 function fitMapToData(showFeedback = false) {
   if (!leafletMap) return;
-  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, pcsBoundaryLayer, pcsLayer, resourceLayer, institutionLayer, populationLayer, searchLayer, customPointsLayer, mapPointsLayer, itinisereLayer, bisonLayer, bisonCameraLayer, seismesLayer, feuxForetLayer, feuxSatelliteLayer, tchooTrainLayer].filter(Boolean);
+  const layers = [boundaryLayer, hydroLayer, hydroLineLayer, apicLayer, pcsBoundaryLayer, pcsLayer, resourceLayer, institutionLayer, populationLayer, searchLayer, customPointsLayer, mapPointsLayer, itinisereLayer, bisonLayer, bisonCameraLayer, seismesLayer, feuxForetLayer, feuxSatelliteLayer, tchooTrainLayer].filter(Boolean);
   const bounds = window.L.latLngBounds([]);
   layers.forEach((layer) => {
     if (layer?.getBounds) {
@@ -13256,6 +13263,37 @@ function renderApicAlerts(apic = {}) {
   }).join('') || '<li>Aucune alerte APIC en cours sur l’Isère.</li>');
 }
 
+async function renderApicLayer(apic = {}) {
+  if (!apicLayer || typeof window.L === 'undefined') return;
+  const sequence = ++apicRenderSequence;
+  apicLayer.clearLayers();
+  if (!(document.getElementById('filter-apic')?.checked ?? true)) return;
+
+  const alerts = (Array.isArray(apic?.alerts) ? apic.alerts : [])
+    .filter((alert) => String(alert?.insee_code || '').startsWith('38'));
+  if (!alerts.length) return;
+
+  const alertByCode = new Map(alerts.map((alert) => [String(alert.insee_code), alert]));
+  const communes = await loadIsereCommunesGeometry();
+  if (sequence !== apicRenderSequence || !(document.getElementById('filter-apic')?.checked ?? true)) return;
+
+  communes.forEach((commune) => {
+    const alert = alertByCode.get(String(commune.code));
+    if (!alert || !commune.geometry) return;
+    const communeName = alert.commune || commune.name || alert.zone || `Commune ${alert.insee_code}`;
+    const alertLevel = normalizeLevel(alert.level || 'jaune');
+    window.L.geoJSON({
+      type: 'Feature',
+      properties: { code: commune.code, nom: communeName },
+      geometry: commune.geometry,
+    }, {
+      style: { color: '#dc2626', weight: 4, opacity: 1, fillColor: '#ef4444', fillOpacity: 0.12 },
+    })
+      .bindPopup(`<div class="map-popup-content"><p class="tag">APIC · pluie intense</p><strong>${escapeHtml(communeName)}</strong><p>Niveau : <strong style="color:${levelColor(alertLevel)}">${escapeHtml(alertLevel)}</strong></p></div>`)
+      .addTo(apicLayer);
+  });
+}
+
 function renderVigicruesFlashAlerts(vigicruesFlash = {}) {
   const alerts = Array.isArray(vigicruesFlash?.alerts) ? vigicruesFlash.alerts : [];
   const total = Number(vigicruesFlash?.alerts_total ?? alerts.length);
@@ -14997,6 +15035,7 @@ function renderExternalRisks(data = {}) {
   renderOfficialColsAlpinsWidget(colsAlpins);
   // Redessiner les couches lourdes uniquement si la carte est visible.
   if (isMapPanelActive()) {
+    renderApicLayer(apic).catch(() => {});
     renderColsAlpinsLayer();
     applyAvalancheZoneLayer();
     renderSeismesLayer();
@@ -16382,6 +16421,9 @@ function bindAppInteractions() {
     }
   });
   document.getElementById('filter-seismes')?.addEventListener('change', () => renderSeismesLayer());
+  document.getElementById('filter-apic')?.addEventListener('change', () => {
+    renderApicLayer(cachedExternalRisksSnapshot?.apic_isere || {}).catch(() => {});
+  });
   document.getElementById('filter-weather-visual-layer')?.addEventListener('change', () => renderWeatherVisualLayer());
   document.getElementById('filter-weather-visual-opacity')?.addEventListener('input', (event) => {
     const value = Math.max(20, Math.min(100, Number(event.target.value || 70)));
