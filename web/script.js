@@ -438,7 +438,6 @@ let mapStreetViewMode = false;
 const TACTICAL_LAYER_CATEGORIES = new Set(['evacuation', 'rassemblement', 'roadblock', 'barriere', 'danger_zone', 'centre_accueil', 'team']);
 const GEORISQUES_WMS_URL = 'https://www.georisques.gouv.fr/services';
 const EUMETSAT_WMS_URL = 'https://view.eumetsat.int/geoserver/wms';
-const EUMETSAT_LIGHTNING_LAYER = 'mtg_fd:li_afa';
 const EUMETSAT_WEATHER_LAYERS = Object.freeze({
   geocolour: { layer: 'mtg_fd:rgb_geocolour', label: 'Satellite couleur jour/nuit', attribution: '&copy; EUMETSAT & NASA' },
   cloudtype: { layer: 'mtg_fd:rgb_cloudtype', label: 'Types de nuages' },
@@ -456,8 +455,6 @@ const GEORISQUES_FLOOD_TRI_LAYERS = [
   'ALEA_SYNT_01_04FAI_FXX',
 ].join(',');
 let cachedCrisisPoints = [];
-let lightningLiveLayer = null;
-let lightningLiveRefreshTimer = null;
 let weatherVisualLayer = null;
 let weatherVisualLayerKey = '';
 let weatherVisualRefreshTimer = null;
@@ -5374,7 +5371,6 @@ async function resetMapFilters() {
   const hydro = document.getElementById('filter-hydro');
   const pcs = document.getElementById('filter-pcs');
   const meteoCities = document.getElementById('filter-meteo-cities');
-  const lightningLive = document.getElementById('filter-lightning-live');
   const activeOnly = document.getElementById('filter-resources-active');
   const schools = document.getElementById('filter-resources-schools');
   const security = document.getElementById('filter-resources-security');
@@ -5399,7 +5395,6 @@ async function resetMapFilters() {
   if (hydro) hydro.checked = true;
   if (pcs) pcs.checked = true;
   if (meteoCities) meteoCities.checked = false;
-  if (lightningLive) lightningLive.checked = false;
   if (activeOnly) activeOnly.checked = true;
   if (schools) schools.checked = false;
   if (security) security.checked = false;
@@ -5430,7 +5425,6 @@ async function resetMapFilters() {
   renderCustomPoints();
   renderResources();
   await renderMeteoCitiesLayer();
-  renderLightningLiveLayer();
   renderWeatherVisualLayer();
   renderSeismesLayer();
   renderFeuxForetLayer();
@@ -12342,53 +12336,6 @@ async function loadSituationForestFireMap() {
   return forestFireMapLoading;
 }
 
-function renderLightningLiveLayer() {
-  if (!leafletMap || typeof window.L === 'undefined') return;
-  const enabled = document.getElementById('filter-lightning-live')?.checked ?? false;
-
-  if (!enabled) {
-    if (lightningLiveLayer && leafletMap.hasLayer(lightningLiveLayer)) leafletMap.removeLayer(lightningLiveLayer);
-    if (lightningLiveRefreshTimer) window.clearInterval(lightningLiveRefreshTimer);
-    lightningLiveRefreshTimer = null;
-    return;
-  }
-
-  if (!leafletMap.getPane('lightningLivePane')) {
-    const pane = leafletMap.createPane('lightningLivePane');
-    pane.style.zIndex = 445;
-    pane.style.pointerEvents = 'none';
-  }
-
-  if (!lightningLiveLayer) {
-    lightningLiveLayer = window.L.tileLayer.wms(EUMETSAT_WMS_URL, {
-      layers: EUMETSAT_LIGHTNING_LAYER,
-      styles: 'mtg_li_afa',
-      format: 'image/png',
-      transparent: true,
-      version: '1.1.1',
-      opacity: 0.82,
-      pane: 'lightningLivePane',
-      cache_bust: Math.floor(Date.now() / 60000),
-      attribution: '&copy; EUMETSAT · MTG Lightning Imager (LI AFA)',
-    });
-    lightningLiveLayer.on('load', () => {
-      setMapFeedback('Foudre satellite affichée · actualisation automatique toutes les minutes.');
-    });
-    lightningLiveLayer.on('tileerror', () => {
-      setMapFeedback('La couche foudre EUMETSAT est temporairement indisponible.', true);
-    });
-  }
-
-  if (!leafletMap.hasLayer(lightningLiveLayer)) lightningLiveLayer.addTo(leafletMap);
-  lightningLiveLayer.setParams({ cache_bust: Math.floor(Date.now() / 60000) }, false);
-
-  if (lightningLiveRefreshTimer) window.clearInterval(lightningLiveRefreshTimer);
-  lightningLiveRefreshTimer = window.setInterval(() => {
-    if (!(document.getElementById('filter-lightning-live')?.checked ?? false) || !lightningLiveLayer) return;
-    lightningLiveLayer.setParams({ cache_bust: Math.floor(Date.now() / 60000) }, false);
-  }, 60 * 1000);
-}
-
 function renderWeatherVisualLayer() {
   if (!leafletMap || typeof window.L === 'undefined') return;
   const key = document.getElementById('filter-weather-visual-layer')?.value || 'none';
@@ -16435,7 +16382,6 @@ function bindAppInteractions() {
     }
   });
   document.getElementById('filter-seismes')?.addEventListener('change', () => renderSeismesLayer());
-  document.getElementById('filter-lightning-live')?.addEventListener('change', () => renderLightningLiveLayer());
   document.getElementById('filter-weather-visual-layer')?.addEventListener('change', () => renderWeatherVisualLayer());
   document.getElementById('filter-weather-visual-opacity')?.addEventListener('input', (event) => {
     const value = Math.max(20, Math.min(100, Number(event.target.value || 70)));
