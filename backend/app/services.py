@@ -4983,6 +4983,11 @@ def _fetch_sncf_isere_alerts_live() -> dict[str, Any]:
             description = re.sub(r"\s+", " ", (situation.findtext("siri:Description", default="", namespaces=namespace) or "").strip())
             detail_html = (situation.findtext("siri:Detail", default="", namespaces=namespace) or "").strip()
             detail_text = re.sub(r"\s+", " ", _strip_html_tags(unescape(detail_html))).strip()
+            # SIRI met généralement la cause, le lieu, l'heure de reprise et les
+            # consignes dans Detail, tandis que Description reste très courte.
+            full_description = detail_text or description or summary
+            if detail_text and description and description.lower() not in detail_text.lower():
+                full_description = f"{description} {detail_text}".strip()
             text_blob = f"{summary} {description} {detail_text}".strip()
             lower_blob = text_blob.lower()
             if not lower_blob:
@@ -5002,7 +5007,9 @@ def _fetch_sncf_isere_alerts_live() -> dict[str, Any]:
             axes = _sncf_extract_axes(text_blob)
             alerts.append({
                 "title": summary or "Alerte trafic SNCF Isère",
-                "description": (description or detail_text or text_blob)[:600],
+                "description": full_description,
+                "short_description": description,
+                "detail": detail_text,
                 "type": "accident" if "accident" in lower_blob else "travaux",
                 "level": level,
                 "severity_raw": severity_raw,

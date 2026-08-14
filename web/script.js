@@ -13247,14 +13247,19 @@ function renderSncfAlerts(sncf = {}) {
     const level = normalizeLevel(alert.level || alert.severity || 'jaune');
     const type = escapeHtml(alert.type || 'alerte');
     const title = escapeHtml(alert.title || 'Alerte SNCF');
-    const desc = escapeHtml(alert.description || '');
+    const detail = String(alert.detail || alert.description || '').trim();
+    const shortDescription = String(alert.short_description || '').trim();
+    const desc = escapeHtml(detail || shortDescription);
     const location = Array.isArray(alert.locations) && alert.locations.length ? ` · ${escapeHtml(alert.locations.join(', '))}` : '';
     const axes = Array.isArray(alert.axes) && alert.axes.length ? `<br><small><strong>Axe(s):</strong> ${escapeHtml(alert.axes.join(' · '))}</small>` : '';
     const validity = alert.valid_from || alert.valid_until
       ? `<br><small><strong>Période:</strong> ${escapeHtml(alert.valid_from || '?')} → ${escapeHtml(alert.valid_until || '?')}</small>`
       : '';
+    const severity = alert.severity_raw ? ` · <small>Sévérité source: ${escapeHtml(alert.severity_raw)}</small>` : '';
+    const reference = alert.situation_number ? `<br><small><strong>Référence:</strong> ${escapeHtml(alert.situation_number)}</small>` : '';
+    const published = alert.published_at ? `<br><small><strong>Publiée le:</strong> ${escapeHtml(alert.published_at)}</small>` : '';
     const link = String(alert.link || '').startsWith('http') ? alert.link : 'https://www.sncf.com/fr/itineraire-reservation/info-trafic';
-    return `<li><strong>${title}</strong> · <span style="color:${levelColor(level)}">${type}</span>${location}<br>${desc}${axes}${validity}${link ? `<br><a href="${link}" target="_blank" rel="noreferrer">Consulter SNCF</a>` : ''}</li>`;
+    return `<li><strong>${title}</strong> · <span style="color:${levelColor(level)}">${type}</span>${severity}${location}<br>${desc}${axes}${validity}${published}${reference}${link ? `<br><a href="${link}" target="_blank" rel="noreferrer">Consulter SNCF</a>` : ''}</li>`;
   }).join('') || '<li>Aucune alerte SNCF accidents/travaux en Isère pour le moment.</li>');
 }
 
