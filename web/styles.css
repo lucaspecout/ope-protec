@@ -6301,6 +6301,15 @@ body {
   border: 3px solid rgba(255,255,255,.92);
   box-shadow: 0 12px 28px rgba(0,0,0,.25);
 }
+.sidebar-logo-title {
+  margin: 0 0 8px;
+  color: #fff;
+  font-size: .78rem;
+  font-weight: 900;
+  letter-spacing: .14em;
+  line-height: 1.2;
+  text-align: center;
+}
 
 /* Sidebar height and logout button fixes */
 html,
