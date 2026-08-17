@@ -7063,6 +7063,16 @@ def _vigieau_list(payload: Any) -> list[dict[str, Any]]:
 
 
 def _vigieau_collect_zone_alerts() -> list[dict[str, Any]]:
+    # The department route is the authoritative complete view. Geographic probes
+    # are kept only as a compatibility fallback for older API deployments.
+    try:
+        payload = _http_get_json("https://api.vigieau.beta.gouv.fr/api/zones/departement/38", timeout=18)
+        department_entries = _vigieau_list(payload)
+        if department_entries:
+            return department_entries
+    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError):
+        pass
+
     probe_points = [
         (45.1885, 5.7245),  # Grenoble
         (45.3640, 5.5920),  # Voiron
@@ -7207,7 +7217,7 @@ def _fetch_vigieau_restrictions_live() -> dict[str, Any]:
         return {
             "service": "Vigieau",
             "status": "online",
-            "source": "https://api.vigieau.beta.gouv.fr/api/zones",
+            "source": "https://api.vigieau.beta.gouv.fr/api/zones/departement/38",
             "department": "Isère",
             "alerts": alerts[:20],
             "max_level": max_level,

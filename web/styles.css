@@ -645,6 +645,58 @@ label { display: block; margin-bottom: .8rem; }
   padding: .8rem;
 }
 .water-hero__meta label { font-weight: 700; }
+.water-restrictions { margin-bottom: .8rem; }
+.water-restrictions__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: .8rem;
+  margin-bottom: .75rem;
+}
+.water-restrictions__head h4 { margin: .12rem 0; }
+.water-restrictions__status {
+  border-radius: 999px;
+  background: #edf4ff;
+  padding: .42rem .7rem;
+  font-size: .82rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.water-restrictions__guide {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: .5rem;
+  margin-bottom: .8rem;
+}
+.water-restrictions__guide-item {
+  border-left: 5px solid #3b9b57;
+  border-radius: 10px;
+  background: #f6f8fb;
+  padding: .6rem .65rem;
+}
+.water-restrictions__guide-item.jaune { border-left-color: #e3b319; }
+.water-restrictions__guide-item.orange { border-left-color: #e57b25; }
+.water-restrictions__guide-item.rouge { border-left-color: #c93636; }
+.water-restrictions__guide-item strong,
+.water-restrictions__guide-item span { display: block; }
+.water-restrictions__guide-item strong { text-transform: capitalize; font-size: .86rem; }
+.water-restrictions__guide-item span { color: var(--muted); font-size: .76rem; margin-top: .16rem; }
+.water-restrictions__list { display: grid; gap: .55rem; }
+.water-restriction-card {
+  border: 1px solid #dbe7f8;
+  border-radius: 12px;
+  background: #fbfdff;
+  padding: .72rem .8rem;
+}
+.water-restriction-card p { margin: .32rem 0 0; }
+.water-restriction-card__head { display: flex; justify-content: space-between; gap: .65rem; }
+.water-restriction-card__head span { font-weight: 800; text-transform: capitalize; }
+.water-restriction-card__head span.vert { color: #287f43; }
+.water-restriction-card__head span.jaune { color: #8b6900; }
+.water-restriction-card__head span.orange { color: #b25208; }
+.water-restriction-card__head span.rouge { color: #b32626; }
+.water-restrictions__notice { color: var(--muted); font-size: .78rem; margin: .75rem 0 .35rem; }
+.water-restrictions__link { font-weight: 700; }
 .water-summary-grid,
 .water-kpi-grid {
   display: grid;
@@ -769,6 +821,7 @@ label { display: block; margin-bottom: .8rem; }
 
 @media (max-width: 980px) {
   .water-hero,
+  .water-restrictions__guide,
   .contacts-hero,
   .contacts-layout,
   .water-layout,

@@ -10835,17 +10835,48 @@ function bisonTrafficSplitBar(departureLevel, arrivalLevel) {
 function renderVigieauAlerts(vigieau = {}) {
   const alerts = Array.isArray(vigieau.alerts) ? vigieau.alerts : [];
   const maxLevel = vigieau.max_level || 'vert';
-  setRiskText('vigieau-status', `${vigieau.status || 'inconnu'} · niveau ${normalizeLevel(maxLevel)}`, maxLevel);
-  setText('vigieau-info', `${alerts.length} alerte(s) restriction d'eau · source Vigieau`);
-  setHtml('vigieau-list', alerts.slice(0, 8).map((alert) => {
+  const updatedLabel = vigieau.updated_at ? formatWaterDate(vigieau.updated_at) : 'date inconnue';
+  const levelGuide = [
+    ['vigilance', 'Économiser l’eau, sans restriction générale'],
+    ['alerte', 'Prélèvements réduits et usages limités'],
+    ['alerte renforcée', 'Limitations plus strictes'],
+    ['crise', 'Usages prioritaires uniquement'],
+  ];
+  const unavailable = ['degraded', 'offline', 'error'].includes(String(vigieau.status || '').toLowerCase());
+  const statusLabel = unavailable
+    ? 'Données temporairement indisponibles'
+    : (alerts.length ? `Niveau max · ${normalizeLevel(maxLevel)}` : 'Aucune restriction signalée');
+  setRiskText('vigieau-status', statusLabel, unavailable ? 'gris' : maxLevel);
+  setText('vigieau-info', `${alerts.length} zone(s) concernée(s) en Isère · mise à jour ${updatedLabel}`);
+  setHtml('vigieau-level-guide', levelGuide.map(([level, description]) => {
+    const color = _vigieauDisplayColor(level);
+    return `<article class="water-restrictions__guide-item ${color}"><strong>${escapeHtml(level)}</strong><span>${escapeHtml(description)}</span></article>`;
+  }).join(''));
+  setHtml('vigieau-list', alerts.slice(0, 12).map((alert) => {
     const zone = escapeHtml(alert.zone || 'Zone Isère');
     const level = escapeHtml(alert.level || 'non définie');
     const measure = escapeHtml(alert.measure || 'Restriction en vigueur');
+    const usages = Array.isArray(alert.usages) ? alert.usages.filter(Boolean).join(' · ') : (alert.usages || alert.resources || '');
     const period = alert.start_date || alert.end_date
-      ? `<br><span class="muted">Période: ${escapeHtml(alert.start_date || '?')} → ${escapeHtml(alert.end_date || '?')}</span>`
+      ? `<p class="muted"><strong>Période :</strong> ${escapeHtml(alert.start_date || 'début non précisé')} → ${escapeHtml(alert.end_date || 'jusqu’à nouvel ordre')}</p>`
       : '';
-    return `<li><strong>${zone}</strong> · <span style="color:${levelColor(alert.level_color || 'vert')}">${level}</span><br>${measure}${period}</li>`;
-  }).join('') || "<li>Aucune restriction d'eau active signalée pour l'Isère.</li>");
+    return `<article class="water-restriction-card">
+      <div class="water-restriction-card__head"><strong>${zone}</strong><span class="${escapeHtml(alert.level_color || _vigieauDisplayColor(alert.level))}">${level}</span></div>
+      <p>${measure}</p>
+      ${usages ? `<p><strong>Usages / ressources concernés :</strong> ${escapeHtml(String(usages))}</p>` : ''}
+      ${period}
+    </article>`;
+  }).join('') || (unavailable
+    ? `<p class="error">Impossible de confirmer la situation actuelle sur VigiEau. Utilisez le lien ci-dessous pour une vérification officielle.</p>`
+    : `<div class="water-banner">Aucune restriction d'eau active signalée pour l'Isère par VigiEau.</div>`));
+}
+
+function _vigieauDisplayColor(level = '') {
+  const value = String(level || '').toLowerCase();
+  if (value.includes('crise')) return 'rouge';
+  if (value.includes('renforc')) return 'orange';
+  if (value.includes('alerte')) return 'jaune';
+  return 'vert';
 }
 
 
