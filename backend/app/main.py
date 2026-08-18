@@ -3255,8 +3255,13 @@ _NOTIF_VOLATILE_FIELDS = {
 }
 
 
-def _notification_content_fingerprint(data: dict) -> str:
-    """Return a stable business-content signature, excluding refresh metadata."""
+def _notification_content_fingerprint(data: dict, service_key: str = "") -> str:
+    """Return a stable business-content signature, excluding refresh metadata.
+
+    VigiEau is deliberately reduced to the actual restrictions.  Transport
+    details (API URL, availability status or error wording) must not trigger a
+    new water-restriction notification.
+    """
     def _stable(value):
         if isinstance(value, dict):
             return {
@@ -3272,8 +3277,26 @@ def _notification_content_fingerprint(data: dict) -> str:
             )
         return value
 
+    fingerprint_data: Any = data
+    if service_key == "vigieau":
+        alerts = data.get("alerts") if isinstance(data, dict) else []
+        fingerprint_data = {
+            "alerts": [
+                {
+                    "zone": alert.get("zone") or "",
+                    "level": alert.get("level") or "",
+                    "measure": alert.get("measure") or "",
+                    "start_date": alert.get("start_date") or "",
+                    "end_date": alert.get("end_date") or "",
+                }
+                for alert in (alerts or [])
+                if isinstance(alert, dict)
+            ],
+            "max_level": data.get("max_level") or "vert",
+        }
+
     canonical = json.dumps(
-        _stable(data),
+        _stable(fingerprint_data),
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
@@ -3706,6 +3729,12 @@ def _check_and_send_notifications(service_key: str, data: dict) -> None:
                 if not svc_cfg.get("enabled"):
                     continue
 
+                # Une panne ou un changement de route API VigiEau ne signifie
+                # pas que les restrictions ont changé. Conserver le dernier
+                # état métier connu jusqu'au prochain relevé exploitable.
+                if service_key == "vigieau" and str(data.get("status") or "").lower() != "online":
+                    continue
+
                 threshold = str(svc_cfg.get("threshold") or "orange").lower()
                 threshold_rank = _LEVEL_ORDER.get(threshold, 1)
 
@@ -3775,7 +3804,7 @@ def _check_and_send_notifications(service_key: str, data: dict) -> None:
                     continue
 
                 last_seen_level = str(state.get("last_seen_level") or "vert")
-                content_fingerprint = _notification_content_fingerprint(data)
+                content_fingerprint = _notification_content_fingerprint(data, service_key)
 
                 # ── Mettre à jour seen_below ────────────────────────────────
                 if current_rank < threshold_rank:
@@ -3818,6 +3847,17 @@ def _check_and_send_notifications(service_key: str, data: dict) -> None:
                 )
 
                 if not should_send:
+                    # Renouveler la durée de vie de l'état tant que le service
+                    # est observé. Une restriction inchangée pendant plus de
+                    # 30 jours ne doit pas être renvoyée comme si elle était
+                    # nouvelle après expiration de la clé Redis.
+                    if _REDIS_OK and _redis is not None:
+                        _redis.setex(state_key, 30 * 86400, json.dumps({
+                            **state,
+                            "last_seen_level": current_level,
+                            "last_seen_fingerprint": content_fingerprint,
+                            "last_seen_at": now_utc.isoformat(),
+                        }))
                     continue
 
                 # ── Envoyer ────────────────────────────────────────────────
