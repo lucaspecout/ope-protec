@@ -183,12 +183,10 @@ const RESOURCE_TYPE_META = {
   transport_gare_sncf: { label: 'Gare SNCF', icon: '🚆' },
   transport_gare_routiere: { label: 'Gare routière', icon: '🚌' },
   transport_aeroport: { label: 'Aéroport', icon: '✈️' },
-  energie: { label: 'Énergie / barrage', icon: '⚡' },
   protection_civile: { label: 'Antenne Protection Civile', icon: '🔺' },
   site_sensible_custom: { label: 'Site sensible (ajouté)', icon: '⚠️' },
   anfr_antenna: { label: 'Antenne ANFR', icon: '📡' },
   arcep_mobile_outage: { label: 'Site mobile indisponible (ARCEP)', icon: '🔴' },
-  telecom_white_zone: { label: 'Zone blanche potentielle', icon: '📵' },
   defibrillateur: { label: 'Defibrillateur automatise externe', icon: '⚡' },
 };
 
@@ -204,19 +202,12 @@ const RESOURCE_POINTS = [
   { id: 'cnpe-saint-alban', name: 'CNPE EDF Saint-Alban / Saint-Maurice', type: 'centrale_nucleaire', active: true, lat: 45.405422953042404, lon: 4.757081312357517, address: 'Rte de la Centrale, 38550 Saint-Maurice-l\'Exil', priority: 'risk', info: 'Installation nucléaire majeure sous surveillance pour la frange sud-ouest Isère.', source: 'https://www.edf.fr/centrale-nucleaire-saint-alban' },
   { id: 'pont-de-claix-chem', name: 'Plateforme chimique de Pont-de-Claix', type: 'lieu_risque', active: true, lat: 45.13180530005534, lon: 5.706618216387599, address: 'Francia, Rue Lavoisier, Le Pont-de-Claix', priority: 'risk', info: 'Cluster industriel SEVESO de l’agglomération grenobloise.', source: 'https://www.pontdeclaix.fr' },
   { id: 'gare-grenoble', name: 'Gare de Grenoble', type: 'transport_gare_sncf', active: true, lat: 45.19142, lon: 5.71472, address: '1 place de la Gare, 38000 Grenoble', priority: 'vital', info: 'Hub ferroviaire principal pour mobilité de crise et évacuation.', source: 'https://www.garesetconnexions.sncf/fr/gares-services/grenoble' },
-  { id: 'barrage-verney', name: 'Barrage du Verney', type: 'energie', active: true, lat: 45.12920201985221, lon: 6.043436022227785, address: '38114 Allemond', priority: 'risk', info: 'Ouvrage hydraulique structurant de la vallée de l’Eau d’Olle.', source: 'https://www.edf.fr/hydraulique-isere' },
   { id: 'plateforme-chem-jarrie', name: 'Plateforme chimique de Jarrie', type: 'lieu_risque', active: true, lat: 45.08694132318529, lon: 5.736251871908567, address: 'N85 BP 16, 38560 Jarrie', priority: 'risk', info: 'Zone industrielle sensible en continuité du couloir chimique sud grenoblois.', source: 'https://www.jarrie.fr' },
-  { id: 'centrale-barrage-grandmaison', name: 'STEP de Grand’Maison', type: 'energie', active: true, lat: 45.206053828393784, lon: 6.116978747872993, address: '38114 Vaujany', priority: 'risk', info: 'Infrastructure énergétique stratégique pour la stabilité du réseau.', source: 'https://www.edf.fr/hydraulique-isere' },
   { id: 'aeroport-grenoble', name: 'Aéroport Grenoble Alpes Isère', type: 'transport_aeroport', active: true, lat: 45.361, lon: 5.33056, address: '38590 Saint-Étienne-de-Saint-Geoirs', priority: 'vital', info: 'Plateforme aérienne de soutien logistique et d’évacuation sanitaire.', source: 'https://www.grenoble-airport.com' },
   { id: 'palais-sports', name: 'Palais des Sports de Grenoble (centre d’accueil)', type: 'salle_spectacle_public', active: true, lat: 45.18565564489357, lon: 5.7408451908719655, address: '14 Bd Clemenceau, 38029 Grenoble', priority: 'vital', info: 'Site de regroupement mobilisable pour accueil population/renforts.', source: 'https://www.grenoble.fr' },
   { id: 'summum-grenoble', name: 'Le Summum (Grenoble Alpes Métropole)', type: 'salle_spectacle_public', active: true, lat: 45.156988, lon: 5.716922, address: 'Rue Henri Barbusse, 38100 Grenoble', priority: 'vital', info: 'Salle événementielle mobilisable pour accueil temporaire en cas de crise.', source: 'https://www.summumgrenoble.com' },
   { id: 'mc2-grenoble', name: 'MC2: Maison de la Culture de Grenoble', type: 'centre_culturel', active: true, lat: 45.166739, lon: 5.735104, address: '4 Rue Paul Claudel, 38100 Grenoble', priority: 'vital', info: 'Équipement culturel public pouvant soutenir un dispositif d’accueil exceptionnel.', source: 'https://www.mc2grenoble.fr' },
   { id: 'halle-tonnelle-fontaine', name: 'Halle de la Tonnelle (Fontaine)', type: 'salle_fetes', active: true, lat: 45.192873, lon: 5.68872, address: 'Rue de la Liberté, 38600 Fontaine', priority: 'vital', info: 'Salle polyvalente mobilisable pour hébergement d’appoint.', source: 'https://www.ville-fontaine.fr' },
-  { id: 'barrage-chambon', name: 'Barrage du Chambon', type: 'energie', active: true, lat: 45.04554730445581, lon: 6.137479156603567, address: '38860 Les Deux Alpes', priority: 'risk', info: 'Barrage alpin stratégique de la vallée de la Romanche.', source: 'https://fr.wikipedia.org/wiki/Barrage_du_Chambon' },
-  { id: 'barrage-sautet', name: 'Barrage du Sautet', type: 'energie', active: true, lat: 44.81749004792632, lon: 5.908287667268233, address: '38970 Pellafol', priority: 'risk', info: 'Ouvrage hydroélectrique majeur entre Isère et Hautes-Alpes.', source: 'https://fr.wikipedia.org/wiki/Barrage_du_Sautet' },
-  { id: 'barrage-saint-pierre-cognet', name: 'Barrage de Saint-Pierre-Cognet', type: 'energie', active: true, lat: 44.8766210455462, lon: 5.8038682262595644, address: '38350 Saint-Pierre-de-Méaroz', priority: 'risk', info: 'Barrage de la vallée du Drac intégré à la chaîne hydroélectrique locale.', source: 'https://fr.wikipedia.org/wiki/Barrage_de_Saint-Pierre-Cognet' },
-  { id: 'barrage-monteynard', name: 'Barrage de Monteynard', type: 'energie', active: true, lat: 44.96155501047247, lon: 5.688786660513596, address: '38650 Avignonet', priority: 'risk', info: 'Grand lac de retenue du Drac, sensible pour la gestion hydraulique départementale.', source: 'https://fr.wikipedia.org/wiki/Barrage_de_Monteynard-Avignonet' },
-  { id: 'barrage-nd-com' , name: 'Barrage de Notre-Dame-de-Commiers', type: 'energie', active: true, lat: 45.005935722637325, lon: 5.688129616155315, address: '38450 Notre-Dame-de-Commiers', priority: 'risk', info: 'Barrage situé en aval de Monteynard sur l’axe hydraulique du Drac.', source: 'https://fr.wikipedia.org/wiki/Barrage_de_Notre-Dame-de-Commiers' },
   { id: 'seveso-seqens-bj', name: 'Pcas - Seqens', type: 'lieu_risque', active: true, lat: 45.594926837137486, lon: 5.261413249717274, address: '38300 Bourgoin-Jallieu', priority: 'risk', info: 'Établissement SEVESO seuil haut (code S3IC 0061.02822).', source: 'https://www.georisques.gouv.fr/risques/installations/donnees' },
   { id: 'seveso-finorga', name: 'Finorga-Novasep', type: 'lieu_risque', active: true, lat: 45.58200705628313, lon: 4.78812425892635, address: '38670 Chasse-sur-Rhône', priority: 'risk', info: 'Établissement SEVESO seuil haut (code S3IC 0061.02857).', source: 'https://www.georisques.gouv.fr/risques/installations/donnees' },
   { id: 'seveso-stmicro-crolles', name: 'ST Microelectronics', type: 'lieu_risque', active: true, lat: 45.2667763, lon: 5.8841567, address: '38920 Crolles', priority: 'risk', info: 'Établissement SEVESO seuil haut (code S3IC 0061.02885).', source: 'https://www.georisques.gouv.fr/risques/installations/donnees' },
@@ -5390,7 +5381,6 @@ async function resetMapFilters() {
   const tchooTrains = document.getElementById('filter-tchoo-trains');
   const seismes = document.getElementById('filter-seismes');
   const feuxForet = document.getElementById('filter-feux-foret');
-  const feuxSatellite = document.getElementById('filter-feux-satellite');
   const healthResources = document.getElementById('filter-resources-health');
   const daeResources = document.getElementById('filter-resources-dae');
   const commandResources = document.getElementById('filter-resources-command');
@@ -5414,7 +5404,6 @@ async function resetMapFilters() {
   if (tchooTrains) tchooTrains.checked = false;
   if (seismes) seismes.checked = false;
   if (feuxForet) feuxForet.checked = false;
-  if (feuxSatellite) feuxSatellite.checked = false;
   if (healthResources) healthResources.checked = false;
   if (daeResources) daeResources.checked = false;
   if (commandResources) commandResources.checked = true;
@@ -5437,7 +5426,6 @@ async function resetMapFilters() {
   renderWeatherVisualLayer();
   renderSeismesLayer();
   renderFeuxForetLayer();
-  renderFeuxSatelliteLayer();
   await renderMunicipalitiesOnMap(cachedMunicipalities);
   await renderPopulationByCityLayer();
   await renderTrafficOnMap();
@@ -6615,7 +6603,7 @@ async function loadTelecomPoints() {
   // Vérifier le cache localStorage en premier (24h) pour un affichage immédiat
   const cached = readFreshSnapshot(STORAGE_KEYS.staticTelecomCache, TELECOM_POINTS_CACHE_TTL_MS);
   if (Array.isArray(cached) && cached.length > 0) {
-    telecomPointsCache = cached;
+    telecomPointsCache = cached.filter((point) => point?.type !== 'telecom_white_zone');
     telecomLoaded = true;
     return telecomPointsCache;
   }
@@ -6680,8 +6668,7 @@ async function loadTelecomPoints() {
       };
     }).filter(Boolean);
 
-    const whiteZoneResources = buildTelecomWhiteZoneResources(anfrResources, arcepResources);
-    telecomPointsCache = [...anfrResources, ...arcepResources, ...whiteZoneResources];
+    telecomPointsCache = [...anfrResources, ...arcepResources];
 
     // Sauvegarder en localStorage uniquement si on a de vraies données
     if (telecomPointsCache.length > 0) {
@@ -6978,12 +6965,6 @@ function _ensureStaticDataLoaded() {
     loadHelipadPoints()
       .then(() => { _helipadLoadInFlight = false; renderHelipadLayer(); })
       .catch(() => { _helipadLoadInFlight = false; });
-  }
-  if (document.getElementById('filter-barrages')?.checked && !barrageLoaded && !_barrageLoadInFlight) {
-    _barrageLoadInFlight = true;
-    loadBarragePoints()
-      .then(() => { _barrageLoadInFlight = false; renderBarrageLayer(); })
-      .catch(() => { _barrageLoadInFlight = false; });
   }
   renderColsAlpinsLayer();
 }
@@ -15034,7 +15015,6 @@ function renderExternalRisks(data = {}) {
     applyAvalancheZoneLayer();
     renderSeismesLayer();
     renderFeuxForetLayer();
-    renderFeuxSatelliteLayer();
   }
   renderNewsPanel(prefecture, dauphine, franceBleu, placegrenet, grenobleMétropole, arsAura, seismesIsere);
   renderSncfAlerts(sncf);
@@ -16375,16 +16355,6 @@ function bindAppInteractions() {
   document.getElementById('filter-google-traffic-flow')?.addEventListener('change', () => applyGoogleTrafficFlowOverlay());
   document.getElementById('filter-flood-zones')?.addEventListener('change', () => applyFloodZoneLayer());
   document.getElementById('filter-avalanche-zones')?.addEventListener('change', () => applyAvalancheZoneLayer());
-  document.getElementById('filter-barrages')?.addEventListener('change', () => {
-    if (!barrageLoaded && !_barrageLoadInFlight) {
-      _barrageLoadInFlight = true;
-      loadBarragePoints()
-        .then(() => { _barrageLoadInFlight = false; renderBarrageLayer(); })
-        .catch(() => { _barrageLoadInFlight = false; });
-    } else {
-      renderBarrageLayer();
-    }
-  });
   document.getElementById('filter-montagne')?.addEventListener('change', () => {
     if (!montagneLoaded && !_montagneLoadInFlight) {
       _montagneLoadInFlight = true;
@@ -16426,9 +16396,6 @@ function bindAppInteractions() {
     if (weatherVisualLayer) weatherVisualLayer.setOpacity(value / 100);
   });
   document.getElementById('filter-feux-foret')?.addEventListener('change', () => renderFeuxForetLayer());
-  document.getElementById('filter-feux-satellite')?.addEventListener('change', (event) => {
-    renderFeuxSatelliteLayer({ forceRefresh: event.target.checked, showFeedback: event.target.checked });
-  });
   document.getElementById('filter-cols-alpins')?.addEventListener('change', () => renderColsAlpinsLayer());
   document.getElementById('filter-resources-telecom')?.addEventListener('change', () => {
     syncTelecomFilterState();
@@ -17050,7 +17017,6 @@ function bindAppInteractions() {
   ]);
   ['filter-hydro', 'filter-pcs', 'filter-meteo-cities', 'filter-meteo-layer-type', 'filter-seismes', 'filter-feux-foret', 'filter-feux-satellite', 'filter-resources-active', 'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type', 'filter-resources-hosting-capacity', 'filter-resources-hosting-surface', 'filter-resources-hosting-accessibility', 'filter-resources-hosting-sanitary', 'filter-resources-hosting-heating', 'filter-resources-hosting-parking', 'filter-resources-schools', 'filter-resources-schools-type', 'filter-resources-security', 'filter-resources-security-type', 'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type', 'filter-resources-transport', 'filter-resources-transport-type', 'filter-resources-health', 'filter-resources-health-type', 'filter-resources-dae', 'filter-resources-telecom', 'filter-resources-telecom-type', 'filter-resources-protcivile', 'filter-traffic-incidents', 'filter-bison-type', 'filter-cameras', 'filter-autoroutes', 'filter-autoroutes-type', 'filter-pr-autoroutes', 'filter-tchoo-trains'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', async () => {
-      if (id === 'filter-feux-satellite') return; // géré par son rafraîchissement FIRMS dédié
       if (RESOURCE_ONLY_FILTERS.has(id)) {
         // Rendu immédiat depuis le cache
         renderResources();
@@ -17061,7 +17027,6 @@ function bindAppInteractions() {
       await renderMeteoCitiesLayer();
       renderSeismesLayer();
       renderFeuxForetLayer();
-      renderFeuxSatelliteLayer();
       await renderMunicipalitiesOnMap(cachedMunicipalities);
       renderResources();
       await renderPopulationByCityLayer();
@@ -17421,7 +17386,6 @@ async function renderMapLiveLayers() {
   renderColsAlpinsLayer();
   applyAvalancheZoneLayer();
   renderSeismesLayer();
-  renderFeuxSatelliteLayer();
   renderResources();
   updateMapSummary();
 }
