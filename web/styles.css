@@ -6861,6 +6861,30 @@ body {
   color: #526b91;
 }
 
+#map-panel .map-zone-impact .zone-impact-section {
+  margin-bottom: .6em;
+  padding: .55em .65em;
+  border: 1px solid #dbe7fb;
+  border-radius: 7px;
+  color: #183153;
+  background: #f8faff;
+}
+
+#map-panel .map-zone-impact #map-zone-impact-list .zone-impact-section li,
+#map-panel .map-zone-impact #map-zone-impact-list .zone-impact-section strong,
+#map-panel .map-zone-impact #map-zone-impact-list .zone-impact-section em {
+  color: #183153;
+}
+
+#map-panel .map-zone-impact #map-zone-impact-list .zone-impact-section li {
+  padding: .25em .35em;
+  border: 0;
+  background: transparent;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
 #map-panel .map-feedback-bar,
 #map-panel .map-selected-location {
   color: #dfeaff;

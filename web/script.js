@@ -3742,7 +3742,7 @@ async function computeZoneImpact() {
     const content = items.length
       ? `<ul style="margin:.3em 0 0 1.1em;padding:0">${items.map((i) => `<li>${i}</li>`).join('')}</ul>`
       : `<span class="muted">${emptyMsg}</span>`;
-    return `<li style="margin-bottom:.6em"><strong>${icon} ${escapeHtml(title)}</strong><br>${content}</li>`;
+    return `<li class="zone-impact-light-card zone-impact-section"><strong>${icon} ${escapeHtml(title)}</strong><br>${content}</li>`;
   };
 
   const nameList = (arr, max = 5) => arr.slice(0, max).map((r) => {
