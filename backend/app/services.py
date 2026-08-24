@@ -10916,8 +10916,22 @@ def _fetch_firms_france_detections() -> list[dict[str, Any]]:
 
 def _parse_feuxdeforet_isere_page(raw_html: str) -> dict[str, Any]:
     anchors: list[dict[str, str]] = []
-    seen_recent: set[tuple[str, str]] = set()
+    # Un même feu est présent dans les données JSON puis à nouveau dans le HTML.
+    # Son ancienneté et son état (en cours/éteint) peuvent changer, mais sa fiche
+    # reste la même : l'URL est donc la clé stable à privilégier. Inclure
+    # ``recency`` dans la clé faisait compter une mise à jour comme un 2e foyer.
+    seen_recent: set[str] = set()
     recent_incidents: list[dict[str, Any]] = []
+
+    def incident_key(href: str, commune: str, title: str) -> str:
+        absolute_href = urljoin(_FEUXDEFORET_ISERE_URL, href).split("#", 1)[0].rstrip("/").lower()
+        if absolute_href and absolute_href != _FEUXDEFORET_ISERE_URL.rstrip("/").lower():
+            return f"url:{absolute_href}"
+        identity = commune or title
+        normalized = unicodedata.normalize("NFKD", identity.lower())
+        normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+        normalized_label = re.sub(r"[^a-z0-9]+", "-", normalized).strip("-")
+        return f"label:{normalized_label}"
 
     marker = "window.__INITIAL_DATA__="
     marker_idx = (raw_html or "").find(marker)
@@ -10936,7 +10950,7 @@ def _parse_feuxdeforet_isere_page(raw_html: str) -> dict[str, Any]:
                 href = str(item.get("url") or "").strip()
                 if not commune and not title:
                     continue
-                dedupe_key = ((href or commune or title).lower(), recency.lower())
+                dedupe_key = incident_key(href, commune, title)
                 if dedupe_key in seen_recent:
                     continue
                 seen_recent.add(dedupe_key)
@@ -10972,7 +10986,7 @@ def _parse_feuxdeforet_isere_page(raw_html: str) -> dict[str, Any]:
         recency = re.sub(r"\s+", " ", recent_match.group(2)).strip()
         if not commune:
             continue
-        dedupe_key = (commune.lower(), recency.lower())
+        dedupe_key = incident_key(anchor["href"], commune, f"{commune} (38)")
         if dedupe_key in seen_recent:
             continue
         seen_recent.add(dedupe_key)
