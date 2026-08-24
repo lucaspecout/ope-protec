@@ -109,8 +109,6 @@ from .services import (
     vigicrues_geojson_from_stations,
     save_risks_snapshot,
     load_risks_snapshot,
-    fetch_montagne_isere,
-    fetch_helipads_isere,
     fetch_municipality_public_services,
     fetch_isere_public_services_by_city,
     fetch_rnb_buildings_bbox,
@@ -1438,12 +1436,6 @@ def startup_warmup_external_sources() -> None:
             fetch_finess_isere_resources()
         except Exception:
             pass
-        # Montagne / hélipads : Redis persist → fichier → Overpass
-        for fn in (fetch_montagne_isere, fetch_helipads_isere):
-            try:
-                fn()
-            except Exception:
-                pass
 
     Thread(target=_warmup_static_data, daemon=True).start()
 
@@ -2490,22 +2482,6 @@ def api_geodae_isere_defibrillators(
 ):
     safe_limit = max(100, min(limit, 20000))
     return fetch_geodae_isere_defibrillators(force_refresh=refresh, limit=safe_limit)
-
-
-@app.get("/api/osm/isere/montagne")
-def api_osm_montagne_isere(
-    refresh: bool = False,
-    _: User = Depends(require_roles(*READ_ROLES)),
-):
-    return fetch_montagne_isere(force_refresh=refresh)
-
-
-@app.get("/api/osm/isere/helipads")
-def api_osm_helipads_isere(
-    refresh: bool = False,
-    _: User = Depends(require_roles(*READ_ROLES)),
-):
-    return fetch_helipads_isere(force_refresh=refresh)
 
 
 @app.get("/api/osm/isere/pr-autoroutes")

@@ -6954,18 +6954,6 @@ function _ensureStaticDataLoaded() {
       .catch(() => { _telecomLoadInFlight = false; });
   }
   // Chargement différé des couches montagne uniquement si les filtres sont activés
-  if (document.getElementById('filter-montagne')?.checked && !montagneLoaded && !_montagneLoadInFlight) {
-    _montagneLoadInFlight = true;
-    loadMontagnePoints()
-      .then(() => { _montagneLoadInFlight = false; renderMontagneLayer(); })
-      .catch(() => { _montagneLoadInFlight = false; });
-  }
-  if (document.getElementById('filter-helipads')?.checked && !helipadLoaded && !_helipadLoadInFlight) {
-    _helipadLoadInFlight = true;
-    loadHelipadPoints()
-      .then(() => { _helipadLoadInFlight = false; renderHelipadLayer(); })
-      .catch(() => { _helipadLoadInFlight = false; });
-  }
   renderColsAlpinsLayer();
 }
 
@@ -16384,26 +16372,6 @@ function bindAppInteractions() {
   document.getElementById('filter-google-traffic-flow')?.addEventListener('change', () => applyGoogleTrafficFlowOverlay());
   document.getElementById('filter-flood-zones')?.addEventListener('change', () => applyFloodZoneLayer());
   document.getElementById('filter-avalanche-zones')?.addEventListener('change', () => applyAvalancheZoneLayer());
-  document.getElementById('filter-montagne')?.addEventListener('change', () => {
-    if (!montagneLoaded && !_montagneLoadInFlight) {
-      _montagneLoadInFlight = true;
-      loadMontagnePoints()
-        .then(() => { _montagneLoadInFlight = false; renderMontagneLayer(); })
-        .catch(() => { _montagneLoadInFlight = false; });
-    } else {
-      renderMontagneLayer();
-    }
-  });
-  document.getElementById('filter-helipads')?.addEventListener('change', () => {
-    if (!helipadLoaded && !_helipadLoadInFlight) {
-      _helipadLoadInFlight = true;
-      loadHelipadPoints()
-        .then(() => { _helipadLoadInFlight = false; renderHelipadLayer(); })
-        .catch(() => { _helipadLoadInFlight = false; });
-    } else {
-      renderHelipadLayer();
-    }
-  });
   document.getElementById('filter-agents-refresh')?.addEventListener('click', () => _refreshAgentMarkers());
   document.getElementById('filter-agents')?.addEventListener('change', () => {
     if (document.getElementById('filter-agents').checked) {
