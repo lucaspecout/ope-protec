@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css?v=20260730-fire-contours-france" />
+  <link rel="stylesheet" href="/styles.css?v=20260824-info-page" />
 </head>
 <body>
   <div id="network-offline-banner" role="alert" aria-live="assertive">
@@ -75,6 +75,7 @@
           <button class="menu-btn hidden" data-target="users-panel" data-icon="👤" hidden><span class="menu-label">Utilisateurs</span></button>
           <button class="menu-btn" data-target="api-panel" data-icon="🧩"><span class="menu-label">Interconnexions API</span></button>
           <button class="menu-btn" data-target="notifications-panel" data-icon="🔔"><span class="menu-label">Notifications</span></button>
+          <button class="menu-btn" data-target="info-panel" data-icon="ℹ️"><span class="menu-label">Informations</span></button>
           <button class="menu-btn" data-target="audit-panel" data-icon="🔍" id="menu-audit-btn" class="hidden" hidden><span class="menu-label">Audit</span></button>
         </nav>
         <button id="logout-btn" class="danger" type="button">Se déconnecter</button>
@@ -1389,6 +1390,64 @@
           </div>
         </section>
 
+        <section id="info-panel" class="panel view hidden" hidden>
+          <div class="info-hero">
+            <img class="info-hero__logo pc-logo-img" src="/assets/protection-civile-isere-logo.svg" alt="Protection Civile de l’Isère" />
+            <div>
+              <p class="tag">Aider · Secourir · Former</p>
+              <h3>À propos de CRISIS38</h3>
+              <p>Un outil numérique conçu pour soutenir la préparation et la coordination opérationnelle en Isère.</p>
+            </div>
+          </div>
+
+          <div class="info-page-grid">
+            <article class="tile info-card info-card--wide">
+              <span class="info-card__icon" aria-hidden="true">🛡️</span>
+              <h4>La Protection Civile de l’Isère</h4>
+              <p>L’Association de Protection Civile de l’Isère est une association agréée de sécurité civile, membre du réseau de la Fédération Nationale de Protection Civile.</p>
+              <p>Ses bénévoles peuvent contribuer aux opérations de secours, soutenir et accompagner les populations touchées par une crise, encadrer les bénévoles spontanés et assurer des dispositifs prévisionnels de secours lors de rassemblements. L’association participe également à la formation aux premiers secours.</p>
+            </article>
+
+            <article class="tile info-card">
+              <span class="info-card__icon" aria-hidden="true">🎯</span>
+              <h4>Pourquoi cette application ?</h4>
+              <p>En situation sensible, les informations utiles sont souvent dispersées entre de nombreuses sources. CRISIS38 les rassemble dans une interface unique afin de faciliter la veille, la lecture de la situation et l’appui aux communes disposant d’un Plan communal de sauvegarde (PCS).</p>
+              <p>L’application aide les équipes à retrouver rapidement les alertes, risques, ressources, contacts, cartes et informations opérationnelles nécessaires à la préparation ou à la gestion d’un événement.</p>
+            </article>
+
+            <article class="tile info-card info-card--creator">
+              <span class="info-card__icon" aria-hidden="true">💻</span>
+              <h4>Conception</h4>
+              <p><strong>CRISIS38 a été imaginée et développée par Lucas PECOUT, membre de la Protection Civile de l’Isère.</strong></p>
+              <p>Le projet est né d’un besoin concret : disposer d’un outil départemental simple, réactif et centralisé pour améliorer l’accès à l’information et soutenir les acteurs mobilisés avant, pendant et après une crise.</p>
+            </article>
+
+            <article class="tile info-card">
+              <span class="info-card__icon" aria-hidden="true">📍</span>
+              <h4>Contacter l’association</h4>
+              <address class="info-contact">
+                <strong>Protection Civile de l’Isère</strong><br />
+                1 rue des Marronniers<br />
+                38600 Fontaine<br />
+                <a href="tel:+33476250430">04 76 25 04 30</a><br />
+                <a href="mailto:isere@protection-civile.org">isere@protection-civile.org</a>
+              </address>
+            </article>
+
+            <article class="tile info-card">
+              <span class="info-card__icon" aria-hidden="true">🔗</span>
+              <h4>Sources et liens utiles</h4>
+              <ul class="info-links">
+                <li><a href="https://isere.protection-civile.org/" target="_blank" rel="noreferrer">Site de la Protection Civile de l’Isère ↗</a></li>
+                <li><a href="https://www.isere.gouv.fr/Services-de-l-Etat/Securite-et-protection-des-personnes/Securite-civile/Protection-civile-de-l-Isere" target="_blank" rel="noreferrer">Annuaire officiel de la préfecture de l’Isère ↗</a></li>
+                <li><a href="https://www.securite-civile.interieur.gouv.fr/documentation/secourisme-et-associations/associations-agreees-par-securite-civile.html" target="_blank" rel="noreferrer">Associations agréées de sécurité civile ↗</a></li>
+              </ul>
+            </article>
+          </div>
+
+          <p class="info-disclaimer">CRISIS38 est un outil d’aide à l’information et à la coordination. Il ne remplace ni les consignes des autorités, ni les systèmes officiels d’alerte, ni les services d’urgence. En cas d’urgence, composez le 18 ou le 112.</p>
+        </section>
+
         <!-- ── Journal d'audit (admin) ── -->
         <section id="audit-panel" class="panel view hidden" hidden>
           <div class="flux-header" style="margin-bottom:1rem">
@@ -1518,6 +1577,6 @@
     <path id="isere-shape" d="M0 0h1v1H0z"></path>
   </svg>
   <script src="/hosting_data.js?v=20260603-perf1"></script>
-  <script src="/script.js?v=20260730-fire-contours-france"></script>
+  <script src="/script.js?v=20260824-info-page"></script>
 </body>
 </html>

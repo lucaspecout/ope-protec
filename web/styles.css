@@ -7273,3 +7273,69 @@ body {
     padding: .85rem;
   }
 }
+
+/* ── Page informations Protection Civile ────────────────────────────────── */
+#info-panel {
+  padding: 0;
+  overflow: hidden;
+  background: #f4f7fb;
+}
+
+.info-hero {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: clamp(1.4rem, 4vw, 2.6rem);
+  color: #fff;
+  background: linear-gradient(125deg, #082f73 0%, #0752a5 58%, #0875c1 100%);
+}
+
+.info-hero__logo {
+  width: clamp(110px, 18vw, 190px);
+  max-height: 105px;
+  padding: .7rem;
+  border-radius: 14px;
+  background: #fff;
+  object-fit: contain;
+}
+
+.info-hero .tag { color: #bfe1ff; }
+.info-hero h3 { margin: .2rem 0 .55rem; font-size: clamp(1.55rem, 3vw, 2.25rem); }
+.info-hero p:last-child { max-width: 720px; margin: 0; color: #e7f3ff; font-size: 1.02rem; }
+
+.info-page-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  padding: 1.2rem;
+}
+
+.info-card { position: relative; padding: 1.25rem; }
+.info-card--wide { grid-column: 1 / -1; }
+.info-card--creator { border-left: 5px solid #f28c00; }
+.info-card__icon { display: block; margin-bottom: .55rem; font-size: 1.65rem; }
+.info-card h4 { margin: 0 0 .7rem; color: #083b7a; font-size: 1.08rem; }
+.info-card p { margin: 0 0 .7rem; line-height: 1.62; }
+.info-card p:last-child { margin-bottom: 0; }
+.info-contact { color: inherit; font-style: normal; line-height: 1.75; }
+.info-card a { color: #075aa8; font-weight: 650; }
+.info-links { margin: 0; padding-left: 1.15rem; }
+.info-links li + li { margin-top: .65rem; }
+
+.info-disclaimer {
+  margin: 0 1.2rem 1.2rem;
+  padding: .9rem 1rem;
+  border: 1px solid #f0c36a;
+  border-radius: 9px;
+  color: #604600;
+  background: #fff8df;
+  line-height: 1.5;
+}
+
+@media (max-width: 720px) {
+  .info-hero { align-items: flex-start; flex-direction: column; }
+  .info-hero__logo { width: 135px; }
+  .info-page-grid { grid-template-columns: 1fr; padding: .85rem; }
+  .info-card--wide { grid-column: auto; }
+  .info-disclaimer { margin: 0 .85rem .85rem; }
+}

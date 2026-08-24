@@ -135,6 +135,7 @@ const PANEL_TITLES = {
   'map-panel': 'Carte stratégique Isère',
   'users-panel': 'Gestion des utilisateurs',
   'notifications-panel': 'Notifications Discord',
+  'info-panel': 'Informations · Protection Civile de l’Isère',
   'audit-panel': "Journal d'audit",
 };
 
@@ -258,6 +259,7 @@ const MAIRIE_ALLOWED_PANELS = new Set([
   'municipalities-panel',
   'logs-panel',
   'map-panel',
+  'info-panel',
 ]);
 let pendingCurrentPassword = '';
 let refreshTimer = null;
