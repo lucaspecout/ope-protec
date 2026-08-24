@@ -3086,7 +3086,10 @@ function setActivePanel(panelId) {
     });
   }
   if (panelId === 'stations-panel' && token) {
-    withPanelLoading('stations-panel', 'Chargement horaires gares...', () => loadAndRenderStationsPanel(false)).catch((error) => {
+    // L'ouverture du panneau doit interroger immédiatement le flux temps réel.
+    // Sans forçage, le cache HTTP pouvait conserver une réponse vide jusqu'à
+    // ce que l'utilisateur clique manuellement sur « Actualiser ».
+    withPanelLoading('stations-panel', 'Chargement horaires gares...', () => loadAndRenderStationsPanel(true)).catch((error) => {
       const errorEl = document.getElementById('stations-error');
       if (errorEl) errorEl.textContent = sanitizeErrorMessage(error.message);
     });
@@ -14600,7 +14603,7 @@ function refreshActivePanelData() {
   if (panelId === 'logs-panel') return Promise.allSettled([loadEvents(null), loadLogs(null)]).then(() => undefined);
   if (panelId === 'municipalities-panel') return loadMunicipalities(null);
   if (panelId === 'users-panel' && canManageUsers()) return loadUsers(null);
-  if (panelId === 'stations-panel') return loadAndRenderStationsPanel(false, { silent: true });
+  if (panelId === 'stations-panel') return loadAndRenderStationsPanel(true, { silent: true });
   if (panelId === 'water-panel') return loadAndRenderWaterPanel(false);
   if (panelId === 'contacts-panel') return loadAndRenderContactsPanel(getDefaultContactsPreloadCity(), false);
   if (panelId === 'api-panel') return loadApiInterconnections(false);
