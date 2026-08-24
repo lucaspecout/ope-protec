@@ -1564,7 +1564,7 @@ def _finess_precise_geocode(
 _isere_opendata_cache_lock = Lock()
 _isere_opendata_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "isere_opendata"}
 _anfr_isere_cache_lock = Lock()
-_anfr_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "anfr_isere"}
+_anfr_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "anfr_isere_v2"}
 _arcep_isere_cache_lock = Lock()
 _arcep_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "arcep_isere"}
 _hubeau_groundwater_cache_lock = Lock()
@@ -8113,15 +8113,15 @@ def _fetch_anfr_isere_antennas_live() -> dict[str, Any]:
     except Exception as exc:
         return {
             "service": "ANFR",
-            "status": "degraded",
+            # Un incident réseau n'est pas une collecte ANFR valide. Ce statut
+            # permet au cache partagé de restituer la dernière bonne valeur au
+            # lieu d'enregistrer durablement un faux total à zéro.
+            "status": "unavailable",
             "source": source,
             "department": "Isère (38)",
-            "supports_total": 0,
-            "stations_total": 0,
-            "average_support_height_m": None,
-            "supports_points": [],
             "updated_at": datetime.utcnow().isoformat() + "Z",
-            "error": str(exc),
+            "error": "Source ANFR temporairement indisponible ; nouvelle tentative automatique prévue.",
+            "error_detail": str(exc),
         }
 
 
