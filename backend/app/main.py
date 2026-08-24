@@ -74,7 +74,6 @@ from .services import (
     fetch_itinisere_disruptions,
     fetch_itinisere_webcams,
     fetch_prefecture_isere_news,
-    fetch_fr_alert_isere,
     fetch_dauphine_isere_news,
     fetch_france_bleu_isere_news,
     fetch_placegrenet_news,
@@ -391,7 +390,6 @@ EDIT_ROLES = {"admin", "ope"}
 # rafraîchies plus souvent que les données quasi-statiques.
 SERVICE_REFRESH_INTERVALS: dict[str, int] = {
     "prefecture_isere":        90,   # Actualités urgentes
-    "fr_alert_isere":          90,
     "meteo_france":           120,
     "meteo_forets_isere":    1800,
     "itinisere":              120,
@@ -431,7 +429,6 @@ CRITICAL_REFRESH_SERVICES = (
     "vigicrues",
     "apic_isere",
     "vigicrues_flash_isere",
-    "fr_alert_isere",
     "prefecture_isere",
 )
 HIGH_REFRESH_SERVICES = CRITICAL_REFRESH_SERVICES + (
@@ -530,7 +527,7 @@ _SVC_LABELS: dict[str, str] = {
     "avalanche_isere": "Avalanches BRA", "feux_foret_isere": "Feux de forêt Isère",
     "seismes_isere": "Séismes Isère", "vigicrues_flash_isere": "Vigicrues Flash",
     "vigieau": "Vigieau", "atmo_aura": "Atmo AURA", "copernicus_ems": "GDACS · Catastrophes Europe",
-    "cols_alpins_isere": "Cols alpins", "prefecture_isere": "Préfecture Isère", "fr_alert_isere": "FR-Alert Isère",
+    "cols_alpins_isere": "Cols alpins", "prefecture_isere": "Préfecture Isère",
 }
 
 
@@ -730,10 +727,6 @@ def compute_global_risk_details(
     atmo_level = str(atmo_today.get("level") or "").lower()
     atmo_label = str(atmo_today.get("label") or atmo_level or "indice indisponible")
     add_factor("Qualité de l'air", {"jaune": 4, "orange": 8, "rouge": 14}.get(atmo_level, 0), atmo_label)
-
-    fr_alert = risks.get("fr_alert_isere") if isinstance(risks.get("fr_alert_isere"), dict) else {}
-    fr_today = _safe_int(fr_alert.get("today_count"), len(fr_alert.get("today_events") or []))
-    add_factor("FR-Alert Isère aujourd'hui", 35 if fr_today > 0 else 0, f"{fr_today} alerte(s)")
 
     vigieau = risks.get("vigieau") if isinstance(risks.get("vigieau"), dict) else {}
     water_total = int(len(vigieau.get("alerts") or []))
@@ -2023,7 +2016,6 @@ def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str])
         "georisques": (lambda: fetch_georisques_isere_summary(force_refresh=refresh, commune_names=pcs_commune_names), {"status": "pending", "details": []}),
         "rnb_isere": (lambda: fetch_rnb_isere_summary(force_refresh=refresh), {"status": "pending", "buildings_total": 0, "sample": []}),
         "prefecture_isere": (lambda: fetch_prefecture_isere_news(force_refresh=refresh), {"status": "pending", "articles": []}),
-        "fr_alert_isere": (lambda: fetch_fr_alert_isere(limit=5, force_refresh=refresh), {"status": "pending", "events": [], "today_events": [], "today_count": 0}),
         "dauphine_isere": (lambda: fetch_dauphine_isere_news(force_refresh=refresh), {"status": "pending", "articles": []}),
         "france_bleu_isere": (lambda: fetch_france_bleu_isere_news(force_refresh=refresh), {"status": "pending", "items": []}),
         "placegrenet": (lambda: fetch_placegrenet_news(force_refresh=refresh), {"status": "pending", "items": []}),
@@ -2378,15 +2370,6 @@ def interactive_map_meteo_vigilance():
     return fetch_meteo_france_isere()
 
 
-@app.get("/api/fr-alert/isere")
-def api_fr_alert_isere(
-    refresh: bool = False,
-    limit: int = 5,
-    _: User = Depends(require_roles(*READ_ROLES)),
-):
-    return fetch_fr_alert_isere(limit=max(1, min(limit, 30)), force_refresh=refresh)
-
-
 @app.get("/api/vigicrues/geojson")
 def interactive_map_vigicrues_geojson(
     refresh: bool = False,
@@ -2560,7 +2543,7 @@ def api_rnb_buildings(
     max_lat: float = Query(...),
     max_lon: float = Query(...),
     refresh: bool = Query(False),
-    limit: int = Query(200, ge=20, le=500),
+    limit: int = Query(10000, ge=20, le=50000),
     _: User = Depends(require_roles(*READ_ROLES)),
 ):
     return fetch_rnb_buildings_bbox(
@@ -3161,7 +3144,6 @@ _SERVICE_LABELS: dict[str, str] = {
     "vinci_autoroutes": "Vinci Autoroutes",
     "cars_region_aura": "Cars Région · AURA",
     "prefecture_isere": "Préfecture Isère",
-    "fr_alert_isere": "FR-Alert Isère",
     "france_bleu_isere": "France Bleu Isère",
     "bison_fute": "Bison Futé",
 }
@@ -3210,9 +3192,6 @@ def _extract_service_level(key: str, data: dict) -> str:
     if key == "feux_foret_isere":
         n = int(data.get("fires_total") or data.get("recent_incidents_2d_total") or 0)
         return "orange" if n > 5 else "jaune" if n > 0 else "vert"
-
-    if key == "fr_alert_isere":
-        return "rouge" if int(data.get("today_count") or 0) > 0 else "vert"
 
     # Fallback générique
     raw = str(data.get("level") or data.get("alert_level") or "vert").lower()

@@ -11122,7 +11122,7 @@ def _hubeau_services_cache_key(code_commune: str, limit: int) -> str:
 
 
 def _rnb_bbox_cache_key(min_lat: float, min_lon: float, max_lat: float, max_lon: float, limit: int) -> str:
-    return f"{min_lat:.5f}|{min_lon:.5f}|{max_lat:.5f}|{max_lon:.5f}|{max(20, min(limit, 500))}"
+    return f"{min_lat:.5f}|{min_lon:.5f}|{max_lat:.5f}|{max_lon:.5f}|{max(20, min(limit, 50000))}"
 
 
 def _normalize_hubeau_quality_item(item: dict[str, Any]) -> dict[str, Any]:
@@ -11351,9 +11351,9 @@ def fetch_rnb_buildings_bbox(
     max_lat: float,
     max_lon: float,
     force_refresh: bool = False,
-    limit: int = 200,
+    limit: int = 10000,
 ) -> dict[str, Any]:
-    safe_limit = max(20, min(limit, 500))
+    safe_limit = max(20, min(limit, 50000))
     page_limit = min(safe_limit, 100)
     safe_min_lat = min(float(min_lat), float(max_lat))
     safe_max_lat = max(float(min_lat), float(max_lat))
@@ -11375,8 +11375,11 @@ def fetch_rnb_buildings_bbox(
         )
         buildings: list[dict[str, Any]] = []
         pages = 0
-        while next_url and len(buildings) < safe_limit and pages < 5:
+        available_total: int | None = None
+        while next_url and len(buildings) < safe_limit:
             payload = _http_get_json(next_url, timeout=20, headers={"Accept": "application/json"})
+            if available_total is None:
+                available_total = _safe_int(payload.get("count")) if isinstance(payload, dict) else None
             results = payload.get("results") if isinstance(payload, dict) else []
             for item in results if isinstance(results, list) else []:
                 if not isinstance(item, dict):
@@ -11408,6 +11411,9 @@ def fetch_rnb_buildings_bbox(
             },
             "buildings": buildings,
             "buildings_total": len(buildings),
+            "available_total": available_total if available_total is not None else len(buildings),
+            "truncated": bool(next_url),
+            "pages_fetched": pages,
             "updated_at": datetime.utcnow().isoformat() + "Z",
         }
 
@@ -11435,7 +11441,7 @@ def fetch_rnb_buildings_bbox(
     return result
 
 
-def fetch_rnb_isere_summary(force_refresh: bool = False, limit: int = 500) -> dict[str, Any]:
+def fetch_rnb_isere_summary(force_refresh: bool = False, limit: int = 10000) -> dict[str, Any]:
     payload = fetch_rnb_buildings_bbox(
         min_lat=44.4,
         min_lon=4.9,
@@ -11449,9 +11455,9 @@ def fetch_rnb_isere_summary(force_refresh: bool = False, limit: int = 500) -> di
     return {
         "status": payload.get("status") if isinstance(payload, dict) else "error",
         "source": payload.get("source") if isinstance(payload, dict) else "https://rnb-fr.gitbook.io/documentation/api-et-outils/api-batiments/lister-des-batiments",
-        "buildings_total": payload.get("buildings_total", 0) if isinstance(payload, dict) else 0,
+        "buildings_total": payload.get("available_total", payload.get("buildings_total", 0)) if isinstance(payload, dict) else 0,
         "sample": sample,
-        "coverage_note": "Aperçu Isère borné par bbox RNB, utilisé aussi pour le calculateur de zone.",
+        "coverage_note": "Total RNB annoncé pour l'emprise Isère ; les calculs de zone chargent les bâtiments par pagination.",
         "updated_at": payload.get("updated_at") if isinstance(payload, dict) else datetime.utcnow().isoformat() + "Z",
         "error": payload.get("error", "") if isinstance(payload, dict) else "",
     }
