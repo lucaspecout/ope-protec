@@ -10826,6 +10826,31 @@ function renderVigieauAlerts(vigieau = {}) {
     : `<div class="water-banner">Aucune restriction d'eau active signalée pour l'Isère par VigiEau.</div>`));
 }
 
+async function loadVigieauCard(forceRefresh = false) {
+  try {
+    const vigieau = await api(`/api/vigieau/alerts${forceRefresh ? '?refresh=true' : ''}`, {
+      bypassCache: forceRefresh,
+      cacheTtlMs: forceRefresh ? 0 : 5 * 60 * 1000,
+      timeoutMs: 45000,
+      maxRetries: 1,
+    });
+    cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, {
+      vigieau: vigieau && typeof vigieau === 'object' ? vigieau : {},
+    });
+    renderVigieauAlerts(cachedExternalRisksSnapshot.vigieau || {});
+    saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
+    return cachedExternalRisksSnapshot.vigieau;
+  } catch (error) {
+    renderVigieauAlerts({
+      status: 'degraded',
+      alerts: [],
+      max_level: 'vert',
+      error: sanitizeErrorMessage(error?.message || 'Service VigiEau indisponible'),
+    });
+    return null;
+  }
+}
+
 function _vigieauDisplayColor(level = '') {
   const value = String(level || '').toLowerCase();
   if (value.includes('crise')) return 'rouge';
@@ -15951,6 +15976,10 @@ async function refreshAll(forceRefresh = false) {
       fallbackFailedCount = fallbackResults.filter((r) => r.status === 'rejected').length;
     }
     if (showBlockingLoader) advanceStartupQueue('données initiales');
+
+    // VigiEau dispose de son propre chargement : sa carte ne doit pas rester
+    // bloquée si le snapshot global est inchangé ou si une autre source échoue.
+    await loadVigieauCard(forceRefresh);
 
     refreshMapDataInBackground();
 

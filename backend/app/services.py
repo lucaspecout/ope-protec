@@ -7083,11 +7083,19 @@ def _vigieau_collect_zone_alerts() -> list[dict[str, Any]]:
         (45.2980, 5.6360),  # Saint-Égrève
     ]
 
-    entries: list[dict[str, Any]] = []
-    for lat, lon in probe_points:
+    def fetch_probe(point: tuple[float, float]) -> list[dict[str, Any]]:
+        lat, lon = point
         query = urlencode({"lat": lat, "lon": lon})
-        payload = _http_get_json(f"https://api.vigieau.beta.gouv.fr/api/zones?{query}", timeout=18)
-        entries.extend(_vigieau_list(payload))
+        try:
+            payload = _http_get_json(f"https://api.vigieau.beta.gouv.fr/api/zones?{query}", timeout=10)
+            return _vigieau_list(payload)
+        except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError):
+            return []
+
+    entries: list[dict[str, Any]] = []
+    with ThreadPoolExecutor(max_workers=len(probe_points)) as executor:
+        for probe_entries in executor.map(fetch_probe, probe_points):
+            entries.extend(probe_entries)
 
     deduped: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -7109,6 +7117,7 @@ def _vigieau_collect_zone_alerts() -> list[dict[str, Any]]:
 def _fetch_vigieau_restrictions_live() -> dict[str, Any]:
     source_page = "https://www.vigieau.gouv.fr"
     candidates = [
+        "https://api.vigieau.beta.gouv.fr/api/zones/departement/38",
         "https://www.vigieau.gouv.fr/api/v1/restrictions?code_departement=38",
         "https://www.vigieau.gouv.fr/api/v1/restrictions?departement=38",
         "https://www.vigieau.gouv.fr/api/restrictions?code_departement=38",
@@ -7117,7 +7126,7 @@ def _fetch_vigieau_restrictions_live() -> dict[str, Any]:
 
     for candidate in candidates:
         try:
-            payload = _http_get_json(candidate, timeout=18)
+            payload = _http_get_json(candidate, timeout=10)
             restrictions = _vigieau_list(payload)
             alerts: list[dict[str, Any]] = []
             for item in restrictions:
