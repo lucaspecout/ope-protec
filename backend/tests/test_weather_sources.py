@@ -22,7 +22,7 @@ NOW = datetime(2026, 10, 20, 12, 0, tzinfo=timezone.utc)
 def load_module(cache_dir):
     tree = ast.parse(MODULE_PATH.read_text(encoding="utf-8-sig"))
     tree.body = [node for node in tree.body if not (
-        isinstance(node, ast.ImportFrom) and node.module == "config" and node.level == 1
+        isinstance(node, ast.ImportFrom) and node.module in {"config", "api_credentials"} and node.level == 1
     )]
     module = ModuleType("weather_sources_under_test")
     module.settings = SimpleNamespace(
@@ -34,6 +34,11 @@ def load_module(cache_dir):
         meteo_france_station_ids="",
         meteo_france_station_limit=40,
     )
+    module.CredentialStoreError = type("CredentialStoreError", (ValueError,), {})
+    module.resolve_credentials = lambda service: {
+        field: getattr(module.settings, f"meteo_france_{field}")
+        for field in ("api_key", "observations_api_key", "radar_api_key", "access_token")
+    }
     exec(compile(tree, str(MODULE_PATH), "exec"), module.__dict__)
     module._now = lambda: NOW
     return module
@@ -71,6 +76,21 @@ class WeatherSourcesTests(unittest.TestCase):
         self.module.settings.meteo_france_api_key = ""
         self.module.settings.meteo_france_access_token = "temporary-token"
         self.assertEqual(self.module._auth_headers("observations")["Authorization"], "Bearer temporary-token")
+
+    def test_saved_credentials_are_resolved_again_without_restarting_collector(self):
+        credentials = {"api_key": "first-key"}
+        with patch.object(self.module, "resolve_credentials", side_effect=lambda service: dict(credentials)) as resolve:
+            self.assertEqual(self.module._auth_headers("observations")["apikey"], "first-key")
+            credentials["api_key"] = "replacement-key"
+            self.assertEqual(self.module._auth_headers("observations")["apikey"], "replacement-key")
+        self.assertEqual(resolve.call_args_list[0].args, ("meteo_france",))
+        self.assertEqual(resolve.call_count, 2)
+
+    def test_credential_storage_failure_remains_safe_in_snapshot(self):
+        with patch.object(self.module, "resolve_credentials", side_effect=self.module.CredentialStoreError("secret-db-url")):
+            payload = self.module.fetch_meteo_observations_isere(force_refresh=True)
+        self.assertEqual(payload["error_code"], "credential_store_unavailable")
+        self.assertNotIn("secret-db-url", json.dumps(payload))
 
     def test_parse_official_station_catalog_and_keep_eight_digits(self):
         catalog = (

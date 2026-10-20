@@ -255,6 +255,7 @@ const RESOURCE_POINTS = [
 
 let token = localStorage.getItem(STORAGE_KEYS.token);
 let currentUser = null;
+window.ApiCredentials?.configure({ api, isAdmin: () => Boolean(token) && canManageUsers() });
 const MAIRIE_ALLOWED_PANELS = new Set([
   'situation-panel',
   'services-panel',
@@ -3052,6 +3053,7 @@ function setActivePanel(panelId, { refreshSnapshot = true } = {}) {
   updateMobileNavActive(panelId);
   document.getElementById('panel-title').textContent = PANEL_TITLES[panelId] || 'Centre opérationnel';
   window.OfficialSources?.activate(panelId);
+  window.ApiCredentials?.activate(panelId);
   if (panelId === 'map-panel') {
     withPanelLoading('map-panel', 'Chargement de la carte...', () => ensureMapReady().then(() => {
       setTimeout(() => {
@@ -16015,6 +16017,7 @@ function applyRoleVisibility() {
   document.querySelectorAll('[data-requires-edit]').forEach((node) => setVisibility(node, canEdit()));
   document.querySelectorAll('[data-requires-map-point]').forEach((node) => setVisibility(node, canCreateMapPoints()));
   document.querySelectorAll('[data-admin-only]').forEach((node) => setVisibility(node, currentUser?.role === 'admin'));
+  if (!canManageUsers()) window.ApiCredentials?.reset();
   setVisibility(document.querySelector('[data-target="users-panel"]'), canManageUsers());
   document.querySelectorAll('.menu-btn').forEach((node) => {
     const target = String(node.getAttribute('data-target') || '');
@@ -17043,6 +17046,7 @@ function bindAppInteractions() {
 
 function logout() {
   window.OfficialSources?.reset();
+  window.ApiCredentials?.reset();
   token = null;
   currentUser = null;
   clearApiCache();

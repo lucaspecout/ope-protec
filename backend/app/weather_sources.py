@@ -27,6 +27,7 @@ from urllib.parse import urlencode, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .config import settings
+from .api_credentials import CredentialStoreError, resolve_credentials
 
 
 OBS_API = "https://public-api.meteofrance.fr/public/DPObs/v2"
@@ -153,11 +154,12 @@ def _fresh(payload: dict, ttl: int) -> bool:
 
 
 def _auth_headers(kind: str) -> dict[str, str]:
-    key = str(
-        getattr(settings, f"meteo_france_{kind}_api_key", "")
-        or getattr(settings, "meteo_france_api_key", "")
-    ).strip()
-    token = str(getattr(settings, "meteo_france_access_token", "") or "").strip()
+    try:
+        credentials = resolve_credentials("meteo_france")
+    except CredentialStoreError:
+        raise WeatherSourceError("credential_store_unavailable") from None
+    key = str(credentials.get(f"{kind}_api_key") or credentials.get("api_key") or "").strip()
+    token = str(credentials.get("access_token") or "").strip()
     headers = {"Accept": "*/*", "User-Agent": "ope-protec/1.0 (observations publiques)"}
     if key:
         headers["apikey"] = key

@@ -18,8 +18,8 @@ from time import sleep
 from threading import Lock, Thread
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote_plus, unquote, urlencode, urljoin, urlparse
-from urllib.request import Request, urlopen
+from urllib.parse import quote, quote_plus, unquote, urlencode, urljoin, urlparse
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 import xml.etree.ElementTree as ET
 import zipfile
 from zoneinfo import ZoneInfo
@@ -48,6 +48,7 @@ import redis as _redis_lib
 
 from .config import settings
 from .database import SessionLocal
+from .api_credentials import CredentialStoreError, resolve_credentials
 
 # ---------------------------------------------------------------------------
 # Cache fichier JSON – persistance sur volume Docker (/data/static)
@@ -262,6 +263,39 @@ def _http_get_text(url: str, timeout: int = 12, ssl_context: ssl.SSLContext | No
     request = Request(url, headers=default_headers)
     payload = _http_get_with_retries(request=request, timeout=timeout, ssl_context=ssl_context, retries=retries)
     return payload.decode("utf-8", errors="ignore")
+
+
+class _CredentialRedirects(HTTPRedirectHandler):
+    """Never forward a provider key or authorization header to another URL."""
+
+    def redirect_request(self, request, response, code, message, headers, new_url):
+        raise ValueError("Redirection du fournisseur refusée")
+
+
+def _credentialed_http_bytes(url: str, *, timeout: int = 12, headers: dict[str, str] | None = None) -> bytes:
+    # Keep credentialed traffic separate from legacy public-feed transports.
+    # In particular, do not disable TLS or include upstream bodies/URLs in errors.
+    request_headers = {"User-Agent": "ope-protec/1.0", **(headers or {})}
+    limit = 16 * 1024 * 1024
+    try:
+        with build_opener(_CredentialRedirects()).open(Request(url, headers=request_headers), timeout=timeout) as response:
+            payload = response.read(limit + 1)
+            if len(payload) > limit:
+                raise ValueError("Réponse du fournisseur trop volumineuse")
+            return payload
+    except HTTPError as error:
+        raise ValueError(f"API fournisseur indisponible (HTTP {error.code})") from None
+    except (URLError, TimeoutError, OSError, RemoteDisconnected, IncompleteRead):
+        raise ValueError("Connexion au fournisseur indisponible") from None
+    except Exception:
+        raise ValueError("Échange avec le fournisseur indisponible") from None
+
+
+def _credentialed_http_json(url: str, *, timeout: int = 12, headers: dict[str, str] | None = None) -> Any:
+    try:
+        return json.loads(_credentialed_http_bytes(url, timeout=timeout, headers=headers).decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError):
+        raise ValueError("Réponse JSON du fournisseur invalide") from None
 
 
 _BROWSER_UA = (
@@ -7421,8 +7455,10 @@ def _fetch_georisques_v2_collection(
     departement: str = "38",
     page_size: int = 1000,
     extra_query: dict[str, Any] | None = None,
+    token: str | None = None,
 ) -> dict[str, Any]:
-    token = settings.georisques_api_token.strip()
+    if token is None:
+        token = str(resolve_credentials("georisques").get("token") or "").strip()
     if not token:
         raise ValueError("Clé API Géorisques absente")
 
@@ -7468,7 +7504,7 @@ def _fetch_georisques_v2_collection(
 
     for candidate_query, pagination in deduped_candidates:
         try:
-            payload = _http_get_json(
+            payload = _credentialed_http_json(
                 f"https://www.georisques.gouv.fr/api/v2/{endpoint}?{urlencode(candidate_query, doseq=True)}",
                 headers=headers,
             )
@@ -7495,7 +7531,7 @@ def _fetch_georisques_v2_collection(
 
         for page_number in page_numbers:
             selected_query[page_key] = page_number
-            page_payload = _http_get_json(
+            page_payload = _credentialed_http_json(
                 f"https://www.georisques.gouv.fr/api/v2/{endpoint}?{urlencode(selected_query, doseq=True)}",
                 headers=headers,
             )
@@ -7613,7 +7649,13 @@ def fetch_georisques_commune_risks(codes_insee: list[str]) -> dict[str, Any]:
 
 def _fetch_georisques_isere_summary_live(commune_names: list[str] | None = None) -> dict[str, Any]:
     source = "https://georisques.gouv.fr/api/v2"
-    if not settings.georisques_api_token.strip():
+    configuration_error = "Clé API Géorisques v2 absente"
+    try:
+        token = str(resolve_credentials("georisques").get("token") or "").strip()
+    except CredentialStoreError:
+        token = ""
+        configuration_error = "Configuration des accès Géorisques indisponible"
+    if not token:
         return {
             "service": "Géorisques",
             "status": "degraded",
@@ -7639,8 +7681,8 @@ def _fetch_georisques_isere_summary_live(commune_names: list[str] | None = None)
             "recent_ground_movements": [],
             "monitored_communes": [],
             "updated_at": datetime.utcnow().isoformat() + "Z",
-            "errors": ["Clé API Géorisques v2 absente"],
-            "error": "Clé API Géorisques v2 absente",
+            "errors": [configuration_error],
+            "error": configuration_error,
         }
 
     monitored_names = commune_names or ["Grenoble", "Bourgoin-Jallieu", "Vienne", "Voiron"]
@@ -7679,17 +7721,17 @@ def _fetch_georisques_isere_summary_live(commune_names: list[str] | None = None)
     radon_labels = {"1": "Faible", "2": "Moyen", "3": "Élevé"}
 
     try:
-        mvt_payload = _fetch_georisques_v2_collection("mvt", extra_query=filters)
-        cavites_payload = _fetch_georisques_v2_collection("cavites", extra_query=filters)
-        radon_payload = _fetch_georisques_v2_collection("radon", extra_query=filters)
-        azi_payload = _fetch_georisques_v2_collection("gaspar/azi", extra_query=filters)
-        pprn_payload = _fetch_georisques_v2_collection("gaspar/pprn", extra_query=filters)
-        pprm_payload = _fetch_georisques_v2_collection("gaspar/pprm", extra_query=filters)
-        pprt_payload = _fetch_georisques_v2_collection("gaspar/pprt", extra_query=filters)
-        dicrim_payload = _fetch_georisques_v2_collection("gaspar/dicrim", extra_query=filters)
-        tim_payload = _fetch_georisques_v2_collection("gaspar/tim", extra_query=filters)
-        risques_payload = _fetch_georisques_v2_collection("gaspar/risques", extra_query=filters)
-        zonage_payload = _fetch_georisques_v2_collection("zonage_sismique", extra_query=filters)
+        mvt_payload = _fetch_georisques_v2_collection("mvt", extra_query=filters, token=token)
+        cavites_payload = _fetch_georisques_v2_collection("cavites", extra_query=filters, token=token)
+        radon_payload = _fetch_georisques_v2_collection("radon", extra_query=filters, token=token)
+        azi_payload = _fetch_georisques_v2_collection("gaspar/azi", extra_query=filters, token=token)
+        pprn_payload = _fetch_georisques_v2_collection("gaspar/pprn", extra_query=filters, token=token)
+        pprm_payload = _fetch_georisques_v2_collection("gaspar/pprm", extra_query=filters, token=token)
+        pprt_payload = _fetch_georisques_v2_collection("gaspar/pprt", extra_query=filters, token=token)
+        dicrim_payload = _fetch_georisques_v2_collection("gaspar/dicrim", extra_query=filters, token=token)
+        tim_payload = _fetch_georisques_v2_collection("gaspar/tim", extra_query=filters, token=token)
+        risques_payload = _fetch_georisques_v2_collection("gaspar/risques", extra_query=filters, token=token)
+        zonage_payload = _fetch_georisques_v2_collection("zonage_sismique", extra_query=filters, token=token)
     except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
         return {
             "service": "Géorisques",
@@ -7716,8 +7758,8 @@ def _fetch_georisques_isere_summary_live(commune_names: list[str] | None = None)
             "recent_ground_movements": [],
             "monitored_communes": [],
             "updated_at": datetime.utcnow().isoformat() + "Z",
-            "errors": [f"API Géorisques v2 indisponible: {exc}"],
-            "error": f"API Géorisques v2 indisponible: {exc}",
+            "errors": ["API Géorisques v2 indisponible"],
+            "error": "API Géorisques v2 indisponible",
         }
 
     movements = mvt_payload["content"]
@@ -10909,7 +10951,7 @@ def _fetch_effis_france_perimeters() -> dict[str, Any]:
 
 def _fetch_firms_france_detections() -> list[dict[str, Any]]:
     """Détections thermiques VIIRS NRT en France métropolitaine et Corse."""
-    map_key = str(settings.firms_map_key or "").strip()
+    map_key = str(resolve_credentials("firms").get("map_key") or "").strip()
     if not map_key:
         return []
     detections: list[dict[str, Any]] = []
@@ -10918,13 +10960,12 @@ def _fetch_firms_france_detections() -> list[dict[str, Any]]:
         for bbox in _FIRMS_FRANCE_BBOXES:
             # Deux jours calendaires sont nécessaires pour couvrir les dernières
             # 24 heures lorsque la journée UTC vient de changer.
-            url = f"{_FIRMS_AREA_API}/{map_key}/{source}/{bbox}/2"
-            raw_csv = _http_get_text(url, timeout=20, retries=1)
+            url = f"{_FIRMS_AREA_API}/{quote(map_key, safe='')}/{source}/{bbox}/2"
+            raw_csv = _credentialed_http_bytes(url, timeout=20).decode("utf-8", errors="replace")
             reader = csv.DictReader(io.StringIO(raw_csv))
             required_columns = {"latitude", "longitude", "acq_date", "acq_time"}
             if not required_columns.issubset(set(reader.fieldnames or [])):
-                detail = re.sub(r"\s+", " ", raw_csv).strip()[:180] or "réponse vide"
-                raise RuntimeError(f"Réponse NASA FIRMS invalide pour {source}: {detail}")
+                raise RuntimeError("Réponse NASA FIRMS invalide")
             for row in reader:
                 try:
                     lat = float(row.get("latitude") or "")
@@ -11560,7 +11601,7 @@ def _fetch_feux_foret_live() -> dict[str, Any]:
     try:
         firms_detections = _fetch_firms_france_detections()
     except Exception as exc:
-        firms_error = str(exc)
+        firms_error = "Source satellite NASA FIRMS indisponible ; vérifier la clé et les droits d'accès"
     effis_error = ""
     effis_perimeters: dict[str, Any] = {"type": "FeatureCollection", "features": []}
     try:
@@ -11821,8 +11862,9 @@ def _validate_route_coord(lat: float, lon: float) -> tuple[float, float]:
     return lat_num, lon_num
 
 
-def _tomtom_route_estimate(start_lat: float, start_lon: float, end_lat: float, end_lon: float) -> dict[str, Any]:
-    api_key = (settings.tomtom_api_key or "").strip()
+def _tomtom_route_estimate(start_lat: float, start_lon: float, end_lat: float, end_lon: float, *, api_key: str | None = None) -> dict[str, Any]:
+    if api_key is None:
+        api_key = str(resolve_credentials("tomtom").get("api_key") or "").strip()
     if not api_key:
         raise RuntimeError("TOMTOM_API_KEY non configure")
     locations = f"{start_lat},{start_lon}:{end_lat},{end_lon}"
@@ -11835,7 +11877,7 @@ def _tomtom_route_estimate(start_lat: float, start_lon: float, end_lat: float, e
         "instructionsType": "text",
         "language": "fr-FR",
     })
-    payload = _http_get_json(f"https://api.tomtom.com/routing/1/calculateRoute/{locations}/json?{query}", timeout=12)
+    payload = _credentialed_http_json(f"https://api.tomtom.com/routing/1/calculateRoute/{locations}/json?{query}", timeout=12)
     routes = payload.get("routes") if isinstance(payload, dict) else []
     if not routes:
         raise RuntimeError("Aucun trajet TomTom trouve")
@@ -12062,21 +12104,29 @@ def _local_route_estimate(
 def fetch_route_estimate(start_lat: float, start_lon: float, end_lat: float, end_lon: float) -> dict[str, Any]:
     start_lat, start_lon = _validate_route_coord(start_lat, start_lon)
     end_lat, end_lon = _validate_route_coord(end_lat, end_lon)
-    if (settings.tomtom_api_key or "").strip():
+    credential_error = ""
+    try:
+        api_key = str(resolve_credentials("tomtom").get("api_key") or "").strip()
+    except CredentialStoreError:
+        api_key = ""
+        credential_error = "Configuration des accès TomTom indisponible"
+    if api_key or credential_error:
         try:
-            return _tomtom_route_estimate(start_lat, start_lon, end_lat, end_lon)
-        except Exception as exc:
+            if credential_error:
+                raise ValueError(credential_error)
+            return _tomtom_route_estimate(start_lat, start_lon, end_lat, end_lon, api_key=api_key)
+        except Exception:
             try:
                 fallback = _osrm_route_estimate(start_lat, start_lon, end_lat, end_lon)
-                fallback["tomtom_error"] = str(exc)
+                fallback["tomtom_error"] = credential_error or "Routage TomTom indisponible ; vérifier la clé et les droits d'accès"
                 return fallback
-            except Exception as fallback_exc:
+            except Exception:
                 return _local_route_estimate(
                     start_lat,
                     start_lon,
                     end_lat,
                     end_lon,
-                    error=f"tomtom: {exc}; osrm: {fallback_exc}",
+                    error="Services de routage TomTom et OSRM indisponibles",
                 )
     try:
         return _osrm_route_estimate(start_lat, start_lon, end_lat, end_lon)

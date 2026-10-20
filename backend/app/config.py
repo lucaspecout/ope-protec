@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 1440
     upload_dir: str = "/data/uploads"
     static_data_dir: str = "/data/static"
+    # Persistent private key, outside served/static directories. Back up with DB.
+    api_credentials_key_path: str = "/data/api_credentials.key"
     georisques_api_token: str = Field(
         default="",
         validation_alias=AliasChoices("GEORISQUES_API_TOKEN", "GEORISQUE_API_TOKEN"),

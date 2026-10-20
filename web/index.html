@@ -9,6 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/styles.css?v=20260824-info-page" />
   <link rel="stylesheet" href="/official_sources.css?v=20261020" />
+  <link rel="stylesheet" href="/api_credentials.css?v=20261020" />
 </head>
 <body>
   <div id="network-offline-banner" role="alert" aria-live="assertive">
@@ -387,6 +388,18 @@
             <button id="api-refresh-btn" type="button">Forcer actualisation</button>
           </div>
           <div id="flux-summary" class="flux-summary"></div>
+          <article id="api-credentials" class="tile api-credentials hidden" data-admin-only hidden>
+            <div class="api-credentials-heading">
+              <div>
+                <h4>Accès aux services · Administration</h4>
+                <p class="muted">Renseignez les clés et jetons nécessaires, puis testez la connexion au fournisseur. Ces accès sont partagés par les collectes du serveur.</p>
+              </div>
+              <button id="api-credentials-reload" type="button" class="ghost">Actualiser la configuration</button>
+            </div>
+            <p id="api-credentials-status" class="muted" role="status" aria-live="polite"></p>
+            <div id="api-credentials-list" class="api-credentials-grid"></div>
+            <p class="api-credential-note muted">Enedis nécessite un accès partenaire et une convention d’échange. Une simple clé ne suffit pas à activer un flux de coupures ; les liens officiels restent accessibles dans « Sources officielles ».</p>
+          </article>
           <article class="tile system-health-card">
             <div class="system-health-head">
               <h4>Santé système</h4>
@@ -1604,6 +1617,7 @@
   </svg>
   <script src="/hosting_data.js?v=20260603-perf1"></script>
   <script src="/official_sources.js?v=20261020"></script>
-  <script src="/script.js?v=20261020-official-sources"></script>
+  <script src="/api_credentials.js?v=20261020"></script>
+  <script src="/script.js?v=20261020-api-credentials"></script>
 </body>
 </html>

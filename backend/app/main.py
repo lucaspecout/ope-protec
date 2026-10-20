@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from copy import deepcopy
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError, as_completed
 import logging
 from pathlib import Path
 import re
@@ -64,6 +64,7 @@ from .operational_sources import fetch_enedis_isere_status, fetch_vigicrues_fore
 from .territorial_sources import fetch_industrial_sites_isere, fetch_insee_population_grid
 from .weather_sources import fetch_meteo_observations_isere, fetch_meteo_radar_isere
 from .source_routes import create_source_router
+from .integration_routes import create_integration_router
 from .services import (
     fetch_institutions_isere,
     fetch_forest_fire_map_isere,
@@ -487,6 +488,8 @@ _service_runtime_lock = Lock()
 _service_runtime: dict[str, dict] = {}
 _refresh_stop_event = Event()
 _refresh_executor = ThreadPoolExecutor(max_workers=settings.background_refresh_workers)
+_credential_refresh_lock = Lock()
+_credential_refresh_requests: dict[str, dict] = {}
 
 # SSE broadcast registry — clients abonnés aux mises à jour temps réel
 _sse_risk_clients: set[asyncio.Queue] = set()
@@ -1311,7 +1314,7 @@ def _update_service_slot(key: str, result: dict) -> None:
     })
 
 
-def _refresh_one_service(key: str) -> None:
+def _refresh_one_service(key: str) -> bool | None:
     """Récupère les données d'un seul service externe et met à jour son slot."""
     db: Session | None = None
     distributed_lock_key = f"svc:refresh-lock:{key}"
@@ -1423,6 +1426,7 @@ def _refresh_one_service(key: str) -> None:
                 runtime["next_retry_mono"] = monotonic() + backoff
                 runtime["next_retry_at"] = (datetime.utcnow() + timedelta(seconds=backoff)).isoformat() + "Z"
         _update_service_slot(key, result)
+        return True
     except Exception:
         pass
     finally:
@@ -4229,4 +4233,86 @@ app.include_router(create_source_router(
     require_roles(*READ_ROLES),
     _get_external_risks_snapshot,
     lambda key: _refresh_executor.submit(_refresh_one_service, key),
+))
+
+
+def _run_credential_refresh(key: str, request: dict) -> None:
+    """Retry once a previous local/remote collection releases the service lock.
+
+    Waiting uses a daemon coordinator, leaving the bounded collection executor
+    free for other feeds. Repeated saves share one coordinator per service.
+    """
+    future = None
+    try:
+        while not _refresh_stop_event.is_set():
+            with _credential_refresh_lock:
+                revision = request["revision"]
+                if monotonic() >= request["deadline"]:
+                    if _credential_refresh_requests.get(key) is request:
+                        del _credential_refresh_requests[key]
+                    return
+            # An older collection may have restored its failed-key backoff
+            # since the save: clear it before every actual retry.
+            with _service_runtime_lock:
+                runtime = _service_runtime.setdefault(key, {})
+                runtime.update(next_retry_mono=0, next_retry_at=None, circuit_open=False, failure_count=0)
+            future = _refresh_executor.submit(_refresh_one_service, key)
+            while not _refresh_stop_event.is_set():
+                with _credential_refresh_lock:
+                    remaining = request["deadline"] - monotonic()
+                    if remaining <= 0:
+                        if _credential_refresh_requests.get(key) is request:
+                            del _credential_refresh_requests[key]
+                        future.cancel()
+                        return
+                try:
+                    collected = future.result(timeout=min(1.0, remaining))
+                    break
+                except FutureTimeoutError:
+                    continue
+            else:
+                future.cancel()
+                return
+            if collected:
+                with _credential_refresh_lock:
+                    if request["revision"] == revision:
+                        # Remove under the same lock as a new save to avoid
+                        # losing a save arriving just as this worker finishes.
+                        if _credential_refresh_requests.get(key) is request:
+                            del _credential_refresh_requests[key]
+                        return
+            if _refresh_stop_event.wait(1.0):
+                return
+    except Exception:
+        # Saving credentials must not fail because shutdown cancels a future.
+        logger.warning("Unable to finish credential refresh for service %s", key)
+    finally:
+        with _credential_refresh_lock:
+            if _credential_refresh_requests.get(key) is request:
+                del _credential_refresh_requests[key]
+
+
+def _refresh_after_credentials_change(key: str) -> None:
+    if _refresh_stop_event.is_set():
+        return
+    with _credential_refresh_lock:
+        request = _credential_refresh_requests.get(key)
+        if request is not None:
+            request["revision"] += 1
+            request["deadline"] = monotonic() + 330
+            return
+        request = {"revision": 1, "deadline": monotonic() + 330}
+        _credential_refresh_requests[key] = request
+    try:
+        Thread(target=_run_credential_refresh, args=(key, request),
+               name=f"credential-refresh-{key}", daemon=True).start()
+    except RuntimeError:
+        with _credential_refresh_lock:
+            if _credential_refresh_requests.get(key) is request:
+                del _credential_refresh_requests[key]
+        logger.warning("Unable to start credential refresh for service %s", key)
+
+
+app.include_router(create_integration_router(
+    require_roles("admin"), _refresh_after_credentials_change,
 ))
