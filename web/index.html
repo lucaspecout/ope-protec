@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="/styles.css?v=20260824-info-page" />
   <link rel="stylesheet" href="/official_sources.css?v=20261020" />
   <link rel="stylesheet" href="/api_credentials.css?v=20261020" />
+  <link rel="stylesheet" href="/public_sources.css?v=20261020" />
 </head>
 <body>
   <div id="network-offline-banner" role="alert" aria-live="assertive">
@@ -188,6 +189,50 @@
         <section id="official-sources-panel" class="panel view hidden" hidden>
           <div class="panel-head"><div><h3>Sources officielles · Isère</h3><p class="muted">Mesures, prévisions et référentiels. Les dates et les limites de couverture accompagnent chaque source.</p></div></div>
           <div id="official-source-cards" class="official-source-grid" aria-live="polite"><p class="muted">Lecture des données collectées par le serveur…</p></div>
+          <div id="public-source-cards" class="official-source-grid" aria-live="polite"></div>
+          <details id="public-fuel_isere" class="tile public-feed" open>
+            <summary>Stations-service et carburants · Isère</summary>
+            <div id="public-fuel-summary"></div>
+            <div class="official-controls">
+              <label>Commune ou adresse<input id="public-fuel-search" type="search" placeholder="Rechercher une station" /></label>
+              <label>Carburant<select id="public-fuel-type"><option value="all">Tous</option><option>Gazole</option><option>SP95</option><option>E10</option><option>SP98</option><option>E85</option><option>GPLc</option></select></label>
+              <label>Déclaration<select id="public-fuel-shortage"><option value="all">Toutes</option><option value="temporary">Rupture temporaire déclarée</option><option value="priced">Prix déclaré, sans rupture signalée</option></select></label>
+              <button type="button" class="ghost" data-public-map="fuel">Voir sur la carte</button>
+            </div>
+            <div id="public-fuel-results" class="official-table-wrap"></div>
+          </details>
+          <details id="public-onde_isere" class="tile public-feed" open>
+            <summary>Écoulement des petits cours d’eau · ONDE</summary>
+            <div id="public-onde-summary"></div>
+            <div class="official-controls">
+              <label>Commune ou cours d’eau<input id="public-onde-search" type="search" placeholder="Rechercher un relevé" /></label>
+              <label>Observation<select id="public-onde-flow"><option value="all">Toutes</option><option value="3">Assec</option><option value="2">Écoulement non visible</option><option value="visible">Écoulement visible</option></select></label>
+              <button type="button" class="ghost" data-public-map="onde">Voir sur la carte</button>
+            </div>
+            <div id="public-onde-results" class="official-table-wrap"></div>
+          </details>
+          <details id="public-catnat_isere" class="tile public-feed">
+            <summary>Historique des catastrophes naturelles · CatNat</summary>
+            <div id="public-catnat-summary"></div>
+            <div class="official-controls"><label>Commune<select id="public-catnat-commune"><option value="">Dernières publications départementales</option></select></label></div>
+            <div id="public-catnat-results" class="official-table-wrap" aria-live="polite"></div>
+          </details>
+          <details id="public-energy_aura" class="tile public-feed" open>
+            <summary>Électricité régionale · Auvergne-Rhône-Alpes</summary>
+            <div id="public-energy-summary"></div>
+            <div id="public-energy-chart"></div>
+            <div id="public-energy-generation" class="public-energy-grid"></div>
+          </details>
+          <details id="public-recalls" class="tile public-feed">
+            <summary>Rappels de produits · RappelConso</summary>
+            <div id="public-recalls-summary"></div>
+            <div class="official-controls">
+              <label>Produit, marque ou distributeur<input id="public-recalls-search" type="search" placeholder="Rechercher un rappel" /></label>
+              <label>Zone déclarée<select id="public-recalls-scope"><option value="relevant">France, région ou Isère</option><option value="isere">Isère explicitement mentionnée</option><option value="unspecified">Autres zones / portée à vérifier</option><option value="all">Toutes les publications</option></select></label>
+              <label>Période<select id="public-recalls-active"><option value="active">En cours ou échéance non renseignée</option><option value="all">Toutes · 90 derniers jours</option></select></label>
+            </div>
+            <div id="public-recalls-results"></div>
+          </details>
           <div class="official-source-grid">
             <article class="tile"><h4>Population exposée · INSEE</h4><div id="official-population-body"></div></article>
             <article class="tile"><h4>Électricité · Enedis</h4><div id="official-enedis-body"></div></article>
@@ -896,6 +941,8 @@
                     <div id="official-radar-note"></div>
                   </div>
                   <label><input id="filter-official-industries" type="checkbox" /> Référentiel officiel ICPE / Seveso<small class="filter-legend">Établissements industriels, sans indication d’incident en cours</small></label>
+                  <label><input id="filter-public-fuel" type="checkbox" /> Stations-service<small class="filter-legend">Prix et ruptures déclarés · filtres dans Sources officielles</small></label>
+                  <label><input id="filter-public-onde" type="checkbox" /> Relevés ONDE<small class="filter-legend">Écoulement et assecs · dates de campagne</small></label>
                   <label><input id="filter-pcs" type="checkbox" checked /> Communes PCS</label>
                   <label>
                     <input id="filter-apic" type="checkbox" checked />
@@ -1617,7 +1664,8 @@
   </svg>
   <script src="/hosting_data.js?v=20260603-perf1"></script>
   <script src="/official_sources.js?v=20261020"></script>
+  <script src="/public_sources.js?v=20261020"></script>
   <script src="/api_credentials.js?v=20261020"></script>
-  <script src="/script.js?v=20261020-api-credentials"></script>
+  <script src="/script.js?v=20261020-public-sources"></script>
 </body>
 </html>

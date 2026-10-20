@@ -1,5 +1,7 @@
 # Sources officielles A à F
 
+Les nouvelles données stations-service, ONDE, CatNat, électricité régionale et RappelConso sont documentées dans le [guide des données publiques supplémentaires](sources_publiques.md).
+
 Les six sources sont raccordées au collecteur en arrière-plan, au snapshot partagé Redis et au flux SSE existants. La page **Sources officielles** regroupe leurs dates, leurs états et les données détaillées. Les pages **Météo**, **Services connectés**, **Interconnexions API** et la carte utilisent les mêmes résultats ; elles ne relancent pas une collecte au chargement.
 
 ## Données et vues

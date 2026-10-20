@@ -65,6 +65,7 @@ from .territorial_sources import fetch_industrial_sites_isere, fetch_insee_popul
 from .weather_sources import fetch_meteo_observations_isere, fetch_meteo_radar_isere
 from .source_routes import create_source_router
 from .integration_routes import create_integration_router
+from .public_sources import DEFINITIONS as PUBLIC_SOURCE_DEFINITIONS, FETCHERS as PUBLIC_SOURCE_FETCHERS
 from .services import (
     fetch_institutions_isere,
     fetch_forest_fire_map_isere,
@@ -434,6 +435,7 @@ SERVICE_REFRESH_INTERVALS: dict[str, int] = {
     "industrial_sites":    86400,   # Référentiel officiel ICPE/Seveso
     "insee_population":   604800,   # Import lourd effectué uniquement en arrière-plan
     "enedis":              21600,   # Accès officiel, sans flux privé non autorisé
+    **{key: value["interval"] for key, value in PUBLIC_SOURCE_DEFINITIONS.items()},
 }
 CRITICAL_REFRESH_SERVICES = (
     "meteo_france",
@@ -537,6 +539,7 @@ def _extract_level_from_slot(key: str, data: dict) -> str:
 
 
 _SVC_LABELS: dict[str, str] = {
+    **{key: value["label"] for key, value in PUBLIC_SOURCE_DEFINITIONS.items()},
     "meteo_france": "Météo-France", "meteo_forets_isere": "Météo des forêts", "vigicrues": "Vigicrues", "apic_isere": "APIC",
     "avalanche_isere": "Avalanches BRA", "feux_foret_isere": "Feux de forêt Isère",
     "seismes_isere": "Séismes Isère", "vigicrues_flash_isere": "Vigicrues Flash",
@@ -1379,7 +1382,7 @@ def _refresh_one_service(key: str) -> bool | None:
             duration_ms = int((monotonic() - started) * 1000)
             success_statuses = {"online", "partial", "stale", "degraded"}
             result_status = str(result.get("status") or "").lower()
-            additional_source = key in {"insee_population", "meteo_observations", "vigicrues_forecasts", "meteo_radar", "industrial_sites", "enedis"}
+            additional_source = key in {"insee_population", "meteo_observations", "vigicrues_forecasts", "meteo_radar", "industrial_sites", "enedis", "fuel_isere", "onde_isere", "catnat_isere", "energy_aura", "recalls"}
             awaiting_access = additional_source and result_status in {"pending", "idle", "configuration_required", "access_required"}
             is_success = result_status in {"online", "partial"} if additional_source else result_status in success_statuses or not result.get("error")
             with _service_runtime_lock:
@@ -2087,6 +2090,10 @@ def build_dashboard_payload(db: Session, user: User, external_risks: dict | None
 
 def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str]) -> dict[str, tuple[Callable[[], dict], dict]]:
     return {
+        **{key: (lambda fetcher=fetcher: fetcher(force_refresh=refresh),
+                 {"status": "pending", "info_state": "Collecte de la source publique en arrière-plan.",
+                  "source": PUBLIC_SOURCE_DEFINITIONS[key]["source"]})
+           for key, fetcher in PUBLIC_SOURCE_FETCHERS.items()},
         "insee_population": (lambda: fetch_insee_population_grid(force_refresh=refresh), {"status": "pending", "data_year": 2021, "resolution_m": 200, "info_state": "Import des carreaux INSEE en arrière-plan."}),
         "meteo_observations": (lambda: fetch_meteo_observations_isere(force_refresh=refresh), {"status": "pending", "stations": [], "info_state": "Vérification de l'accès aux observations Météo-France."}),
         "vigicrues_forecasts": (lambda: fetch_vigicrues_forecasts_isere(force_refresh=refresh), {"status": "pending", "stations": [], "info_state": "Recherche des prévisions officiellement publiées."}),

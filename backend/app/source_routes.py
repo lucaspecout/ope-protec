@@ -1,15 +1,18 @@
 """Authenticated, cache-only HTTP access to the additional official sources."""
 from typing import Callable
 import math
+import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, field_validator
+from .public_sources import DEFINITIONS as PUBLIC_SOURCE_DEFINITIONS
 
 
 SOURCE_KEYS = (
     "insee_population", "meteo_observations", "vigicrues_forecasts",
     "meteo_radar", "industrial_sites", "enedis",
+    *PUBLIC_SOURCE_DEFINITIONS,
 )
 
 
@@ -118,5 +121,42 @@ def create_source_router(authorize: Callable, snapshot_reader: Callable, queue_r
     @router.get("/enedis/isere")
     def electricity():
         return read_source("enedis")
+
+    @router.get("/fuel/isere")
+    def fuel(refresh: bool = False):
+        return read_source("fuel_isere", refresh)
+
+    @router.get("/onde/isere")
+    def onde(refresh: bool = False):
+        return read_source("onde_isere", refresh)
+
+    @router.get("/catnat/isere")
+    def catnat(refresh: bool = False):
+        return read_source("catnat_isere", refresh)
+
+    @router.get("/catnat/isere/history")
+    def catnat_history(code_insee: str):
+        if not re.fullmatch(r"38[0-9]{3}", code_insee):
+            raise HTTPException(422, "Code INSEE de l’Isère invalide.")
+        from .public_sources import read_catnat_history
+        return read_catnat_history(code_insee)
+
+    @router.get("/energy/aura")
+    def energy(refresh: bool = False):
+        return read_source("energy_aura", refresh)
+
+    @router.get("/recalls")
+    def recalls(refresh: bool = False):
+        return read_source("recalls", refresh)
+
+    @router.get("/recalls/{recall_id}")
+    def recall_detail(recall_id: str):
+        if not re.fullmatch(r"[0-9]{1,15}", recall_id):
+            raise HTTPException(422, "Identifiant de rappel invalide.")
+        from .public_sources import read_recall_detail
+        result = read_recall_detail(recall_id)
+        if result is None:
+            raise HTTPException(404, "Rappel absent du cache récent. Consulter la source officielle.")
+        return result
 
     return router

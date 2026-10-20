@@ -25,6 +25,11 @@ SOURCES = {
     "meteo_radar": {"status": "configuration_required", "frames": [], "message": "Accès Météo-France à configurer."},
     "industrial_sites": {"status": "online", "updated_at": STAMP, "sites_total": 1, "seveso_haut_total": 1, "sites": [{"id": "test-1", "nom": "Usine test officielle", "commune": "Grenoble", "lat": 45.18, "lon": 5.72, "seveso": "haut", "seveso_label": "Seveso seuil haut", "source_url": "https://www.georisques.gouv.fr/"}]},
     "enedis": {"status": "access_required", "outages": None, "data_available": False},
+    "fuel_isere": {"status": "online", "updated_at": STAMP, "stations_total": 1, "temporary_shortage_stations": 1, "note": "Prix et ruptures déclarés ; stock non garanti.", "stations": [{"id": "38000001", "commune": "Grenoble", "address": "Station carburant test", "postal_code": "38000", "lat": 45.18, "lon": 5.72, "hours": [], "services": [], "automate_24h": True, "fuels": [{"fuel": "Gazole", "price_eur": 1.7, "updated_at": STAMP, "old_price": False, "shortage": None}, {"fuel": "E10", "price_eur": None, "shortage": "temporary", "old_price": True}]}]},
+    "onde_isere": {"status": "online", "updated_at": STAMP, "stations_total": 1, "dry_stations": 1, "observed_at": "2026-09-25", "note": "Relevés de campagne OFB, pas du temps réel.", "stations": [{"id": "V150 6011", "name": "Ruisseau de test", "commune": "Grenoble", "river": "Ruisseau test", "lat": 45.18, "lon": 5.72, "flow_code": "3", "flow_label": "Assec", "observed_at": "2026-09-25"}]},
+    "catnat_isere": {"status": "online", "updated_at": STAMP, "events_total": 1, "preview_limit": 150, "note": "Historique, sans alerte actuelle.", "coverage": {"communes_total": 1, "communes_checked": 1}, "events": [{"id": "TEST_ORDER", "commune": "Grenoble", "code_insee": "38185", "risk": "Inondation de test", "event_start": "1993-09-09", "event_end": "1993-09-10", "published_at": "1994-02-18"}], "communes": [{"code": "38185", "name": "Grenoble", "checked": True, "events_total": 1}]},
+    "energy_aura": {"status": "online", "updated_at": STAMP, "observed_at": STAMP, "note": "Données régionales en MW, sans localisation des coupures.", "latest": {"consumption_mw": 0, "generation_mw": {"solaire": 0, "nucleaire": None}}, "generation_labels": {"solaire": "Solaire", "nucleaire": "Nucléaire"}, "series": [{"at": (NOW - timedelta(minutes=15)).isoformat(), "consumption_mw": 100}, {"at": STAMP, "consumption_mw": 0}]},
+    "recalls": {"status": "online", "updated_at": STAMP, "items_total": 2, "targeted_total": 1, "unspecified_total": 1, "note": "Zone de vente déclarative.", "items": [{"id": "123", "name": "Rappel alimentaire test", "brand": "Marque test", "scope": "national", "active": None, "published_at": STAMP, "source_url": "https://rappel.conso.gouv.fr/fiche-rappel/123/interne"}, {"id": "124", "name": "Autre zone test", "scope": "unspecified", "active": True, "published_at": STAMP}]},
 }
 RISKS = {
     **SOURCES,
@@ -70,6 +75,27 @@ CHECKS = """<script>
     setActivePanel('official-sources-panel',{refreshSnapshot:false});
     const pop=await window.OfficialSources.estimatePopulation({type:'Polygon',coordinates:[[[5.7,45.1],[5.8,45.1],[5.8,45.2],[5.7,45.1]]]});
     check('population API integrated',pop.population_estimated===1234);
+    check('five additional public sources',document.querySelectorAll('.public-source-card').length===5);
+    check('fuel data rendered',document.getElementById('public-fuel-results').textContent.includes('Station carburant test'));
+    check('declared shortages rendered',document.getElementById('public-fuel-results').textContent.includes('Rupture temporaire déclarée'));
+    const fuelSearch=document.getElementById('public-fuel-search');fuelSearch.value='introuvable';fuelSearch.dispatchEvent(new Event('input'));
+    check('fuel search works',document.getElementById('public-fuel-results').textContent.includes('Aucune station'));
+    fuelSearch.value='';fuelSearch.dispatchEvent(new Event('input'));
+    check('ONDE campaign date visible',document.getElementById('public-onde-results').textContent.includes('25/09/2026'));
+    check('ONDE observation rendered',document.getElementById('public-onde-results').textContent.includes('Assec'));
+    const catnat=document.getElementById('public-catnat-commune');catnat.value='38185';catnat.dispatchEvent(new Event('change'));
+    for(let i=0;i<50&&!document.getElementById('public-catnat-results').textContent.includes('Historique complet test');i++)await new Promise(r=>setTimeout(r,100));
+    check('CatNat reads selected commune history',document.getElementById('public-catnat-results').textContent.includes('Historique complet test'));
+    check('regional zero consumption retained',document.getElementById('public-energy-summary').textContent.includes('0 MW'));
+    check('regional energy graph rendered',document.querySelector('#public-energy-chart svg'));
+    check('recall default excludes other zones',!document.getElementById('public-recalls-results').textContent.includes('Autre zone test'));
+    const recall=document.querySelector('[data-public-recall-id="123"]');recall.open=true;
+    for(let i=0;i<50&&!document.getElementById('public-recall-detail-123').textContent.includes('LOT-CACHE-TEST');i++)await new Promise(r=>setTimeout(r,100));
+    check('recall details loaded from cache',document.getElementById('public-recall-detail-123').textContent.includes('LOT-CACHE-TEST'));
+    const scope=document.getElementById('public-recalls-scope');scope.value='unspecified';scope.dispatchEvent(new Event('input'));
+    check('other recall scopes remain accessible',document.getElementById('public-recalls-results').textContent.includes('Autre zone test'));
+    check('new data sections fit viewport',[...document.querySelectorAll('.public-feed')].every(e=>e.scrollWidth<=e.clientWidth+2));
+    check('new map layers available',document.getElementById('filter-public-fuel')&&document.getElementById('filter-public-onde'));
     check('no uncaught JavaScript errors',window.__smokeErrors.length===0);
   } catch(e) { results.push({name:'unexpected error',pass:false,error:String(e)}); }
   const report=document.createElement('pre');report.id='smoke-results';report.textContent=JSON.stringify({results,errors:window.__smokeErrors});document.body.append(report);
@@ -99,12 +125,16 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(RISKS)
         if path == "/external/isere/risks/stream":
             return self.send(f"data: {json.dumps(RISKS)}\n\n".encode(), "text/event-stream")
-        if path.endswith("/history"):
+        if path.startswith("/api/meteo-france/observations/") and path.endswith("/history"):
             return self.send({"history": [{"observed_at": STAMP, "temperature_c": 14.2}]})
         if path == "/dashboard":
             return self.send(BOOTSTRAP["dashboard"])
         if path == "/api/sources/isere":
             return self.send(SOURCES)
+        if path == "/api/catnat/isere/history":
+            return self.send({"status": "online", "events": [{"id": "TEST_FULL_ORDER", "commune": "Grenoble", "code_insee": "38185", "risk": "Historique complet test", "event_start": "1993-09-09", "event_end": "1993-09-10", "published_at": "1994-02-18"}]})
+        if path == "/api/recalls/123":
+            return self.send({"status": "online", "item": {"identification": "LOT-CACHE-TEST", "actions": "Consignes publiées de test", "sale_area": "France entière"}})
         if path == "/" or path == "/index.html":
             html = (ROOT / "web/index.html").read_text(encoding="utf-8")
             html = html.replace("<head>", "<head>" + INIT).replace("</body>", CHECKS + "</body>")

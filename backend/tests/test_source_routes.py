@@ -62,6 +62,13 @@ class SourceRouteTests(unittest.TestCase):
         self.weather = ModuleType("app.weather_sources")
         self.weather.get_observation_history = Mock(return_value={"status": "online", "points": []})
         self.weather.get_radar_frame_path = Mock(return_value=None)
+        self.public = importlib.import_module("app.public_sources")
+        self.history_patcher = patch.object(self.public, "read_catnat_history", return_value={"status": "online", "events": []})
+        self.recall_patcher = patch.object(self.public, "read_recall_detail", return_value={"status": "online", "item": {"id": "123"}})
+        self.history_reader = self.history_patcher.start()
+        self.recall_reader = self.recall_patcher.start()
+        self.addCleanup(self.history_patcher.stop)
+        self.addCleanup(self.recall_patcher.stop)
         self.module_patch = patch.dict(sys.modules, {"app.territorial_sources": self.territorial, "app.weather_sources": self.weather})
         self.module_patch.start()
         self.addCleanup(self.module_patch.stop)
@@ -78,10 +85,15 @@ class SourceRouteTests(unittest.TestCase):
             "/api/meteo-france/radar": "meteo_radar",
             "/api/vigicrues/forecasts": "vigicrues_forecasts",
             "/api/enedis/isere": "enedis",
+            "/api/fuel/isere": "fuel_isere",
+            "/api/onde/isere": "onde_isere",
+            "/api/catnat/isere": "catnat_isere",
+            "/api/energy/aura": "energy_aura",
+            "/api/recalls": "recalls",
         }
 
     def test_every_source_route_requires_authentication_before_reading_or_importing_collectors(self):
-        urls = [*self.source_urls(), "/api/sources/isere", "/api/meteo-france/observations/38473001/history", "/api/meteo-france/radar/frames/20261020100000.png"]
+        urls = [*self.source_urls(), "/api/sources/isere", "/api/meteo-france/observations/38473001/history", "/api/meteo-france/radar/frames/20261020100000.png", "/api/catnat/isere/history?code_insee=38185", "/api/recalls/123"]
         for url in urls:
             with self.subTest(url=url):
                 self.assertEqual(self.client.get(url).status_code, 401)
@@ -90,15 +102,17 @@ class SourceRouteTests(unittest.TestCase):
         self.queue.assert_not_called()
         self.territorial.estimate_insee_population.assert_not_called()
         self.weather.get_radar_frame_path.assert_not_called()
+        self.history_reader.assert_not_called()
+        self.recall_reader.assert_not_called()
 
     def test_application_role_validator_denies_forbidden_role(self):
-        for url in [*self.source_urls(), "/api/sources/isere", "/api/meteo-france/radar/frames/20261020100000.png"]:
+        for url in [*self.source_urls(), "/api/sources/isere", "/api/meteo-france/radar/frames/20261020100000.png", "/api/catnat/isere/history?code_insee=38185", "/api/recalls/123"]:
             with self.subTest(url=url):
                 self.assertEqual(self.client.get(url, headers={"Authorization": "Bearer forbidden"}).status_code, 403)
         self.reader.assert_not_called()
         self.queue.assert_not_called()
 
-    def test_six_source_contracts_are_cache_reads_and_exclude_unrelated_settings(self):
+    def test_all_source_contracts_are_cache_reads_and_exclude_unrelated_settings(self):
         for url, key in self.source_urls().items():
             with self.subTest(url=url):
                 response = self.client.get(url, headers=HEADERS)
@@ -108,7 +122,7 @@ class SourceRouteTests(unittest.TestCase):
                 self.assertNotIn("internal-secret-must-not-leak", response.text)
         combined = self.client.get("/api/sources/isere", headers=HEADERS)
         self.assertEqual(set(combined.json()), set(routes.SOURCE_KEYS))
-        self.assertEqual(len(combined.json()), 6)
+        self.assertEqual(set(combined.json()), set(self.source_urls().values()))
         self.assertIsNone(combined.json()["enedis"]["outages"])
         self.assertNotIn("internal-secret-must-not-leak", combined.text)
         self.queue.assert_not_called()
@@ -126,7 +140,7 @@ class SourceRouteTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(response.json(), self.snapshot[key])
                 self.queue.assert_called_with(key)
-        self.assertEqual(self.queue.call_count, 5)
+        self.assertEqual(self.queue.call_count, 10)
         self.weather.get_observation_history.assert_not_called()
         self.territorial.estimate_insee_population.assert_not_called()
 
@@ -210,6 +224,19 @@ class SourceRouteTests(unittest.TestCase):
         self.assertEqual(response.headers["content-type"], "image/png")
         self.assertEqual(response.headers["cache-control"], "private, max-age=300")
         self.assertNotIn("authorization", response.text.lower())
+
+    def test_public_details_read_cache_only_and_validate_identifiers(self):
+        response = self.client.get("/api/catnat/isere/history?code_insee=38185", headers=HEADERS)
+        self.assertEqual(response.status_code, 200)
+        self.history_reader.assert_called_once_with("38185")
+        for value in ("69000", "bad-code", "123456789", "38../"):
+            self.assertEqual(self.client.get("/api/catnat/isere/history", params={"code_insee": value}, headers=HEADERS).status_code, 422)
+        self.assertEqual(self.client.get("/api/recalls/123", headers=HEADERS).status_code, 200)
+        self.recall_reader.assert_called_once_with("123")
+        self.assertEqual(self.client.get("/api/recalls/not-an-id", headers=HEADERS).status_code, 422)
+        self.recall_reader.return_value = None
+        self.assertEqual(self.client.get("/api/recalls/999", headers=HEADERS).status_code, 404)
+        self.queue.assert_not_called()
 
 
 if __name__ == "__main__":

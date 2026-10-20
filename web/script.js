@@ -90,6 +90,11 @@ const FLUX_SERVICES = [
   { key: 'meteo_radar', label: 'Météo-France · Radar', icon: '🌧️', category: 'Météo', interval: 300, metric: (d) => d.info_state || `${d.frames?.length ?? 0} images disponibles` },
   { key: 'industrial_sites', label: 'Géorisques · ICPE / Seveso', icon: '🏭', category: 'Référentiels', interval: 86400, metric: (d) => `${d.sites_total ?? 0} sites · ${d.seveso_haut_total ?? 0} Seveso haut` },
   { key: 'enedis', label: 'Enedis · Accès officiel', icon: '⚡', category: 'Électricité', interval: 21600, metric: () => 'Diagnostic officiel à l’adresse · aucun flux privé connecté' },
+  { key: 'fuel_isere', label: 'Stations-service · Isère', icon: '⛽', category: 'Logistique', interval: 600, metric: d => `${d.stations_total ?? '–'} stations · ${d.temporary_shortage_stations ?? '–'} avec rupture temporaire déclarée` },
+  { key: 'onde_isere', label: 'OFB · Observations ONDE', icon: '💧', category: 'Eau', interval: 21600, metric: d => `${d.stations_total ?? '–'} stations · ${d.dry_stations ?? '–'} assecs observés · relevés de campagne` },
+  { key: 'catnat_isere', label: 'Géorisques · Historique CatNat', icon: '📚', category: 'Référentiels', interval: 86400, metric: d => `${d.events_total ?? '–'} reconnaissances commune/arrêté · données historiques` },
+  { key: 'energy_aura', label: 'RTE · Électricité régionale', icon: '⚡', category: 'Électricité', interval: 3600, metric: d => `${d.latest?.consumption_mw ?? '–'} MW consommés · Auvergne-Rhône-Alpes` },
+  { key: 'recalls', label: 'RappelConso · Produits', icon: '📦', category: 'Veille', interval: 3600, metric: d => `${d.items_total ?? '–'} publications · 90 derniers jours` },
   { key: 'meteo_france',           label: 'Météo-France',              icon: '⛅', category: 'Météo',         interval: 120,   metric: (d) => d.level ? `Vigilance ${d.level}` : `${(d.alerts || []).length} alerte(s)` },
   { key: 'meteo_forets_isere',     label: 'Météo des forêts · Isère',  icon: '🌲', category: 'Météo',         interval: 3600,  metric: (d) => `Danger ${d.forecasts?.[0]?.danger || d.danger || 'indisponible'}` },
   { key: 'apic_isere',             label: 'APIC · Pluie intense',      icon: '🌧️', category: 'Météo',        interval: 180,   metric: (d) => `${d.alerts_total ?? 0} avertissement(s)` },
@@ -3053,12 +3058,13 @@ function setActivePanel(panelId, { refreshSnapshot = true } = {}) {
   updateMobileNavActive(panelId);
   document.getElementById('panel-title').textContent = PANEL_TITLES[panelId] || 'Centre opérationnel';
   window.OfficialSources?.activate(panelId);
+  window.PublicSources?.activate(panelId);
   window.ApiCredentials?.activate(panelId);
   if (panelId === 'map-panel') {
     withPanelLoading('map-panel', 'Chargement de la carte...', () => ensureMapReady().then(() => {
       setTimeout(() => {
         leafletMap?.invalidateSize();
-        centerMapOnIsere();
+        if (!window.PublicSources?.applyMapFocus()) centerMapOnIsere();
       }, 100);
       if (token) _refreshAgentMarkers();
       if (token && !stationsTimetableCache) loadAndRenderStationsPanel(false).catch(() => {});
@@ -14345,6 +14351,11 @@ async function loadDashboard(forceRefresh = false) {
 /* ── Services panel — cards builder & groundwater renderers ──────────────── */
 
 const SVC_CARD_META = {
+  fuel_isere: { statusId: 'fuel_isere-public-status', infoId: 'fuel_isere-public-info', url: 'https://www.prix-carburants.gouv.fr/rubrique/opendata/' },
+  onde_isere: { statusId: 'onde_isere-public-status', infoId: 'onde_isere-public-info', url: 'https://www.data.gouv.fr/dataservices/hubeau-ecoulement-des-cours-deau' },
+  catnat_isere: { statusId: 'catnat_isere-public-status', infoId: 'catnat_isere-public-info', url: 'https://www.georisques.gouv.fr/doc-api' },
+  energy_aura: { statusId: 'energy_aura-public-status', infoId: 'energy_aura-public-info', url: 'https://www.rte-france.com/donnees-publications/eco2mix-donnees-temps-reel/donnees-regionales' },
+  recalls: { statusId: 'recalls-public-status', infoId: 'recalls-public-info', url: 'https://rappel.conso.gouv.fr/' },
   insee_population:      { statusId: 'insee_population-official-status', infoId: 'insee_population-official-info', url: 'https://www.insee.fr/fr/statistiques/8735162' },
   meteo_observations:    { statusId: 'meteo_observations-official-status', infoId: 'meteo_observations-official-info', url: 'https://portail-api.meteofrance.fr/' },
   vigicrues_forecasts:   { statusId: 'vigicrues_forecasts-official-status', infoId: 'vigicrues_forecasts-official-info', url: 'https://www.vigicrues.gouv.fr/' },
@@ -14969,6 +14980,7 @@ function renderExternalRisks(data = {}) {
   lastRenderedExternalRisksSignature = signature;
   cachedExternalRisksSnapshot = mergedData;
   window.OfficialSources?.update(mergedData);
+  window.PublicSources?.update(mergedData);
   const meteo = mergedData?.meteo_france || {};
   const vigicrues = mergedData?.vigicrues || {};
   cachedVigicruesPayload = {
@@ -17046,6 +17058,7 @@ function bindAppInteractions() {
 
 function logout() {
   window.OfficialSources?.reset();
+  window.PublicSources?.reset();
   window.ApiCredentials?.reset();
   token = null;
   currentUser = null;
@@ -17387,6 +17400,7 @@ function startSituationWallboardRefresh({ refreshImmediately = true } = {}) {
 async function renderMapLiveLayers() {
   if (!leafletMap || !isMapPanelActive()) return;
   window.OfficialSources?.syncMap();
+  window.PublicSources?.syncMap();
   renderStations(cachedVigicruesPayload);
   await Promise.all([
     renderApicLayer(cachedExternalRisksSnapshot?.apic_isere || {}),
