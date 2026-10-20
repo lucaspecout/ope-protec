@@ -60,6 +60,10 @@ from .schemas import (
     UserUpdate,
 )
 from .security import create_access_token, hash_password, verify_password, verify_and_upgrade, warmup_crypto
+from .operational_sources import fetch_enedis_isere_status, fetch_vigicrues_forecasts_isere
+from .territorial_sources import fetch_industrial_sites_isere, fetch_insee_population_grid
+from .weather_sources import fetch_meteo_observations_isere, fetch_meteo_radar_isere
+from .source_routes import create_source_router
 from .services import (
     fetch_institutions_isere,
     fetch_forest_fire_map_isere,
@@ -395,6 +399,9 @@ SERVICE_REFRESH_INTERVALS: dict[str, int] = {
     "itinisere":              120,
     "sncf_isere":             120,
     "vigicrues":              120,
+    "vigicrues_forecasts":    120,
+    "meteo_observations":     360,
+    "meteo_radar":            300,
     "ter_aura":               120,   # Transport
     "mreseau":                120,   # M Réseau trams + bus + cars Grenoble
     "vigicrues_flash_isere":  180,
@@ -423,6 +430,9 @@ SERVICE_REFRESH_INTERVALS: dict[str, int] = {
     "feux_foret_isere":     300,    # Feux de forêt FeuxDeForet.fr Isère
     "cols_alpins_isere":   1800,    # État cols alpins Isère (couche officielle Itinisère)
     "copernicus_ems":      1800,    # Copernicus EMS cartographie d'urgence
+    "industrial_sites":    86400,   # Référentiel officiel ICPE/Seveso
+    "insee_population":   604800,   # Import lourd effectué uniquement en arrière-plan
+    "enedis":              21600,   # Accès officiel, sans flux privé non autorisé
 }
 CRITICAL_REFRESH_SERVICES = (
     "meteo_france",
@@ -1365,12 +1375,18 @@ def _refresh_one_service(key: str) -> None:
             result = fetcher()
             duration_ms = int((monotonic() - started) * 1000)
             success_statuses = {"online", "partial", "stale", "degraded"}
-            is_success = str(result.get("status") or "").lower() in success_statuses or not result.get("error")
+            result_status = str(result.get("status") or "").lower()
+            additional_source = key in {"insee_population", "meteo_observations", "vigicrues_forecasts", "meteo_radar", "industrial_sites", "enedis"}
+            awaiting_access = additional_source and result_status in {"pending", "idle", "configuration_required", "access_required"}
+            is_success = result_status in {"online", "partial"} if additional_source else result_status in success_statuses or not result.get("error")
             with _service_runtime_lock:
                 runtime = _service_runtime.setdefault(key, {})
                 runtime["refreshing"] = False
                 runtime["last_duration_ms"] = duration_ms
-                if is_success:
+                if awaiting_access:
+                    runtime.update(failure_count=0, last_error=None, circuit_open=False,
+                                   next_retry_mono=0, next_retry_at=None)
+                elif is_success:
                     runtime["failure_count"] = 0
                     runtime["last_success_at"] = datetime.utcnow().isoformat() + "Z"
                     runtime["last_error"] = None
@@ -1382,7 +1398,7 @@ def _refresh_one_service(key: str) -> None:
                     backoff = SERVICE_BACKOFF_SECONDS[min(failure_count - 1, len(SERVICE_BACKOFF_SECONDS) - 1)]
                     runtime["failure_count"] = failure_count
                     runtime["circuit_open"] = failure_count >= SERVICE_CIRCUIT_BREAKER_OPEN_AFTER
-                    runtime["last_error"] = str(result.get("error") or result.get("stale_reason") or "service indisponible")
+                    runtime["last_error"] = str(result.get("error") or result.get("stale_reason") or result.get("message") or result.get("info_state") or "service indisponible")
                     runtime["last_error_at"] = datetime.utcnow().isoformat() + "Z"
                     runtime["next_retry_mono"] = monotonic() + backoff
                     runtime["next_retry_at"] = (datetime.utcnow() + timedelta(seconds=backoff)).isoformat() + "Z"
@@ -2067,6 +2083,12 @@ def build_dashboard_payload(db: Session, user: User, external_risks: dict | None
 
 def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str]) -> dict[str, tuple[Callable[[], dict], dict]]:
     return {
+        "insee_population": (lambda: fetch_insee_population_grid(force_refresh=refresh), {"status": "pending", "data_year": 2021, "resolution_m": 200, "info_state": "Import des carreaux INSEE en arrière-plan."}),
+        "meteo_observations": (lambda: fetch_meteo_observations_isere(force_refresh=refresh), {"status": "pending", "stations": [], "info_state": "Vérification de l'accès aux observations Météo-France."}),
+        "vigicrues_forecasts": (lambda: fetch_vigicrues_forecasts_isere(force_refresh=refresh), {"status": "pending", "stations": [], "info_state": "Recherche des prévisions officiellement publiées."}),
+        "meteo_radar": (lambda: fetch_meteo_radar_isere(force_refresh=refresh), {"status": "pending", "frames": [], "info_state": "Vérification de l'accès au radar Météo-France."}),
+        "industrial_sites": (lambda: fetch_industrial_sites_isere(force_refresh=refresh), {"status": "pending", "sites": [], "info_state": "Chargement du référentiel officiel ICPE/Seveso."}),
+        "enedis": (lambda: fetch_enedis_isere_status(force_refresh=refresh), {"status": "access_required", "data_available": False, "outages": None, "info_state": "Consulter le service officiel Enedis pour les coupures."}),
         "meteo_france": (lambda: fetch_meteo_france_isere(force_refresh=refresh), {"status": "pending", "level": "gris", "title": "Météo-France en synchronisation"}),
         "meteo_forets_isere": (lambda: fetch_meteo_forets_isere(force_refresh=refresh), {"status": "pending", "level": "gris", "danger": "synchronisation", "forecasts": []}),
         "vigicrues": (lambda: fetch_vigicrues_isere(force_refresh=refresh), {"status": "pending", "level": "gris", "water_alert_level": "gris", "stations": [], "alerts": []}),
@@ -4201,3 +4223,10 @@ def export_audit_csv(
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+
+app.include_router(create_source_router(
+    require_roles(*READ_ROLES),
+    _get_external_risks_snapshot,
+    lambda key: _refresh_executor.submit(_refresh_one_service, key),
+))

@@ -4,6 +4,8 @@ Application web repensée comme un centre de crise départemental (CRISIS38) dé
 
 Les corrections du chargement initial, les constats de revue de code et la procédure de mesure sont détaillés dans la [revue du 20 octobre 2026](docs/revue-performance-2026-10-20.md).
 
+Les sources supplémentaires INSEE, observations et radar Météo-France, prévisions Vigicrues, ICPE/Seveso et accès Enedis sont présentées dans le [guide des sources officielles](docs/sources_officielles.md), avec la configuration et les limites d'accès.
+
 ## Démarrage rapide
 
 ```bash

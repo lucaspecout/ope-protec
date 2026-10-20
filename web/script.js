@@ -84,6 +84,12 @@ const LAZY_ASSETS = {
 const lazyAssetPromises = new Map();
 let mapBootstrapPromise = null;
 const FLUX_SERVICES = [
+  { key: 'insee_population', label: 'INSEE · Carroyage 200 m', icon: '👥', category: 'Référentiels', interval: 604800, metric: (d) => `${d.cells_total ?? 0} carreaux · millésime ${d.data_year || 2021}` },
+  { key: 'meteo_observations', label: 'Météo-France · Observations', icon: '🌡️', category: 'Météo', interval: 360, metric: (d) => d.info_state || `${d.stations?.length ?? 0} stations de mesure` },
+  { key: 'vigicrues_forecasts', label: 'Vigicrues · Prévisions', icon: '📈', category: 'Eau', interval: 120, metric: (d) => d.info_state || `${d.coverage?.with_forecasts ?? 0} stations avec prévisions` },
+  { key: 'meteo_radar', label: 'Météo-France · Radar', icon: '🌧️', category: 'Météo', interval: 300, metric: (d) => d.info_state || `${d.frames?.length ?? 0} images disponibles` },
+  { key: 'industrial_sites', label: 'Géorisques · ICPE / Seveso', icon: '🏭', category: 'Référentiels', interval: 86400, metric: (d) => `${d.sites_total ?? 0} sites · ${d.seveso_haut_total ?? 0} Seveso haut` },
+  { key: 'enedis', label: 'Enedis · Accès officiel', icon: '⚡', category: 'Électricité', interval: 21600, metric: () => 'Diagnostic officiel à l’adresse · aucun flux privé connecté' },
   { key: 'meteo_france',           label: 'Météo-France',              icon: '⛅', category: 'Météo',         interval: 120,   metric: (d) => d.level ? `Vigilance ${d.level}` : `${(d.alerts || []).length} alerte(s)` },
   { key: 'meteo_forets_isere',     label: 'Météo des forêts · Isère',  icon: '🌲', category: 'Météo',         interval: 3600,  metric: (d) => `Danger ${d.forecasts?.[0]?.danger || d.danger || 'indisponible'}` },
   { key: 'apic_isere',             label: 'APIC · Pluie intense',      icon: '🌧️', category: 'Météo',        interval: 180,   metric: (d) => `${d.alerts_total ?? 0} avertissement(s)` },
@@ -123,6 +129,7 @@ const AUTOROUTES_ISERE_ROAD_REGEX = /\bA\s?(480|49|48|51|43|41)\b/i;
 const PANEL_TITLES = {
   'situation-panel': 'Situation opérationnelle',
   'services-panel': 'Services connectés',
+  'official-sources-panel': 'Sources officielles · Mesures et référentiels',
   'stations-panel': 'Horaires gares Isere',
   'meteo-panel': 'Météo hebdomadaire Isère',
   'water-panel': 'Eau potable et assainissement',
@@ -251,6 +258,7 @@ let currentUser = null;
 const MAIRIE_ALLOWED_PANELS = new Set([
   'situation-panel',
   'services-panel',
+  'official-sources-panel',
   'stations-panel',
   'meteo-panel',
   'water-panel',
@@ -3043,6 +3051,7 @@ function setActivePanel(panelId, { refreshSnapshot = true } = {}) {
   updateGlobalLoadingVisual(getStartupQueuePercent());
   updateMobileNavActive(panelId);
   document.getElementById('panel-title').textContent = PANEL_TITLES[panelId] || 'Centre opérationnel';
+  window.OfficialSources?.activate(panelId);
   if (panelId === 'map-panel') {
     withPanelLoading('map-panel', 'Chargement de la carte...', () => ensureMapReady().then(() => {
       setTimeout(() => {
@@ -3658,7 +3667,7 @@ async function computeZoneImpact() {
   renderZoneImpactPanel('<li>⏳ Analyse en cours…</li>');
 
   // ─── Chargements parallèles ────────────────────────────────────────────────
-  const [inseePopulationMap, zonePopulationMetrics, streetInsights, geoCtx, rnbPayload] = await Promise.all([
+  const [inseePopulationMap, zonePopulationMetrics, streetInsights, geoCtx, rnbPayload, inseeGridEstimate] = await Promise.all([
     loadIserePopulationByInsee(),
     (async () => {
       const muns = zoneImpactDepartmentCommunesInZone(geometry);
@@ -3667,6 +3676,7 @@ async function computeZoneImpact() {
     fetchZoneStreetInsights(geometry),
     fetchZoneGeographicContext(geometry),
     fetchZoneRnbBuildings(geometry).catch(() => ({ buildings: [], buildings_total: 0 })),
+    window.OfficialSources?.estimatePopulation(geometry) || Promise.resolve({ status: 'pending' }),
   ]);
   if (runSeq !== mapZoneImpactComputationSeq) return;
 
@@ -3700,8 +3710,12 @@ async function computeZoneImpact() {
     const p = code ? Number(inseePopulationMap.get(code) || 0) : 0;
     return sum + (p > 0 ? p : Number(m.population || 0));
   }, 0);
-  const population = areaBasedPop > 0 ? Math.round(areaBasedPop) : fallbackPop;
-  const popSource = areaBasedPop > 0 ? 'pondérée par surface (INSEE + contours communes)' : 'population légale communes intersectées (INSEE)';
+  const fallbackPopulation = areaBasedPop > 0 ? Math.round(areaBasedPop) : fallbackPop;
+  const fallbackPopSource = areaBasedPop > 0 ? 'pondérée par surface (INSEE + contours communes)' : 'population légale communes intersectées (INSEE)';
+  const gridDecision = window.OfficialSources?.populationDecision(inseeGridEstimate, fallbackPopulation, fallbackPopSource)
+    || { useGrid: false, value: fallbackPopulation, source: fallbackPopSource, note: '' };
+  const population = gridDecision.value;
+  const popSource = gridDecision.source;
 
   // ─── Échelle géographique ─────────────────────────────────────────────────
   const scale = detectZoneScale(zoneAreaM2);
@@ -3738,7 +3752,8 @@ async function computeZoneImpact() {
   const riskSummary = zoneImpactExternalRiskSummary(municipalitiesInZone);
 
   // Estimation populations vulnérables (ratios standards)
-  const childrenEstimate = schools.length > 0 ? Math.round(population * 0.12) : 0;
+  const childrenEstimate = gridDecision.useGrid ? Number(inseeGridEstimate.children_under_18 || 0) : (schools.length > 0 ? Math.round(population * 0.12) : 0);
+  const elderlyEstimate = gridDecision.useGrid ? Number(inseeGridEstimate.elderly_65_plus || 0) : null;
   const ehpadResidents   = ehpads.length * 80; // capacité moyenne EHPAD France
 
   // ─── Rues / quartiers OSM ─────────────────────────────────────────────────
@@ -3785,16 +3800,18 @@ async function computeZoneImpact() {
     parts.push(section('📏', 'Surface dessinée par ville', municipalityBreakdown.slice(0, 8).map((row) => (
       `<strong>${escapeHtml(row.displayLabel || row.name || 'Commune non identifiée')}</strong> · ${row.overlapKm2.toLocaleString('fr-FR', { maximumFractionDigits: 3 })} km²`
       + ` · ${row.sharePercent.toLocaleString('fr-FR', { maximumFractionDigits: 1 })}% de la zone`
-      + `${row.estimatedPopulation > 0 ? ` · ~${row.estimatedPopulation.toLocaleString('fr-FR')} hab.` : ''}`
+      + `${!gridDecision.useGrid && row.estimatedPopulation > 0 ? ` · ~${row.estimatedPopulation.toLocaleString('fr-FR')} hab. (méthode surfacique)` : ''}`
     ))));
   }
 
   // 2. Population
   parts.push(`<li class="zone-impact-light-card" style="margin-bottom:.6em;padding:.4em;background:#fff7e6;border-radius:6px">
-    <strong>👥 Population exposée : <span style="font-size:1.2em;color:#c05900">${population > 0 ? population.toLocaleString('fr-FR') : 'inconnue'}</span> habitants</strong><br>
-    <span class="muted">${popSource}</span><br>
-    ${childrenEstimate > 0 ? `👶 ~${childrenEstimate.toLocaleString('fr-FR')} enfants scolarisés estimés · ` : ''}
-    ${ehpadResidents > 0 ? `🧓 ~${ehpadResidents.toLocaleString('fr-FR')} résidents EHPAD (personnes à mobilité réduite)` : ''}
+    <strong>👥 Population résidente estimée : <span style="font-size:1.2em;color:#c05900">${population > 0 || gridDecision.useGrid ? population.toLocaleString('fr-FR') : 'inconnue'}</span> habitants</strong><br>
+    <span class="muted">${escapeHtml(popSource)}</span><br>
+    <span class="muted">${escapeHtml(gridDecision.note)}</span><br>
+    ${childrenEstimate > 0 ? `👶 ~${childrenEstimate.toLocaleString('fr-FR')} ${gridDecision.useGrid ? 'résidents de moins de 18 ans' : 'enfants estimés (ratio indicatif)'} · ` : ''}
+    ${elderlyEstimate !== null ? `🧓 ~${elderlyEstimate.toLocaleString('fr-FR')} résidents de 65 ans et plus · ` : ''}
+    ${ehpadResidents > 0 ? `EHPAD : capacité indicative ~${ehpadResidents.toLocaleString('fr-FR')}, à confirmer auprès des établissements` : ''}
   </li>`);
   parts.push(`<li class="zone-impact-light-card" style="margin-bottom:.6em;padding:.4em;background:#eef7ff;border-radius:6px">
     <strong>🏢 Bâtiments sélectionnés : <span style="font-size:1.15em;color:#0b4daa">${buildingCount.toLocaleString('fr-FR')}</span></strong><br>
@@ -3913,7 +3930,7 @@ async function computeZoneImpact() {
   // Stocker les données brutes pour l'export
   mapZoneImpactReportData = {
     generatedAt: new Date(),
-    scale, geoLabel, geoCtx, zoneAreaM2, population, popSource,
+    scale, geoLabel, geoCtx, zoneAreaM2, population, popSource, inseeGridEstimate, gridDecision, elderlyEstimate,
     buildingCount,
     childrenEstimate, ehpadResidents,
     municipalitiesInZone, municipalityBreakdown, resourcesInZone,
@@ -4053,7 +4070,9 @@ ${simpleTable('Surface dessinée par ville', '📏', d.municipalityBreakdown || 
   <div class="pop-num">${d.population > 0 ? d.population.toLocaleString('fr-FR') : '?'} habitants</div>
   <div style="font-size:9.5pt;color:#666;margin-top:.2em">${toText(d.popSource)}</div>
   <div style="margin-top:.4em">🏢 Bâtiments RNB dans la zone : <strong>${Number(d.buildingCount || 0).toLocaleString('fr-FR')}</strong></div>
-  ${d.childrenEstimate > 0 ? `<div style="margin-top:.4em">👶 Enfants scolarisés estimés : <strong>~${d.childrenEstimate.toLocaleString('fr-FR')}</strong></div>` : ''}
+  <p>${toText(d.gridDecision?.note || '')}</p>
+  ${d.childrenEstimate > 0 ? `<div style="margin-top:.4em">👶 ${d.gridDecision?.useGrid ? 'Résidents de moins de 18 ans' : 'Enfants estimés (ratio indicatif)'} : <strong>~${d.childrenEstimate.toLocaleString('fr-FR')}</strong></div>` : ''}
+  ${d.elderlyEstimate != null ? `<div>🧓 Résidents de 65 ans et plus : <strong>~${d.elderlyEstimate.toLocaleString('fr-FR')}</strong></div>` : ''}
   ${d.ehpadResidents > 0 ? `<div>🧓 Résidents EHPAD (mobilité réduite) : <strong>~${d.ehpadResidents.toLocaleString('fr-FR')}</strong></div>` : ''}
 </div>
 
@@ -6766,7 +6785,8 @@ function getResourcesForZoneImpact() {
   const osmNonHostingInstitutions = institutionPointsCache.filter((r) => !HOSTING_RESOURCE_TYPES.has(String(r.type || '')));
   const dynamicResources = [...osmNonHostingInstitutions, ...verifiedHostingPointsCache, ...finessPointsCache, ...daePointsCache, ...telecomPointsCache]
     .filter((r) => !hostingStatic.some((h) => h.id === r.id));
-  return [...staticResources, ...dynamicResources];
+  const combined = [...staticResources, ...dynamicResources];
+  return window.OfficialSources?.mergeIndustryResources(combined) || combined;
 }
 
 
@@ -14323,6 +14343,12 @@ async function loadDashboard(forceRefresh = false) {
 /* ── Services panel — cards builder & groundwater renderers ──────────────── */
 
 const SVC_CARD_META = {
+  insee_population:      { statusId: 'insee_population-official-status', infoId: 'insee_population-official-info', url: 'https://www.insee.fr/fr/statistiques/8735162' },
+  meteo_observations:    { statusId: 'meteo_observations-official-status', infoId: 'meteo_observations-official-info', url: 'https://portail-api.meteofrance.fr/' },
+  vigicrues_forecasts:   { statusId: 'vigicrues_forecasts-official-status', infoId: 'vigicrues_forecasts-official-info', url: 'https://www.vigicrues.gouv.fr/' },
+  meteo_radar:           { statusId: 'meteo_radar-official-status', infoId: 'meteo_radar-official-info', url: 'https://portail-api.meteofrance.fr/' },
+  industrial_sites:     { statusId: 'industrial_sites-official-status', infoId: 'industrial_sites-official-info', url: 'https://www.georisques.gouv.fr/donnees/bases-de-donnees/installations-industrielles' },
+  enedis:               { statusId: 'enedis-official-status', infoId: 'enedis-official-info', url: 'https://www.enedis.fr/panne-et-interruption' },
   meteo_france:          { statusId: 'meteo-status',           infoId: 'meteo-info',           url: 'https://vigilance.meteofrance.fr' },
   apic_isere:            { statusId: 'apic-status',            infoId: 'apic-info',            url: 'https://apic.meteofrance.fr' },
   vigicrues:             { statusId: 'vigicrues-status',       infoId: 'vigicrues-info',       url: 'https://www.vigicrues.gouv.fr' },
@@ -14709,6 +14735,7 @@ function renderSvcSummaryBar(data = {}) {
   if (counts.stale   > 0) pills.push(`<span class="svc-pill svc-pill--stale">${counts.stale} obsolète${counts.stale > 1 ? 's' : ''}</span>`);
   if (counts.error   > 0) pills.push(`<span class="svc-pill svc-pill--error">${counts.error} erreur${counts.error > 1 ? 's' : ''}</span>`);
   if (counts.pending > 0) pills.push(`<span class="svc-pill svc-pill--pending">${counts.pending} en attente</span>`);
+  if (counts.setup > 0) pills.push(`<span class="svc-pill svc-pill--pending">${counts.setup} accès à configurer</span>`);
   pills.push(`<span class="svc-pill svc-pill--total">${services.length} flux</span>`);
   bar.innerHTML = pills.join('');
 }
@@ -14939,6 +14966,7 @@ function renderExternalRisks(data = {}) {
 
   lastRenderedExternalRisksSignature = signature;
   cachedExternalRisksSnapshot = mergedData;
+  window.OfficialSources?.update(mergedData);
   const meteo = mergedData?.meteo_france || {};
   const vigicrues = mergedData?.vigicrues || {};
   cachedVigicruesPayload = {
@@ -15086,6 +15114,7 @@ function _fluxServiceState(payload, intervalSec) {
   const status = String(payload?.status || 'pending');
   const updatedAt = payload?.updated_at ? new Date(payload.updated_at).getTime() : 0;
   const ageMs = updatedAt > 0 ? (Date.now() - updatedAt) : Infinity;
+  if (['configuration_required', 'config_required', 'access_required'].includes(status)) return { state: 'setup', updatedAt, ageMs };
   if (payload?.meta?.refreshing) return { state: 'pending', updatedAt, ageMs };
   if (status === 'pending' || status === 'idle') return { state: 'pending', updatedAt, ageMs };
   if (status === 'stale' || status === 'partial') return { state: 'stale', updatedAt, ageMs };
@@ -15095,6 +15124,7 @@ function _fluxServiceState(payload, intervalSec) {
 }
 
 function _fluxAgeLabel(ageMs, intervalSec, state) {
+  if (state === 'setup') return { text: 'accès requis', css: 'unknown' };
   if (state === 'pending') return { text: 'en attente', css: 'unknown' };
   if (!Number.isFinite(ageMs)) return { text: '–', css: 'unknown' };
   const ageSec = ageMs / 1000;
@@ -15104,6 +15134,7 @@ function _fluxAgeLabel(ageMs, intervalSec, state) {
 }
 
 function _fluxNextLabel(updatedAt, intervalSec, state) {
+  if (state === 'setup') return 'Activation nécessaire';
   if (state === 'pending') return `↻ toutes les ${_formatInterval(intervalSec)}`;
   if (updatedAt > 0 && state === 'online') {
     const nextMs = (intervalSec * 1000) - (Date.now() - updatedAt);
@@ -15134,7 +15165,7 @@ function renderApiInterconnections(data = {}) {
   });
 
   // Summary counts
-  const counts = { online: 0, error: 0, stale: 0, pending: 0 };
+  const counts = { online: 0, error: 0, stale: 0, pending: 0, setup: 0 };
   rows.forEach((r) => counts[r.state]++);
 
   // Summary bar HTML
@@ -15143,6 +15174,7 @@ function renderApiInterconnections(data = {}) {
     counts.error > 0 ? `<span class="flux-stat error">⚠ ${counts.error} erreur${counts.error > 1 ? 's' : ''}</span>` : '',
     counts.stale > 0 ? `<span class="flux-stat stale">⏱ ${counts.stale} périmé${counts.stale > 1 ? 's' : ''}</span>` : '',
     counts.pending > 0 ? `<span class="flux-stat pending">⋯ ${counts.pending} en attente</span>` : '',
+    counts.setup > 0 ? `<span class="flux-stat pending">🔑 ${counts.setup} accès à configurer</span>` : '',
     `<span class="flux-stat clock" id="flux-resync-ago">↻ ${formatElapsedSince(lastApiResyncAt)}</span>`,
   ];
   setHtml('flux-summary', summaryParts.filter(Boolean).join(''));
@@ -15156,7 +15188,7 @@ function renderApiInterconnections(data = {}) {
   });
 
   // Sort: errors first, stale second, then online sorted by oldest update, pending last
-  const ORDER = { error: 0, stale: 1, online: 2, pending: 3 };
+  const ORDER = { error: 0, stale: 1, online: 2, pending: 3, setup: 4 };
   const sorted = [...rows].sort((a, b) => {
     if (ORDER[a.state] !== ORDER[b.state]) return ORDER[a.state] - ORDER[b.state];
     return b.ageMs - a.ageMs;
@@ -17010,6 +17042,7 @@ function bindAppInteractions() {
 
 
 function logout() {
+  window.OfficialSources?.reset();
   token = null;
   currentUser = null;
   clearApiCache();
@@ -17349,6 +17382,7 @@ function startSituationWallboardRefresh({ refreshImmediately = true } = {}) {
 
 async function renderMapLiveLayers() {
   if (!leafletMap || !isMapPanelActive()) return;
+  window.OfficialSources?.syncMap();
   renderStations(cachedVigicruesPayload);
   await Promise.all([
     renderApicLayer(cachedExternalRisksSnapshot?.apic_isere || {}),

@@ -314,6 +314,7 @@ test('navigation and focus refresh read snapshots without forcing external provi
   const calls = [];
   const record = (name, result) => (...args) => { calls.push([name, ...args]); return result; };
   const context = vm.createContext({
+    window: {},
     token: 'token', currentUser: { role: 'operateur' },
     STORAGE_KEYS: { activePanel: 'activePanel' },
     PANEL_TITLES: { 'situation-panel': 'Situation' },

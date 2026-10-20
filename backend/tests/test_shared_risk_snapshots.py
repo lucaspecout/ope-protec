@@ -1,7 +1,7 @@
 """Exercise worker snapshot exchange without importing application startup side effects."""
 import ast
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 from pathlib import Path
 from threading import Lock
@@ -211,6 +211,29 @@ class WorkerSynchronizationTests(unittest.TestCase):
         })
         namespace["_refresh_one_service"]("meteo_france")
         self.assertTrue(namespace["_service_runtime"]["meteo_france"]["refreshing"])
+
+    def test_official_sources_do_not_mark_missing_access_or_failed_fetch_as_success(self):
+        for status, expected_failures, succeeded in (
+            ("configuration_required", 0, False), ("access_required", 0, False),
+            ("error", 1, False), ("stale", 1, False), ("online", 0, True),
+        ):
+            with self.subTest(status=status):
+                result = {"status": status, "message": "Source test"}
+                update = Mock()
+                namespace = load_definitions("main.py", {"_refresh_one_service"}, {
+                    "datetime": datetime, "timedelta": timedelta, "monotonic": lambda: 10,
+                    "deepcopy": deepcopy, "_service_runtime_lock": Lock(), "_service_runtime": {},
+                    "_REDIS_OK": False, "_redis": None,
+                    "_external_risks_snapshot_lock": Lock(), "_external_risks_snapshot": {"payload": {}},
+                    "build_external_risks_fetch_jobs": lambda **_: {"meteo_observations": (lambda: result, {})},
+                    "_update_service_slot": update,
+                    "SERVICE_BACKOFF_SECONDS": (60, 180), "SERVICE_CIRCUIT_BREAKER_OPEN_AFTER": 3,
+                })
+                namespace["_refresh_one_service"]("meteo_observations")
+                runtime = namespace["_service_runtime"]["meteo_observations"]
+                update.assert_called_once_with("meteo_observations", result)
+                self.assertEqual(runtime.get("failure_count"), expected_failures)
+                self.assertEqual(bool(runtime.get("last_success_at")), succeeded)
 
 
 if __name__ == "__main__":

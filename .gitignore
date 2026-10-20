@@ -1,3 +1,8 @@
 __pycache__/
 *.py[cod]
 debug.log
+.test-deps/
+.test-data/
+.env
+.env.*
+!.env.example

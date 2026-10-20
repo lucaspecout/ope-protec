@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/styles.css?v=20260824-info-page" />
+  <link rel="stylesheet" href="/official_sources.css?v=20261020" />
 </head>
 <body>
   <div id="network-offline-banner" role="alert" aria-live="assertive">
@@ -63,6 +64,7 @@
         <nav class="side-nav" aria-label="Menu principal">
           <button class="menu-btn" data-target="situation-panel" data-icon="📊"><span class="menu-label">Situation</span></button>
           <button class="menu-btn" data-target="services-panel" data-icon="🔌"><span class="menu-label">Services connectés</span></button>
+          <button class="menu-btn" data-target="official-sources-panel" data-icon="📡"><span class="menu-label">Sources officielles</span></button>
           <button class="menu-btn" data-target="stations-panel" data-icon="🚆"><span class="menu-label">Horaires gares</span></button>
           <button class="menu-btn" data-target="meteo-panel" data-icon="🌤️"><span class="menu-label">Météo semaine</span></button>
           <button class="menu-btn" data-target="water-panel" data-icon="🚰"><span class="menu-label">Eau potable</span></button>
@@ -182,6 +184,18 @@
           </div>
         </section>
 
+        <section id="official-sources-panel" class="panel view hidden" hidden>
+          <div class="panel-head"><div><h3>Sources officielles · Isère</h3><p class="muted">Mesures, prévisions et référentiels. Les dates et les limites de couverture accompagnent chaque source.</p></div></div>
+          <div id="official-source-cards" class="official-source-grid" aria-live="polite"><p class="muted">Lecture des données collectées par le serveur…</p></div>
+          <div class="official-source-grid">
+            <article class="tile"><h4>Population exposée · INSEE</h4><div id="official-population-body"></div></article>
+            <article class="tile"><h4>Électricité · Enedis</h4><div id="official-enedis-body"></div></article>
+          </div>
+          <article class="tile official-section"><h4>Observations Météo-France</h4><div id="official-observation-summary"></div><div class="official-controls"><label>Station<select id="official-observation-station" aria-label="Station météorologique observée"></select></label><label>Mesure<select id="official-observation-metric"><option value="temperature_c">Température</option><option value="rain_6m_mm">Pluie sur 6 minutes</option><option value="gust_kmh">Rafales</option></select></label></div><div id="official-observation-chart"></div><div id="official-observation-table" class="official-table-wrap"></div></article>
+          <article class="tile official-section"><h4>Prévisions hydrologiques · Vigicrues</h4><div id="official-forecast-summary"></div><div class="official-controls"><label>Station<select id="official-forecast-station" aria-label="Station avec prévisions Vigicrues"></select></label><label>Grandeur<select id="official-forecast-variable"><option value="H">Hauteur d’eau</option><option value="Q">Débit</option></select></label></div><div id="official-forecast-chart"></div></article>
+          <article class="tile official-section"><h4>Installations industrielles · ICPE / Seveso</h4><div id="official-industry-summary"></div><div class="official-controls"><label>Rechercher<input id="official-industry-search" type="search" placeholder="Établissement ou commune" /></label><label>Classement<select id="official-industry-filter"><option value="all">Tous les établissements</option><option value="haut">Seveso seuil haut</option><option value="bas">Seveso seuil bas</option><option value="non">Non Seveso</option></select></label></div><div id="official-industry-table" class="official-table-wrap"></div></article>
+        </section>
+
         <section id="meteo-panel" class="panel view hidden" hidden>
           <div class="panel-head">
             <div>
@@ -193,6 +207,8 @@
             <label for="meteo-city-select">Ville</label>
             <select id="meteo-city-select" aria-label="Sélectionner une ville"></select>
           </div>
+
+          <article id="official-weather-inline" class="tile official-section"></article>
 
           <article id="meteo-city-current" class="meteo-current-card">
             <p class="muted">Chargement de la météo locale…</p>
@@ -857,6 +873,16 @@
                 <summary class="filter-group__title">🌊 Alertes &amp; Surveillance</summary>
                 <div class="filter-group__body map-toggle-grid">
                   <label><input id="filter-hydro" type="checkbox" checked /> Vigicrues (stations crues)</label>
+                  <label><input id="filter-official-observations" type="checkbox" /> Mesures Météo-France<small class="filter-legend">Stations officielles · température, pluie et rafales</small></label>
+                  <div class="filter-subgroup official-radar-controls">
+                    <label><input id="filter-official-radar" type="checkbox" /> Radar Météo-France<small class="filter-legend">Pluie mesurée sur 5 minutes · accès Météo-France requis</small></label>
+                    <div id="official-radar-state" aria-live="polite"></div>
+                    <label for="official-radar-frame">Image radar<input id="official-radar-frame" type="range" min="0" max="0" value="0" disabled /></label>
+                    <button id="official-radar-play" type="button" class="ghost" disabled>Lire l’animation</button>
+                    <div id="official-radar-legend" class="official-radar-legend"></div>
+                    <div id="official-radar-note"></div>
+                  </div>
+                  <label><input id="filter-official-industries" type="checkbox" /> Référentiel officiel ICPE / Seveso<small class="filter-legend">Établissements industriels, sans indication d’incident en cours</small></label>
                   <label><input id="filter-pcs" type="checkbox" checked /> Communes PCS</label>
                   <label>
                     <input id="filter-apic" type="checkbox" checked />
@@ -1577,6 +1603,7 @@
     <path id="isere-shape" d="M0 0h1v1H0z"></path>
   </svg>
   <script src="/hosting_data.js?v=20260603-perf1"></script>
-  <script src="/script.js?v=20260824-info-page"></script>
+  <script src="/official_sources.js?v=20261020"></script>
+  <script src="/script.js?v=20261020-official-sources"></script>
 </body>
 </html>

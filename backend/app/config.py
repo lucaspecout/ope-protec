@@ -21,6 +21,16 @@ class Settings(BaseSettings):
     db_pool_recycle_seconds: int = 1800
     external_fetch_workers: int = 6
     background_refresh_workers: int = 4
+    # Sources officielles : identifiants uniquement côté serveur.
+    meteo_france_api_key: str = ""
+    meteo_france_observations_api_key: str = ""
+    meteo_france_radar_api_key: str = ""
+    meteo_france_access_token: str = ""
+    meteo_france_station_ids: str = ""
+    meteo_france_station_limit: int = Field(default=40, ge=1, le=40)
+    insee_population_csv_url: str = "https://www.insee.fr/fr/statistiques/fichier/8735162/Filosofi2021_carreaux_200m_csv.zip"
+    insee_population_local_path: str = ""
+    industrial_sites_csv_url: str = ""
     # NASA FIRMS — clé gratuite sur https://firms.modaps.eosdis.nasa.gov/api/map_key/
     firms_map_key: str = ""
     # TomTom Routing API. If configured, route estimates include live traffic.
