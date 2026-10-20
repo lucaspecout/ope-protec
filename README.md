@@ -2,6 +2,8 @@
 
 Application web repensée comme un centre de crise départemental (CRISIS38) dédié à l'Isère, avec une interface modernisée, une carte stratégique locale et des interconnexions vers les services publics de référence.
 
+Les corrections du chargement initial, les constats de revue de code et la procédure de mesure sont détaillés dans la [revue du 20 octobre 2026](docs/revue-performance-2026-10-20.md).
+
 ## Démarrage rapide
 
 ```bash

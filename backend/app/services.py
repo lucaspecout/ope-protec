@@ -91,7 +91,9 @@ def _file_cache_save(filename: str, data: dict[str, Any]) -> None:
 # Cache Redis partagé entre tous les workers gunicorn
 # ---------------------------------------------------------------------------
 try:
-    _redis: _redis_lib.Redis = _redis_lib.from_url(settings.redis_url, decode_responses=True, socket_connect_timeout=2)
+    _redis: _redis_lib.Redis = _redis_lib.from_url(
+        settings.redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2,
+    )
     _redis.ping()
     _REDIS_OK = True
 except Exception:
@@ -10781,22 +10783,72 @@ def fetch_copernicus_ems_france(force_refresh: bool = False) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Persistance du snapshot consolidé (main.py ↔ Redis)
+# Persistance des services partagés entre workers (main.py ↔ Redis)
 # ---------------------------------------------------------------------------
 
 _RISKS_SNAPSHOT_KEY = "risks_snapshot_v1"
+_RISKS_SERVICE_SNAPSHOTS_KEY = "risks_snapshot_slots_v2"
 
 
-def save_risks_snapshot(payload: dict[str, Any]) -> None:
-    """Sauvegarde le snapshot complet des risques dans Redis (7 jours).
-    Appelé par main.py après chaque mise à jour d'un slot de service."""
-    _redis_set(_RISKS_SNAPSHOT_KEY, payload, _PERSIST_TTL_SECONDS)
+def save_risk_service_snapshot(service_key: str, payload: dict[str, Any], revision: str) -> None:
+    """Persist one feed atomically without overwriting another worker's feeds."""
+    if not _REDIS_OK or _redis is None:
+        return
+    try:
+        shared_key = _REDIS_KEY_PREFIX + _RISKS_SERVICE_SNAPSHOTS_KEY
+        record = json.dumps({"revision": revision, "payload": payload}, default=str)
+        with _redis.pipeline() as pipe:
+            pipe.hset(shared_key, service_key, record)
+            # Keep revision fields in the same hash: Redis eviction cannot
+            # discard the index while leaving unread payloads behind.
+            pipe.hset(shared_key, f"revision:{service_key}", revision)
+            pipe.expire(shared_key, _PERSIST_TTL_SECONDS)
+            pipe.execute()
+    except Exception:
+        pass
+
+
+def load_risk_service_snapshots(known_revisions: dict[str, str] | None = None) -> dict[str, dict[str, Any]]:
+    """Read shared feed revisions; unavailable Redis leaves local data intact."""
+    if not _REDIS_OK or _redis is None:
+        return {}
+    try:
+        shared_key = _REDIS_KEY_PREFIX + _RISKS_SERVICE_SNAPSHOTS_KEY
+        if known_revisions is None:
+            raw_slots = _redis.hgetall(shared_key)
+        else:
+            tracked_keys = list(known_revisions)
+            revisions = _redis.hmget(shared_key, [f"revision:{key}" for key in tracked_keys]) if tracked_keys else []
+            changed = [
+                key for key, revision in zip(tracked_keys, revisions)
+                if revision and revision > known_revisions[key]
+            ]
+            # Poll only small revision strings; unchanged FINESS/GeoDAE payloads
+            # must not be transferred and decoded every second in every worker.
+            raw_slots = dict(zip(changed, _redis.hmget(shared_key, changed))) if changed else {}
+    except Exception:
+        return {}
+    slots: dict[str, dict[str, Any]] = {}
+    for service_key, raw in raw_slots.items():
+        try:
+            record = json.loads(raw)
+            if isinstance(record, dict) and isinstance(record.get("payload"), dict) and isinstance(record.get("revision"), str):
+                slots[service_key] = record
+        except (TypeError, ValueError):
+            continue
+    return slots
 
 
 def load_risks_snapshot() -> dict[str, Any] | None:
     """Charge le dernier snapshot complet depuis Redis.
     Retourne None si Redis est indisponible ou si aucune donnée n'a encore été sauvegardée."""
-    return _redis_get(_RISKS_SNAPSHOT_KEY)
+    legacy = _redis_get(_RISKS_SNAPSHOT_KEY)
+    payload = dict(legacy) if isinstance(legacy, dict) else {}
+    for service_key, record in load_risk_service_snapshots().items():
+        payload[service_key] = record["payload"]
+        if record["revision"] > str(payload.get("updated_at") or ""):
+            payload["updated_at"] = record["revision"]
+    return payload or None
 
 
 # ══════════════════════════════════════════════════════════════════════════════

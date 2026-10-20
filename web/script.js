@@ -453,6 +453,7 @@ const GEORISQUES_FLOOD_TRI_LAYERS = [
   'ALEA_SYNT_01_04FAI_FXX',
 ].join(',');
 let cachedCrisisPoints = [];
+let municipalitiesMapRenderVersion = 0;
 let weatherVisualLayer = null;
 let weatherVisualLayerKey = '';
 let weatherVisualRefreshTimer = null;
@@ -3032,7 +3033,7 @@ async function ensureMapReady() {
   return leafletMap;
 }
 
-function setActivePanel(panelId) {
+function setActivePanel(panelId, { refreshSnapshot = true } = {}) {
   if (!canAccessPanel(panelId)) panelId = 'situation-panel';
   closeMobileSidebar();
   localStorage.setItem(STORAGE_KEYS.activePanel, panelId);
@@ -3042,7 +3043,6 @@ function setActivePanel(panelId) {
   updateGlobalLoadingVisual(getStartupQueuePercent());
   updateMobileNavActive(panelId);
   document.getElementById('panel-title').textContent = PANEL_TITLES[panelId] || 'Centre opérationnel';
-  requestPriorityServicesForPanel(panelId);
   if (panelId === 'map-panel') {
     withPanelLoading('map-panel', 'Chargement de la carte...', () => ensureMapReady().then(() => {
       setTimeout(() => {
@@ -3052,14 +3052,14 @@ function setActivePanel(panelId) {
       if (token) _refreshAgentMarkers();
       if (token && !stationsTimetableCache) loadAndRenderStationsPanel(false).catch(() => {});
       renderMapLiveLayers().catch(() => {});
-      refreshMapLiveView().catch(() => {});
+      if (refreshSnapshot) refreshMapLiveView().catch(() => {});
     })).catch((error) => {
       setMapFeedback(`Carte indisponible: ${sanitizeErrorMessage(error.message)}`, true);
     });
   }
   if (panelId === 'logs-panel') ensureLogMunicipalitiesLoaded();
   if (panelId === 'news-panel') ensureSocialFeedsRendered();
-  if (['situation-panel', 'services-panel', 'meteo-panel', 'news-panel'].includes(panelId) && token) {
+  if (refreshSnapshot && ['situation-panel', 'services-panel', 'meteo-panel', 'news-panel'].includes(panelId) && token) {
     withPanelLoading(panelId, 'Synchronisation des données...', async () => {
       if (panelId === 'situation-panel') await loadDashboard(false);
       await loadExternalRisks(false);
@@ -3083,9 +3083,15 @@ function setActivePanel(panelId) {
     });
   }
   if (panelId === 'api-panel' && token) {
-    withPanelLoading('api-panel', 'Synchronisation des flux...', () => Promise.all([loadApiInterconnections(false), loadSystemHealth()])).catch((error) => {
+    withPanelLoading('api-panel', 'Synchronisation des flux...', () => Promise.all([
+      refreshSnapshot ? loadApiInterconnections(false) : Promise.resolve(),
+      loadSystemHealth(),
+    ])).catch((error) => {
       document.getElementById('dashboard-error').textContent = sanitizeErrorMessage(error.message);
     });
+  }
+  if (panelId === 'users-panel' && token && currentUser?.role === 'admin') {
+    loadLdapBindPasswordStatus().catch(() => {});
   }
   if (panelId === 'stations-panel' && token) {
     // L'ouverture du panneau doit interroger immédiatement le flux temps réel.
@@ -5805,13 +5811,17 @@ async function fetchMunicipalityContour(municipality) {
 }
 
 async function renderMunicipalitiesOnMap(municipalities = []) {
+  const renderVersion = ++municipalitiesMapRenderVersion;
   cachedMunicipalities = municipalities;
   const pcs = municipalities.filter((m) => m.pcs_active);
-  setHtml('pcs-list', pcs.slice(0, 15).map((m) => `<li><strong>${m.name}</strong> · ${m.postal_code || 'CP ?'} · ${m.manager} · ${m.crisis_mode ? '🔴 CRISE' : 'veille'}</li>`).join('') || '<li>Aucune commune PCS.</li>');
+  setHtml('pcs-list', pcs.slice(0, 15).map((m) => `<li><strong>${escapeHtml(m.name)}</strong> · ${escapeHtml(m.postal_code || 'CP ?')} · ${escapeHtml(m.manager)} · ${m.crisis_mode ? '🔴 CRISE' : 'veille'}</li>`).join('') || '<li>Aucune commune PCS.</li>');
   if (!pcsLayer) return;
-  pcsLayer.clearLayers();
-  if (pcsBoundaryLayer) pcsBoundaryLayer.clearLayers();
+  const targetPcsLayer = pcsLayer;
+  const targetBoundaryLayer = pcsBoundaryLayer;
   if (!(document.getElementById('filter-pcs')?.checked ?? true)) {
+    pcsLayer.clearLayers();
+    if (pcsBoundaryLayer) pcsBoundaryLayer.clearLayers();
+    cachedCrisisPoints = [];
     mapStats.pcs = 0;
     updateMapSummary();
     return;
@@ -5823,6 +5833,12 @@ async function renderMunicipalitiesOnMap(municipalities = []) {
       contour: await fetchMunicipalityContour(m),
     })),
   );
+  // Un rendu plus récent peut avoir terminé pendant le géocodage. Garder les
+  // couches visibles jusque-là et appliquer uniquement le dernier résultat.
+  if (renderVersion !== municipalitiesMapRenderVersion
+    || pcsLayer !== targetPcsLayer || pcsBoundaryLayer !== targetBoundaryLayer) return;
+  pcsLayer.clearLayers();
+  if (pcsBoundaryLayer) pcsBoundaryLayer.clearLayers();
   let renderedCount = 0;
   cachedCrisisPoints = [];
   points.forEach(({ municipality, point, contour }) => {
@@ -5842,7 +5858,7 @@ async function renderMunicipalitiesOnMap(municipalities = []) {
       fillColor: isInCrisis ? '#e03131' : '#17335f',
       fillOpacity: 0.95,
     })
-      .bindPopup(`<strong>${municipality.name}</strong><br>Code postal: ${municipality.postal_code || '-'}<br>PCS: actif<br>Statut: ${isInCrisis ? 'CRISE' : 'veille'}`)
+      .bindPopup(`<strong>${escapeHtml(municipality.name)}</strong><br>Code postal: ${escapeHtml(municipality.postal_code || '-')}<br>PCS: actif<br>Statut: ${isInCrisis ? 'CRISE' : 'veille'}`)
       .addTo(pcsLayer);
 
     if (isInCrisis) {
@@ -14304,45 +14320,6 @@ async function loadDashboard(forceRefresh = false) {
   }
 }
 
-async function loadInitialServerSnapshot() {
-  const jobs = [
-    api('/external/isere/risks', {
-      bypassCache: true,
-      cacheTtlMs: 0,
-      timeoutMs: API_SLOW_ENDPOINT_TIMEOUT_MS,
-      maxRetries: 0,
-    }).then((payload) => {
-      cachedExternalRisksSnapshot = payload && typeof payload === 'object' ? payload : {};
-      renderExternalRisks(cachedExternalRisksSnapshot);
-      renderApiInterconnections(cachedExternalRisksSnapshot);
-      saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
-      saveSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot, cachedExternalRisksSnapshot);
-      return payload;
-    }),
-    api('/dashboard', {
-      bypassCache: true,
-      cacheTtlMs: 0,
-      timeoutMs: API_SLOW_ENDPOINT_TIMEOUT_MS,
-      maxRetries: 0,
-    }).then((dashboard) => {
-      cachedDashboardSnapshot = dashboard || {};
-      renderDashboard(cachedDashboardSnapshot);
-      saveSnapshot(STORAGE_KEYS.dashboardSnapshot, cachedDashboardSnapshot);
-      return dashboard;
-    }),
-  ];
-
-  const results = await Promise.allSettled(jobs);
-  const ok = results.some((result) => result.status === 'fulfilled');
-  if (ok) {
-    initialServerSnapshotReady = true;
-    markServerSnapshotFresh(cachedExternalRisksSnapshot);
-    renderSituationOverview();
-    setServerSnapshotSyncing(false);
-  }
-  return ok;
-}
-
 /* ── Services panel — cards builder & groundwater renderers ──────────────── */
 
 const SVC_CARD_META = {
@@ -14601,7 +14578,6 @@ function requestPriorityServicesForPanel(panelId) {
 function refreshActivePanelData() {
   if (!token || document.hidden) return Promise.resolve();
   const panelId = localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel';
-  requestPriorityServicesForPanel(panelId);
   if (panelId === 'logs-panel') return Promise.allSettled([loadEvents(null), loadLogs(null)]).then(() => undefined);
   if (panelId === 'municipalities-panel') return loadMunicipalities(null);
   if (panelId === 'users-panel' && canManageUsers()) return loadUsers(null);
@@ -15403,7 +15379,7 @@ function applyMunicipalityFilters() {
   renderMunicipalitiesList(filtered);
 }
 
-async function loadMunicipalities(preloaded = null) {
+async function loadMunicipalities(preloaded = null, { awaitMapRender = true } = {}) {
   const storedMunicipalities = readSnapshot(STORAGE_KEYS.municipalitiesCache);
   const previousMunicipalities = Array.isArray(cachedMunicipalityRecords) && cachedMunicipalityRecords.length
     ? cachedMunicipalityRecords
@@ -15435,7 +15411,11 @@ async function loadMunicipalities(preloaded = null) {
   syncLogScopeFields();
   syncLogOtherFields();
   applyMunicipalityFilters();
-  await renderMunicipalitiesOnMap(municipalities);
+  const mapRender = renderMunicipalitiesOnMap(municipalities);
+  if (awaitMapRender) await mapRender;
+  else mapRender.catch((error) => {
+    setMapFeedback(`Communes sur la carte indisponibles: ${sanitizeErrorMessage(error.message)}`, true);
+  });
 }
 
 function computeLogCriticality(level) {
@@ -15817,6 +15797,7 @@ async function loadLdapBindPasswordStatus() {
 
 async function loadOperationsBootstrap(forceRefresh = false) {
   const payload = await api('/operations/bootstrap', {
+    highPriority: true,
     bypassCache: forceRefresh,
     cacheTtlMs: forceRefresh ? 0 : 5000,
     timeoutMs: API_SLOW_ENDPOINT_TIMEOUT_MS,
@@ -15830,17 +15811,19 @@ async function loadOperationsBootstrap(forceRefresh = false) {
     saveSnapshot(STORAGE_KEYS.dashboardSnapshot, payload.dashboard);
   }
   if (payload.external_risks) {
-    renderExternalRisks(payload.external_risks);
-    renderApiInterconnections(payload.external_risks);
-    saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, payload.external_risks);
-    saveSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot, payload.external_risks);
+    cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, payload.external_risks);
+    renderExternalRisks(cachedExternalRisksSnapshot);
+    renderApiInterconnections(cachedExternalRisksSnapshot);
+    saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
+    saveSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot, cachedExternalRisksSnapshot);
   }
 
-  await loadMunicipalities(payload.municipalities || []);
-  await loadEvents(payload.events || null);
-  await loadLogs(payload.logs || []);
-  if (canManageUsers()) await loadUsers(payload.users || []);
-  if (currentUser?.role === 'admin') await loadLdapBindPasswordStatus();
+  await loadMunicipalities(Array.isArray(payload.municipalities) ? payload.municipalities : null, { awaitMapRender: false });
+  await loadEvents(Array.isArray(payload.events) ? payload.events : null);
+  await loadLogs(Array.isArray(payload.logs) ? payload.logs : null);
+  if (canManageUsers()) await loadUsers(Array.isArray(payload.users) ? payload.users : null);
+  initialServerSnapshotReady = true;
+  situationWallboardLastSuccessAt = Date.now();
 
   const perf = payload.perf || {};
   const duration = Number(perf.backend_duration_ms || 0);
@@ -15918,82 +15901,70 @@ async function refreshAll(forceRefresh = false) {
     const activePanelId = localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel';
     const showBlockingLoader = forceRefresh || !initialServerSnapshotReady;
     if (showBlockingLoader) startStartupQueue(2);
-    if (showBlockingLoader) setPanelLoading(activePanelId, true, forceRefresh ? 'Actualisation en cours...' : 'Lecture des données serveur...');
-    setServerSnapshotSyncing(true, forceRefresh ? 'Synchronisation demandée...' : (initialServerSnapshotReady ? 'Synchronisation discrète...' : 'Lecture du snapshot serveur...'));
-    if (forceRefresh) requestExternalRisksBackgroundRefresh();
-
-    // Effacer toute erreur résiduelle du cycle précédent dès le début.
-    // Sans ce reset, une erreur ponctuelle reste affichée pour toujours même si les
-    // refreshs suivants réussissent.
-    const errorTarget = document.getElementById('dashboard-error');
-    if (errorTarget) errorTarget.textContent = '';
-
-    let bootstrapError = null;
-    let fallbackFailedCount = 0;
-
-    if (showBlockingLoader) setStartupQueueCurrent('Lecture du snapshot serveur...');
     try {
-      const bsData = await loadOperationsBootstrap(false);
+      if (showBlockingLoader) setPanelLoading(activePanelId, true, forceRefresh ? 'Actualisation en cours...' : 'Lecture des données serveur...');
+      setServerSnapshotSyncing(true, forceRefresh ? 'Synchronisation demandée...' : (initialServerSnapshotReady ? 'Synchronisation discrète...' : 'Lecture du snapshot serveur...'));
+      if (forceRefresh) requestExternalRisksBackgroundRefresh();
 
-      // — dashboard —
-      if (bsData?.dashboard) {
-        renderDashboard(bsData.dashboard);
-        saveSnapshot(STORAGE_KEYS.dashboardSnapshot, bsData.dashboard);
+      // Effacer toute erreur résiduelle du cycle précédent dès le début.
+      // Sans ce reset, une erreur ponctuelle reste affichée pour toujours même si les
+      // refreshs suivants réussissent.
+      const errorTarget = document.getElementById('dashboard-error');
+      if (errorTarget) errorTarget.textContent = '';
+
+      let bootstrapError = null;
+      let fallbackFailedCount = 0;
+
+      if (showBlockingLoader) setStartupQueueCurrent('Lecture du snapshot serveur...');
+      try {
+        // Le bootstrap applique lui-même chaque jeu de données une seule fois.
+        await loadOperationsBootstrap(forceRefresh);
+      } catch (err) {
+        bootstrapError = err;
+        // Fallback : appels individuels si le bootstrap échoue.
+        // Compter les échecs : si tous réussissent, l'UI est complète → pas d'erreur à afficher.
+        const fallbackResults = await Promise.allSettled([
+          loadDashboard(false),
+          loadExternalRisks(false),
+          loadMunicipalities(null, { awaitMapRender: false }),
+          loadEvents(null),
+          loadLogs(null),
+          loadUsers(null),
+        ]);
+        fallbackFailedCount = fallbackResults.filter((r) => r.status === 'rejected').length;
+        if (!fallbackFailedCount) initialServerSnapshotReady = true;
       }
-      // — risques externes —
-      if (bsData?.external_risks) {
-        cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, bsData.external_risks);
-        renderExternalRisks(cachedExternalRisksSnapshot);
-        saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
-        renderApiInterconnections(cachedExternalRisksSnapshot);
+      if (showBlockingLoader) advanceStartupQueue('données initiales');
+
+      // Les fournisseurs externes ne bloquent jamais l'affichage du snapshot.
+      loadVigieauCard(forceRefresh).catch((error) => {
+        console.warn('Actualisation VigiEau indisponible', error);
+      });
+
+      refreshMapDataInBackground();
+
+      renderResources();
+      if (showBlockingLoader) advanceStartupQueue('pages applicatives');
+      _ensureStaticDataLoaded();
+
+      // N'afficher "Chargement dégradé" que si le fallback a aussi échoué (≥3 sources en erreur).
+      // Si le bootstrap échoue mais que les fallbacks individuels passent, l'UI est complète
+      // et il n'y a rien à signaler à l'utilisateur.
+      if (bootstrapError && fallbackFailedCount >= 3 && !isTransientBackendError(bootstrapError)) {
+        if (errorTarget) errorTarget.textContent = `Chargement dégradé: ${sanitizeErrorMessage(bootstrapError.message)}`;
       }
-      // — données opérationnelles (support preloaded) —
-      await Promise.all([
-        loadMunicipalities(Array.isArray(bsData?.municipalities) ? bsData.municipalities : null),
-        loadEvents(Array.isArray(bsData?.events) ? bsData.events : null),
-        loadLogs(Array.isArray(bsData?.logs) ? bsData.logs : null),
-        loadUsers(Array.isArray(bsData?.users) ? bsData.users : null),
-      ]);
-    } catch (err) {
-      bootstrapError = err;
-      // Fallback : appels individuels si le bootstrap échoue.
-      // Compter les échecs : si tous réussissent, l'UI est complète → pas d'erreur à afficher.
-      const fallbackResults = await Promise.allSettled([
-        loadDashboard(false),
-        Promise.resolve(),
-        loadMunicipalities(null),
-        loadEvents(null),
-        loadLogs(null),
-        loadUsers(null),
-      ]);
-      fallbackFailedCount = fallbackResults.filter((r) => r.status === 'rejected').length;
+
+      _serverSnapshotSyncing = Boolean(
+        isPendingServicePayload(cachedExternalRisksSnapshot?.meteo_france || {})
+        || isPendingServicePayload(cachedExternalRisksSnapshot?.vigicrues || {})
+        || cachedExternalRisksSnapshot?.refresh?.in_progress
+      );
+    } finally {
+      if (showBlockingLoader) {
+        setPanelLoading(activePanelId, false);
+        finishStartupQueue();
+      }
     }
-    if (showBlockingLoader) advanceStartupQueue('données initiales');
-
-    // VigiEau dispose de son propre chargement : sa carte ne doit pas rester
-    // bloquée si le snapshot global est inchangé ou si une autre source échoue.
-    await loadVigieauCard(forceRefresh);
-
-    refreshMapDataInBackground();
-
-    renderResources();
-    if (showBlockingLoader) advanceStartupQueue('pages applicatives');
-    _ensureStaticDataLoaded();
-
-    // N'afficher "Chargement dégradé" que si le fallback a aussi échoué (≥3 sources en erreur).
-    // Si le bootstrap échoue mais que les fallbacks individuels passent, l'UI est complète
-    // et il n'y a rien à signaler à l'utilisateur.
-    if (bootstrapError && fallbackFailedCount >= 3 && !isTransientBackendError(bootstrapError)) {
-      if (errorTarget) errorTarget.textContent = `Chargement dégradé: ${sanitizeErrorMessage(bootstrapError.message)}`;
-    }
-
-    _serverSnapshotSyncing = Boolean(
-      isPendingServicePayload(cachedExternalRisksSnapshot?.meteo_france || {})
-      || isPendingServicePayload(cachedExternalRisksSnapshot?.vigicrues || {})
-      || cachedExternalRisksSnapshot?.refresh?.in_progress
-    );
-    if (showBlockingLoader) setPanelLoading(activePanelId, false);
-    if (showBlockingLoader) finishStartupQueue();
   });
 
   try {
@@ -16018,7 +15989,7 @@ function applyRoleVisibility() {
     setVisibility(node, canAccessPanel(target));
   });
   const activePanel = localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel';
-  if (!canAccessPanel(activePanel)) setActivePanel('situation-panel');
+  if (!canAccessPanel(activePanel)) setActivePanel('situation-panel', { refreshSnapshot: false });
 }
 
 
@@ -17360,7 +17331,7 @@ async function refreshSituationWallboard() {
   return situationWallboardRefreshInFlight;
 }
 
-function startSituationWallboardRefresh() {
+function startSituationWallboardRefresh({ refreshImmediately = true } = {}) {
   if (situationWallboardTimer) clearInterval(situationWallboardTimer);
   if (situationWallboardStatusTimer) clearInterval(situationWallboardStatusTimer);
   situationWallboardTimer = setInterval(refreshSituationWallboard, SITUATION_WALLBOARD_REFRESH_MS);
@@ -17372,7 +17343,7 @@ function startSituationWallboardRefresh() {
       if (!document.hidden) refreshSituationWallboard();
     });
   }
-  if ((localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel') === 'situation-panel') refreshSituationWallboard();
+  if (refreshImmediately && (localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel') === 'situation-panel') refreshSituationWallboard();
   updateSituationWallboardStatus();
 }
 
@@ -17567,34 +17538,32 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
   initMobileGeoLocate();
   startAgentMarkersPolling();
   renderSituationOverview();
-  setActivePanel(localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel');
+  // Le bootstrap fournit déjà le tableau de bord et les risques : ouvrir la
+  // page sans redemander ces mêmes snapshots en parallèle.
+  setActivePanel(localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel', { refreshSnapshot: false });
   syncMobileNavWithPanel();
   renderStations(cachedVigicruesPayload);
   syncLogScopeFields();
   syncLogOtherFields();
   prefillEventTime();
 
-  const snapshotPromise = loadInitialServerSnapshot().catch((error) => {
-    if (isTransientBackendError(error)) return false;
-    document.getElementById('dashboard-error').textContent = `Snapshot serveur indisponible: ${sanitizeErrorMessage(error.message)}`;
-    return false;
-  });
-
-  const refreshPromise = snapshotPromise.then(() => refreshAll()).catch((error) => {
-    if (isTransientBackendError(error)) return;
+  const sessionToken = token;
+  const refreshPromise = refreshAll().catch((error) => {
+    if (token !== sessionToken || isTransientBackendError(error)) return;
     document.getElementById('dashboard-error').textContent = `Synchronisation différée: ${sanitizeErrorMessage(error.message)}`;
+  }).then(() => {
+    if (token !== sessionToken) return;
+    startAutoRefresh();
+    startStationTimetableRefresh();
+    startLiveEventsRefresh();
+    startSituationWallboardRefresh({ refreshImmediately: false });
+    startMapLiveRefresh();
   });
 
-  if (!runRefreshInBackground) await refreshPromise;
-
-  startAutoRefresh();
-  startStationTimetableRefresh();
-  startLiveEventsRefresh();
-  startSituationWallboardRefresh();
-  startMapLiveRefresh();
   startExternalRisksSSE();
   startLiveClock();
   startDataFreshnessIndicator();
+  if (!runRefreshInBackground) await refreshPromise;
 }
 
 // Efface l'erreur de login dès que l'utilisateur recommence à taper

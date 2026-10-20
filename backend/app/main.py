@@ -107,7 +107,8 @@ from .services import (
     fetch_copernicus_ems_france,
     resolve_commune_insee_code,
     vigicrues_geojson_from_stations,
-    save_risks_snapshot,
+    save_risk_service_snapshot,
+    load_risk_service_snapshots,
     load_risks_snapshot,
     fetch_municipality_public_services,
     fetch_isere_public_services_by_city,
@@ -323,6 +324,7 @@ def prune_audit_logs(db: Session) -> None:
 
 @app.middleware("http")
 async def audit_log_middleware(request: Request, call_next):
+    started_at = monotonic()
     try:
         response = await call_next(request)
     except Exception as exc:
@@ -335,6 +337,7 @@ async def audit_log_middleware(request: Request, call_next):
                 "error": exc.__class__.__name__,
             },
         )
+    response.headers["Server-Timing"] = f"app;dur={(monotonic() - started_at) * 1000:.1f}"
     method = request.method
     path = request.url.path
     should_log = (
@@ -450,6 +453,7 @@ SERVICE_CIRCUIT_BREAKER_OPEN_AFTER = 3
 
 _external_risks_snapshot_lock = Lock()
 _external_risks_snapshot: dict = {"updated_at": None, "payload": {}}
+_external_risks_revisions: dict[str, str] = {}
 
 
 def _is_legacy_cols_snapshot(slot: dict | None) -> bool:
@@ -1121,7 +1125,8 @@ def test_ldap_directory_connection() -> dict:
 def get_user_municipality_id(user: User, db: Session) -> int | None:
     if not user.municipality_name:
         return None
-    municipality = db.query(Municipality).filter(Municipality.name == user.municipality_name).first()
+    normalized_name = user.municipality_name.strip().lower()
+    municipality = db.query(Municipality).filter(func.lower(Municipality.name) == normalized_name).first()
     return municipality.id if municipality else None
 
 
@@ -1176,13 +1181,53 @@ def _set_external_risks_snapshot(payload: dict) -> None:
     with _external_risks_snapshot_lock:
         _external_risks_snapshot["updated_at"] = datetime.utcnow()
         _external_risks_snapshot["payload"] = deepcopy(payload)
-    save_risks_snapshot(payload)
     _broadcast_risk_update_from_thread()
 
 
 def _get_external_risks_snapshot() -> dict:
     with _external_risks_snapshot_lock:
         return deepcopy(_external_risks_snapshot.get("payload") or {})
+
+
+def _sync_shared_risk_snapshots() -> None:
+    """Merge other workers' results and deliver the same deltas to local SSE clients."""
+    with _external_risks_snapshot_lock:
+        known_revisions = {key: _external_risks_revisions.get(key, "") for key in SERVICE_REFRESH_INTERVALS}
+    shared_slots = load_risk_service_snapshots(known_revisions)
+    updates: list[tuple[str, str, dict]] = []
+    with _external_risks_snapshot_lock:
+        payload = dict(_external_risks_snapshot.get("payload") or {})
+        for key, record in shared_slots.items():
+            if key not in SERVICE_REFRESH_INTERVALS:
+                continue
+            revision = record["revision"]
+            if revision <= _external_risks_revisions.get(key, ""):
+                continue
+            slot = deepcopy(record["payload"])
+            payload[key] = slot
+            _external_risks_revisions[key] = revision
+            payload["updated_at"] = max(str(payload.get("updated_at") or ""), revision)
+            updates.append((key, revision, slot))
+        if updates:
+            _external_risks_snapshot["payload"] = payload
+            _external_risks_snapshot["updated_at"] = datetime.utcnow()
+    for key, revision, slot in updates:
+        _broadcast_risk_update_from_thread({
+            "type": "service_update",
+            "service_key": key,
+            "updated_at": revision,
+            "payload": slot,
+            "refresh": {"in_progress": _is_any_service_refreshing()},
+        })
+
+
+def _shared_risk_snapshot_sync_loop() -> None:
+    while not _refresh_stop_event.is_set():
+        try:
+            _sync_shared_risk_snapshots()
+        except Exception:
+            logger.exception("Unable to synchronise shared risk snapshots")
+        _refresh_stop_event.wait(1.0)
 
 
 def _service_meta(key: str, *, status: str | None = None) -> dict:
@@ -1213,7 +1258,14 @@ def _is_any_service_refreshing() -> bool:
 
 def _annotate_service_payload(key: str, payload: dict, *, status: str | None = None) -> dict:
     result = dict(payload or {})
-    result["meta"] = _service_meta(key, status=status or str(result.get("status") or "unknown"))
+    local_meta = _service_meta(key, status=status or str(result.get("status") or "unknown"))
+    shared_meta = result.get("meta") if isinstance(result.get("meta"), dict) else {}
+    result["meta"] = {
+        **local_meta,
+        **shared_meta,
+        "refreshing": local_meta["refreshing"],
+        "status": local_meta["status"],
+    }
     return result
 
 
@@ -1229,19 +1281,21 @@ def _annotate_external_snapshot(payload: dict) -> dict:
 def _update_service_slot(key: str, result: dict) -> None:
     """Mise à jour atomique d'un seul slot de service dans le snapshot.
     Les autres services ne sont pas affectés."""
-    result = _annotate_service_payload(key, result)
+    result = dict(result)
+    result["meta"] = _service_meta(key, status=str(result.get("status") or "unknown"))
+    revision = datetime.utcnow().isoformat(timespec="microseconds") + "Z"
     with _external_risks_snapshot_lock:
         payload = dict(_external_risks_snapshot.get("payload") or {})
         payload[key] = deepcopy(result)
-        payload["updated_at"] = datetime.utcnow().isoformat() + "Z"
+        payload["updated_at"] = revision
+        _external_risks_revisions[key] = revision
         _external_risks_snapshot["payload"] = payload
         _external_risks_snapshot["updated_at"] = datetime.utcnow()
-        snapshot_copy = deepcopy(payload)
-    save_risks_snapshot(snapshot_copy)
+    save_risk_service_snapshot(key, result, revision)
     _broadcast_risk_update_from_thread({
         "type": "service_update",
         "service_key": key,
-        "updated_at": snapshot_copy.get("updated_at"),
+        "updated_at": revision,
         "payload": result,
         "refresh": {"in_progress": _is_any_service_refreshing()},
     })
@@ -1252,6 +1306,7 @@ def _refresh_one_service(key: str) -> None:
     db: Session | None = None
     distributed_lock_key = f"svc:refresh-lock:{key}"
     distributed_lock_token: str | None = None
+    owns_refresh = False
     try:
         now_mono = monotonic()
         now_utc = datetime.utcnow()
@@ -1264,6 +1319,7 @@ def _refresh_one_service(key: str) -> None:
                 runtime["circuit_open"] = int(runtime.get("failure_count") or 0) >= SERVICE_CIRCUIT_BREAKER_OPEN_AFTER
                 return
             runtime["refreshing"] = True
+            owns_refresh = True
             runtime["circuit_open"] = False
             runtime["started_at"] = now_utc.isoformat() + "Z"
         # Gunicorn workers each run a scheduler. Redis elects one worker per feed,
@@ -1355,7 +1411,7 @@ def _refresh_one_service(key: str) -> None:
         pass
     finally:
         with _service_runtime_lock:
-            if key in _service_runtime:
+            if owns_refresh and key in _service_runtime:
                 _service_runtime[key]["refreshing"] = False
         if db is not None:
             db.close()
@@ -1420,6 +1476,7 @@ def startup_warmup_external_sources() -> None:
     # Start one scheduler; its bounded pool staggers services by 400 ms and
     # prevents large external responses from being parsed concurrently without limit.
     _refresh_stop_event.clear()
+    Thread(target=_shared_risk_snapshot_sync_loop, name="shared-risk-snapshots", daemon=True).start()
     Thread(target=_service_scheduler, name="external-refresh-scheduler", daemon=True).start()
 
     # Préchauffer toutes les données statiques au démarrage.
@@ -1629,11 +1686,18 @@ def delete_map_annotation(annotation_id: int, db: Session = Depends(get_db), use
     return {"status": "deleted", "id": annotation_id}
 
 
+def _authorize_stream_token(token: str) -> None:
+    # L'authentification est la seule opération SQL du flux : rendre la connexion
+    # au pool avant d'ouvrir une réponse qui peut durer plusieurs heures.
+    with SessionLocal() as db:
+        user = get_user_from_token_value(token, db)
+        if user.role not in READ_ROLES:
+            raise HTTPException(403, "Droits insuffisants")
+
+
 @app.get("/map/annotations/stream")
-async def stream_map_annotations(request: Request, token: str = Query(...), db: Session = Depends(get_db)):
-    user = get_user_from_token_value(token, db)
-    if user.role not in READ_ROLES:
-        raise HTTPException(403, "Droits insuffisants")
+async def stream_map_annotations(request: Request, token: str = Query(...)):
+    await asyncio.to_thread(_authorize_stream_token, token)
 
     async def event_stream():
         last_sent = -1
@@ -1662,13 +1726,11 @@ async def stream_map_annotations(request: Request, token: str = Query(...), db: 
 
 
 @app.get("/external/isere/risks/stream")
-async def stream_external_risks(request: Request, token: str = Query(...), db: Session = Depends(get_db)):
+async def stream_external_risks(request: Request, token: str = Query(...)):
     """Flux SSE : pousse le snapshot complet des risques dès chaque mise à jour serveur.
     Le client reçoit immédiatement le snapshot courant à la connexion, puis chaque
     mise à jour dès qu'un service est rafraîchi en arrière-plan."""
-    user = get_user_from_token_value(token, db)
-    if user.role not in READ_ROLES:
-        raise HTTPException(403, "Droits insuffisants")
+    await asyncio.to_thread(_authorize_stream_token, token)
 
     queue: asyncio.Queue = asyncio.Queue(maxsize=10)
     with _sse_risk_clients_lock:
@@ -1954,14 +2016,20 @@ def build_dashboard_payload(db: Session, user: User, external_risks: dict | None
     logs_query = db.query(OperationalLog)
     if user.role == "mairie":
         municipality_id = get_user_municipality_id(user, db)
-        logs_query = logs_query.filter(OperationalLog.municipality_id == municipality_id)
+        # Une commune supprimée ou non affectée ne donne accès à aucune MCO.
+        # Comparer à None sélectionnerait les entrées départementales (IS NULL).
+        logs_query = logs_query.filter(
+            OperationalLog.municipality_id == municipality_id if municipality_id is not None else False
+        )
         crisis_count = 1 if municipality_id and db.get(Municipality, municipality_id).crisis_mode else 0
 
     logs = logs_query.order_by(OperationalLog.created_at.desc()).limit(5).all()
 
     meteo = external_risks.get("meteo_france") if external_risks else None
     if not isinstance(meteo, dict) or not meteo:
-        meteo = fetch_meteo_france_isere()
+        # Le scheduler alimente le snapshot. Un cache vide ne doit jamais
+        # transformer le dashboard (ou le bootstrap) en appel réseau bloquant.
+        meteo = {"status": "pending", "level": "gris"}
     meteo_level = meteo.get("level") or "vert"
     crues_level = river_level.level if river_level else "vert"
     global_risk_details = compute_global_risk_details(
@@ -2264,85 +2332,28 @@ def operations_bootstrap(
     db: Session = Depends(get_db),
     user: User = Depends(require_roles(*READ_ROLES)),
 ):
-    """Charge en une seule requête toutes les données nécessaires à l'interface.
-    Les 4 requêtes DB (communes, évènements, MCO, users) sont exécutées en parallèle
-    avec des sessions indépendantes — SQLAlchemy n'est pas thread-safe sur une session."""
-    started_at = datetime.utcnow()
+    """Charge l'interface depuis le snapshot et une seule session SQL.
+
+    Réutiliser les lecteurs des routes conserve les mêmes restrictions d'accès
+    et évite que plusieurs bootstraps se bloquent en attendant chacun quatre
+    connexions supplémentaires dans le pool.
+    """
+    started_at = monotonic()
 
     # Le bootstrap doit rester instantané: il lit le snapshot en mémoire et ne déclenche
     # jamais de rafraîchissement externe global depuis la navigation utilisateur.
     risks_payload = get_external_risks_payload(refresh=False, db=db)
     dashboard_payload = build_dashboard_payload(db, user, external_risks=risks_payload)
 
-    # Requêtes DB parallèles — chaque tâche ouvre et ferme sa propre session.
-    from concurrent.futures import ThreadPoolExecutor as _TPE
+    municipalities_payload = list_municipalities(db=db, user=user)
+    events_payload = list_events(db=db, user=user)
+    logs_payload = list_logs(db=db, user=user)
+    users_payload = list_users(db=db, _=user) if user.role == "admin" else []
 
-    user_role = user.role
-    user_municipality_name = user.municipality_name
-
-    def _fetch_municipalities() -> list:
-        with SessionLocal() as s:
-            if user_role == "mairie":
-                if not user_municipality_name:
-                    return []
-                nm = user_municipality_name.strip().lower()
-                return s.query(Municipality).filter(func.lower(Municipality.name) == nm).all()
-            rows = s.query(Municipality).order_by(Municipality.name).all()
-            s.expunge_all()
-            return rows
-
-    def _fetch_events() -> list:
-        with SessionLocal() as s:
-            q = s.query(IncidentEvent).order_by(IncidentEvent.created_at.desc())
-            if user_role == "mairie":
-                mun = s.query(Municipality).filter(
-                    func.lower(Municipality.name) == (user_municipality_name or "").strip().lower()
-                ).first()
-                if mun is None:
-                    return []
-                q = q.filter(IncidentEvent.municipality_id == mun.id)
-            rows = q.limit(300).all()
-            s.expunge_all()
-            return rows
-
-    def _fetch_logs() -> list:
-        with SessionLocal() as s:
-            q = s.query(OperationalLog).order_by(OperationalLog.created_at.desc())
-            if user_role == "mairie":
-                mun = s.query(Municipality).filter(
-                    func.lower(Municipality.name) == (user_municipality_name or "").strip().lower()
-                ).first()
-                if mun is None:
-                    return []
-                q = q.filter(OperationalLog.municipality_id == mun.id)
-            rows = q.limit(200).all()
-            s.expunge_all()
-            return rows
-
-    def _fetch_users() -> list:
-        if user_role != "admin":
-            return []
-        with SessionLocal() as s:
-            rows = s.query(User).order_by(User.created_at.desc()).all()
-            s.expunge_all()
-            return rows
-
-    with _TPE(max_workers=4) as ex:
-        f_muni  = ex.submit(_fetch_municipalities)
-        f_evts  = ex.submit(_fetch_events)
-        f_logs  = ex.submit(_fetch_logs)
-        f_users = ex.submit(_fetch_users)
-        municipalities_payload = f_muni.result()
-        events_payload         = f_evts.result()
-        logs_payload           = f_logs.result()
-        users_payload          = f_users.result()
-
-    duration_ms = int((datetime.utcnow() - started_at).total_seconds() * 1000)
-    return {
+    payload = {
         "updated_at": utc_timestamp(),
         "refresh": refresh,
         "perf": {
-            "backend_duration_ms": duration_ms,
             "municipality_count": len(municipalities_payload),
             "event_count": len(events_payload),
             "log_count": len(logs_payload),
@@ -2354,6 +2365,8 @@ def operations_bootstrap(
         "logs": [OperationalLogOut.model_validate(item).model_dump() for item in logs_payload],
         "users": [UserOut.model_validate(item).model_dump() for item in users_payload],
     }
+    payload["perf"]["backend_duration_ms"] = int((monotonic() - started_at) * 1000)
+    return payload
 
 
 @app.get("/api/meteo-france/vigilance")
@@ -3940,7 +3953,7 @@ async def test_notif(request: Request, _: User = Depends(require_roles("admin", 
             "footer": {"text": "CRISIS38 · Centre opérationnel Isère"},
         }]
     }
-    ok, detail = _send_discord_webhook(webhook_url, test_payload)
+    ok, detail = await asyncio.to_thread(_send_discord_webhook, webhook_url, test_payload)
     return {"success": ok, "detail": detail}
 
 
