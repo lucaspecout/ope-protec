@@ -390,6 +390,7 @@ let mapTileLayer = null;
 let mapFloodOverlayLayer = null;
 let googleTrafficFlowLayer = null;
 let floodZoneWmsLayer = null;
+let floodZoneLoadState = null;
 let avalancheZoneWmsLayer = null;
 let barrageMarkerLayer = null;
 let montagneLayer = null;
@@ -452,6 +453,7 @@ let mapControlsCollapsed = false;
 let mapStreetViewMode = false;
 const TACTICAL_LAYER_CATEGORIES = new Set(['evacuation', 'rassemblement', 'roadblock', 'barriere', 'danger_zone', 'centre_accueil', 'team']);
 const GEORISQUES_WMS_URL = 'https://www.georisques.gouv.fr/services';
+const GEORISQUES_PPR_WMS_URL = 'https://mapsref.brgm.fr/wxs/georisques/risques';
 const EUMETSAT_WMS_URL = 'https://view.eumetsat.int/geoserver/wms';
 const EUMETSAT_WEATHER_LAYERS = Object.freeze({
   geocolour: { layer: 'mtg_fd:rgb_geocolour', label: 'Satellite couleur jour/nuit', attribution: '&copy; EUMETSAT & NASA' },
@@ -4528,14 +4530,67 @@ function applyGoogleTrafficFlowOverlay() {
   if (!leafletMap.hasLayer(googleTrafficFlowLayer)) googleTrafficFlowLayer.addTo(leafletMap);
 }
 
+function renderFloodZoneStatus(announce = false) {
+  const enabled = document.getElementById('filter-flood-zones')?.checked ?? false;
+  const node = document.getElementById('flood-zone-status');
+  const retry = document.getElementById('flood-zone-retry');
+  if (node) node.hidden = !enabled;
+  if (retry) retry.hidden = true;
+  if (!enabled || !floodZoneLoadState) {
+    if (node) node.textContent = '';
+    return;
+  }
+  const state = floodZoneLoadState;
+  const zoom = leafletMap.getZoom();
+  const visible = state.sources.filter((source) => zoom >= source.minZoom);
+  const failed = visible.filter((source) => source.errors > 0);
+  const loaded = visible.filter((source) => source.loaded > 0);
+  let message;
+  if (!visible.length) {
+    message = 'Zoomez sur la carte pour afficher les zones inondables détaillées.';
+  } else if (failed.length) {
+    message = loaded.length
+      ? `Affichage partiel : certaines tuiles ${failed.map((source) => source.label).join(' et ')} n’ont pas chargé. Les autres zones restent affichées.`
+      : 'Le zonage inondable ne peut pas être chargé pour cette vue. Réessayez le chargement.';
+    if (retry) retry.hidden = false;
+  } else if (visible.some((source) => source.loading || !source.loaded)) {
+    message = 'Chargement du zonage inondable en cours…';
+  } else {
+    message = visible.length === state.sources.length
+      ? 'Zonages PPR et surfaces TRI chargés pour la vue courante.'
+      : 'Surfaces TRI chargées. Zoomez davantage pour afficher le zonage PPR.';
+  }
+  if (node && node.textContent !== message) node.textContent = message;
+  // A map interaction may have replaced the shared feedback with route/tool
+  // information. Tile events keep their own status without overwriting it.
+  const feedback = document.getElementById('map-feedback');
+  if (announce || feedback?.textContent === state.feedback) {
+    setMapFeedback(message, failed.length > 0 && loaded.length === 0);
+    state.feedback = message;
+  }
+}
+
+function clearFloodZoneLayer() {
+  if (floodZoneLoadState?.onZoom && leafletMap) leafletMap.off('zoomend', floodZoneLoadState.onZoom);
+  if (floodZoneLoadState?.feedback && document.getElementById('map-feedback')?.textContent === floodZoneLoadState.feedback) setMapFeedback('');
+  const previous = floodZoneWmsLayer;
+  floodZoneWmsLayer = null;
+  floodZoneLoadState = null;
+  if (previous && leafletMap) leafletMap.removeLayer(previous);
+}
+
+function retryFloodZoneLayer() {
+  if (!(document.getElementById('filter-flood-zones')?.checked ?? false)) return;
+  clearFloodZoneLayer();
+  applyFloodZoneLayer();
+}
+
 function applyFloodZoneLayer() {
   if (!leafletMap || typeof window.L === 'undefined') return;
   const enabled = document.getElementById('filter-flood-zones')?.checked ?? false;
   if (!enabled) {
-    if (floodZoneWmsLayer) {
-      leafletMap.removeLayer(floodZoneWmsLayer);
-      floodZoneWmsLayer = null;
-    }
+    clearFloodZoneLayer();
+    renderFloodZoneStatus();
     return;
   }
   if (floodZoneWmsLayer) {
@@ -4544,48 +4599,58 @@ function applyFloodZoneLayer() {
     } else if (typeof floodZoneWmsLayer.eachLayer === 'function') {
       floodZoneWmsLayer.eachLayer((layer) => layer?.bringToFront?.());
     }
+    renderFloodZoneStatus();
     return;
   }
-  // Créer un pane dédié au-dessus des markers (overlayPane = 400) mais sous les popups (700)
+  // Keep the raster above other overlays and below markers and popups.
   if (!leafletMap.getPane('floodZonePane')) {
     const pane = leafletMap.createPane('floodZonePane');
     pane.style.zIndex = 450;
     pane.style.pointerEvents = 'none';
   }
 
-  const pprLayer = window.L.tileLayer.wms(GEORISQUES_WMS_URL, {
-    layers: GEORISQUES_FLOOD_PPRI_LAYER,
-    styles: '',
-    format: 'image/png',
-    transparent: true,
-    version: '1.3.0',
-    opacity: 0.78,
-    pane: 'floodZonePane',
-    attribution: '&copy; État / Géorisques — Zonage réglementaire PPR inondation',
-  });
-
-  const triLayer = window.L.tileLayer.wms(GEORISQUES_WMS_URL, {
-    layers: GEORISQUES_FLOOD_TRI_LAYERS,
-    styles: '',
-    format: 'image/png',
-    transparent: true,
-    version: '1.3.0',
-    opacity: 0.34,
-    pane: 'floodZonePane',
-    attribution: '&copy; État / Géorisques — Surfaces inondables TRI rapportage 2020',
-  });
-
-  [pprLayer, triLayer].forEach((layer) => {
-    layer.on('tileerror', () => {
-      setMapFeedback("Impossible de charger le zonage inondation détaillé. Le service WMS Géorisques ne répond pas correctement.");
+  const sources = [
+    { key: 'tri', label: 'TRI', url: GEORISQUES_WMS_URL, layers: GEORISQUES_FLOOD_TRI_LAYERS,
+      minZoom: 11, opacity: 0.34, attribution: '&copy; État / Géorisques — Surfaces inondables TRI rapportage 2020' },
+    { key: 'ppr', label: 'PPR', url: GEORISQUES_PPR_WMS_URL, layers: GEORISQUES_FLOOD_PPRI_LAYER,
+      minZoom: 13, opacity: 0.78, attribution: '&copy; État / BRGM / Géorisques — Zonage réglementaire PPR inondation' },
+  ].map((source) => ({ ...source, loaded: 0, errors: 0, loading: false }));
+  const group = window.L.layerGroup();
+  const state = { group, sources, feedback: null, onZoom: () => renderFloodZoneStatus() };
+  const current = () => floodZoneLoadState === state && floodZoneWmsLayer === group;
+  for (const source of sources) {
+    const layer = window.L.tileLayer.wms(source.url, {
+      layers: source.layers, styles: '', format: 'image/png', transparent: true,
+      version: '1.3.0', minZoom: source.minZoom, maxZoom: 20, updateWhenIdle: true,
+      opacity: source.opacity, pane: 'floodZonePane', attribution: source.attribution,
     });
-  });
-  pprLayer.on('load', () => {
-    setMapFeedback('Zonage inondation détaillé affiché: PPR réglementaire + surfaces TRI.');
-  });
-
-  floodZoneWmsLayer = window.L.layerGroup([triLayer, pprLayer]);
-  floodZoneWmsLayer.addTo(leafletMap);
+    layer.on('loading', () => {
+      if (!current()) return;
+      source.loaded = 0; source.errors = 0; source.loading = true;
+      renderFloodZoneStatus();
+    });
+    layer.on('tileload', () => {
+      if (!current()) return;
+      source.loaded += 1;
+      renderFloodZoneStatus();
+    });
+    layer.on('tileerror', () => {
+      if (!current()) return;
+      source.errors += 1;
+      renderFloodZoneStatus();
+    });
+    layer.on('load', () => {
+      if (!current()) return;
+      source.loading = false;
+      renderFloodZoneStatus();
+    });
+    group.addLayer(layer);
+  }
+  floodZoneWmsLayer = group;
+  floodZoneLoadState = state;
+  leafletMap.on('zoomend', state.onZoom);
+  group.addTo(leafletMap);
+  renderFloodZoneStatus(true);
 }
 
 function applyAvalancheZoneLayer() {
@@ -5608,6 +5673,7 @@ async function resetMapFilters() {
   document.querySelectorAll('#map-filter-menu input[data-map-layer]').forEach((input) => {
     input.checked = input.defaultChecked;
   });
+  applyFloodZoneLayer();
   document.getElementById('filter-official-radar')?.dispatchEvent(new Event('change', { bubbles: true }));
   ['map-observation-search', 'map-industry-search', 'map-fuel-search', 'map-onde-search'].forEach((id) => {
     document.getElementById(id)?.dispatchEvent(new Event('input', { bubbles: true }));
@@ -16947,6 +17013,7 @@ function bindAppInteractions() {
   document.getElementById('map-basemap-select')?.addEventListener('change', async (event) => { applyBasemap(event.target.value); await renderPopulationByCityLayer(); });
   document.getElementById('filter-google-traffic-flow')?.addEventListener('change', () => applyGoogleTrafficFlowOverlay());
   document.getElementById('filter-flood-zones')?.addEventListener('change', () => applyFloodZoneLayer());
+  document.getElementById('flood-zone-retry')?.addEventListener('click', retryFloodZoneLayer);
   document.getElementById('filter-avalanche-zones')?.addEventListener('change', () => applyAvalancheZoneLayer());
   document.getElementById('filter-agents-refresh')?.addEventListener('click', () => _refreshAgentMarkers());
   document.getElementById('filter-agents')?.addEventListener('change', () => {

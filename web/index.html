@@ -1010,8 +1010,10 @@
 <label>
                     <input id="filter-flood-zones" type="checkbox" data-map-layer />
                     Zones inondables détaillées
-                    <small class="filter-legend">Zonage PPR + surfaces TRI fréquente / moyenne / rare · Géorisques</small>
+                    <small class="filter-legend">Zonage PPR + surfaces TRI fréquente / moyenne / rare (2020) · Géorisques / BRGM</small>
                   </label>
+                  <p id="flood-zone-status" class="filter-legend" role="status" aria-live="polite" hidden></p>
+                  <button id="flood-zone-retry" type="button" class="ghost" hidden>Réessayer le zonage</button>
                 </div>
               </details>
 
@@ -1698,6 +1700,6 @@
   <script defer src="/public_sources.js?v=20261021-map-menu"></script>
   <script defer src="/api_credentials.js?v=20261020"></script>
   <script defer src="/map_filters.js?v=20261021-map-menu"></script>
-  <script defer src="/script.js?v=20261021-map-menu"></script>
+  <script defer src="/script.js?v=20261021-flood"></script>
 </body>
 </html>

@@ -47,6 +47,41 @@ distinguent les résultats et les points disposant de coordonnées.
 **Réinitialiser** remet les critères et les couches à leurs valeurs initiales,
 dans le menu comme dans les tableaux, en conservant la catégorie ouverte.
 
+## Zones inondables détaillées
+
+Dans **Eau et cours d’eau**, ce filtre superpose deux sources WMS publiques :
+
+| Données | Service | Couche | Zoom minimal |
+| --- | --- | --- | --- |
+| Surfaces inondables TRI, rapportage 2020 | [Géorisques](https://www.georisques.gouv.fr/services?SERVICE=WMS&REQUEST=GetCapabilities&VERSION=1.3.0) | `ALEA_SYNT_01_01FOR_FXX`, `ALEA_SYNT_01_02MOY_FXX`, `ALEA_SYNT_01_04FAI_FXX` | 11 |
+| Zonage réglementaire PPR inondation | [BRGM / Géorisques](https://mapsref.brgm.fr/wxs/georisques/risques?SERVICE=WMS&REQUEST=GetCapabilities&VERSION=1.3.0) | `PPRN_ZONE_INOND` | 13 |
+
+Vérification le 21 octobre 2026 : le service `www.georisques.gouv.fr/services`
+ne propose pas `PPRN_ZONE_INOND` et renvoie une exception XML `LayerNotDefined`
+même avec un statut HTTP 200. Le service BRGM fournit cette couche en PNG.
+Les zooms minimaux respectent les échelles maximales annoncées dans les
+capacités WMS : 1:500 000 pour les TRI et 1:100 000 pour les PPR, avec les
+tuiles Web Mercator de 256 pixels utilisées par la carte.
+
+À l’échelle du département, le menu invite à zoomer. Les images ne sont
+demandées qu’une fois leur échelle d’affichage atteinte, sans téléchargement
+à la connexion. Une image transparente chargée ne signifie pas que le secteur
+est exempt de risque : l’affichage dépend des données publiées par ces sources.
+
+Le statut distingue le chargement, les images chargées, l’échec partiel et
+l’indisponibilité. La fin d’un chargement Leaflet ne suffit pas à déclarer un
+succès si des tuiles ont échoué. **Réessayer le zonage** recrée les deux couches ;
+une erreur sur une source laisse les images de l’autre affichées.
+Décocher le filtre ou réinitialiser enlève les deux couches et leur suivi.
+
+`tests/map-flood.test.cjs` vérifie les adresses, les transitions de statut,
+les événements tardifs et le nettoyage. `scripts/smoke_flood.py --offline`
+teste les vraies couches Leaflet avec des images locales, y compris les pannes
+et la reprise, aux largeurs 1440 et 390 pixels. L’option `--live --width 390`
+autorise uniquement les deux hôtes WMS pour vérifier leurs images réelles ;
+les API de l’application restent simulées localement. `--tile chemin.png`
+permet de réutiliser une image WMS enregistrée comme fixture.
+
 ## Accessibilité et chargement
 
 Les catégories utilisent des boutons nommés, accessibles au clavier. Les
