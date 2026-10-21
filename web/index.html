@@ -1045,8 +1045,8 @@
                     </select>
                     <div class="hosting-filter-grid" aria-label="Filtres avancés lieux d'accueil">
                       <label>
-                        Capacité min.
-                        <select id="filter-resources-hosting-capacity" aria-label="Capacité minimale d'accueil">
+                        Accueil public min.
+                        <select id="filter-resources-hosting-capacity" aria-label="Capacité minimale d'accueil public publiée">
                           <option value="0">Toutes capacités</option>
                           <option value="50">50+ personnes</option>
                           <option value="100">100+ personnes</option>
@@ -1076,13 +1076,16 @@
                         Accès
                         <select id="filter-resources-hosting-accessibility" aria-label="Filtrer par accessibilité">
                           <option value="all">Tous</option>
-                          <option value="accessible">Accessible PMR confirmé/probable</option>
+                          <option value="accessible">Accessible PMR renseigné</option>
                         </select>
                       </label>
                       <label class="map-inline-checkbox"><input id="filter-resources-hosting-sanitary" type="checkbox" /> Sanitaires</label>
                       <label class="map-inline-checkbox"><input id="filter-resources-hosting-heating" type="checkbox" /> Chauffage</label>
                       <label class="map-inline-checkbox"><input id="filter-resources-hosting-parking" type="checkbox" /> Parking</label>
                     </div>
+                    <label class="map-inline-checkbox"><input id="filter-resources-hosting-unknown" type="checkbox" checked /> Conserver les informations non renseignées</label>
+                    <p id="hosting-data-status" class="muted" role="status" aria-live="polite">Les lieux officiels se chargent à l’ouverture de la carte.</p>
+                    <button id="hosting-data-retry" type="button" class="ghost">Actualiser les lieux</button>
                   </div>
 
                   <div class="filter-subgroup">
@@ -1670,10 +1673,9 @@
   <svg aria-hidden="true" width="0" height="0" focusable="false" style="position:absolute">
     <path id="isere-shape" d="M0 0h1v1H0z"></path>
   </svg>
-  <script defer src="/hosting_data.js?v=20260603-perf1"></script>
   <script defer src="/official_sources.js?v=20261020"></script>
   <script defer src="/public_sources.js?v=20261020"></script>
   <script defer src="/api_credentials.js?v=20261020"></script>
-  <script defer src="/script.js?v=20261021-anfr"></script>
+  <script defer src="/script.js?v=20261021-hosting"></script>
 </body>
 </html>

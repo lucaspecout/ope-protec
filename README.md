@@ -10,6 +10,8 @@ Les zones, usages, publics concernés et arrêtés de VigiEau sont détaillés d
 
 La source mobile ANFR, les limites de collecte et la conservation des données en cas d'indisponibilité sont décrites dans le [guide ANFR](docs/anfr.md).
 
+La collecte officielle des lieux d’accueil potentiels, les renseignements disponibles et les filtres de la carte sont détaillés dans le [guide des lieux d’accueil](docs/hosting.md).
+
 Les sources supplémentaires INSEE, observations et radar Météo-France, prévisions Vigicrues, ICPE/Seveso et accès Enedis sont présentées dans le [guide des sources officielles](docs/sources_officielles.md), avec la configuration et les limites d'accès.
 
 Les stations-service, les observations ONDE, les historiques CatNat, l’électricité régionale RTE et les rappels de produits sont décrits dans le [guide des nouvelles données publiques](docs/sources_publiques.md). Ces cinq sources sont accessibles sans nouvelle clé API.

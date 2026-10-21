@@ -11,6 +11,7 @@ import requests as _requests
 import json
 from pathlib import Path
 import re
+import secrets
 import ssl
 import unicodedata
 from random import uniform
@@ -50,6 +51,7 @@ from .config import settings
 from .database import SessionLocal
 from .api_credentials import CredentialStoreError, resolve_credentials
 from .anfr_sources import ANFR_SOURCE_URL, collect_anfr_isere
+from .hosting_sources import HOSTING_SOURCE_URL, collect_verified_hosting_isere
 
 # ---------------------------------------------------------------------------
 # Cache fichier JSON – persistance sur volume Docker (/data/static)
@@ -1095,143 +1097,131 @@ _INSTITUTIONS_FILE = "institutions_isere.json"
 
 _VERIFIED_HOSTING_ISERE_CACHE_TTL_SECONDS = 86400
 _verified_hosting_isere_cache_lock = Lock()
-_verified_hosting_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min}
+_verified_hosting_fetch_lock = Lock()
+_verified_hosting_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min,
+                                            "retry_at": datetime.min, "failure": None}
+_VERIFIED_HOSTING_KEY = "hosting_isere_v2"
+_VERIFIED_HOSTING_FILE = "hosting_isere_v2.json"
 
 
-def _erp_capacity_range(category: Any) -> tuple[int | None, int | None, str | None]:
+def _hosting_payload_age_seconds(payload: dict) -> float:
     try:
-        cat = int(category)
-    except (TypeError, ValueError):
-        return None, None, None
-    ranges = {
-        1: (1501, None, "ERP catégorie 1: plus de 1 500 personnes"),
-        2: (701, 1500, "ERP catégorie 2: 701 à 1 500 personnes"),
-        3: (301, 700, "ERP catégorie 3: 301 à 700 personnes"),
-        4: (1, 300, "ERP catégorie 4: jusqu'à 300 personnes"),
-        5: (1, None, "ERP catégorie 5: seuil dépendant du type d'établissement"),
-    }
-    return ranges.get(cat, (None, None, None))
+        observed = datetime.fromisoformat(str(payload.get("updated_at") or "").replace("Z", "+00:00"))
+        now = datetime.now(observed.tzinfo) if observed.tzinfo else datetime.utcnow()
+        return max(0.0, (now - observed).total_seconds())
+    except (ValueError, TypeError):
+        return float("inf")
 
 
-def _classify_data_es_hosting_type(row: dict[str, Any]) -> str:
-    text = " ".join(str(row.get(key) or "") for key in ("equip_type_name", "equip_nom", "inst_nom")).lower()
-    if "gymnase" in text or "multisports" in text:
-        return "gymnase"
-    if "dojo" in text or "combat" in text or "arts martiaux" in text:
-        return "salle_omnisports"
-    if "polyvalente" in text or "fêtes" in text or "fetes" in text or "non spécialisée" in text or "non specialisee" in text:
-        return "salle_fetes"
-    if "danse" in text or "spécialisée" in text or "specialisee" in text:
-        return "salle_spectacle_public"
-    return "gymnase"
+def _hosting_successful_payload(payload: Any) -> bool:
+    return (isinstance(payload, dict) and payload.get("schema_version") == 2
+            and payload.get("status") == "online" and payload.get("complete") is True
+            and not payload.get("error") and not payload.get("truncated")
+            and type(payload.get("count")) is int and isinstance(payload.get("points"), list)
+            and payload["count"] == len(payload["points"])
+            and math.isfinite(_hosting_payload_age_seconds(payload)))
 
 
-def _data_es_bool(value: Any) -> str | None:
-    text = str(value or "").strip().lower()
-    if text == "true":
-        return "yes"
-    if text == "false":
-        return "no"
-    return None
+def _hosting_response_view(payload: dict, limit: int) -> dict:
+    # A caller's preview limit must never shrink the shared departmental cache.
+    result = deepcopy(payload)
+    points = result.get("points") or []
+    total = len(points) if result.get("count") is not None else None
+    result["points"] = points[:limit]
+    result.update(total_count=total, returned_count=len(result["points"]),
+                  count=len(result["points"]) if total is not None else None,
+                  collection_complete=result.get("complete") is True,
+                  truncated=len(points) > limit)
+    if result["truncated"]:
+        result["complete"] = False
+    return result
 
 
-def _data_es_record_to_hosting_point(row: dict[str, Any]) -> dict[str, Any] | None:
-    coords = row.get("equip_coordonnees") or {}
-    try:
-        lat = float(coords.get("lat") or row.get("equip_y"))
-        lon = float(coords.get("lon") or row.get("equip_x"))
-    except (TypeError, ValueError):
-        return None
-    capacity_min, capacity_max, capacity_label = _erp_capacity_range(row.get("equip_erp_cat"))
-    if not capacity_label:
-        return None
-    source_url = str(row.get("equip_url") or "").strip() or "https://data.education.gouv.fr/explore/dataset/fr-en-data-es-base-de-donnees/"
-    surface_m2 = None
-    try:
-        surface_m2 = float(row.get("equip_surf")) if row.get("equip_surf") is not None else None
-    except (TypeError, ValueError):
-        surface_m2 = None
-    erp_type = str(row.get("equip_erp_type") or "").strip()
-    details = [
-        "Source vérifiée: Data ES - Ministère chargé des Sports",
-        capacity_label,
-        f"Type ERP: {erp_type}" if erp_type else "",
-        f"Surface: {int(surface_m2)} m2" if surface_m2 else "",
-        f"Tribunes: {row.get('equip_trib_nb')} places" if row.get("equip_trib_nb") not in (None, "") else "",
-        f"MAJ: {row.get('equip_maj_date')}" if row.get("equip_maj_date") else "",
-    ]
-    pmr_fields = [row.get("equip_pmr_acc"), row.get("equip_pmr_aire"), row.get("equip_pmr_chem"), row.get("equip_pmr_sanit")]
-    accessibility = "yes" if any(str(v).lower() == "true" for v in pmr_fields) or str(row.get("inst_acc_handi_bool")).lower() == "true" else "no"
-    parking = "yes" if "parking" in str(row.get("inst_obs") or "").lower() else None
-    return {
-        "id": f"dataes-{row.get('equip_numero') or row.get('inst_numero')}",
-        "name": str(row.get("equip_nom") or row.get("inst_nom") or "Lieu d'accueil ERP").strip(),
-        "type": _classify_data_es_hosting_type(row),
-        "lat": lat,
-        "lon": lon,
-        "active": True,
-        "address": " ".join(str(x).strip() for x in (row.get("inst_adresse"), row.get("inst_cp"), row.get("new_name")) if str(x or "").strip()) or "Adresse non renseignée",
-        "priority": "critical" if capacity_min and capacity_min >= 701 else "vital" if capacity_min and capacity_min >= 301 else "standard",
-        "source": source_url,
-        "info": " | ".join(part for part in details if part)[:300],
-        "capacity": capacity_max or capacity_min,
-        "capacity_min": capacity_min,
-        "capacity_max": capacity_max,
-        "capacity_source": capacity_label,
-        "surface_m2": surface_m2,
-        "accessibility": accessibility,
-        "sanitary": _data_es_bool(row.get("equip_sanit")),
-        "heating": "yes" if row.get("equip_energie") else None,
-        "parking": parking,
-        "verified": True,
-        "verified_source": "Data ES",
-        "updated_at": row.get("equip_maj_date") or row.get("inst_enqu_date"),
-        "dynamic": True,
-    }
+def _hosting_unavailable_payload(previous: dict | None, *, pending: bool = False) -> dict:
+    message = "Source des lieux d'accueil temporairement indisponible. Nouvelle tentative possible."
+    now = datetime.utcnow().isoformat() + "Z"
+    if previous is not None:
+        result = deepcopy(previous)
+        result.update(status="stale", complete=False, retained_previous=True, last_attempt_at=now,
+                      error=None if pending else message, refreshing=pending,
+                      retry_after_seconds=5 if pending else 60)
+        return result
+    return {"schema_version": 2, "status": "pending" if pending else "unavailable", "complete": False,
+            "source": "Data ES · Ministère chargé des Sports", "source_url": HOSTING_SOURCE_URL,
+            "count": None, "points": [], "updated_at": None, "last_success_at": None,
+            "last_attempt_at": now, "error": None if pending else message,
+            "refreshing": pending, "retry_after_seconds": 5 if pending else 60}
 
 
 def fetch_verified_hosting_isere(force_refresh: bool = False, limit: int = 2000) -> dict[str, Any]:
-    with _verified_hosting_isere_cache_lock:
-        if not force_refresh and _verified_hosting_isere_cache["payload"] and datetime.utcnow() < _verified_hosting_isere_cache["expires_at"]:
-            return _verified_hosting_isere_cache["payload"]
     safe_limit = max(1, min(int(limit or 2000), 5000))
-    where = (
-        'dep_code="38" AND equip_erp_cat is not null AND equip_nature="Intérieur" '
-        'AND (search(equip_type_name, "Salle") OR search(equip_nom, "Gymnase") '
-        'OR search(inst_nom, "Gymnase") OR search(equip_nom, "polyvalente") OR search(equip_nom, "fêtes"))'
-    )
-    rows: list[dict[str, Any]] = []
-    offset = 0
-    page_size = 100
-    while len(rows) < safe_limit:
-        query = urlencode({"where": where, "limit": min(page_size, safe_limit - len(rows)), "offset": offset})
-        payload = _http_get_json(
-            f"https://data.education.gouv.fr/api/explore/v2.1/catalog/datasets/fr-en-data-es-base-de-donnees/records?{query}",
-            timeout=30,
-        )
-        page = payload.get("results") if isinstance(payload, dict) else []
-        if not isinstance(page, list) or not page:
-            break
-        rows.extend(page)
-        offset += len(page)
-        total = int(payload.get("total_count") or 0)
-        if offset >= total:
-            break
-    points = [_data_es_record_to_hosting_point(row) for row in rows]
-    points = [point for point in points if point]
-    result = {
-        "status": "online",
-        "source": "Data ES - Ministère chargé des Sports",
-        "source_url": "https://data.education.gouv.fr/explore/dataset/fr-en-data-es-base-de-donnees/",
-        "count": len(points),
-        "points": points,
-        "updated_at": datetime.utcnow().isoformat() + "Z",
-        "note": "Capacité issue de la catégorie ERP Data ES lorsque renseignée; aucun point OSM n'est utilisé pour les lieux d'accueil.",
-    }
+    now = datetime.utcnow()
     with _verified_hosting_isere_cache_lock:
-        _verified_hosting_isere_cache["payload"] = result
-        _verified_hosting_isere_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_VERIFIED_HOSTING_ISERE_CACHE_TTL_SECONDS)
-    return result
+        memory = deepcopy(_verified_hosting_isere_cache.get("payload"))
+        expiry = _verified_hosting_isere_cache.get("expires_at") or datetime.min
+        retry_at = _verified_hosting_isere_cache.get("retry_at") or datetime.min
+        failure = deepcopy(_verified_hosting_isere_cache.get("failure"))
+    if not force_refresh:
+        if failure and now < retry_at:
+            return _hosting_response_view(failure, safe_limit)
+        if (_hosting_successful_payload(memory) and now < expiry
+                and _hosting_payload_age_seconds(memory) < _VERIFIED_HOSTING_ISERE_CACHE_TTL_SECONDS):
+            return _hosting_response_view(memory, safe_limit)
+
+    fallback = memory if _hosting_successful_payload(memory) else None
+    # Read every shared copy even for a forced refresh: another worker may have
+    # a more recent inventory than this worker's memory.
+    candidates = [_redis_get(_VERIFIED_HOSTING_KEY), _redis_get(f"persist:{_VERIFIED_HOSTING_KEY}"),
+                  _file_cache_load(_VERIFIED_HOSTING_FILE)]
+    for candidate in candidates:
+        if (_hosting_successful_payload(candidate) and
+                (fallback is None or _hosting_payload_age_seconds(candidate) < _hosting_payload_age_seconds(fallback))):
+            fallback = candidate
+    if not force_refresh and fallback is not None:
+        remaining = _VERIFIED_HOSTING_ISERE_CACHE_TTL_SECONDS - _hosting_payload_age_seconds(fallback)
+        if remaining > 0:
+            with _verified_hosting_isere_cache_lock:
+                _verified_hosting_isere_cache.update(payload=deepcopy(fallback), expires_at=now + timedelta(seconds=remaining),
+                                                    failure=None, retry_at=datetime.min)
+            return _hosting_response_view(fallback, safe_limit)
+
+    if not _verified_hosting_fetch_lock.acquire(blocking=False):
+        return _hosting_response_view(_hosting_unavailable_payload(fallback, pending=True), safe_limit)
+    distributed_token = None
+    distributed_key = f"{_REDIS_KEY_PREFIX}refresh-lock:{_VERIFIED_HOSTING_KEY}"
+    try:
+        if _REDIS_OK and _redis is not None:
+            token = secrets.token_hex(16)
+            try:
+                if not _redis.set(distributed_key, token, nx=True, ex=90):
+                    return _hosting_response_view(_hosting_unavailable_payload(fallback, pending=True), safe_limit)
+                distributed_token = token
+            except Exception:
+                pass
+        try:
+            result = collect_verified_hosting_isere()
+        except Exception:
+            result = None
+        if _hosting_successful_payload(result):
+            with _verified_hosting_isere_cache_lock:
+                _verified_hosting_isere_cache.update(payload=deepcopy(result), failure=None, retry_at=datetime.min,
+                                                    expires_at=datetime.utcnow() + timedelta(seconds=_VERIFIED_HOSTING_ISERE_CACHE_TTL_SECONDS))
+            _redis_set(_VERIFIED_HOSTING_KEY, result, _VERIFIED_HOSTING_ISERE_CACHE_TTL_SECONDS)
+            _redis_set(f"persist:{_VERIFIED_HOSTING_KEY}", result, _PERSIST_TTL_SECONDS)
+            _file_cache_save(_VERIFIED_HOSTING_FILE, result)
+            return _hosting_response_view(result, safe_limit)
+        failed = _hosting_unavailable_payload(fallback)
+        with _verified_hosting_isere_cache_lock:
+            _verified_hosting_isere_cache.update(failure=deepcopy(failed), retry_at=datetime.utcnow() + timedelta(seconds=60))
+        return _hosting_response_view(failed, safe_limit)
+    finally:
+        if distributed_token is not None:
+            try:
+                _redis.eval("if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+                            1, distributed_key, distributed_token)
+            except Exception:
+                pass
+        _verified_hosting_fetch_lock.release()
 
 
 def _geodae_bool(value: Any) -> bool | None:

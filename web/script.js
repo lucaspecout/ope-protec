@@ -39,6 +39,7 @@ const STORAGE_KEYS = {
   apiInterconnectionsSnapshot: 'apiInterconnectionsSnapshot',
   homeLiveSnapshot: 'homeLiveSnapshot',
   staticInstitutionsCache: 'staticInstitutionsCacheV3',
+  staticHostingCache: 'staticHostingCacheV1',
   staticFinessCache: 'staticFinessCacheV3',
   staticDaeCache: 'staticDaeCacheV2',
   staticTelecomCache: 'staticTelecomCacheV1',
@@ -731,6 +732,10 @@ let institutionPointsCache = [];
 let institutionsLoaded = false;
 let verifiedHostingPointsCache = [];
 let verifiedHostingLoaded = false;
+let verifiedHostingLoadPromise = null;
+let verifiedHostingRetryTimer = null;
+let verifiedHostingNextRetryAt = 0;
+let verifiedHostingState = { status: 'pending', updated_at: null };
 let finessPointsCache = [];
 let finessLoaded = false;
 let finessTypeCounts = {};
@@ -5555,6 +5560,7 @@ async function resetMapFilters() {
   const hostingSanitary = document.getElementById('filter-resources-hosting-sanitary');
   const hostingHeating = document.getElementById('filter-resources-hosting-heating');
   const hostingParking = document.getElementById('filter-resources-hosting-parking');
+  const hostingUnknown = document.getElementById('filter-resources-hosting-unknown');
   const telecomResources = document.getElementById('filter-resources-telecom');
   if (hydro) hydro.checked = true;
   if (pcs) pcs.checked = true;
@@ -5578,6 +5584,7 @@ async function resetMapFilters() {
   if (hostingSanitary) hostingSanitary.checked = false;
   if (hostingHeating) hostingHeating.checked = false;
   if (hostingParking) hostingParking.checked = false;
+  if (hostingUnknown) hostingUnknown.checked = true;
   if (telecomResources) telecomResources.checked = false;
   if (googleFlow) googleFlow.checked = false;
   document.querySelectorAll('.tactical-layer-toggle').forEach((input) => { input.checked = true; });
@@ -6216,36 +6223,9 @@ function isHostingCandidateType(type = '') {
 }
 
 function estimateHostingCapacity(resource = {}) {
-  const min = Number(resource.capacity_min);
-  const max = Number(resource.capacity_max);
-  if (Number.isFinite(min) && min > 0 && Number.isFinite(max) && max > 0) {
-    return { value: max, label: `${min.toLocaleString('fr-FR')}-${max.toLocaleString('fr-FR')} pers.`, source: resource.capacity_source || 'catégorie ERP renseignée' };
-  }
-  if (Number.isFinite(min) && min > 0) {
-    return { value: min, label: `${min.toLocaleString('fr-FR')}+ pers.`, source: resource.capacity_source || 'catégorie ERP renseignée' };
-  }
   const explicit = Number(resource.capacity || resource.hosting_capacity || resource.details?.capacity);
-  if (Number.isFinite(explicit) && explicit > 0) return { value: Math.round(explicit), label: `${Math.round(explicit).toLocaleString('fr-FR')} pers.`, source: resource.capacity_source || 'capacité renseignée' };
-  const surface = Number(resource.surface_m2 || resource.details?.surface_m2);
-  if (Number.isFinite(surface) && surface > 0) {
-    const value = Math.max(1, Math.floor(surface / 4));
-    return { value, label: `${value.toLocaleString('fr-FR')} pers.`, source: 'estimation surface / 4 m²' };
-  }
-  const fallback = {
-    palais_congres: 800,
-    salle_omnisports: 500,
-    stade: 300,
-    complexe_sportif: 220,
-    lycee: 220,
-    universite: 220,
-    college: 160,
-    centre_culturel: 150,
-    salle_spectacle_public: 150,
-    gymnase: 120,
-    salle_fetes: 80,
-    ecole_primaire: 70,
-  }[String(resource.type || '')];
-  return fallback ? { value: fallback, label: `${fallback.toLocaleString('fr-FR')} pers.`, source: 'estimation par type, à confirmer' } : { value: null, label: 'à confirmer', source: 'capacité à confirmer' };
+  if (Number.isFinite(explicit) && explicit > 0) return { value: Math.floor(explicit), label: `${Math.floor(explicit).toLocaleString('fr-FR')} pers.`, source: resource.capacity_source || 'capacité publiée' };
+  return { value: null, label: 'non renseignée', source: '' };
 }
 
 function hostingAmenityStatus(resource = {}, key = '') {
@@ -6253,17 +6233,7 @@ function hostingAmenityStatus(resource = {}, key = '') {
   const value = resource[key] ?? resource[`hosting_${key}`] ?? details[key] ?? details[`hosting_${key}`];
   const normalized = normalizeYesNo(value);
   if (normalized !== null) return normalized;
-  const type = String(resource.type || '');
-  if (key === 'sanitary' && isHostingCandidateType(type)) return true;
-  if (key === 'heating') {
-    if (type === 'stade') return false;
-    if (isHostingCandidateType(type)) return true;
-  }
-  if (key === 'parking' && ['complexe_sportif', 'salle_omnisports', 'palais_congres', 'stade', 'lycee', 'college', 'universite'].includes(type)) return true;
-  if (key === 'accessibility') {
-    if (normalizeYesNo(resource.wheelchair ?? details.wheelchair) === true) return true;
-    if (['palais_congres', 'salle_omnisports', 'complexe_sportif', 'centre_culturel', 'lycee', 'college', 'universite'].includes(type)) return 'probable';
-  }
+  if (key === 'accessibility') return normalizeYesNo(resource.wheelchair ?? details.wheelchair);
   return null;
 }
 
@@ -6275,7 +6245,8 @@ function buildHostingProfile(resource = {}) {
     capacity: capacity.value,
     capacityLabel: capacity.label,
     capacitySource: resource.capacity_source || capacity.source,
-    surfaceM2: Number(resource.surface_m2) || null,
+    surfaceM2: Number(resource.surface_m2 || resource.details?.surface_m2) > 0 ? Number(resource.surface_m2 || resource.details?.surface_m2) : null,
+    erpLabel: resource.erp_capacity_label || (resource.erp_category ? `catégorie ${resource.erp_category}` : ''),
     accessibility: hostingAmenityStatus(resource, 'accessibility'),
     sanitary: hostingAmenityStatus(resource, 'sanitary'),
     heating: hostingAmenityStatus(resource, 'heating'),
@@ -6287,15 +6258,16 @@ function buildHostingProfile(resource = {}) {
 function hostingMatchesAdvancedFilters(resource = {}) {
   const profile = buildHostingProfile(resource);
   if (!profile) return false;
+  const keepUnknown = document.getElementById('filter-resources-hosting-unknown')?.checked ?? true;
   const minCapacity = Number(document.getElementById('filter-resources-hosting-capacity')?.value || 0);
-  if (Number.isFinite(minCapacity) && minCapacity > 0 && (!profile.capacity || profile.capacity < minCapacity)) return false;
+  if (Number.isFinite(minCapacity) && minCapacity > 0 && (profile.capacity ? profile.capacity < minCapacity : !keepUnknown)) return false;
   const minSurface = Number(document.getElementById('filter-resources-hosting-surface')?.value || 0);
-  if (Number.isFinite(minSurface) && minSurface > 0 && (!profile.surfaceM2 || profile.surfaceM2 < minSurface)) return false;
+  if (Number.isFinite(minSurface) && minSurface > 0 && (profile.surfaceM2 ? profile.surfaceM2 < minSurface : !keepUnknown)) return false;
   const accessibility = document.getElementById('filter-resources-hosting-accessibility')?.value || 'all';
-  if (accessibility === 'accessible' && !(profile.accessibility === true || profile.accessibility === 'probable' || profile.accessibility === 'limited')) return false;
-  if ((document.getElementById('filter-resources-hosting-sanitary')?.checked ?? false) && profile.sanitary !== true) return false;
-  if ((document.getElementById('filter-resources-hosting-heating')?.checked ?? false) && profile.heating !== true) return false;
-  if ((document.getElementById('filter-resources-hosting-parking')?.checked ?? false) && !(profile.parking === true || profile.parking === 'probable')) return false;
+  if (accessibility === 'accessible' && profile.accessibility !== true && !(keepUnknown && profile.accessibility !== false)) return false;
+  for (const key of ['sanitary', 'heating', 'parking']) {
+    if ((document.getElementById(`filter-resources-hosting-${key}`)?.checked ?? false) && profile[key] !== true && !(keepUnknown && profile[key] !== false)) return false;
+  }
   return true;
 }
 
@@ -6305,16 +6277,39 @@ function formatHostingDetailsHtml(resource = {}) {
   const capacity = profile.capacityLabel || (profile.capacity ? `${Number(profile.capacity).toLocaleString('fr-FR')} pers.` : 'à confirmer');
   const surface = profile.surfaceM2 ? `Surface ${Number(profile.surfaceM2).toLocaleString('fr-FR')} m²` : '';
   const chips = [
-    `<span class="hosting-chip hosting-chip--ok">Capacité ${escapeHtml(capacity)}</span>`,
-    `<span class="hosting-chip ${profile.accessibility ? 'hosting-chip--ok' : 'hosting-chip--warn'}">PMR ${escapeHtml(yesNoLabel(profile.accessibility, { unknown: 'à vérifier', yes: 'oui', no: 'non' }))}</span>`,
+    `<span class="hosting-chip ${profile.capacity ? 'hosting-chip--ok' : 'hosting-chip--warn'}">Accueil ${escapeHtml(capacity)}</span>`,
+    `<span class="hosting-chip ${profile.accessibility === true ? 'hosting-chip--ok' : 'hosting-chip--warn'}">PMR ${escapeHtml(yesNoLabel(profile.accessibility, { unknown: 'à vérifier', yes: 'oui', no: 'non' }))}</span>`,
     `<span class="hosting-chip ${profile.sanitary === true ? 'hosting-chip--ok' : 'hosting-chip--warn'}">Sanitaires ${escapeHtml(yesNoLabel(profile.sanitary, { unknown: 'à vérifier', yes: 'oui', no: 'non' }))}</span>`,
     `<span class="hosting-chip ${profile.heating === true ? 'hosting-chip--ok' : 'hosting-chip--warn'}">Chauffage ${escapeHtml(yesNoLabel(profile.heating, { unknown: 'à vérifier', yes: 'oui', no: 'non' }))}</span>`,
     `<span class="hosting-chip ${profile.parking === true ? 'hosting-chip--ok' : 'hosting-chip--warn'}">Parking ${escapeHtml(yesNoLabel(profile.parking, { unknown: 'à vérifier', yes: 'oui', no: 'non' }))}</span>`,
   ].join('');
-  const note = [profile.capacitySource, surface, profile.isSchool ? 'ERP scolaire: accord commune/établissement à valider avant ouverture accueil.' : 'Lieu d’accueil: à confirmer avec la commune avant activation.']
+  const note = [profile.capacitySource, surface, profile.erpLabel ? `ERP : ${profile.erpLabel} (accueil du public, pas une capacité de couchage)` : '', 'Capacité de couchage et disponibilité à confirmer avec la commune avant activation.']
     .filter(Boolean)
     .join(' · ');
-  return `<div class="hosting-details"><div class="hosting-details__chips">${chips}</div><div class="hosting-details__note">${escapeHtml(note)}</div></div>`;
+  const details = [
+    ['Installation', resource.installation_name], ['Équipement', resource.equipment_type],
+    ['Commune', resource.municipality], ['Gestionnaire', resource.operator || resource.manager],
+    ['Propriétaire', resource.owner], ['Téléphone', resource.phone], ['Courriel', resource.email],
+    ['Places spectateurs', resource.spectator_capacity],
+    ['Dimensions', [['longueur', resource.length_m], ['largeur', resource.width_m], ['hauteur', resource.height_m]].filter(([, value]) => Number(value) > 0).map(([label, value]) => `${label} ${Number(value).toLocaleString('fr-FR')} m`).join(', ')],
+    ['Activités', Array.isArray(resource.activities) ? resource.activities.join(', ') : resource.activities],
+    ['Vestiaires', resource.locker_rooms ?? resource.changing_rooms], ['Douches', yesNoLabel(resource.shower ?? resource.showers, { unknown: '', yes: 'oui', no: 'non' })],
+    ['Arrêté d’ouverture au public', yesNoLabel(resource.opening_authorization, { unknown: '', yes: 'oui', no: 'non' })],
+    ['Détails PMR', resource.accessibility_details && typeof resource.accessibility_details === 'object'
+      ? Object.entries(resource.accessibility_details).map(([key, value]) => {
+        const label = ({ entrance: 'entrée', reception: 'accueil', paths: 'cheminements', activity_area: 'aire d’activité', changing_rooms: 'vestiaires', locker_rooms: 'vestiaires', sanitary: 'sanitaires', toilets: 'sanitaires', parking: 'parking', shower: 'douches', showers: 'douches', equipment: 'équipement' })[key] || key.replace(/_/g, ' ');
+        const status = yesNoLabel(value, { unknown: '', yes: 'oui', no: 'non' });
+        return status ? `${label} : ${status}` : '';
+      }).filter(Boolean).join(', ') : resource.accessibility_details],
+    ['Énergies', Array.isArray(resource.energy_sources) ? resource.energy_sources.join(', ') : resource.energy_sources],
+    ['Mise à jour de la fiche', resource.source_updated_at || resource.record_updated_at || resource.updated_at],
+  ].filter(([, value]) => value !== null && value !== undefined && String(value).trim() !== '')
+    .map(([label, value]) => `<div>${escapeHtml(label)} : ${escapeHtml(String(value))}</div>`).join('');
+  const recordUrl = String(resource.record_url || resource.source || resource.source_url || '');
+  const recordLink = /^https?:\/\//i.test(recordUrl) ? `<div><a href="${escapeHtml(recordUrl)}" target="_blank" rel="noreferrer noopener">Fiche officielle de l’équipement ↗</a></div>` : '';
+  const website = String(resource.website || '');
+  const websiteLink = /^https?:\/\//i.test(website) ? `<div><a href="${escapeHtml(website)}" target="_blank" rel="noreferrer noopener">Site de l’équipement ↗</a></div>` : '';
+  return `<div class="hosting-details"><div class="hosting-details__chips">${chips}</div><div class="hosting-details__note">${escapeHtml(note)}${details}${recordLink}${websiteLink}</div></div>`;
 }
 
 async function loadFinessIsereResources() {
@@ -6667,18 +6662,113 @@ function isVerifiedHostingResource(resource = {}) {
   return Boolean(resource.verified) || source.includes('data es') || source.includes('data.education.gouv.fr') || source.includes('sports');
 }
 
-async function loadVerifiedHostingIsere() {
-  if (verifiedHostingLoaded) return verifiedHostingPointsCache;
-  try {
-    const payload = await api('/api/hosting/isere/verified?limit=2000', { cacheTtlMs: 24 * 60 * 60 * 1000 });
-    verifiedHostingPointsCache = filterIserePoints(Array.isArray(payload?.points) ? payload.points : [])
-      .filter((point) => HOSTING_RESOURCE_TYPES.has(String(point.type || '')))
-      .map((point) => ({ ...point, verified: true, dynamic: true }));
-  } catch {
-    verifiedHostingPointsCache = [];
+function normaliseVerifiedHostingPoints(points) {
+  return filterIserePoints(Array.isArray(points) ? points.filter((point) => point && typeof point === 'object') : [])
+    .filter((point) => point && HOSTING_RESOURCE_TYPES.has(String(point.type || '')))
+    .map((point) => ({ ...point, verified: true, dynamic: true, active: point.active !== false }));
+}
+
+function renderHostingDataStatus() {
+  const node = document.getElementById('hosting-data-status');
+  const retry = document.getElementById('hosting-data-retry');
+  if (retry) retry.disabled = Boolean(verifiedHostingLoadPromise);
+  if (!node) return;
+  const total = verifiedHostingPointsCache.length;
+  const visible = verifiedHostingPointsCache.filter((resource) => {
+    const type = document.getElementById('filter-resources-hosting-type')?.value || 'all';
+    const query = (document.getElementById('map-search')?.value || '').trim().toLowerCase();
+    return (type === 'all' || type === resource.type) && hostingMatchesAdvancedFilters(resource)
+      && (!query || `${resource.name} ${resource.address} ${resource.municipality || ''}`.toLowerCase().includes(query));
+  }).length;
+  const status = verifiedHostingState.status;
+  const descriptions = [];
+  if (status === 'loading') descriptions.push('Chargement des lieux officiels en cours…');
+  else if (status === 'pending') descriptions.push(verifiedHostingNextRetryAt > 0 ? 'Collecte officielle en cours. Les lieux apparaîtront automatiquement.' : 'Les lieux officiels se chargent à l’ouverture de la carte.');
+  else if (status !== 'online') descriptions.push(total ? 'Collecte incomplète ou momentanément indisponible : dernières fiches conservées.' : 'Données momentanément indisponibles. Réessayez le chargement.');
+  if (total) {
+    descriptions.push(`${visible.toLocaleString('fr-FR')} / ${total.toLocaleString('fr-FR')} équipement(s) avec ces filtres.`);
+    const installations = new Set(verifiedHostingPointsCache.map((p) => p.installation_id).filter(Boolean)).size;
+    if (installations) descriptions.push(`${installations.toLocaleString('fr-FR')} site(s), certains avec plusieurs salles.`);
+    const unknown = verifiedHostingPointsCache.filter((p) => !estimateHostingCapacity(p).value).length;
+    if (unknown) descriptions.push(`${unknown.toLocaleString('fr-FR')} capacité(s) d’accueil non renseignée(s).`);
+    if (!visible) descriptions.push('Élargissez les filtres ou conservez les informations non renseignées.');
+  } else if (status === 'online') descriptions.push('Aucun équipement dans la dernière collecte complète.');
+  const updated = new Date(verifiedHostingState.updated_at || '');
+  if (Number.isFinite(updated.getTime())) descriptions.push(`Collecte du ${updated.toLocaleString('fr-FR')}.`);
+  descriptions.push('Lieux potentiels : accord de la commune et capacité de couchage à confirmer.');
+  node.textContent = descriptions.join(' ');
+}
+
+function scheduleVerifiedHostingRetry() {
+  if (verifiedHostingRetryTimer !== null) return;
+  verifiedHostingRetryTimer = setTimeout(() => {
+    verifiedHostingRetryTimer = null;
+    if (!isMapPanelActive()) return;
+    void loadVerifiedHostingIsere().then(() => { if (isMapPanelActive()) _drawResourceMarkers(); });
+  }, Math.max(1000, verifiedHostingNextRetryAt - Date.now()));
+}
+
+async function loadVerifiedHostingIsere(forceRefresh = false) {
+  if (verifiedHostingLoadPromise) return verifiedHostingLoadPromise;
+  if (verifiedHostingLoaded && !forceRefresh) return verifiedHostingPointsCache;
+  if (!forceRefresh && Date.now() < verifiedHostingNextRetryAt) return verifiedHostingPointsCache;
+  if (!verifiedHostingPointsCache.length) {
+    const saved = readSnapshot(STORAGE_KEYS.staticHostingCache);
+    const points = normaliseVerifiedHostingPoints(saved?.points);
+    if (points.length) {
+      verifiedHostingPointsCache = points;
+      verifiedHostingState = { ...saved, status: 'stale' };
+    }
   }
-  verifiedHostingLoaded = true;
-  return verifiedHostingPointsCache;
+  verifiedHostingState = { ...verifiedHostingState, status: 'loading' };
+  verifiedHostingLoadPromise = (async () => {
+    let retryAfterMs = 60 * 1000;
+    let unavailableStatus = 'unavailable';
+    try {
+      const payload = await api(`/api/hosting/isere/verified?limit=5000${forceRefresh ? '&refresh=true' : ''}`, {
+        cacheTtlMs: 0, bypassCache: true, timeoutMs: Math.max(API_SLOW_ENDPOINT_TIMEOUT_MS, 85000),
+      });
+      const retrySeconds = Number(payload?.retry_after_seconds);
+      if (Number.isFinite(retrySeconds) && retrySeconds > 0) retryAfterMs = Math.max(5000, Math.min(300000, retrySeconds * 1000));
+      if (payload?.status === 'pending') unavailableStatus = 'pending';
+      if (!Array.isArray(payload?.points)) throw new Error('Invalid hosting response');
+      const points = normaliseVerifiedHostingPoints(payload.points);
+      const observed = Date.parse(payload.updated_at || '');
+      const previousObserved = Date.parse(verifiedHostingState.updated_at || '');
+      const complete = payload.complete === true && payload.status === 'online' && Number.isFinite(observed);
+      const retained = payload.schema_version === 2 && payload.retained_previous === true && payload.status === 'stale' && Number.isFinite(observed);
+      const older = Number.isFinite(observed) && Number.isFinite(previousObserved) && observed < previousObserved;
+      if (!points.length && !complete && !retained) throw new Error('Incomplete hosting response');
+      if (payload.points.length && !points.length) throw new Error('Invalid hosting coordinates');
+      if ((complete || retained) && !older) verifiedHostingPointsCache = points;
+      else if (!complete && !retained && !older) {
+        const byId = new Map(verifiedHostingPointsCache.map((p) => [p.id, p]));
+        for (const point of points) byId.set(point.id, point);
+        verifiedHostingPointsCache = [...byId.values()];
+      }
+      verifiedHostingLoaded = complete;
+      verifiedHostingState = { status: complete ? 'online' : 'stale',
+        updated_at: (complete || retained) && !older ? payload.updated_at : verifiedHostingState.updated_at || null };
+      if (!older && (verifiedHostingPointsCache.length || complete || retained)) saveSnapshot(STORAGE_KEYS.staticHostingCache, { ...verifiedHostingState, points: verifiedHostingPointsCache });
+    } catch {
+      verifiedHostingLoaded = false;
+      verifiedHostingState = { ...verifiedHostingState, status: verifiedHostingPointsCache.length ? 'stale' : unavailableStatus };
+    } finally {
+      verifiedHostingLoadPromise = null;
+      if (verifiedHostingLoaded) {
+        verifiedHostingNextRetryAt = 0;
+        if (verifiedHostingRetryTimer !== null) clearTimeout(verifiedHostingRetryTimer);
+        verifiedHostingRetryTimer = null;
+      } else {
+        verifiedHostingNextRetryAt = Date.now() + retryAfterMs;
+        scheduleVerifiedHostingRetry();
+      }
+      renderHostingDataStatus();
+    }
+    return verifiedHostingPointsCache;
+  })();
+  renderHostingDataStatus();
+  return verifiedHostingLoadPromise;
 }
 
 async function loadIsereInstitutions() {
@@ -6994,12 +7084,25 @@ function _staticDataLoading() {
   return _institutionsLoadInFlight || _finessLoadInFlight || _daeLoadInFlight || _telecomLoadInFlight;
 }
 
+function hostingPopupOptions() {
+  const bounds = leafletMap.getContainer().getBoundingClientRect();
+  const summary = document.querySelector('#map-panel .map-summary')?.getBoundingClientRect();
+  const top = summary && summary.bottom > bounds.top && summary.top < bounds.bottom
+    ? Math.max(12, summary.bottom - bounds.top + 12) : 12;
+  return {
+    maxWidth: Math.max(180, Math.min(360, bounds.width - 64)),
+    maxHeight: Math.max(100, Math.min(420, bounds.height - top - 85)),
+    autoPanPaddingTopLeft: [12, top], autoPanPaddingBottomRight: [12, 24],
+  };
+}
+
 /**
  * Rendu synchrone des ressources depuis le cache actuel.
  * N'attend aucune requête réseau. Appelée dès que le cache change.
  */
 function _drawResourceMarkers() {
   if (!isMapPanelActive()) return;
+  renderHostingDataStatus();
   syncFinessHealthFilterOptions();
   const resources = getDisplayedResources();
   const priorityLabel = { critical: 'critique', vital: 'vital', risk: 'à risque', standard: 'standard' };
@@ -7016,7 +7119,7 @@ function _drawResourceMarkers() {
     const statusLabel = r.active ? 'affichée' : 'masquée';
     const toggleButton = r.dynamic ? '' : `<button type="button" class="ghost" data-resource-toggle="${escapeHtml(r.id)}">${r.active ? 'Masquer' : 'Afficher'}</button>`;
     return `<li>
-      <strong>${meta.icon} ${r.name}</strong> · ${r.address}<br/>
+      <strong>${meta.icon} ${escapeHtml(r.name)}</strong> · ${escapeHtml(r.address)}<br/>
       <span class="muted">${meta.label} · ${statusLabel} · ${priorityLabel[r.priority] || 'standard'}</span><br/>
       <span class="muted">${escapeHtml(r.info || 'Aucune information complémentaire.')}</span><br/>
       ${formatHostingDetailsHtml(r)}
@@ -7045,7 +7148,12 @@ function _drawResourceMarkers() {
     window.L.marker([coords.lat, coords.lon], {
       icon: window.L.divIcon({ className: 'map-resource-icon-wrap', html: markerHtml, iconSize: [24, 24], iconAnchor: [12, 12] }),
     })
-      .bindPopup(`<strong>${meta.icon} ${r.name}</strong><br>Type: ${meta.label}<br>Niveau: ${priorityLabel[r.priority] || 'standard'}<br>Adresse: ${r.address}<br>${escapeHtml(r.info || '')}${formatHostingDetailsHtml(r)}${formatFinessDetailsHtml(r)}${formatDaeDetailsHtml(r)}${stationTimetableHtml}<br><a href="${escapeHtml(r.source || '#')}" target="_blank" rel="noreferrer">Source publique</a>`)
+      .bindPopup(`<strong>${meta.icon} ${escapeHtml(r.name)}</strong><br>Type: ${meta.label}<br>Niveau: ${priorityLabel[r.priority] || 'standard'}<br>Adresse: ${escapeHtml(r.address)}<br>${escapeHtml(r.info || '')}${formatHostingDetailsHtml(r)}${formatFinessDetailsHtml(r)}${formatDaeDetailsHtml(r)}${stationTimetableHtml}<br><a href="${escapeHtml(r.source || '#')}" target="_blank" rel="noreferrer">Source publique</a>`)
+      .on('popupopen', (event) => {
+        if (!HOSTING_RESOURCE_TYPES.has(typeKey)) return;
+        Object.assign(event.popup.options, hostingPopupOptions());
+        event.popup.update();
+      })
       .addTo(resourceLayer);
   });
 
@@ -17434,10 +17542,17 @@ function bindAppInteractions() {
     await runLdapTest({ serverOnly: true });
   });
 
+  document.getElementById('hosting-data-retry')?.addEventListener('click', async () => {
+    if (!isMapPanelActive()) return;
+    await loadVerifiedHostingIsere(true);
+    if (isMapPanelActive()) _drawResourceMarkers();
+  });
+  document.getElementById('filter-resources-hosting-unknown')?.addEventListener('change', () => renderResources());
+
   const RESOURCE_ONLY_FILTERS = new Set([
     'filter-resources-command', 'filter-resources-hosting', 'filter-resources-hosting-type',
     'filter-resources-hosting-capacity', 'filter-resources-hosting-surface', 'filter-resources-hosting-accessibility',
-    'filter-resources-hosting-sanitary', 'filter-resources-hosting-heating', 'filter-resources-hosting-parking',
+    'filter-resources-hosting-sanitary', 'filter-resources-hosting-heating', 'filter-resources-hosting-parking', 'filter-resources-hosting-unknown',
     'filter-resources-schools', 'filter-resources-schools-type',
     'filter-resources-security', 'filter-resources-security-type',
     'filter-resources-fire', 'filter-resources-risks', 'filter-resources-risks-type',
