@@ -40,7 +40,7 @@
     }).join(''));
   }
   function fuelRows() {
-    const query = normal(el('public-fuel-search')?.value), type = el('public-fuel-type')?.value || 'all', filter = el('public-fuel-shortage')?.value || 'all';
+    const query = normal(el('public-fuel-search')?.value ?? el('map-fuel-search')?.value), type = el('public-fuel-type')?.value || el('map-fuel-type')?.value || 'all', filter = el('public-fuel-shortage')?.value || el('map-fuel-shortage')?.value || 'all';
     return (state.slots.fuel_isere?.stations || []).flatMap(station => {
       if (!normal(`${station.commune} ${station.address} ${station.postal_code}`).includes(query)) return [];
       const fuels = (station.fuels || []).filter(fuel => (type === 'all' || fuel.fuel === type)
@@ -59,7 +59,7 @@
     put('public-fuel-results', rows.length ? `<table><caption>${rows.length} station(s) selon les filtres</caption><thead><tr><th>Station</th><th>Carburants déclarés</th><th>Horaires et services</th><th>Carte</th></tr></thead><tbody>${shown.map(station => `<tr><th scope="row">${esc(station.commune)}<small>${esc(station.address)} · ${esc(station.postal_code)}</small></th><td>${station.fuels.map(fuelText).join('<br>')}</td><td>${station.automate_24h === true ? 'Automate 24 h/24' : station.automate_24h === false ? 'Automate non déclaré 24 h/24' : 'Horaires automate non renseignés'}<details><summary>Détail</summary>${(station.hours || []).map(day => `<small>${esc(day.day)} : ${day.closed ? 'Fermé' : day.slots.length ? day.slots.map(time => `${esc(time.from)}–${esc(time.to)}`).join(', ') : 'Non renseigné'}</small>`).join('')}${note((station.services || []).join(' · '))}</details></td><td>${finite(station.lat) && finite(station.lon) ? `<button type="button" class="ghost" data-public-location="fuel:${esc(station.id)}">Localiser</button>` : 'Position non renseignée'}</td></tr>`).join('')}</tbody></table>${more('fuel', shown.length, rows.length)}` : note(hasData(slot) ? 'Aucune station correspondant aux filtres.' : 'Stations en attente de collecte.'));
   }
   function ondeRows() {
-    const query = normal(el('public-onde-search')?.value), flow = el('public-onde-flow')?.value || 'all';
+    const query = normal(el('public-onde-search')?.value ?? el('map-onde-search')?.value), flow = el('public-onde-flow')?.value || el('map-onde-flow')?.value || 'all';
     return (state.slots.onde_isere?.stations || []).filter(station => normal(`${station.commune} ${station.river} ${station.name}`).includes(query)
       && (flow === 'all' || flow === 'visible' && String(station.flow_code).startsWith('1') || station.flow_code === flow));
   }
@@ -152,13 +152,16 @@
     if (state.map !== leafletMap) { Object.keys(state.layers).forEach(removeLayer); state.map = leafletMap; state.layerSignatures = {}; }
     [['fuel', 'fuel_isere', fuelRows], ['onde', 'onde_isere', ondeRows]].forEach(([kind, key, getRows]) => {
       const enabled = Boolean(el(`filter-public-${kind}`)?.checked), rows = getRows();
-      const controls = kind === 'fuel' ? ['public-fuel-search', 'public-fuel-type', 'public-fuel-shortage'] : ['public-onde-search', 'public-onde-flow'];
+      const controls = kind === 'fuel' ? ['public-fuel-search', 'public-fuel-type', 'public-fuel-shortage', 'map-fuel-search', 'map-fuel-type', 'map-fuel-shortage'] : ['public-onde-search', 'public-onde-flow', 'map-onde-search', 'map-onde-flow'];
       const signature = `${enabled}:${state.signatures[key] || ''}:${controls.map(id => el(id)?.value || '').join('|')}:${rows.map(row => row.id).join(',')}`;
+      const positioned = rows.filter(row => finite(row.lat) && finite(row.lon) && Math.abs(Number(row.lat)) <= 90 && Math.abs(Number(row.lon)) <= 180);
+      const counter = el(`map-${kind}-results`);
+      if (counter) counter.textContent = `${positioned.length} point(s) affichable(s) · ${rows.length}/${state.slots[key]?.stations?.length || 0} résultat(s)`;
       if (state.layerSignatures[kind] === signature) return;
       removeLayer(kind); state.layerSignatures[kind] = signature;
       if (!enabled) return;
       const layer = window.L.layerGroup();
-      rows.filter(row => finite(row.lat) && finite(row.lon) && Math.abs(Number(row.lat)) <= 90 && Math.abs(Number(row.lon)) <= 180).forEach(row => {
+      positioned.forEach(row => {
         const popup = kind === 'fuel' ? `<strong>Station-service · ${esc(row.commune)}</strong><p>${esc(row.address)}</p>${row.fuels.map(fuelText).join('<br>')}${note('Déclarations fournisseur ; stock non garanti.')}`
           : `<strong>${esc(row.name)}</strong><p>${esc(row.commune)} · ${esc(row.flow_label)}</p><p>Relevé du ${esc(when(row.observed_at))}</p>${note('Observation de campagne, pas une mesure en direct.')}`;
         const color = kind === 'fuel' ? (row.fuels.some(fuel => fuel.shortage === 'temporary') ? '#b04b26' : '#2459a1') : row.flow_code === '3' ? '#b03a43' : row.flow_code === '2' ? '#b07813' : '#148a8a';
@@ -183,12 +186,26 @@
     ++state.session; ++state.historyVersion; Object.keys(state.layers).forEach(removeLayer);
     state.map = null; state.slots = {}; state.signatures = {}; state.layerSignatures = {}; state.focusPoint = null;
     state.limits = { fuel: 60, onde: 60, recalls: 40 };
-    ['public-fuel-search', 'public-onde-search', 'public-recalls-search'].forEach(id => { if (el(id)) el(id).value = ''; });
+    ['public-fuel-search', 'public-onde-search', 'map-fuel-search', 'map-onde-search', 'public-recalls-search'].forEach(id => { if (el(id)) el(id).value = ''; });
+    ['public-fuel-type', 'public-fuel-shortage', 'public-onde-flow', 'map-fuel-type', 'map-fuel-shortage', 'map-onde-flow'].forEach(id => { if (el(id)) el(id).value = 'all'; });
+    ['map-fuel-results', 'map-onde-results'].forEach(id => { if (el(id)) el(id).textContent = ''; });
     ['public-fuel-summary', 'public-onde-summary', 'public-catnat-summary', 'public-energy-summary', 'public-recalls-summary', 'public-fuel-results', 'public-onde-results', 'public-catnat-results', 'public-recalls-results', 'public-energy-chart', 'public-energy-generation', 'public-source-cards'].forEach(id => put(id, ''));
     put('public-catnat-commune', '<option value="">Dernières publications départementales</option>');
   }
   function bind() {
-    [['fuel', ['public-fuel-search', 'public-fuel-type', 'public-fuel-shortage'], renderFuel], ['onde', ['public-onde-search', 'public-onde-flow'], renderOnde], ['recalls', ['public-recalls-search', 'public-recalls-scope', 'public-recalls-active'], renderRecalls]].forEach(([kind, ids, render]) => ids.forEach(id => el(id)?.addEventListener('input', () => { state.limits[kind] = kind === 'recalls' ? 40 : 60; render(); syncMap(); })));
+    [['fuel', ['search', 'type', 'shortage'], renderFuel], ['onde', ['search', 'flow'], renderOnde]].forEach(([kind, filters, render]) => filters.forEach(filter => {
+      const ids = [`public-${kind}-${filter}`, `map-${kind}-${filter}`];
+      if (el(ids[1]) && el(ids[0])) el(ids[0]).value = el(ids[1]).value;
+      ids.forEach(id => {
+        const change = () => {
+          const other = el(ids.find(otherId => otherId !== id));
+          if (other) other.value = el(id).value;
+          state.limits[kind] = 60; render(); syncMap();
+        };
+        ['input', 'change'].forEach(event => el(id)?.addEventListener(event, change));
+      });
+    }));
+    ['public-recalls-search', 'public-recalls-scope', 'public-recalls-active'].forEach(id => el(id)?.addEventListener('input', () => { state.limits.recalls = 40; renderRecalls(); }));
     el('public-catnat-commune')?.addEventListener('change', loadHistory);
     ['fuel', 'onde'].forEach(kind => el(`filter-public-${kind}`)?.addEventListener('change', syncMap));
     document.addEventListener('click', async event => {
@@ -205,6 +222,7 @@
         const location = locate?.dataset.publicLocation || '', colon = location.indexOf(':'), kind = mapButton?.dataset.publicMap || location.slice(0, colon);
         if (!['fuel', 'onde'].includes(kind)) return;
         if (el(`filter-public-${kind}`)) el(`filter-public-${kind}`).checked = true;
+        window.MapFilters?.refresh();
         if (locate) {
           const row = (state.slots[kind === 'fuel' ? 'fuel_isere' : 'onde_isere']?.stations || []).find(row => row.id === location.slice(colon + 1));
           if (row && finite(row.lat) && finite(row.lon)) state.focusPoint = [row.lat, row.lon];

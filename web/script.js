@@ -440,6 +440,7 @@ let cachedMunicipalityRecords = [];
 let cachedItinisereEvents = [];
 let cachedItinisereWebcams = [];
 let itinisereWebcamsInFlight = null;
+let itinisereWebcamsNextLoadAt = 0;
 let cachedBisonFute = {};
 let cachedBisonLiveEvents = [];
 let geocodeCache = new Map();
@@ -5514,6 +5515,23 @@ function updateSelectedLocationPanel(lat, lon) {
 async function resetMapFilters() {
   const defaults = {
     'map-search': '',
+    'map-observation-search': '',
+    'map-observation-freshness': 'all',
+    'map-observation-measure': 'all',
+    'map-industry-search': '',
+    'map-industry-class': 'all',
+    'official-industry-search': '',
+    'official-industry-filter': 'all',
+    'map-fuel-search': '',
+    'map-fuel-type': 'all',
+    'map-fuel-shortage': 'all',
+    'public-fuel-search': '',
+    'public-fuel-type': 'all',
+    'public-fuel-shortage': 'all',
+    'map-onde-search': '',
+    'map-onde-flow': 'all',
+    'public-onde-search': '',
+    'public-onde-flow': 'all',
     'poi-target-category-filter': 'all',
     'filter-resources-schools-type': 'all',
     'filter-resources-security-type': 'all',
@@ -5587,7 +5605,17 @@ async function resetMapFilters() {
   if (hostingUnknown) hostingUnknown.checked = true;
   if (telecomResources) telecomResources.checked = false;
   if (googleFlow) googleFlow.checked = false;
+  document.querySelectorAll('#map-filter-menu input[data-map-layer]').forEach((input) => {
+    input.checked = input.defaultChecked;
+  });
+  document.getElementById('filter-official-radar')?.dispatchEvent(new Event('change', { bubbles: true }));
+  ['map-observation-search', 'map-industry-search', 'map-fuel-search', 'map-onde-search'].forEach((id) => {
+    document.getElementById(id)?.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  window.OfficialSources?.syncMap();
+  window.PublicSources?.syncMap();
   document.querySelectorAll('.tactical-layer-toggle').forEach((input) => { input.checked = true; });
+  window.MapFilters?.refresh();
   resourceVisibilityOverrides.clear();
   syncTelecomFilterState();
   if (searchLayer) searchLayer.clearLayers();
@@ -7594,6 +7622,8 @@ function filterCurrentTrafficEvents(events = []) {
 
 async function loadItinisereWebcams(forceRefresh = false) {
   if (itinisereWebcamsInFlight) return itinisereWebcamsInFlight;
+  if (!forceRefresh && Date.now() < itinisereWebcamsNextLoadAt) return cachedItinisereWebcams;
+  itinisereWebcamsNextLoadAt = Date.now() + 60 * 1000;
   const suffix = forceRefresh ? '?refresh=true' : '';
   itinisereWebcamsInFlight = api(`/api/itinisere/webcams${suffix}`, {
     bypassCache: forceRefresh,
@@ -7603,6 +7633,8 @@ async function loadItinisereWebcams(forceRefresh = false) {
     cachedItinisereWebcams = Array.isArray(payload?.webcams) ? payload.webcams : [];
     return cachedItinisereWebcams;
   }).catch(() => cachedItinisereWebcams).finally(() => {
+    // Empty responses and failures also need a delay before the next attempt.
+    itinisereWebcamsNextLoadAt = Date.now() + 60 * 1000;
     itinisereWebcamsInFlight = null;
   });
   return itinisereWebcamsInFlight;
@@ -8949,6 +8981,7 @@ function _prToLatLonOsrm(road, prStr) {
 }
 
 async function renderTrafficOnMap() {
+  if (!isMapPanelActive()) return;
   if (!itinisereLayer || !bisonLayer || !bisonCameraLayer || typeof window.L === 'undefined') return;
   const renderSequence = ++trafficRenderSequence;
   itinisereLayer.clearLayers();
@@ -9079,10 +9112,10 @@ async function renderTrafficOnMap() {
   const showCameras = document.getElementById('filter-cameras')?.checked ?? true;
   if (showCameras) {
     const itinisereWebcams = cachedItinisereWebcams;
-    if (!itinisereWebcams.length && !itinisereWebcamsInFlight) {
+    if (!itinisereWebcamsInFlight && Date.now() >= itinisereWebcamsNextLoadAt) {
       loadItinisereWebcams(false).then(() => {
-        if (document.getElementById('filter-cameras')?.checked ?? true) renderTrafficOnMap();
-      });
+        if (isMapPanelActive() && (document.getElementById('filter-cameras')?.checked ?? true)) return renderTrafficOnMap();
+      }).catch(() => {});
     }
     BISON_FUTE_CAMERAS.forEach((camera) => {
       const coords = normalizeMapCoordinates(camera.lat, camera.lon);
@@ -16666,6 +16699,7 @@ function setMapControlsCollapsed(collapsed) {
   if (!workspace || !controls || !toggle) return;
   workspace.classList.toggle('map-workspace--collapsed', mapControlsCollapsed);
   controls.setAttribute('aria-hidden', String(mapControlsCollapsed));
+  controls.inert = mapControlsCollapsed;
   toggle.setAttribute('aria-expanded', String(!mapControlsCollapsed));
   toggle.textContent = mapControlsCollapsed ? '🧰' : '📌';
   const toggleLabel = mapControlsCollapsed ? 'Afficher les options de la carte' : 'Ranger les options de la carte';

@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
-  <link rel="stylesheet" href="/styles.css?v=20261021-vigieau" />
+  <link rel="stylesheet" href="/styles.css?v=20261021-map-menu" />
   <link rel="stylesheet" href="/official_sources.css?v=20261020" />
   <link rel="stylesheet" href="/api_credentials.css?v=20261020" />
   <link rel="stylesheet" href="/public_sources.css?v=20261020" />
@@ -919,11 +919,18 @@
                 </div>
               </div>
 
-              <!-- Fond de carte -->
-              <details class="filter-group map-filter-group--basemap" open>
-                <summary class="filter-group__title">🗺️ Fond de carte</summary>
-                <div class="filter-group__body">
-                  <select id="map-basemap-select" aria-label="Choisir le fond de carte">
+              <!-- Navigation des catégories de filtres -->
+              <div id="map-filter-menu">
+                <nav id="map-filter-categories" aria-label="Catégories des filtres de la carte" hidden></nav>
+                <div id="map-filter-category-header" class="map-filter-category-header" hidden>
+                  <button id="map-filter-back" type="button" class="ghost">← Catégories</button>
+                  <div><strong id="map-filter-current-title" tabindex="-1"></strong><span id="map-filter-current-count"></span></div>
+                </div>
+
+              <details id="map-filter-category-basemap" class="filter-group map-filter-group--basemap" data-map-filter-category="basemap">
+                <summary class="filter-group__title">🗺️ Vue et fond de carte</summary>
+                <div class="filter-group__body map-toggle-grid">
+<select id="map-basemap-select" data-map-layer aria-label="Choisir le fond de carte">
                     <option value="osm">Fond standard (OSM)</option>
                     <option value="satellite">Vue satellite</option>
                     <option value="topo">Relief (topographique)</option>
@@ -934,35 +941,34 @@
                 </div>
               </details>
 
-              <!-- Alertes & Surveillance -->
-              <details class="filter-group map-filter-group--alerts" open>
-                <summary class="filter-group__title">🌊 Alertes &amp; Surveillance</summary>
+              <details id="map-filter-category-weather" class="filter-group map-filter-group--weather" data-map-filter-category="weather">
+                <summary class="filter-group__title">🌦️ Météo et observations</summary>
                 <div class="filter-group__body map-toggle-grid">
-                  <label><input id="filter-hydro" type="checkbox" checked /> Vigicrues (stations crues)</label>
-                  <label><input id="filter-official-observations" type="checkbox" /> Mesures Météo-France<small class="filter-legend">Stations officielles · température, pluie et rafales</small></label>
-                  <div class="filter-subgroup official-radar-controls">
-                    <label><input id="filter-official-radar" type="checkbox" /> Radar Météo-France<small class="filter-legend">Pluie mesurée sur 5 minutes · accès Météo-France requis</small></label>
+<div class="filter-subgroup map-source-filters"><label><input id="filter-official-observations" type="checkbox" data-map-layer /> Mesures Météo-France<small class="filter-legend">Stations officielles · température, pluie et rafales</small></label>
+<label>Station ou commune<input id="map-observation-search" type="search" placeholder="Rechercher…" /></label>
+<label>Date des mesures<select id="map-observation-freshness"><option value="all">Toutes les mesures</option><option value="fresh">Mesures récentes</option><option value="stale">Mesures anciennes</option></select></label>
+<label>Mesure disponible<select id="map-observation-measure"><option value="all">Toutes les mesures</option><option value="temperature">Température</option><option value="rain">Pluie</option><option value="wind">Rafales de vent</option></select></label>
+<p id="map-observation-results" class="filter-legend" role="status" aria-live="polite"></p>
+<small class="filter-legend">Les dates et valeurs restent celles des stations officielles.</small></div>
+<div class="filter-subgroup official-radar-controls">
+                    <label><input id="filter-official-radar" type="checkbox" data-map-layer /> Radar Météo-France<small class="filter-legend">Pluie mesurée sur 5 minutes · accès Météo-France requis</small></label>
                     <div id="official-radar-state" aria-live="polite"></div>
                     <label for="official-radar-frame">Image radar<input id="official-radar-frame" type="range" min="0" max="0" value="0" disabled /></label>
                     <button id="official-radar-play" type="button" class="ghost" disabled>Lire l’animation</button>
                     <div id="official-radar-legend" class="official-radar-legend"></div>
                     <div id="official-radar-note"></div>
                   </div>
-                  <label><input id="filter-official-industries" type="checkbox" /> Référentiel officiel ICPE / Seveso<small class="filter-legend">Établissements industriels, sans indication d’incident en cours</small></label>
-                  <label><input id="filter-public-fuel" type="checkbox" /> Stations-service<small class="filter-legend">Prix et ruptures déclarés · filtres dans Sources officielles</small></label>
-                  <label><input id="filter-public-onde" type="checkbox" /> Relevés ONDE<small class="filter-legend">Écoulement et assecs · dates de campagne</small></label>
-                  <label><input id="filter-pcs" type="checkbox" checked /> Communes PCS</label>
-                  <label>
-                    <input id="filter-apic" type="checkbox" checked />
+<label>
+                    <input id="filter-apic" type="checkbox" data-map-layer checked />
                     APIC · pluies intenses en direct
                     <small class="filter-legend">Contour rouge des communes actuellement concernées</small>
                   </label>
-                  <label>
-                    <input id="filter-meteo-cities" type="checkbox" />
+<label>
+                    <input id="filter-meteo-cities" type="checkbox" data-map-layer />
                     🌡️ Météo villes en direct
                     <small class="filter-legend">Température actuelle · Open-Meteo</small>
                   </label>
-                  <select id="filter-meteo-layer-type" aria-label="Choisir le calque météo">
+<select id="filter-meteo-layer-type" aria-label="Choisir le calque météo">
                     <option value="temperature" selected>Température actuelle</option>
                     <option value="heat">Ressenti / chaleur</option>
                     <option value="wind">Vent en ville</option>
@@ -972,9 +978,9 @@
                     <option value="humidity">Humidité</option>
                     <option value="pollution">Pollution / qualité de l'air</option>
                   </select>
-                  <div class="filter-subgroup map-weather-visual-filter">
+<div class="filter-subgroup map-weather-visual-filter">
                     <label for="filter-weather-visual-layer">🛰️ Imagerie météo temps réel</label>
-                    <select id="filter-weather-visual-layer" aria-label="Choisir l'imagerie météo satellite">
+                    <select id="filter-weather-visual-layer" data-map-layer aria-label="Choisir l'imagerie météo satellite">
                       <option value="none" selected>Aucun calque satellite</option>
                       <option value="geocolour">🌍 Satellite couleur jour/nuit</option>
                       <option value="cloudtype">☁️ Types de nuages</option>
@@ -989,49 +995,63 @@
                     <input id="filter-weather-visual-opacity" type="range" min="20" max="100" step="5" value="70" />
                     <small class="filter-legend">Dernière image disponible · EUMETSAT Meteosat</small>
                   </div>
-                  <label>
-                    <input id="filter-flood-zones" type="checkbox" />
+                </div>
+              </details>
+
+              <details id="map-filter-category-water" class="filter-group map-filter-group--water" data-map-filter-category="water">
+                <summary class="filter-group__title">🌊 Eau et cours d’eau</summary>
+                <div class="filter-group__body map-toggle-grid">
+<label><input id="filter-hydro" type="checkbox" data-map-layer checked /> Vigicrues (stations crues)</label>
+<div class="filter-subgroup map-source-filters"><label><input id="filter-public-onde" type="checkbox" data-map-layer /> Relevés ONDE<small class="filter-legend">Écoulement et assecs · dates de campagne</small></label>
+<label>Commune ou cours d’eau<input id="map-onde-search" type="search" placeholder="Rechercher…" /></label>
+<label>Observation de l’écoulement<select id="map-onde-flow"><option value="all">Toutes les observations</option><option value="3">Assec</option><option value="2">Écoulement non visible</option><option value="visible">Écoulement visible</option></select></label>
+<p id="map-onde-results" class="filter-legend" role="status" aria-live="polite"></p>
+<small class="filter-legend">Observations de campagne : consultez la date de chaque relevé.</small></div>
+<label>
+                    <input id="filter-flood-zones" type="checkbox" data-map-layer />
                     Zones inondables détaillées
                     <small class="filter-legend">Zonage PPR + surfaces TRI fréquente / moyenne / rare · Géorisques</small>
                   </label>
-                  <label>
-                    <input id="filter-seismes" type="checkbox" />
+                </div>
+              </details>
+
+              <details id="map-filter-category-risks" class="filter-group map-filter-group--risks" data-map-filter-category="risks">
+                <summary class="filter-group__title">⚠️ Risques et sites sensibles</summary>
+                <div class="filter-group__body map-toggle-grid">
+<div class="filter-subgroup map-source-filters"><label><input id="filter-official-industries" type="checkbox" data-map-layer /> Référentiel officiel ICPE / Seveso<small class="filter-legend">Établissements industriels, sans indication d’incident en cours</small></label>
+<label>Établissement ou commune<input id="map-industry-search" type="search" placeholder="Rechercher…" /></label>
+<label>Classement industriel<select id="map-industry-class"><option value="all">Tous les établissements</option><option value="haut">Seveso seuil haut</option><option value="bas">Seveso seuil bas</option><option value="non_seveso">Autres ICPE non Seveso</option></select></label>
+<p id="map-industry-results" class="filter-legend" role="status" aria-live="polite"></p>
+<small class="filter-legend">Référentiel des établissements ; le classement ne signale pas un incident en cours.</small></div>
+<div class="filter-subgroup">
+                    <label><input id="filter-resources-risks" type="checkbox" data-map-layer /> ⚠️ Sites sensibles</label>
+                    <select id="filter-resources-risks-type" aria-label="Filtrer les sites sensibles">
+                      <option value="all">Tous les types</option>
+                      <option value="lieu_risque">Seveso</option>
+                      <option value="centrale_nucleaire">Nucléaire</option>
+                      <option value="site_sensible_custom">Sites ajoutés</option>
+                    </select>
+                  </div>
+<label>
+                    <input id="filter-seismes" type="checkbox" data-map-layer />
                     🌍 Séismes récents
                     <small class="filter-legend">Magnitude, profondeur et localisation</small>
                   </label>
-                  <label>
-                    <input id="filter-feux-foret" type="checkbox" />
+<label>
+                    <input id="filter-feux-foret" type="checkbox" data-map-layer />
                     🔥 Signalements feux de forêt
                     <small class="filter-legend">Derniers signalements FeuxDeForet.fr en Isère</small>
                   </label>
-                  <label>
-                    <input id="filter-avalanche-zones" type="checkbox" />
-                    ❄️ Zones d'avalanche CLPA
-                    <small class="filter-legend">Carte de localisation des phénomènes · Géorisques</small>
-                  </label>
                 </div>
               </details>
 
-              <!-- Montagne & Aérien -->
-              <details class="filter-group map-filter-group--mountain">
-                <summary class="filter-group__title">🏔️ Montagne &amp; Aérien</summary>
+              <details id="map-filter-category-resources" class="filter-group map-filter-group--resources" data-map-filter-category="resources">
+                <summary class="filter-group__title">🏢 Ressources et accueil</summary>
                 <div class="filter-group__body map-toggle-grid">
-                  <label>
-                    <input id="filter-cols-alpins" type="checkbox" />
-                    ⛰️ Cols alpins
-                    <small class="filter-legend">État &amp; conditions météo · open-meteo.com</small>
-                  </label>
-                </div>
-              </details>
-
-              <!-- Ressources opérationnelles -->
-              <details class="filter-group map-filter-group--resources">
-                <summary class="filter-group__title">🏢 Ressources opérationnelles</summary>
-                <div class="filter-group__body map-toggle-grid">
-                  <label><input id="filter-resources-command" type="checkbox" checked /> 🛰️ Centres de commandement</label>
-
-                  <div class="filter-subgroup">
-                    <label><input id="filter-resources-hosting" type="checkbox" /> 🏟️ Lieux d'accueil hébergeables</label>
+<label><input id="filter-pcs" type="checkbox" data-map-layer checked /> Communes PCS</label>
+<label><input id="filter-resources-command" type="checkbox" data-map-layer checked /> 🛰️ Centres de commandement</label>
+<div class="filter-subgroup">
+                    <label><input id="filter-resources-hosting" type="checkbox" data-map-layer /> 🏟️ Lieux d'accueil hébergeables</label>
                     <select id="filter-resources-hosting-type" aria-label="Filtrer les lieux d'accueil hébergeables">
                       <option value="all">Tous les types</option>
                       <option value="gymnase">Gymnases</option>
@@ -1087,9 +1107,8 @@
                     <p id="hosting-data-status" class="muted" role="status" aria-live="polite">Les lieux officiels se chargent à l’ouverture de la carte.</p>
                     <button id="hosting-data-retry" type="button" class="ghost">Actualiser les lieux</button>
                   </div>
-
-                  <div class="filter-subgroup">
-                    <label><input id="filter-resources-schools" type="checkbox" /> 🎒 Écoles</label>
+<div class="filter-subgroup">
+                    <label><input id="filter-resources-schools" type="checkbox" data-map-layer /> 🎒 Écoles</label>
                     <select id="filter-resources-schools-type" aria-label="Filtrer les établissements scolaires">
                       <option value="all">Tous les types</option>
                       <option value="ecole_primaire">Écoles primaires</option>
@@ -1099,9 +1118,8 @@
                       <option value="creche">Crèches</option>
                     </select>
                   </div>
-
-                  <div class="filter-subgroup">
-                    <label><input id="filter-resources-security" type="checkbox" /> 👮 Police &amp; Gendarmerie</label>
+<div class="filter-subgroup">
+                    <label><input id="filter-resources-security" type="checkbox" data-map-layer /> 👮 Police &amp; Gendarmerie</label>
                     <select id="filter-resources-security-type" aria-label="Filtrer les forces de sécurité">
                       <option value="all">Tous les types</option>
                       <option value="gendarmerie">Gendarmeries</option>
@@ -1109,63 +1127,36 @@
                       <option value="police_municipale">Police municipale</option>
                     </select>
                   </div>
-
-                  <label><input id="filter-resources-fire" type="checkbox" /> 🚒 Casernes de pompiers</label>
-
-                  <div class="filter-subgroup">
-                    <label><input id="filter-resources-health" type="checkbox" /> 🏥 Santé FINESS (Isère)</label>
+<label><input id="filter-resources-fire" type="checkbox" data-map-layer /> 🚒 Casernes de pompiers</label>
+<div class="filter-subgroup">
+                    <label><input id="filter-resources-health" type="checkbox" data-map-layer /> 🏥 Santé FINESS (Isère)</label>
                     <select id="filter-resources-health-type" aria-label="Filtrer les établissements de santé">
                       <option value="all">Toutes les catégories FINESS</option>
                     </select>
                   </div>
-
-                  <label><input id="filter-resources-dae" type="checkbox" /> ⚡ Défibrillateurs DAE</label>
-
-                  <div class="filter-subgroup">
-                    <label><input id="filter-resources-transport" type="checkbox" /> 🚉 Transports</label>
-                    <select id="filter-resources-transport-type" aria-label="Filtrer les transports">
-                      <option value="all">Tous les types</option>
-                      <option value="transport_gare_sncf">Gares SNCF</option>
-                      <option value="transport_gare_routiere">Gares routières</option>
-                      <option value="transport_aeroport">Aéroports</option>
-                    </select>
-                  </div>
-
-                  <div class="filter-subgroup">
-                    <label><input id="filter-resources-telecom" type="checkbox" /> 📡 Télécom (ANFR / ARCEP)</label>
+<label><input id="filter-resources-dae" type="checkbox" data-map-layer /> ⚡ Défibrillateurs DAE</label>
+<div class="filter-subgroup">
+                    <label><input id="filter-resources-telecom" type="checkbox" data-map-layer /> 📡 Télécom (ANFR / ARCEP)</label>
                     <select id="filter-resources-telecom-type" aria-label="Filtrer les ressources télécom" disabled>
                       <option value="all">Tous les types</option>
                       <option value="anfr_antenna">Antennes ANFR</option>
                       <option value="arcep_mobile_outage">Sites indisponibles ARCEP</option>
                     </select>
                   </div>
-
-                  <div class="filter-subgroup">
-                    <label><input id="filter-agents" type="checkbox" checked /> 🧑‍🚒 Agents terrain</label>
+<div class="filter-subgroup">
+                    <label><input id="filter-agents" type="checkbox" data-map-layer checked /> 🧑‍🚒 Agents terrain</label>
                     <span id="filter-agents-status" style="font-size:.75rem;display:block;margin-top:2px"></span>
                     <button id="filter-agents-refresh" type="button" class="ghost map-btn-lite" style="margin-top:4px;font-size:.75rem">↺ Rafraîchir maintenant</button>
                   </div>
-
-                  <label><input id="filter-resources-protcivile" type="checkbox" checked /> 🔺 Antennes Protection Civile</label>
-
-                  <div class="filter-subgroup">
-                    <label><input id="filter-resources-risks" type="checkbox" /> ⚠️ Sites sensibles</label>
-                    <select id="filter-resources-risks-type" aria-label="Filtrer les sites sensibles">
-                      <option value="all">Tous les types</option>
-                      <option value="lieu_risque">Seveso</option>
-                      <option value="centrale_nucleaire">Nucléaire</option>
-                      <option value="site_sensible_custom">Sites ajoutés</option>
-                    </select>
-                  </div>
+<label><input id="filter-resources-protcivile" type="checkbox" data-map-layer checked /> 🔺 Antennes Protection Civile</label>
                 </div>
               </details>
 
-              <!-- Trafic & Mobilité -->
-              <details class="filter-group map-filter-group--traffic" open>
-                <summary class="filter-group__title">🚦 Trafic &amp; Mobilité</summary>
+              <details id="map-filter-category-traffic" class="filter-group map-filter-group--traffic" data-map-filter-category="traffic">
+                <summary class="filter-group__title">🚦 Déplacements et carburants</summary>
                 <div class="filter-group__body map-toggle-grid">
-                  <label><input id="filter-cameras" type="checkbox" checked /> 📷 Caméras terrain</label>
-                  <label><input id="filter-traffic-incidents" type="checkbox" checked /> 🚨 Itinisère + Bison Futé</label>
+<label><input id="filter-cameras" type="checkbox" data-map-layer checked /> 📷 Caméras terrain</label>
+                  <label><input id="filter-traffic-incidents" type="checkbox" data-map-layer checked /> 🚨 Itinisère + Bison Futé</label>
                   <select id="filter-bison-type" aria-label="Filtrer les événements trafic">
                     <option value="all" selected>Tout (Itinisère + Bison Futé)</option>
                     <option value="itinisere">Itinisère (tout)</option>
@@ -1173,7 +1164,7 @@
                     <option value="accident">Accidents</option>
                     <option value="danger">Dangers</option>
                   </select>
-                  <label><input id="filter-autoroutes" type="checkbox" checked /> 🛣️ Autoroutes Isère</label>
+                  <label><input id="filter-autoroutes" type="checkbox" data-map-layer checked /> 🛣️ Autoroutes Isère</label>
                   <select id="filter-autoroutes-type" aria-label="Filtrer les incidents autoroutes">
                     <option value="all" selected>Tout (Bison + APRR + Vinci)</option>
                     <option value="accident">Accidents</option>
@@ -1181,17 +1172,47 @@
                     <option value="perturbation">Perturbations</option>
                     <option value="inconnu">Autres</option>
                   </select>
-                  <label><input id="filter-pr-autoroutes" type="checkbox" /> 📍 Points de repère (PR km)</label>
-                  <label><input id="filter-google-traffic-flow" type="checkbox" /> 🛣️ Trafic continu (style Google Maps)</label>
-                  <label><input id="filter-tchoo-trains" type="checkbox" /> 🚆 Trains Carto Tchoo</label>
+                  <label><input id="filter-pr-autoroutes" type="checkbox" data-map-layer /> 📍 Points de repère (PR km)</label>
+                  <label><input id="filter-google-traffic-flow" type="checkbox" data-map-layer /> 🛣️ Trafic continu (style Google Maps)</label>
+                  <label><input id="filter-tchoo-trains" type="checkbox" data-map-layer /> 🚆 Trains Carto Tchoo</label>
+<div class="filter-subgroup">
+                    <label><input id="filter-resources-transport" type="checkbox" data-map-layer /> 🚉 Transports</label>
+                    <select id="filter-resources-transport-type" aria-label="Filtrer les transports">
+                      <option value="all">Tous les types</option>
+                      <option value="transport_gare_sncf">Gares SNCF</option>
+                      <option value="transport_gare_routiere">Gares routières</option>
+                      <option value="transport_aeroport">Aéroports</option>
+                    </select>
+                  </div>
+<div class="filter-subgroup map-source-filters"><label><input id="filter-public-fuel" type="checkbox" data-map-layer /> Stations-service<small class="filter-legend">Prix et ruptures déclarés</small></label>
+<label>Commune ou adresse<input id="map-fuel-search" type="search" placeholder="Rechercher…" /></label>
+<label>Carburant<select id="map-fuel-type"><option value="all">Tous les carburants</option><option value="Gazole">Gazole</option><option value="SP95">SP95</option><option value="E10">E10</option><option value="SP98">SP98</option><option value="E85">E85</option><option value="GPLc">GPLc</option></select></label>
+<label>Déclaration<select id="map-fuel-shortage"><option value="all">Toutes les déclarations</option><option value="temporary">Rupture temporaire déclarée</option><option value="priced">Prix déclaré, sans rupture signalée</option></select></label>
+<p id="map-fuel-results" class="filter-legend" role="status" aria-live="polite"></p>
+<small class="filter-legend">Prix et ruptures déclarés ; le stock disponible doit être confirmé.</small></div>
                 </div>
               </details>
 
-              <!-- Outils terrain -->
-              <details class="filter-group map-filter-group--tools" open>
+              <details id="map-filter-category-mountain" class="filter-group map-filter-group--mountain" data-map-filter-category="mountain">
+                <summary class="filter-group__title">🏔️ Montagne</summary>
+                <div class="filter-group__body map-toggle-grid">
+<label>
+                    <input id="filter-cols-alpins" type="checkbox" data-map-layer />
+                    ⛰️ Cols alpins
+                    <small class="filter-legend">État &amp; conditions météo · open-meteo.com</small>
+                  </label>
+<label>
+                    <input id="filter-avalanche-zones" type="checkbox" data-map-layer />
+                    ❄️ Zones d'avalanche CLPA
+                    <small class="filter-legend">Carte de localisation des phénomènes · Géorisques</small>
+                  </label>
+                </div>
+              </details>
+
+              <details id="map-filter-category-tools" class="filter-group map-filter-group--tools" data-map-filter-category="tools">
                 <summary class="filter-group__title">🛠️ Outils terrain</summary>
-                <div class="filter-group__body">
-                  <div class="map-tool-section">
+                <div class="filter-group__body map-toggle-grid">
+<div class="map-tool-section">
                     <div class="map-tool-section__title">Analyse &amp; briefing</div>
                   <div class="filter-tool-row">
                     <button id="map-zone-impact-start" type="button" class="ghost map-btn-lite">🧭 Analyser une zone</button>
@@ -1283,25 +1304,25 @@
                 </div>
               </details>
 
-              <!-- Feedback & coordonnées -->
-              <p id="map-feedback" class="muted map-feedback-bar"></p>
-              <div id="map-selected-location" class="map-selected-location" hidden>
-                <p class="muted">📍 <strong id="map-selected-coords">-</strong></p>
-                <a id="map-open-google-maps" class="ghost map-btn-lite" href="#" target="_blank" rel="noreferrer noopener">🗺️ Google Maps</a>
-                <button id="map-open-streetview" type="button" class="ghost map-btn-lite">👁️ Street View</button>
-              </div>
-
-              <!-- POI et formes -->
-              <details class="filter-group map-filter-group--lists">
+              <details id="map-filter-category-lists" class="filter-group map-filter-group--lists" data-map-filter-category="lists">
                 <summary class="filter-group__title">📍 POI et formes</summary>
-                <div class="filter-group__body">
-                  <p class="muted map-poi-shapes-note">Centrez ou supprimez les POI et formes dessinées.</p>
+                <div class="filter-group__body map-toggle-grid">
+<p class="muted map-poi-shapes-note">Centrez ou supprimez les POI et formes dessinées.</p>
                   <h5 class="map-poi-shapes-title">POI</h5>
                   <ul id="custom-points-list" class="list compact resources-sidebar-list"></ul>
                   <h5 class="map-poi-shapes-title">Formes</h5>
                   <ul id="map-annotations-list" class="list compact resources-sidebar-list"></ul>
                 </div>
               </details>
+
+              </div>
+
+<p id="map-feedback" class="muted map-feedback-bar"></p>
+<div id="map-selected-location" class="map-selected-location" hidden>
+                <p class="muted">📍 <strong id="map-selected-coords">-</strong></p>
+                <a id="map-open-google-maps" class="ghost map-btn-lite" href="#" target="_blank" rel="noreferrer noopener">🗺️ Google Maps</a>
+                <button id="map-open-streetview" type="button" class="ghost map-btn-lite">👁️ Street View</button>
+              </div>
 
             </aside>
 
@@ -1673,9 +1694,10 @@
   <svg aria-hidden="true" width="0" height="0" focusable="false" style="position:absolute">
     <path id="isere-shape" d="M0 0h1v1H0z"></path>
   </svg>
-  <script defer src="/official_sources.js?v=20261020"></script>
-  <script defer src="/public_sources.js?v=20261020"></script>
+  <script defer src="/official_sources.js?v=20261021-map-menu"></script>
+  <script defer src="/public_sources.js?v=20261021-map-menu"></script>
   <script defer src="/api_credentials.js?v=20261020"></script>
-  <script defer src="/script.js?v=20261021-hosting"></script>
+  <script defer src="/map_filters.js?v=20261021-map-menu"></script>
+  <script defer src="/script.js?v=20261021-map-menu"></script>
 </body>
 </html>

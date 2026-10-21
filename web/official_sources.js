@@ -13,6 +13,34 @@
   const note = (text) => `<p class="muted">${esc(text)}</p>`;
   const safeUrl = (value) => { try { const u = new URL(value); return u.protocol === 'https:' ? u.href : ''; } catch (_) { return ''; } };
   const link = (url, label) => safeUrl(url) ? `<a href="${esc(safeUrl(url))}" target="_blank" rel="noopener noreferrer">${esc(label)} ↗</a>` : '';
+  const normal = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLocaleLowerCase('fr');
+  const coordinates = (row) => finite(row.lat) && finite(row.lon) && Math.abs(Number(row.lat)) <= 90 && Math.abs(Number(row.lon)) <= 180;
+
+  function observationRows() {
+    const query = normal(el('map-observation-search')?.value);
+    const freshness = el('map-observation-freshness')?.value || 'all';
+    const measure = el('map-observation-measure')?.value || 'all';
+    return (state.snapshot.meteo_observations?.stations || []).filter((station) => {
+      const dated = Boolean(station.observed_at && Number.isFinite(Date.parse(station.observed_at)));
+      const matchesFreshness = freshness === 'all' || dated && (freshness === 'stale' ? station.stale === true : !station.stale);
+      const matchesMeasure = measure === 'all' || measure === 'rain' && finite(station.rain_6m_mm)
+        || measure === 'wind' && finite(station.gust_kmh) || measure === 'temperature' && finite(station.temperature_c);
+      return normal(`${station.name || ''} ${station.id || ''} ${station.commune || ''}`).includes(query) && matchesFreshness && matchesMeasure;
+    });
+  }
+
+  function industryRows() {
+    const query = normal(el('official-industry-search')?.value ?? el('map-industry-search')?.value);
+    const selected = el('official-industry-filter')?.value || el('map-industry-class')?.value || 'all';
+    const classification = selected === 'non_seveso' ? 'non' : selected;
+    return (state.snapshot.industrial_sites?.sites || []).filter((site) => (classification === 'all' || site.seveso === classification)
+      && normal(`${site.nom || ''} ${site.commune || ''} ${site.code_insee || ''}`).includes(query));
+  }
+
+  function mapCount(id, rows, total) {
+    const node = el(id);
+    if (node) node.textContent = `${rows.filter(coordinates).length} point(s) affichable(s) · ${rows.length}/${total} résultat(s)`;
+  }
 
   function status(slot = {}) {
     const names = { online: 'Disponible', partial: 'Couverture partielle', stale: 'Dernières données connues', degraded: 'Service dégradé', pending: 'Collecte en cours', idle: 'En attente', unavailable: 'Indisponible', error: 'Indisponible', configuration_required: 'Accès à configurer', config_required: 'Accès à configurer', access_required: 'Accès partenaire requis', no_forecast: 'Aucune prévision publiée' };
@@ -58,13 +86,14 @@
 
   function renderObservations() {
     const data = state.snapshot.meteo_observations || {};
-    const stations = Array.isArray(data.stations) ? data.stations : [];
+    const all = Array.isArray(data.stations) ? data.stations : [];
+    const stations = observationRows();
     options(el('official-observation-station'), stations, (s) => s.id, (s) => `${s.name} · ${s.stale ? 'ancienne mesure' : when(s.observed_at)}`);
     const summaries = data.summary || {};
-    put('official-observation-summary', stations.length ? `<div class="official-kpis"><span><strong>${fmt(summaries.fresh_stations ?? stations.filter((s) => !s.stale && s.observed_at).length)}</strong> stations récentes</span><span><strong>${fmt(summaries.max_rain_6m_mm, 'mm/6 min')}</strong> pluie maximale</span><span><strong>${fmt(summaries.max_gust_kmh, 'km/h')}</strong> rafale maximale</span></div>` : note(data.info_state || status(data)));
+    put('official-observation-summary', all.length ? `<div class="official-kpis"><span><strong>${fmt(summaries.fresh_stations ?? all.filter((s) => !s.stale && s.observed_at && Number.isFinite(Date.parse(s.observed_at))).length)}</strong> stations récentes</span><span><strong>${fmt(summaries.max_rain_6m_mm, 'mm/6 min')}</strong> pluie maximale</span><span><strong>${fmt(summaries.max_gust_kmh, 'km/h')}</strong> rafale maximale</span></div>` : note(data.info_state || status(data)));
     const rows = stations.map((s) => `<tr><th scope="row">${esc(s.name || s.id)}</th><td>${esc(when(s.observed_at))}${s.stale ? ' · ancienne' : ''}</td><td>${esc(fmt(s.temperature_c, '°C'))}</td><td>${esc(fmt(s.rain_6m_mm, 'mm'))}</td><td>${esc(fmt(s.gust_kmh, 'km/h'))}</td></tr>`).join('');
-    put('official-observation-table', stations.length ? `<table><caption>Mesures des stations — pluie sur six minutes, rafale maximale</caption><thead><tr><th>Station</th><th>Observation</th><th>Température</th><th>Pluie / 6 min</th><th>Rafale</th></tr></thead><tbody>${rows}</tbody></table>` : note('Les mesures apparaîtront après activation de l’accès Météo-France. Les prévisions météo habituelles restent disponibles.'));
-    put('official-weather-inline', stations.length ? `<strong>Mesures officielles : ${stations.length} station(s)</strong><p>Pluie max. ${esc(fmt(summaries.max_rain_6m_mm, 'mm/6 min'))} · Rafale max. ${esc(fmt(summaries.max_gust_kmh, 'km/h'))}</p><button type="button" class="ghost" data-open-official>Voir les observations et le radar</button>` : `<strong>Observations et radar Météo-France</strong>${note(data.info_state || status(data))}<button type="button" class="ghost" data-open-official>Consulter les sources officielles</button>`);
+    put('official-observation-table', stations.length ? `<table><caption>${stations.length} station(s) selon les filtres de la carte — pluie sur six minutes, rafale maximale</caption><thead><tr><th>Station</th><th>Observation</th><th>Température</th><th>Pluie / 6 min</th><th>Rafale</th></tr></thead><tbody>${rows}</tbody></table>` : note(all.length ? 'Aucune station correspondant aux filtres de la carte.' : 'Les mesures apparaîtront après activation de l’accès Météo-France. Les prévisions météo habituelles restent disponibles.'));
+    put('official-weather-inline', all.length ? `<strong>Mesures officielles : ${all.length} station(s)</strong><p>Pluie max. ${esc(fmt(summaries.max_rain_6m_mm, 'mm/6 min'))} · Rafale max. ${esc(fmt(summaries.max_gust_kmh, 'km/h'))}</p><button type="button" class="ghost" data-open-official>Voir les observations et le radar</button>` : `<strong>Observations et radar Météo-France</strong>${note(data.info_state || status(data))}<button type="button" class="ghost" data-open-official>Consulter les sources officielles</button>`);
     // History is read only when this panel is visible, never during bootstrap.
     if (activePanel() === 'official-sources-panel' && stations.length) loadHistory();
   }
@@ -129,10 +158,8 @@
 
   function renderIndustries() {
     const slot = state.snapshot.industrial_sites || {};
-    const query = (el('official-industry-search')?.value || '').trim().toLocaleLowerCase('fr');
-    const classification = el('official-industry-filter')?.value || 'all';
     const all = Array.isArray(slot.sites) ? slot.sites : [];
-    const filtered = all.filter((s) => (classification === 'all' || s.seveso === classification) && `${s.nom} ${s.commune} ${s.code_insee}`.toLocaleLowerCase('fr').includes(query));
+    const filtered = industryRows();
     put('official-industry-summary', `<p>${all.length ? `${fmt(all.length)} établissements · ${fmt(slot.seveso_haut_total || 0)} Seveso seuil haut · ${fmt(slot.seveso_bas_total || 0)} seuil bas` : esc(slot.info_state || status(slot))}</p>${note('Référentiel des établissements, sans indication d’incident en cours. Les sites officiels complètent aussi l’analyse de zone.')}`);
     put('official-industry-table', filtered.length ? `<table><caption>${filtered.length} établissement(s) correspondant aux filtres</caption><thead><tr><th>Établissement</th><th>Commune</th><th>Classement</th><th>Activité</th></tr></thead><tbody>${filtered.slice(0, 250).map((s) => `<tr><th scope="row">${link(s.source_url, s.nom) || esc(s.nom)}</th><td>${esc(s.commune)}</td><td>${esc(s.seveso_label || s.regime)}</td><td>${esc(s.activite || s.etat_activite || 'Non renseignée')}</td></tr>`).join('')}</tbody></table>${filtered.length > 250 ? note('Affichage limité aux 250 premiers résultats. Affiner la recherche.') : ''}` : note(all.length ? 'Aucun établissement correspondant aux filtres.' : 'Le référentiel sera disponible après sa collecte en arrière-plan.'));
   }
@@ -200,23 +227,26 @@
     if (activePanel() !== 'map-panel') { stopAnimation(); ++state.radarVersion; return; }
     const obsEnabled = Boolean(el('filter-official-observations')?.checked);
     const industriesEnabled = Boolean(el('filter-official-industries')?.checked);
-    const obsSignature = `${obsEnabled}:${state.signatures.meteo_observations || ''}`;
-    const industrySignature = `${industriesEnabled}:${state.signatures.industrial_sites || ''}`;
+    const observations = observationRows(), industries = industryRows();
+    mapCount('map-observation-results', observations, state.snapshot.meteo_observations?.stations?.length || 0);
+    mapCount('map-industry-results', industries, state.snapshot.industrial_sites?.sites?.length || 0);
+    const obsSignature = `${obsEnabled}:${state.signatures.meteo_observations || ''}:${['map-observation-search', 'map-observation-freshness', 'map-observation-measure'].map((id) => el(id)?.value || '').join('|')}`;
+    const industrySignature = `${industriesEnabled}:${state.signatures.industrial_sites || ''}:${['official-industry-search', 'official-industry-filter', 'map-industry-search', 'map-industry-class'].map((id) => el(id)?.value || '').join('|')}`;
     const observationsChanged = obsSignature !== state.layerSignatures.observations;
     const industriesChanged = industrySignature !== state.layerSignatures.industries;
     if (observationsChanged) removeLayer('observations');
     if (industriesChanged) removeLayer('industries');
     if (observationsChanged && obsEnabled) {
       const layer = window.L.layerGroup();
-      (state.snapshot.meteo_observations?.stations || []).filter((s) => finite(s.lat) && finite(s.lon)).forEach((s) => {
-        window.L.circleMarker([s.lat, s.lon], { radius: 6, color: '#fff', weight: 2, fillColor: s.stale ? '#888' : '#087f8c', fillOpacity: 0.95 })
+      observations.filter(coordinates).forEach((s) => {
+        window.L.circleMarker([s.lat, s.lon], { radius: 6, color: '#fff', weight: 2, fillColor: !s.observed_at || !Number.isFinite(Date.parse(s.observed_at)) || s.stale ? '#888' : '#087f8c', fillOpacity: 0.95 })
           .bindPopup(`<strong>${esc(s.name)}</strong><p>${esc(when(s.observed_at))}${s.stale ? ' · ancienne mesure' : ''}</p><p>${esc(fmt(s.temperature_c, '°C'))} · Pluie ${esc(fmt(s.rain_6m_mm, 'mm/6 min'))} · Rafale ${esc(fmt(s.gust_kmh, 'km/h'))}</p>`).addTo(layer);
       });
       layer.addTo(state.map); state.layers.observations = layer;
     }
     if (industriesChanged && industriesEnabled) {
       const layer = window.L.layerGroup();
-      (state.snapshot.industrial_sites?.sites || []).filter((s) => finite(s.lat) && finite(s.lon)).forEach((s) => {
+      industries.filter(coordinates).forEach((s) => {
         window.L.circleMarker([s.lat, s.lon], { radius: s.seveso === 'haut' ? 8 : 5, color: '#fff', weight: 1, fillColor: s.seveso === 'haut' ? '#a12636' : s.seveso === 'bas' ? '#d17b12' : '#655491', fillOpacity: 0.9 })
           .bindPopup(`<strong>${esc(s.nom)}</strong><p>${esc(s.commune)} · ${esc(s.seveso_label || s.regime)}</p><p>${esc(s.adresse || '')}</p>${note('Référentiel industriel, sans indication d’incident en cours.')}${link(s.source_url, 'Fiche officielle')}`).addTo(layer);
       });
@@ -232,6 +262,7 @@
     if (state.timer) { stopAnimation(); return; }
     if ((state.snapshot.meteo_radar?.frames || []).length < 2) return;
     if (el('filter-official-radar')) el('filter-official-radar').checked = true;
+    window.MapFilters?.refresh();
     if (typeof setActivePanel === 'function') setActivePanel('map-panel');
     if (el('official-radar-play')) el('official-radar-play').textContent = 'Pause';
     state.timer = setInterval(() => {
@@ -266,12 +297,30 @@
     Object.keys(state.layers).forEach(removeLayer);
     state.frameUrls.forEach((url) => { if (typeof url === 'string') URL.revokeObjectURL(url); });
     state.frameUrls.clear(); state.snapshot = {}; state.signatures = {}; state.layerSignatures = {}; state.map = null;
+    ['map-observation-search', 'map-industry-search', 'official-industry-search'].forEach((id) => { if (el(id)) el(id).value = ''; });
+    ['map-observation-freshness', 'map-observation-measure', 'map-industry-class', 'official-industry-filter'].forEach((id) => { if (el(id)) el(id).value = 'all'; });
+    ['map-observation-results', 'map-industry-results'].forEach((id) => { if (el(id)) el(id).textContent = ''; });
   }
 
   function bind() {
     ['official-observation-station', 'official-observation-metric'].forEach((id) => el(id)?.addEventListener('change', loadHistory));
     ['official-forecast-station', 'official-forecast-variable'].forEach((id) => el(id)?.addEventListener('change', renderForecasts));
-    ['official-industry-search', 'official-industry-filter'].forEach((id) => el(id)?.addEventListener('input', renderIndustries));
+    [['official-industry-search', 'map-industry-search'], ['official-industry-filter', 'map-industry-class']].forEach((ids) => ids.forEach((id) => {
+      const change = () => {
+        const other = el(ids.find((otherId) => otherId !== id));
+        let value = el(id).value;
+        if (id === 'map-industry-class' && value === 'non_seveso') value = 'non';
+        if (id === 'official-industry-filter' && value === 'non') value = 'non_seveso';
+        if (other) other.value = value;
+        renderIndustries(); syncMap();
+      };
+      ['input', 'change'].forEach((event) => el(id)?.addEventListener(event, change));
+    }));
+    if (el('map-industry-search') && el('official-industry-search')) el('official-industry-search').value = el('map-industry-search').value;
+    if (el('map-industry-class') && el('official-industry-filter')) el('official-industry-filter').value = el('map-industry-class').value === 'non_seveso' ? 'non' : el('map-industry-class').value || 'all';
+    ['map-observation-search', 'map-observation-freshness', 'map-observation-measure'].forEach((id) => {
+      ['input', 'change'].forEach((event) => el(id)?.addEventListener(event, () => { renderObservations(); syncMap(); }));
+    });
     ['filter-official-observations', 'filter-official-industries', 'filter-official-radar'].forEach((id) => el(id)?.addEventListener('change', () => {
       if (id === 'filter-official-radar' && !el(id).checked) stopAnimation();
       syncMap();
