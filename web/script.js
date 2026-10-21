@@ -10208,6 +10208,11 @@ function shouldPreferBrowserRoute(payload = {}) {
   return provider === 'local' || !hasDetailedRoutePolyline(payload);
 }
 
+function routeProviderWarning(payload = {}) {
+  const message = payload.tomtom_error || payload.backend_fallback?.tomtom_error;
+  return message ? sanitizeErrorMessage(message) : '';
+}
+
 function buildRouteInfoHtml(route = {}) {
   const payload = route.payload || {};
   const duration = formatDurationSeconds(payload.duration_seconds);
@@ -10215,8 +10220,10 @@ function buildRouteInfoHtml(route = {}) {
   const source = payload.source || 'Source inconnue';
   const delay = Number(payload.traffic_delay_seconds || 0);
   const delayText = delay > 0 ? `<br>Retard estime: ${escapeHtml(formatDurationSeconds(delay))}` : '';
+  const warning = routeProviderWarning(payload);
+  const warningText = warning ? `<br><span style="color:#9b1c1c">${escapeHtml(warning)}</span>` : '';
   const errorText = route.error ? `<br><span style="color:#9b1c1c">${escapeHtml(sanitizeErrorMessage(route.error))}</span>` : '';
-  return `<strong>Trajet ${escapeHtml(String(routeDisplayIndex(route)))}</strong><br>${escapeHtml(duration)} - ${escapeHtml(distance)}<br>${escapeHtml(source)}${delayText}${errorText}`;
+  return `<strong>Trajet ${escapeHtml(String(routeDisplayIndex(route)))}</strong><br>${escapeHtml(duration)} - ${escapeHtml(distance)}<br>${escapeHtml(source)}${delayText}${warningText}${errorText}`;
 }
 
 function renderRouteEstimate(payload = {}) {
@@ -10245,10 +10252,12 @@ function renderRouteEstimate(payload = {}) {
   const eventText = nearbyEvents.length
     ? `<br><span class="muted">${nearbyEvents.slice(0, 2).map((event) => escapeHtml(event.title || event.category || 'Perturbation')).join(' / ')}</span>`
     : '';
+  const warning = routeProviderWarning(payload);
+  const warningText = warning ? `<br><span style="color:#9b1c1c">${escapeHtml(warning)}</span>` : '';
   setRouteSummary(`
     <strong>${escapeHtml(duration)}</strong> - ${escapeHtml(distance)}<br>
     <span>${escapeHtml(delayText)}</span><br>
-    <span class="muted">Source: ${escapeHtml(source)} - MAJ ${escapeHtml(updatedLabel)} - auto 60 s</span>${altText}${eventText}
+    <span class="muted">Source: ${escapeHtml(source)} - MAJ ${escapeHtml(updatedLabel)} - auto 60 s</span>${altText}${eventText}${warningText}
   `);
 }
 
@@ -10292,21 +10301,28 @@ async function fetchBestRoutePayload(start, end) {
     end_lat: String(end.lat),
     end_lon: String(end.lon),
   });
+  let payload;
   try {
-    const payload = await api(`/api/routes/estimate?${params.toString()}`, {
+    payload = await api(`/api/routes/estimate?${params.toString()}`, {
       bypassCache: true,
       cacheTtlMs: 0,
       timeoutMs: API_SLOW_ENDPOINT_TIMEOUT_MS,
       maxRetries: 1,
     });
-    if (!shouldPreferBrowserRoute(payload)) return payload;
-    const browserPayload = await fetchClientOsrmRoute(start, end);
-    browserPayload.backend_fallback = payload;
-    return browserPayload;
   } catch (error) {
     const browserPayload = await fetchClientOsrmRoute(start, end);
     browserPayload.backend_error = sanitizeErrorMessage(error.message || 'Backend trajet indisponible');
     return browserPayload;
+  }
+  if (!shouldPreferBrowserRoute(payload)) return payload;
+  try {
+    const browserPayload = await fetchClientOsrmRoute(start, end);
+    browserPayload.backend_fallback = payload;
+    const warning = routeProviderWarning(payload);
+    if (warning) browserPayload.tomtom_error = warning;
+    return browserPayload;
+  } catch (_) {
+    return payload;
   }
 }
 

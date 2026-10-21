@@ -76,7 +76,10 @@ def _http_bytes(url, headers, deadline):
         if declared is not None and (int(declared) < 0 or int(declared) > MAX_RESPONSE_BYTES):
             raise _ProbeFailure("invalid_response")
         chunks, size = [], 0
-        while True:
+        # read1() closes a Content-Length response as soon as the final bytes
+        # arrive. With Connection: close this also closes the detached socket;
+        # do not reset its timeout or attempt an extra read after completion.
+        while response.length != 0:
             timeout = _remaining(deadline)
             if transport_socket is not None:
                 transport_socket.settimeout(timeout)

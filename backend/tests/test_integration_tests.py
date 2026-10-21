@@ -1,6 +1,7 @@
 """Credential probes never need real credentials or network access in tests."""
 
 import importlib.util
+import io
 import json
 from pathlib import Path
 import unittest
@@ -193,6 +194,33 @@ class IntegrationTestsTests(unittest.TestCase):
         with patch.object(module.http.client, "HTTPSConnection", return_value=connection):
             self.assertEqual(module._http_bytes("https://api.tomtom.com/test", {}, module.monotonic() + 14), b"{}")
         self.assertGreaterEqual(transport_socket.settimeout.call_count, 3)
+
+    def test_complete_content_length_response_does_not_touch_closed_socket(self):
+        # Use the real HTTP parser: read1() closes the body/socket as soon as
+        # Content-Length is consumed, before a subsequent empty read is needed.
+        wire_socket = Mock()
+        wire_socket.makefile.return_value = io.BytesIO(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}"
+        )
+        response = module.http.client.HTTPResponse(wire_socket)
+        response.begin()
+        connection = Mock()
+        transport_socket = connection.sock
+
+        def set_timeout(_timeout):
+            if response.isclosed():
+                raise OSError("Socket closed after complete response")
+
+        def detach_socket():
+            connection.sock = None
+            return response
+
+        transport_socket.settimeout.side_effect = set_timeout
+        connection.getresponse.side_effect = detach_socket
+        with patch.object(module.http.client, "HTTPSConnection", return_value=connection):
+            self.assertEqual(module._http_bytes("https://api.tomtom.com/test", {}, module.monotonic() + 14), b"{}")
+        self.assertTrue(response.isclosed())
+        self.assertEqual(transport_socket.settimeout.call_count, 2)
 
 
 if __name__ == "__main__":
