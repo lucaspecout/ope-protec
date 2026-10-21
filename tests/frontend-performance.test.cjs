@@ -57,6 +57,7 @@ function refreshHarness(overrides = {}) {
     } },
     refreshAllInFlight: null,
     initialServerSnapshotReady: false,
+    situationRenderBatchDepth: 0, situationRenderPending: false,
     cachedExternalRisksSnapshot: {},
     _serverSnapshotSyncing: false,
     _liveEventsFailCount: 3,
@@ -94,6 +95,7 @@ function refreshHarness(overrides = {}) {
     sanitizeErrorMessage: (message) => message,
     ...overrides,
   });
+  loadFunction(context, 'withBatchedSituationRendering');
   loadFunction(context, 'loadOperationsBootstrap');
   loadFunction(context, 'refreshAll');
   return { context, calls, payload };
@@ -287,6 +289,7 @@ test('session starts one refresh and SSE immediately; polling waits for bootstra
     localStorage: { getItem: () => 'situation-panel' },
     roleLabel: (role) => role,
     refreshAll: () => { calls.push(['refresh']); return initialRefresh.promise; },
+    withBatchedSituationRendering: (fn) => fn(),
     isTransientBackendError: () => false,
     sanitizeErrorMessage: (message) => message,
   });
@@ -339,4 +342,130 @@ test('navigation and focus refresh read snapshots without forcing external provi
   assert.deepEqual(calls.map(([name]) => name), ['dashboard', 'risks']);
   await context.refreshActivePanelData();
   assert.deepEqual(calls.map(([name]) => name), ['dashboard', 'risks', 'dashboard']);
+});
+
+test('bootstrap draws Situation once with all datasets applied', async () => {
+  const { context, calls } = refreshHarness();
+  let draws = 0;
+  context._renderSituationOverview = () => { draws += 1; };
+  loadFunction(context, 'renderSituationOverview');
+  for (const name of ['renderDashboard', 'renderExternalRisks', 'loadEvents', 'loadLogs']) {
+    context[name] = () => context.renderSituationOverview();
+  }
+  await context.loadOperationsBootstrap();
+  assert.equal(draws, 1, 'dashboard, external risks and logs share one Situation render');
+  assert.equal(context.situationRenderBatchDepth, 0);
+  assert.equal(context.situationRenderPending, false);
+  assert.equal(calls.filter(([name]) => name === 'users').length, 1);
+  context.renderSituationOverview();
+  assert.equal(draws, 2, 'later live updates still render immediately');
+});
+
+test('nested Situation batches release rendering after sync and async failures', async () => {
+  const draws = [];
+  const context = vm.createContext({
+    situationRenderBatchDepth: 0, situationRenderPending: false,
+    _renderSituationOverview: () => draws.push('draw'),
+  });
+  loadFunction(context, 'withBatchedSituationRendering');
+  loadFunction(context, 'renderSituationOverview');
+  assert.throws(() => context.withBatchedSituationRendering(() => {
+    context.renderSituationOverview();
+    context.withBatchedSituationRendering(() => context.renderSituationOverview());
+    throw new Error('sync failure');
+  }), /sync failure/);
+  assert.equal(draws.length, 1);
+  await assert.rejects(context.withBatchedSituationRendering(async () => {
+    context.renderSituationOverview();
+    await Promise.resolve();
+    context.renderSituationOverview();
+    throw new Error('async failure');
+  }), /async failure/);
+  assert.equal(draws.length, 2);
+  assert.equal(context.situationRenderBatchDepth, 0);
+  context.renderSituationOverview();
+  assert.equal(draws.length, 3);
+});
+
+test('hidden weather page does not geocode PCS municipalities or fetch forecasts at login', async () => {
+  let hidden = true;
+  const calls = [];
+  const context = vm.createContext({
+    document: { getElementById: (id) => id === 'meteo-panel'
+      ? { classList: { contains: () => hidden } } : null },
+    renderMeteoCitySelector: async () => calls.push('geocode'),
+    getSelectedMeteoCity: () => ({ key: 'grenoble' }),
+    fetchWeeklyForecastForCity: async () => { calls.push('forecast'); return {}; },
+    renderMeteoCurrentCard() {}, renderMeteoHourlyForecast() {}, setText() {},
+  });
+  loadFunction(context, 'renderWeeklyWeatherPanel');
+  await context.renderWeeklyWeatherPanel({});
+  assert.deepEqual(calls, []);
+  hidden = false;
+  await context.renderWeeklyWeatherPanel({});
+  assert.deepEqual(calls, ['geocode', 'forecast'], 'opening weather still loads its complete data');
+});
+
+test('hidden map performs no resource downloads or marker construction, including a restored map', () => {
+  const context = vm.createContext({
+    leafletMap: {}, isMapPanelActive: () => false,
+    syncFinessHealthFilterOptions: () => { throw new Error('hidden map rendered'); },
+  });
+  loadFunction(context, '_ensureStaticDataLoaded');
+  loadFunction(context, '_drawResourceMarkers');
+  assert.doesNotThrow(() => context._ensureStaticDataLoaded());
+  assert.doesNotThrow(() => context._drawResourceMarkers());
+});
+
+test('opening map loads every dataset for all resource filters and zone analysis, without duplicates', async () => {
+  const calls = [];
+  const pending = deferred();
+  const context = vm.createContext({
+    leafletMap: {}, isMapPanelActive: () => true,
+    institutionsLoaded: false, verifiedHostingLoaded: false, finessLoaded: false,
+    daeLoaded: false, daePointsCache: [], telecomLoaded: false,
+    _institutionsLoadInFlight: false, _finessLoadInFlight: false,
+    _daeLoadInFlight: false, _telecomLoadInFlight: false, _lastDaeRefreshAttempt: 0,
+    document: { getElementById: () => ({ checked: false }) },
+    _drawResourceMarkers() {}, renderColsAlpinsLayer() {},
+  });
+  for (const name of ['loadIsereInstitutions', 'loadVerifiedHostingIsere', 'loadFinessIsereResources', 'loadDaeIsereResources', 'loadTelecomPoints']) {
+    context[name] = () => { calls.push(name); return pending.promise; };
+  }
+  loadFunction(context, '_ensureStaticDataLoaded');
+  context._ensureStaticDataLoaded();
+  context._ensureStaticDataLoaded();
+  assert.equal(calls.length, 5);
+  assert.equal(new Set(calls).size, 5);
+  pending.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(context._institutionsLoadInFlight, false);
+  assert.equal(context._finessLoadInFlight, false);
+});
+
+test('SSE bursts schedule one prompt render and retain map updates across later status messages', async () => {
+  const scheduled = [];
+  const calls = [];
+  const context = vm.createContext({
+    externalRisksRenderTimer: 0, externalRisksMapRenderPending: false,
+    cachedExternalRisksSnapshot: { revision: 1 }, STORAGE_KEYS: { externalRisksSnapshot: 'snapshot' },
+    document: { hidden: false },
+    window: { setTimeout: (fn) => { scheduled.push(fn); return scheduled.length; } },
+    renderExternalRisks: (data) => calls.push(['risks', data.revision]),
+    renderApiInterconnections: () => calls.push(['api']),
+    saveSnapshot: () => calls.push(['save']),
+    isMapPanelActive: () => true,
+    renderMapLiveLayers: async () => calls.push(['map']),
+  });
+  loadFunction(context, 'scheduleExternalRisksRender');
+  context.scheduleExternalRisksRender({ map: true });
+  for (let index = 0; index < 100; index += 1) context.scheduleExternalRisksRender();
+  context.cachedExternalRisksSnapshot = { revision: 2 };
+  assert.equal(scheduled.length, 1, 'continuous updates cannot push the first timer back');
+  scheduled[0]();
+  assert.deepEqual(calls, [['risks', 2], ['api'], ['save'], ['map']]);
+  assert.equal(context.externalRisksMapRenderPending, false);
+  context.scheduleExternalRisksRender();
+  scheduled[1]();
+  assert.equal(calls.filter(([name]) => name === 'map').length, 1);
 });

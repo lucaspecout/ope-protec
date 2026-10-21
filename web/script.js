@@ -300,6 +300,7 @@ let _liveEventsFailCount = 0;
 let lastApiResyncAt = null;
 let isLoginSubmitting = false;
 let externalRisksRenderTimer = 0;
+let externalRisksMapRenderPending = false;
 const SITUATION_WALLBOARD_REFRESH_MS = 60 * 1000;
 const MAP_LIVE_REFRESH_MS = SITUATION_WALLBOARD_REFRESH_MS;
 const apiGetCache = new Map();
@@ -747,6 +748,8 @@ let telecomPointsCache = [];
 let telecomLoaded = false;
 let cachedHomeLiveSnapshot = {};
 let lastRenderedExternalRisksSignature = null;
+let situationRenderBatchDepth = 0;
+let situationRenderPending = false;
 let lastRenderedApiInterconnectionsSignature = null;
 let _currentFluxFilter = 'all';
 let lastRenderedGeorisquesSignature = null;
@@ -2497,11 +2500,14 @@ function queueApiRequest(task) {
   });
 }
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = API_REQUEST_TIMEOUT_MS) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = API_REQUEST_TIMEOUT_MS, consumeResponse = null) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...options, signal: controller.signal });
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    // JSON bodies can keep downloading long after the headers arrive. Keep the
+    // deadline active through consumption when a caller supplies a reader.
+    return consumeResponse ? await consumeResponse(response) : response;
   } catch (error) {
     if (error?.name === 'AbortError') {
       throw createApiError('Délai dépassé, veuillez vérifier votre réseau.', null, { isTimeout: true });
@@ -2542,9 +2548,13 @@ async function requestApiAcrossOrigins(path, fetchOptions = {}, {
     for (const origin of origins) {
       const url = buildApiUrl(path, origin);
       try {
-        const runFetch = () => fetchWithTimeout(url, { ...fetchOptions, headers }, timeoutMs);
-        const response = await (highPriority ? runFetch() : queueApiRequest(runFetch));
-        const payload = await parseJsonResponse(response, path);
+        const runFetch = () => fetchWithTimeout(url, { ...fetchOptions, headers }, timeoutMs, async (response) => ({
+          response,
+          payload: await parseJsonResponse(response, path),
+        }));
+        // The queue slot covers the body too, preventing background downloads
+        // from multiplying while the initial snapshot is being transferred.
+        const { response, payload } = await (highPriority ? runFetch() : queueApiRequest(runFetch));
         if (!response.ok) {
           const message = normalizeApiErrorMessage(payload, response.status);
           if (response.status === 401 && logoutOn401) logout();
@@ -6823,6 +6833,7 @@ function _staticDataLoading() {
  * N'attend aucune requête réseau. Appelée dès que le cache change.
  */
 function _drawResourceMarkers() {
+  if (!isMapPanelActive()) return;
   syncFinessHealthFilterOptions();
   const resources = getDisplayedResources();
   const priorityLabel = { critical: 'critique', vital: 'vital', risk: 'à risque', standard: 'standard' };
@@ -6974,7 +6985,7 @@ function renderHelipadLayer() {
 }
 
 function _ensureStaticDataLoaded() {
-  if (!leafletMap && !isMapPanelActive()) return;
+  if (!leafletMap || !isMapPanelActive()) return;
   if ((!institutionsLoaded || !verifiedHostingLoaded) && !_institutionsLoadInFlight) {
     _institutionsLoadInFlight = true;
     Promise.all([loadIsereInstitutions(), loadVerifiedHostingIsere()])
@@ -9484,14 +9495,19 @@ function stopExternalRisksSSE() {
 }
 
 function scheduleExternalRisksRender({ map = false } = {}) {
-  if (externalRisksRenderTimer) window.clearTimeout(externalRisksRenderTimer);
+  externalRisksMapRenderPending = externalRisksMapRenderPending || map;
+  // Une rafale de services ne doit ni repousser indéfiniment le rendu, ni
+  // perdre une mise à jour cartographique suivie d'un simple statut.
+  if (externalRisksRenderTimer) return;
   externalRisksRenderTimer = window.setTimeout(() => {
     externalRisksRenderTimer = 0;
     if (document.hidden) return;
+    const renderMap = externalRisksMapRenderPending;
+    externalRisksMapRenderPending = false;
     renderExternalRisks(cachedExternalRisksSnapshot);
     renderApiInterconnections(cachedExternalRisksSnapshot);
     saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
-    if (map && isMapPanelActive()) renderMapLiveLayers().catch(() => {});
+    if (renderMap && isMapPanelActive()) renderMapLiveLayers().catch(() => {});
   }, 250);
 }
 
@@ -12459,7 +12475,36 @@ function renderSituationForestFireMap(payload) {
   if (link && payload?.page_url) link.href = payload.page_url;
 }
 
+function withBatchedSituationRendering(runUpdate) {
+  situationRenderBatchDepth += 1;
+  const finish = () => {
+    situationRenderBatchDepth -= 1;
+    if (!situationRenderBatchDepth && situationRenderPending) {
+      situationRenderPending = false;
+      renderSituationOverview();
+    }
+  };
+  let result;
+  try {
+    result = runUpdate();
+  } catch (error) {
+    finish();
+    throw error;
+  }
+  if (result && typeof result.then === 'function') return Promise.resolve(result).finally(finish);
+  finish();
+  return result;
+}
+
 function renderSituationOverview() {
+  if (situationRenderBatchDepth) {
+    situationRenderPending = true;
+    return;
+  }
+  _renderSituationOverview();
+}
+
+function _renderSituationOverview() {
   const target = document.getElementById('situation-content');
   if (!target) return;
   // Le contenu Situation peut être recréé par les flux live. Conserver exactement
@@ -13705,6 +13750,9 @@ function renderMeteoCurrentCard(cityForecast, city) {
 }
 
 async function renderWeeklyWeatherPanel(externalRisks = {}) {
+  // Géocoder toutes les communes PCS et télécharger leurs prévisions n'est
+  // utile qu'à l'ouverture de cette page. La navigation relance ce rendu.
+  if (document.getElementById('meteo-panel')?.classList.contains('hidden')) return;
   const meteo = externalRisks?.meteo_france || {};
   await renderMeteoCitySelector();
   const selectedCity = getSelectedMeteoCity();
@@ -15868,22 +15916,24 @@ async function loadOperationsBootstrap(forceRefresh = false) {
   if (!payload || typeof payload !== 'object') throw new Error('Réponse bootstrap invalide');
   markServerSnapshotFresh(payload);
 
-  if (payload.dashboard) {
-    renderDashboard(payload.dashboard);
-    saveSnapshot(STORAGE_KEYS.dashboardSnapshot, payload.dashboard);
-  }
-  if (payload.external_risks) {
-    cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, payload.external_risks);
-    renderExternalRisks(cachedExternalRisksSnapshot);
-    renderApiInterconnections(cachedExternalRisksSnapshot);
-    saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
-    saveSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot, cachedExternalRisksSnapshot);
-  }
+  await withBatchedSituationRendering(async () => {
+    if (payload.dashboard) {
+      renderDashboard(payload.dashboard);
+      saveSnapshot(STORAGE_KEYS.dashboardSnapshot, payload.dashboard);
+    }
+    if (payload.external_risks) {
+      cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, payload.external_risks);
+      renderExternalRisks(cachedExternalRisksSnapshot);
+      renderApiInterconnections(cachedExternalRisksSnapshot);
+      saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
+      saveSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot, cachedExternalRisksSnapshot);
+    }
 
-  await loadMunicipalities(Array.isArray(payload.municipalities) ? payload.municipalities : null, { awaitMapRender: false });
-  await loadEvents(Array.isArray(payload.events) ? payload.events : null);
-  await loadLogs(Array.isArray(payload.logs) ? payload.logs : null);
-  if (canManageUsers()) await loadUsers(Array.isArray(payload.users) ? payload.users : null);
+    await loadMunicipalities(Array.isArray(payload.municipalities) ? payload.municipalities : null, { awaitMapRender: false });
+    await loadEvents(Array.isArray(payload.events) ? payload.events : null);
+    await loadLogs(Array.isArray(payload.logs) ? payload.logs : null);
+    if (canManageUsers()) await loadUsers(Array.isArray(payload.users) ? payload.users : null);
+  });
   initialServerSnapshotReady = true;
   situationWallboardLastSuccessAt = Date.now();
 
@@ -17600,12 +17650,11 @@ async function initializeAuthenticatedSession({ runRefreshInBackground = false }
   _updateNotifBtn();
   showApp();
   buildServiceCards();
-  hydrateAppFromSnapshots();
+  withBatchedSituationRendering(hydrateAppFromSnapshots);
   syncPendingLogs();
   initMobileNav();
   initMobileGeoLocate();
   startAgentMarkersPolling();
-  renderSituationOverview();
   // Le bootstrap fournit déjà le tableau de bord et les risques : ouvrir la
   // page sans redemander ces mêmes snapshots en parallèle.
   setActivePanel(localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel', { refreshSnapshot: false });

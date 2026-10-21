@@ -4,6 +4,8 @@ Application web repensée comme un centre de crise départemental (CRISIS38) dé
 
 Les corrections du chargement initial, les constats de revue de code et la procédure de mesure sont détaillés dans la [revue du 20 octobre 2026](docs/revue-performance-2026-10-20.md).
 
+Les optimisations complémentaires de connexion, de rendu et des mises à jour temps réel, avec les mesures et vérifications, sont décrites dans la [revue du 21 octobre 2026](docs/revue-performance-2026-10-21.md).
+
 Les sources supplémentaires INSEE, observations et radar Météo-France, prévisions Vigicrues, ICPE/Seveso et accès Enedis sont présentées dans le [guide des sources officielles](docs/sources_officielles.md), avec la configuration et les limites d'accès.
 
 Les stations-service, les observations ONDE, les historiques CatNat, l’électricité régionale RTE et les rappels de produits sont décrits dans le [guide des nouvelles données publiques](docs/sources_publiques.md). Ces cinq sources sont accessibles sans nouvelle clé API.

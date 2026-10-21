@@ -4,7 +4,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta
 import json
 from pathlib import Path
-from threading import Lock
+from threading import Event, Lock, Thread
 import unittest
 from unittest.mock import Mock
 
@@ -140,6 +140,70 @@ class SharedPersistenceTests(unittest.TestCase):
 
 
 class WorkerSynchronizationTests(unittest.TestCase):
+    def test_snapshot_copies_do_not_hold_the_publication_lock(self):
+        ns = main_namespace()
+        lock = ns["_external_risks_snapshot_lock"]
+
+        def unlocked_copy(value):
+            self.assertFalse(lock.locked(), "Large copies must not block other readers/writers")
+            return deepcopy(value)
+
+        ns["deepcopy"] = unlocked_copy
+        initial = {"meteo_france": {"alerts": [{"level": "orange"}]}}
+        ns["_set_external_risks_snapshot"](initial)
+        initial["meteo_france"]["alerts"][0]["level"] = "vert"
+        self.assertEqual(ns["_get_external_risks_snapshot"]()["meteo_france"]["alerts"][0]["level"], "orange")
+        result = {"status": "online", "alerts": [{"level": "jaune"}]}
+        ns["_update_service_slot"]("vigicrues", result)
+        result["alerts"][0]["level"] = "vert"
+        snapshot = ns["_get_external_risks_snapshot"]()
+        self.assertEqual(snapshot["vigicrues"]["alerts"][0]["level"], "jaune")
+        snapshot["vigicrues"]["alerts"].clear()
+        self.assertTrue(ns["_get_external_risks_snapshot"]()["vigicrues"]["alerts"])
+        ns["load_risk_service_snapshots"].return_value = {
+            "meteo_france": {"revision": "2099-10-20T10:00:01Z", "payload": {"level": "rouge"}},
+        }
+        ns["_sync_shared_risk_snapshots"]()
+        self.assertEqual(ns["_get_external_risks_snapshot"]()["meteo_france"]["level"], "rouge")
+
+    def test_slow_snapshot_reader_does_not_block_atomic_service_publication(self):
+        ns = main_namespace()
+        original = {"meteo_france": {"level": "orange"}, "vigicrues": {"level": "jaune"}}
+        ns["_set_external_risks_snapshot"](original)
+        published = ns["_external_risks_snapshot"]["payload"]
+        copying = Event()
+        resume = Event()
+        updated = Event()
+        result = []
+
+        def slow_copy(value):
+            if value is published:
+                copying.set()
+                resume.wait(5)
+            return deepcopy(value)
+
+        def publish():
+            ns["_update_service_slot"]("meteo_france", {"level": "rouge"})
+            updated.set()
+
+        ns["deepcopy"] = slow_copy
+        reader = Thread(target=lambda: result.append(ns["_get_external_risks_snapshot"]()))
+        writer = Thread(target=publish)
+        try:
+            reader.start()
+            self.assertTrue(copying.wait(2))
+            writer.start()
+            self.assertTrue(updated.wait(2), "Service publication waited for a full snapshot copy")
+        finally:
+            resume.set()
+            reader.join(5)
+            if writer.ident is not None:
+                writer.join(5)
+        self.assertEqual(result, [original])
+        current = ns["_get_external_risks_snapshot"]()
+        self.assertEqual(current["meteo_france"]["level"], "rouge")
+        self.assertEqual(current["vigicrues"]["level"], "jaune")
+
     def test_remote_updates_merge_once_and_never_replace_newer_local_values(self):
         ns = main_namespace()
         ns["_external_risks_snapshot"]["payload"] = {"meteo_france": {"level": "orange"}}

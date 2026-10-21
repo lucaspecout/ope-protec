@@ -1170,6 +1170,12 @@ def serialize_document(document: MunicipalityDocument, db: Session) -> Municipal
     )
 
 
+def _serialize_risk_event(event_payload: dict | None = None) -> str:
+    """Encode one immutable SSE frame, outside the asyncio request loop."""
+    payload = event_payload if isinstance(event_payload, dict) else _get_external_risks_snapshot()
+    return f"data: {json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}\n\n"
+
+
 def _broadcast_risk_update_from_thread(event_payload: dict | None = None) -> None:
     """Pousse une mise à jour vers tous les clients SSE connectés.
     Appelé depuis des threads sync — utilise call_soon_threadsafe pour
@@ -1177,13 +1183,24 @@ def _broadcast_risk_update_from_thread(event_payload: dict | None = None) -> Non
     loop = _sse_risk_loop
     if loop is None or not loop.is_running():
         return
-    payload = deepcopy(event_payload) if isinstance(event_payload, dict) else _get_external_risks_snapshot()
+    with _sse_risk_clients_lock:
+        if not _sse_risk_clients:
+            return
+    # One encoded frame is shared by every client. Encoding inside each async
+    # generator repeatedly traversed large datasets and blocked all HTTP requests.
+    try:
+        frame = _serialize_risk_event(event_payload)
+    except (TypeError, ValueError):
+        # Serialization used to happen in the subscriber. A malformed event must
+        # still leave the collection, notifications and other clients running.
+        logger.exception("Unable to encode risk update for SSE clients")
+        return
 
     def _enqueue() -> None:
         with _sse_risk_clients_lock:
             for q in list(_sse_risk_clients):
                 try:
-                    q.put_nowait(payload)
+                    q.put_nowait(frame)
                 except asyncio.QueueFull:
                     pass  # client trop lent, on passe
 
@@ -1194,22 +1211,26 @@ def _broadcast_risk_update_from_thread(event_payload: dict | None = None) -> Non
 
 
 def _set_external_risks_snapshot(payload: dict) -> None:
+    snapshot = deepcopy(payload)
     with _external_risks_snapshot_lock:
         _external_risks_snapshot["updated_at"] = datetime.utcnow()
-        _external_risks_snapshot["payload"] = deepcopy(payload)
+        _external_risks_snapshot["payload"] = snapshot
     _broadcast_risk_update_from_thread()
 
 
 def _get_external_risks_snapshot() -> dict:
     with _external_risks_snapshot_lock:
-        return deepcopy(_external_risks_snapshot.get("payload") or {})
+        snapshot = _external_risks_snapshot.get("payload") or {}
+    # Writers replace the root and service slots; published objects are never
+    # mutated. Copying this stable version need not block other reads/updates.
+    return deepcopy(snapshot)
 
 
 def _sync_shared_risk_snapshots() -> None:
     """Merge other workers' results and deliver the same deltas to local SSE clients."""
     with _external_risks_snapshot_lock:
         known_revisions = {key: _external_risks_revisions.get(key, "") for key in SERVICE_REFRESH_INTERVALS}
-    shared_slots = load_risk_service_snapshots(known_revisions)
+    shared_slots = deepcopy(load_risk_service_snapshots(known_revisions))
     updates: list[tuple[str, str, dict]] = []
     with _external_risks_snapshot_lock:
         payload = dict(_external_risks_snapshot.get("payload") or {})
@@ -1219,7 +1240,7 @@ def _sync_shared_risk_snapshots() -> None:
             revision = record["revision"]
             if revision <= _external_risks_revisions.get(key, ""):
                 continue
-            slot = deepcopy(record["payload"])
+            slot = record["payload"]
             payload[key] = slot
             _external_risks_revisions[key] = revision
             payload["updated_at"] = max(str(payload.get("updated_at") or ""), revision)
@@ -1299,10 +1320,11 @@ def _update_service_slot(key: str, result: dict) -> None:
     Les autres services ne sont pas affectés."""
     result = dict(result)
     result["meta"] = _service_meta(key, status=str(result.get("status") or "unknown"))
-    revision = datetime.utcnow().isoformat(timespec="microseconds") + "Z"
+    slot = deepcopy(result)
     with _external_risks_snapshot_lock:
+        revision = datetime.utcnow().isoformat(timespec="microseconds") + "Z"
         payload = dict(_external_risks_snapshot.get("payload") or {})
-        payload[key] = deepcopy(result)
+        payload[key] = slot
         payload["updated_at"] = revision
         _external_risks_revisions[key] = revision
         _external_risks_snapshot["payload"] = payload
@@ -1375,7 +1397,8 @@ def _refresh_one_service(key: str) -> bool | None:
         # Sauvegarder les données courantes avant la tentative de fetch,
         # pour les préserver si le service est temporairement indisponible.
         with _external_risks_snapshot_lock:
-            prev_slot = deepcopy((_external_risks_snapshot.get("payload") or {}).get(key)) or {}
+            previous = (_external_risks_snapshot.get("payload") or {}).get(key)
+        prev_slot = deepcopy(previous) or {}
         started = monotonic()
         try:
             result = fetcher()
@@ -1750,9 +1773,7 @@ async def stream_map_annotations(request: Request, token: str = Query(...)):
 
 @app.get("/external/isere/risks/stream")
 async def stream_external_risks(request: Request, token: str = Query(...)):
-    """Flux SSE : pousse le snapshot complet des risques dès chaque mise à jour serveur.
-    Le client reçoit immédiatement le snapshot courant à la connexion, puis chaque
-    mise à jour dès qu'un service est rafraîchi en arrière-plan."""
+    """Envoie le snapshot courant, puis les mises à jour de chaque service."""
     await asyncio.to_thread(_authorize_stream_token, token)
 
     queue: asyncio.Queue = asyncio.Queue(maxsize=10)
@@ -1762,15 +1783,13 @@ async def stream_external_risks(request: Request, token: str = Query(...)):
     async def event_stream():
         try:
             # Envoi immédiat du snapshot courant dès la connexion
-            current = _get_external_risks_snapshot()
-            yield f"data: {json.dumps(current)}\n\n"
+            yield await asyncio.to_thread(_serialize_risk_event)
 
             while True:
                 if await request.is_disconnected():
                     break
                 try:
-                    data = await asyncio.wait_for(queue.get(), timeout=20.0)
-                    yield f"data: {json.dumps(data)}\n\n"
+                    yield await asyncio.wait_for(queue.get(), timeout=20.0)
                 except asyncio.TimeoutError:
                     # Maintien de la connexion à travers les proxies
                     yield ": keep-alive\n\n"

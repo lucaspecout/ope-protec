@@ -11468,14 +11468,19 @@ def fetch_rnb_buildings_bbox(
     max_lon: float,
     force_refresh: bool = False,
     limit: int = 10000,
+    max_pages: int | None = None,
 ) -> dict[str, Any]:
     safe_limit = max(20, min(limit, 50000))
     page_limit = min(safe_limit, 100)
+    safe_max_pages = max(1, int(max_pages)) if max_pages is not None else None
     safe_min_lat = min(float(min_lat), float(max_lat))
     safe_max_lat = max(float(min_lat), float(max_lat))
     safe_min_lon = min(float(min_lon), float(max_lon))
     safe_max_lon = max(float(min_lon), float(max_lon))
     cache_key = _rnb_bbox_cache_key(safe_min_lat, safe_min_lon, safe_max_lat, safe_max_lon, safe_limit)
+    if safe_max_pages is not None:
+        # A summary page must never satisfy a later request for all buildings.
+        cache_key += f"|pages:{safe_max_pages}"
 
     with _rnb_buildings_cache_lock:
         cached = _rnb_buildings_cache.get("by_bbox", {}).get(cache_key)
@@ -11492,7 +11497,7 @@ def fetch_rnb_buildings_bbox(
         buildings: list[dict[str, Any]] = []
         pages = 0
         available_total: int | None = None
-        while next_url and len(buildings) < safe_limit:
+        while next_url and len(buildings) < safe_limit and (safe_max_pages is None or pages < safe_max_pages):
             payload = _http_get_json(next_url, timeout=20, headers={"Accept": "application/json"})
             if available_total is None:
                 available_total = _safe_int(payload.get("count")) if isinstance(payload, dict) else None
@@ -11528,6 +11533,7 @@ def fetch_rnb_buildings_bbox(
             "buildings": buildings,
             "buildings_total": len(buildings),
             "available_total": available_total if available_total is not None else len(buildings),
+            "available_total_reported": available_total is not None and available_total >= 0,
             "truncated": bool(next_url),
             "pages_fetched": pages,
             "updated_at": datetime.utcnow().isoformat() + "Z",
@@ -11565,7 +11571,20 @@ def fetch_rnb_isere_summary(force_refresh: bool = False, limit: int = 10000) -> 
         max_lon=6.4,
         force_refresh=force_refresh,
         limit=limit,
+        # The first page already reports the total and contains our small sample.
+        # Zone calculations keep the full pagination of fetch_rnb_buildings_bbox.
+        max_pages=1,
     )
+    if payload.get("status") == "online" and not payload.get("available_total_reported"):
+        # Without a provider total, retain the existing full-download count.
+        payload = fetch_rnb_buildings_bbox(
+            min_lat=44.4,
+            min_lon=4.9,
+            max_lat=45.7,
+            max_lon=6.4,
+            force_refresh=force_refresh,
+            limit=limit,
+        )
     buildings = payload.get("buildings") if isinstance(payload, dict) else []
     sample = buildings[:8] if isinstance(buildings, list) else []
     return {

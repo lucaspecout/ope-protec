@@ -242,6 +242,7 @@ class StreamTests(unittest.IsolatedAsyncioTestCase):
             "_get_external_risks_snapshot": lambda: {"meteo_france": {"level": "vert"}},
         }
         load_functions(["_authorize_stream_token", "stream_map_annotations",
+                        "_serialize_risk_event", "_broadcast_risk_update_from_thread",
                         "stream_external_risks"], env)
         return env, session, auth_thread_ids
 
@@ -273,6 +274,80 @@ class StreamTests(unittest.IsolatedAsyncioTestCase):
                     self.assertTrue(session.closed)
                     env["StreamingResponse"].assert_not_called()
                     self.assertEqual(env["_sse_risk_clients"], set())
+
+    async def test_initial_risk_encoding_runs_outside_the_request_loop(self):
+        env, _, _ = self.stream_environment()
+        encoding_threads = []
+
+        def encode(payload, **options):
+            encoding_threads.append(threading.get_ident())
+            return json.dumps(payload, **options)
+
+        env["json"] = SimpleNamespace(dumps=encode)
+        request = SimpleNamespace(is_disconnected=AsyncMock(return_value=False))
+        response = await env["stream_external_risks"](request, token="test-token")
+        frame = await anext(response.body_iterator)
+        self.assertEqual(json.loads(frame.removeprefix("data: ")),
+                         {"meteo_france": {"level": "vert"}})
+        self.assertEqual(len(encoding_threads), 1)
+        self.assertNotEqual(encoding_threads[0], threading.get_ident())
+        await response.body_iterator.aclose()
+
+    async def test_risk_broadcast_encodes_once_for_all_clients_and_preserves_events(self):
+        env, _, _ = self.stream_environment()
+        env["_sse_risk_loop"] = asyncio.get_running_loop()
+        clients = [asyncio.Queue(maxsize=1) for _ in range(5)]
+        env["_sse_risk_clients"].update(clients)
+        env["json"] = SimpleNamespace(dumps=Mock(side_effect=json.dumps))
+        event = {"type": "service_update", "service_key": "meteo_france",
+                 "payload": {"title": "Vigilance météo", "level": "orange"}}
+        expected = copy.deepcopy(event)
+        await asyncio.to_thread(env["_broadcast_risk_update_from_thread"], event)
+        event["payload"]["level"] = "vert"
+        await asyncio.sleep(0)
+        frames = [client.get_nowait() for client in clients]
+        env["json"].dumps.assert_called_once()
+        self.assertTrue(all(frame is frames[0] for frame in frames))
+        self.assertEqual(json.loads(frames[0].removeprefix("data: ")), expected)
+
+    async def test_risk_stream_yields_preencoded_updates_and_skips_full_clients(self):
+        env, _, _ = self.stream_environment()
+        env["_sse_risk_loop"] = asyncio.get_running_loop()
+        request = SimpleNamespace(is_disconnected=AsyncMock(return_value=False))
+        response = await env["stream_external_risks"](request, token="test-token")
+        await anext(response.body_iterator)
+        full_client = asyncio.Queue(maxsize=1)
+        full_client.put_nowait("older update")
+        env["_sse_risk_clients"].add(full_client)
+        event = {"type": "refresh_status", "refresh": {"in_progress": False}}
+        await asyncio.to_thread(env["_broadcast_risk_update_from_thread"], event)
+        frame = await anext(response.body_iterator)
+        self.assertEqual(json.loads(frame.removeprefix("data: ")), event)
+        self.assertEqual(full_client.get_nowait(), "older update")
+        await response.body_iterator.aclose()
+        env["_sse_risk_clients"].remove(full_client)
+
+    async def test_risk_broadcast_skips_serialization_without_subscribers(self):
+        env, _, _ = self.stream_environment()
+        env["_sse_risk_loop"] = asyncio.get_running_loop()
+        env["_serialize_risk_event"] = Mock()
+        await asyncio.to_thread(env["_broadcast_risk_update_from_thread"], {"level": "vert"})
+        env["_serialize_risk_event"].assert_not_called()
+
+    async def test_encoding_failure_does_not_interrupt_the_service_refresh(self):
+        env, _, _ = self.stream_environment()
+        env["_sse_risk_loop"] = asyncio.get_running_loop()
+        env["_sse_risk_clients"].add(asyncio.Queue())
+        env["logger"] = Mock()
+        # Invalid data previously failed inside the subscriber, after the
+        # background refresh had already completed its notification hooks.
+        await asyncio.to_thread(env["_broadcast_risk_update_from_thread"], {"bad": object()})
+        env["logger"].exception.assert_called_once()
+        queue = next(iter(env["_sse_risk_clients"]))
+        self.assertTrue(queue.empty())
+        await asyncio.to_thread(env["_broadcast_risk_update_from_thread"], {"status": "online"})
+        await asyncio.sleep(0)
+        self.assertEqual(json.loads(queue.get_nowait().removeprefix("data: ")), {"status": "online"})
 
 
 class NotificationTests(unittest.IsolatedAsyncioTestCase):
