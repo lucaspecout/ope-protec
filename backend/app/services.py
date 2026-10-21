@@ -49,6 +49,7 @@ import redis as _redis_lib
 from .config import settings
 from .database import SessionLocal
 from .api_credentials import CredentialStoreError, resolve_credentials
+from .anfr_sources import ANFR_SOURCE_URL, collect_anfr_isere
 
 # ---------------------------------------------------------------------------
 # Cache fichier JSON – persistance sur volume Docker (/data/static)
@@ -1600,7 +1601,7 @@ def _finess_precise_geocode(
 _isere_opendata_cache_lock = Lock()
 _isere_opendata_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "isere_opendata"}
 _anfr_isere_cache_lock = Lock()
-_anfr_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "anfr_isere_v2"}
+_anfr_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "anfr_isere_v3"}
 _arcep_isere_cache_lock = Lock()
 _arcep_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "arcep_isere"}
 _hubeau_groundwater_cache_lock = Lock()
@@ -7974,186 +7975,7 @@ def fetch_georisques_isere_summary(force_refresh: bool = False, commune_names: l
 
 
 def _fetch_anfr_isere_antennas_live() -> dict[str, Any]:
-    dataset_id = "551d4ff3c751df55da0cd89f"
-    source = "https://www.data.gouv.fr/fr/datasets/donnees-sur-les-installations-radioelectriques-de-plus-de-5-watts-1/"
-    try:
-        dataset = _http_get_json(
-            f"https://www.data.gouv.fr/api/1/datasets/{dataset_id}/",
-            headers={"Accept": "application/json", "User-Agent": _BROWSER_UA},
-        )
-        resources = dataset.get("resources") or []
-        candidates = [
-            resource for resource in resources
-            if "supports antennes" in str(resource.get("title") or "").lower() and str(resource.get("url") or "").startswith("http")
-        ]
-        if not candidates:
-            raise ValueError("Aucune ressource ANFR exploitable")
-
-        latest_resource = sorted(
-            candidates,
-            key=lambda item: str(item.get("last_modified") or item.get("created_at") or ""),
-            reverse=True,
-        )[0]
-
-        archive_bytes = _http_stream_large_file(
-            str(latest_resource.get("url")),
-            timeout=120,
-            retries=2,
-        )
-        with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
-            with archive.open("SUP_SUPPORT.txt") as handle:
-                rows = handle.read().decode("latin-1", errors="ignore").splitlines()
-            with archive.open("SUP_EMETTEUR.txt") as handle:
-                emetteur_rows = handle.read().decode("latin-1", errors="ignore").splitlines()
-
-        if not rows:
-            raise ValueError("Archive ANFR vide")
-
-        header = rows[0].split(";")
-        insee_idx = header.index("COM_CD_INSEE") if "COM_CD_INSEE" in header else -1
-        support_idx = header.index("SUP_ID") if "SUP_ID" in header else -1
-        station_idx = header.index("STA_NM_ANFR") if "STA_NM_ANFR" in header else -1
-        height_idx = header.index("SUP_NM_HAUT") if "SUP_NM_HAUT" in header else -1
-
-        station_systems: dict[str, set[str]] = {}
-        if emetteur_rows:
-            emetteur_header = emetteur_rows[0].split(";")
-            emetteur_station_idx = emetteur_header.index("STA_NM_ANFR") if "STA_NM_ANFR" in emetteur_header else -1
-            emetteur_system_idx = emetteur_header.index("EMR_LB_SYSTEME") if "EMR_LB_SYSTEME" in emetteur_header else -1
-            if emetteur_station_idx >= 0 and emetteur_system_idx >= 0:
-                for emetteur_line in emetteur_rows[1:]:
-                    values = emetteur_line.split(";")
-                    if len(values) <= max(emetteur_station_idx, emetteur_system_idx):
-                        continue
-                    station = str(values[emetteur_station_idx] or "").strip()
-                    system_label = str(values[emetteur_system_idx] or "").strip()
-                    if not station or not system_label:
-                        continue
-                    station_systems.setdefault(station, set()).add(system_label)
-
-        def _dms_to_decimal(deg: str | None, minute: str | None, second: str | None, direction: str | None) -> float | None:
-            try:
-                d = float(str(deg or "0").replace(",", "."))
-                m = float(str(minute or "0").replace(",", "."))
-                s = float(str(second or "0").replace(",", "."))
-            except ValueError:
-                return None
-            value = d + (m / 60.0) + (s / 3600.0)
-            cardinal = str(direction or "").strip().upper()
-            if cardinal in {"S", "W", "O"}:
-                value *= -1
-            return round(value, 7)
-
-        def _extract_data_services(labels: set[str]) -> list[str]:
-            services: set[str] = set()
-            for label in labels:
-                lower = label.lower()
-                if "5g" in lower or "nr" in lower:
-                    services.add("5G")
-                if "4g" in lower or "lte" in lower:
-                    services.add("4G")
-                if "3g" in lower or "umts" in lower:
-                    services.add("3G")
-                if "2g" in lower or "gsm" in lower:
-                    services.add("2G")
-            ordered = [item for item in ("2G", "3G", "4G", "5G") if item in services]
-            return ordered
-
-        lat_deg_idx = header.index("COR_NB_DG_LAT") if "COR_NB_DG_LAT" in header else -1
-        lat_min_idx = header.index("COR_NB_MN_LAT") if "COR_NB_MN_LAT" in header else -1
-        lat_sec_idx = header.index("COR_NB_SC_LAT") if "COR_NB_SC_LAT" in header else -1
-        lat_dir_idx = header.index("COR_CD_NS_LAT") if "COR_CD_NS_LAT" in header else -1
-        lon_deg_idx = header.index("COR_NB_DG_LON") if "COR_NB_DG_LON" in header else -1
-        lon_min_idx = header.index("COR_NB_MN_LON") if "COR_NB_MN_LON" in header else -1
-        lon_sec_idx = header.index("COR_NB_SC_LON") if "COR_NB_SC_LON" in header else -1
-        lon_dir_idx = header.index("COR_CD_EW_LON") if "COR_CD_EW_LON" in header else -1
-
-        supports: set[str] = set()
-        stations: set[str] = set()
-        heights: list[float] = []
-        support_points: list[dict[str, Any]] = []
-        seen_support_ids: set[str] = set()
-        support_station_ids: dict[str, set[str]] = {}
-        for line in rows[1:]:
-            parts = line.split(";")
-            support_id = ""
-            if insee_idx < 0 or len(parts) <= insee_idx:
-                continue
-            insee_code = str(parts[insee_idx] or "").strip()
-            if not insee_code.startswith("38"):
-                continue
-            if support_idx >= 0 and len(parts) > support_idx and parts[support_idx]:
-                support_id = str(parts[support_idx]).strip()
-                supports.add(support_id)
-            if station_idx >= 0 and len(parts) > station_idx and parts[station_idx]:
-                station_id = str(parts[station_idx]).strip()
-                stations.add(station_id)
-                if support_id:
-                    support_station_ids.setdefault(support_id, set()).add(station_id)
-            if height_idx >= 0 and len(parts) > height_idx:
-                try:
-                    heights.append(float(str(parts[height_idx]).replace(",", ".")))
-                except ValueError:
-                    pass
-
-            if not support_id or support_id in seen_support_ids:
-                continue
-
-            if min(lat_deg_idx, lat_min_idx, lat_sec_idx, lat_dir_idx, lon_deg_idx, lon_min_idx, lon_sec_idx, lon_dir_idx) < 0:
-                continue
-            if len(parts) <= max(lat_deg_idx, lat_min_idx, lat_sec_idx, lat_dir_idx, lon_deg_idx, lon_min_idx, lon_sec_idx, lon_dir_idx):
-                continue
-
-            lat = _dms_to_decimal(parts[lat_deg_idx], parts[lat_min_idx], parts[lat_sec_idx], parts[lat_dir_idx])
-            lon = _dms_to_decimal(parts[lon_deg_idx], parts[lon_min_idx], parts[lon_sec_idx], parts[lon_dir_idx])
-            if lat is None or lon is None:
-                continue
-
-            station_name = str(parts[station_idx]).strip() if station_idx >= 0 and len(parts) > station_idx else ""
-            systems = set()
-            for station_ref in support_station_ids.get(support_id, set()):
-                systems.update(station_systems.get(station_ref, set()))
-            data_services = _extract_data_services(systems)
-
-            support_points.append({
-                "id": support_id,
-                "lat": lat,
-                "lon": lon,
-                "station_name": station_name,
-                "operator": "non renseigné (ANFR)",
-                "voice_service": "possible" if systems else "inconnu",
-                "data_services": data_services,
-            })
-            seen_support_ids.add(support_id)
-
-        avg_height = round(sum(heights) / len(heights), 1) if heights else None
-        return {
-            "service": "ANFR",
-            "status": "online",
-            "source": source,
-            "department": "Isère (38)",
-            "supports_total": len(supports),
-            "stations_total": len(stations),
-            "average_support_height_m": avg_height,
-            "supports_points": support_points,
-            "data_release": latest_resource.get("title") or "publication mensuelle",
-            "resource_updated_at": latest_resource.get("last_modified") or latest_resource.get("created_at"),
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-            "error": None,
-        }
-    except Exception as exc:
-        return {
-            "service": "ANFR",
-            # Un incident réseau n'est pas une collecte ANFR valide. Ce statut
-            # permet au cache partagé de restituer la dernière bonne valeur au
-            # lieu d'enregistrer durablement un faux total à zéro.
-            "status": "unavailable",
-            "source": source,
-            "department": "Isère (38)",
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-            "error": "Source ANFR temporairement indisponible ; nouvelle tentative automatique prévue.",
-            "error_detail": str(exc),
-        }
+    return collect_anfr_isere()
 
 
 def _fetch_arcep_isere_mobile_outages_live() -> dict[str, Any]:
@@ -8265,14 +8087,74 @@ def _fetch_arcep_isere_mobile_outages_live() -> dict[str, Any]:
         }
 
 
+def _anfr_payload_age_seconds(payload: dict) -> float:
+    try:
+        observed = datetime.fromisoformat(str(payload.get("updated_at") or "").replace("Z", "+00:00"))
+        now = datetime.now(observed.tzinfo) if observed.tzinfo else datetime.utcnow()
+        return max(0.0, (now - observed).total_seconds())
+    except (ValueError, TypeError):
+        return float("inf")
+
+
+def _anfr_successful_payload(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    counts = (payload.get("supports_total"), payload.get("stations_total"))
+    return (payload.get("schema_version") == 3 and payload.get("status") == "online"
+            and payload.get("complete") is True and not payload.get("error")
+            and all(isinstance(count, int) and not isinstance(count, bool) and count >= 0 for count in counts)
+            and isinstance(payload.get("supports_points"), list)
+            and math.isfinite(_anfr_payload_age_seconds(payload)))
+
+
 def fetch_anfr_isere_antennas(force_refresh: bool = False) -> dict[str, Any]:
-    return _cached_external_payload(
-        cache=_anfr_isere_cache,
-        lock=_anfr_isere_cache_lock,
-        ttl_seconds=_ANFR_ISERE_CACHE_TTL_SECONDS,
-        force_refresh=force_refresh,
-        loader=_fetch_anfr_isere_antennas_live,
-    )
+    # Persist only complete mobile inventories. A failed fetch must not create a
+    # durable zero, renew an old observation date, or become a successful refresh.
+    now = datetime.utcnow()
+    with _anfr_isere_cache_lock:
+        memory = deepcopy(_anfr_isere_cache.get("payload"))
+        expires_at = _anfr_isere_cache.get("expires_at") or datetime.min
+    if (not force_refresh and _anfr_successful_payload(memory)
+            and now < expires_at and _anfr_payload_age_seconds(memory) < _ANFR_ISERE_CACHE_TTL_SECONDS):
+        return memory
+
+    key = _anfr_isere_cache["redis_key"]
+    fallback = memory if _anfr_successful_payload(memory) else None
+    for redis_key in (key, f"persist:{key}"):
+        shared = _redis_get(redis_key)
+        if not _anfr_successful_payload(shared):
+            continue
+        if fallback is None or _anfr_payload_age_seconds(shared) < _anfr_payload_age_seconds(fallback):
+            fallback = shared
+        remaining = _ANFR_ISERE_CACHE_TTL_SECONDS - _anfr_payload_age_seconds(shared)
+        if not force_refresh and remaining > 0:
+            with _anfr_isere_cache_lock:
+                _anfr_isere_cache.update(payload=deepcopy(shared), expires_at=now + timedelta(seconds=remaining))
+            return deepcopy(shared)
+
+    attempt_at = datetime.utcnow().isoformat() + "Z"
+    try:
+        payload = _fetch_anfr_isere_antennas_live()
+    except Exception:
+        payload = {}
+    if _anfr_successful_payload(payload):
+        with _anfr_isere_cache_lock:
+            _anfr_isere_cache.update(payload=deepcopy(payload), expires_at=datetime.utcnow() + timedelta(seconds=_ANFR_ISERE_CACHE_TTL_SECONDS))
+        _redis_set(key, payload, _ANFR_ISERE_CACHE_TTL_SECONDS)
+        _redis_set(f"persist:{key}", payload, _PERSIST_TTL_SECONDS)
+        return payload
+
+    message = "Source ANFR temporairement indisponible ; nouvelle tentative automatique prévue."
+    if fallback is not None:
+        result = deepcopy(fallback)
+        result.update(status="stale", complete=False, retained_previous=True,
+                      error=message, stale_reason=message, last_attempt_at=attempt_at)
+        result.pop("error_detail", None)
+        return result
+    return {"service": "ANFR", "schema_version": 3, "status": "unavailable", "complete": False,
+            "source": ANFR_SOURCE_URL, "department": "Isère (38)", "supports_total": None,
+            "stations_total": None, "average_support_height_m": None, "supports_points": [],
+            "updated_at": None, "last_attempt_at": attempt_at, "error": message}
 
 
 def fetch_arcep_isere_mobile_outages(force_refresh: bool = False) -> dict[str, Any]:

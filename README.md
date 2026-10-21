@@ -8,6 +8,8 @@ Les optimisations complémentaires de connexion, de rendu et des mises à jour t
 
 Les zones, usages, publics concernés et arrêtés de VigiEau sont détaillés dans le [guide VigiEau](docs/vigieau.md).
 
+La source mobile ANFR, les limites de collecte et la conservation des données en cas d'indisponibilité sont décrites dans le [guide ANFR](docs/anfr.md).
+
 Les sources supplémentaires INSEE, observations et radar Météo-France, prévisions Vigicrues, ICPE/Seveso et accès Enedis sont présentées dans le [guide des sources officielles](docs/sources_officielles.md), avec la configuration et les limites d'accès.
 
 Les stations-service, les observations ONDE, les historiques CatNat, l’électricité régionale RTE et les rappels de produits sont décrits dans le [guide des nouvelles données publiques](docs/sources_publiques.md). Ces cinq sources sont accessibles sans nouvelle clé API.
@@ -104,7 +106,7 @@ Pour améliorer la fluidité des requêtes et réduire les bugs en production, a
 - Gestion des communes (ajout, enrichissement contacts/informations, bascule mode crise, import ORSEC et conventions).
 - Main courante locale (ajout d’évènements horodatés).
 - Carte opérationnelle embarquée (OpenStreetMap).
-- Connexion aux flux externes Isère : Météo-France (état de disponibilité et infos vigilance), Vigicrues (stations du département + vigilances de tronçons + niveau d'alerte eau calculé), Vigieau (restrictions d'eau), Hub'Eau (niveaux de nappes phréatiques), Atmo AURA (indice qualité de l'air Grenoble/Isère), RTE éCO2mix (proxy électrique régional ARA pour suivi Isère), ANFR (supports/antennes radioélectriques du 38) et ARCEP (sites mobiles indisponibles en Isère).
+- Connexion aux flux externes Isère : Météo-France (état de disponibilité et infos vigilance), Vigicrues (stations du département + vigilances de tronçons + niveau d'alerte eau calculé), Vigieau (restrictions d'eau), Hub'Eau (niveaux de nappes phréatiques), Atmo AURA (indice qualité de l'air Grenoble/Isère), RTE éCO2mix (proxy électrique régional ARA pour suivi Isère), ANFR (supports et stations des réseaux mobiles du 38) et ARCEP (sites mobiles indisponibles en Isère).
 
 
 ## Géorisques API v2 (clé annuelle)
@@ -147,7 +149,7 @@ Retourne un bloc consolidé :
 - `sncf_isere` : alertes SNCF filtrées sur l'Isère (accidents et travaux de voie) issues du flux temps réel SNCF (SIRI SX Lite / GTFS-RT Service Alerts).
 - `atmo_aura` : indice ATMO (J/J+1), commentaire et statut d'épisode pollution via Atmo Auvergne-Rhône-Alpes (commune de Grenoble).
 - `electricity_isere` : état électrique Isère via jeu officiel data.gouv RTE éCO2mix régional (consommation, production, marge de sécurité, échanges).
-- `anfr_isere` : synthèse ANFR Isère (supports recensés, stations ANFR associées, hauteur moyenne des supports).
+- `anfr_isere` : synthèse de l'observatoire mobile ANFR en Isère (supports uniques, stations associées, opérateurs, générations mobiles publiées et hauteur moyenne disponible). Voir le [guide ANFR](docs/anfr.md).
 - `arcep_isere` : indisponibilités mobiles ARCEP sur l'Isère (volumétrie, communes touchées, opérateurs les plus impactés).
 - `groundwater_isere` : état des nappes phréatiques Hub'Eau (stations Isère, dernières mesures, tendance locale en hausse/baisse/stable).
 - `isere_opendata` : consolidation Open Data Isère orientée préparation opérationnelle (aide alimentaire, maisons de santé pluriprofessionnelles et établissements scolaires géolocalisés).

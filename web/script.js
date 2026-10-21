@@ -122,7 +122,7 @@ const FLUX_SERVICES = [
   { key: 'feux_foret_isere',       label: 'Feux de forêt Isère',       icon: '🔥', category: 'Risques',       interval: 180,   metric: (d) => `${d.fires_total ?? 0} foyer(s) FeuxDeForet.fr < 2j` },
   { key: 'copernicus_ems',         label: 'GDACS · Catastrophes Europe',  icon: '🛰️', category: 'Risques',    interval: 1800,  metric: (d) => `${d.france_total ?? 0} événement(s) France · ${d.activations_total ?? 0} Europe` },
   { key: 'cols_alpins_isere',      label: 'Cols alpins Isère',         icon: '⛰️', category: 'Transport',     interval: 21600, metric: (d) => `${d.cols_total ?? 0} cols · ${d.dangereux_total ?? 0} à surveiller` },
-  { key: 'anfr_isere',             label: 'ANFR · Antennes mobiles',   icon: '📡', category: 'Télécom',       interval: 21600, metric: (d) => Number.isFinite(Number(d.supports_total)) ? `${Number(d.supports_total)} support(s) mobile recensés` : 'Données ANFR temporairement indisponibles' },
+  { key: 'anfr_isere',             label: 'ANFR · Antennes mobiles',   icon: '📡', category: 'Télécom',       interval: 21600, metric: anfrMetric },
   { key: 'arcep_isere',            label: 'ARCEP · Sites mobiles',     icon: '📶', category: 'Télécom',       interval: 600,   metric: (d) => `${d.outages_total ?? 0} indisponibilité(s)` },
   { key: 'isere_opendata',         label: 'Isère OpenData · Résilience', icon: '📊', category: 'Données',    interval: 1800,  metric: (d) => `${d.totals?.schools ?? 0} écoles · ${d.totals?.health_centers ?? 0} santé · ${d.totals?.food_aid_points ?? 0} aide alim.` },
   { key: 'finess_isere',           label: 'FINESS · Établissements santé', icon: '🏥', category: 'Santé',    interval: 604800, metric: (d) => `${d.resources_total ?? 0} établissement(s)` },
@@ -746,6 +746,8 @@ let forestFireMapCache = null;
 let forestFireMapLoading = null;
 let telecomPointsCache = [];
 let telecomLoaded = false;
+let telecomAnfrRevision = '';
+let telecomRetryTimer = null;
 let cachedHomeLiveSnapshot = {};
 let lastRenderedExternalRisksSignature = null;
 let situationRenderBatchDepth = 0;
@@ -817,6 +819,105 @@ function mergeVigieauSlot(previous = {}, next = {}) {
     if (!alerts.length) merged.max_level = 'vert';
   }
   return merged;
+}
+
+function anfrNumericValue(value) {
+  if (!['number', 'string'].includes(typeof value) || String(value).trim() === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+function anfrHasConfirmedCollection(payload = {}) {
+  return payload.status === 'online' && !payload.error && payload.complete !== false
+    && payload.truncated !== true && payload.retained_previous !== true
+    && anfrNumericValue(payload.supports_total) !== null;
+}
+
+function anfrHasKnownCollection(payload = {}) {
+  const supports = anfrNumericValue(payload.supports_total);
+  const retainedAt = payload.last_success_at || payload.updated_at;
+  const retainedZero = Number(payload.schema_version) >= 3 && payload.retained_previous === true
+    && Boolean(retainedAt) && Number.isFinite(new Date(retainedAt).getTime());
+  return supports !== null && (supports > 0 || anfrHasConfirmedCollection(payload) || retainedZero);
+}
+
+function mergeAnfrSlot(previous = {}, next = {}) {
+  if (!Object.keys(next).length) return previous;
+  if (anfrHasConfirmedCollection(next)) {
+    // A confirmed empty result can replace old antennas; a failed refresh cannot.
+    return {
+      ...previous, ...next, retained_previous: false, error: null,
+      supports_points: Array.isArray(next.supports_points) ? next.supports_points : [],
+      stations_total: anfrNumericValue(next.stations_total),
+      average_support_height_m: anfrNumericValue(next.average_support_height_m),
+    };
+  }
+  const merged = { ...previous, ...next };
+  const previousKnown = anfrHasKnownCollection(previous);
+  const nextKnown = anfrHasKnownCollection(next);
+  const observedAt = (payload) => {
+    const at = new Date(payload.last_success_at || payload.updated_at || '').getTime();
+    return Number.isFinite(at) ? at : 0;
+  };
+  const previousAt = observedAt(previous);
+  const nextAt = observedAt(next);
+  const newerNextCollection = nextKnown && nextAt > 0 && (nextAt > previousAt
+    || (nextAt === previousAt && Number(next.schema_version) >= 3 && !(Number(previous.schema_version) >= 3)));
+  if (previousKnown || nextKnown) {
+    const collection = previousKnown && !newerNextCollection ? previous : next;
+    for (const key of ['schema_version', 'supports_total', 'stations_total', 'average_support_height_m', 'supports_points',
+      'data_release', 'resource_updated_at', 'updated_at', 'last_success_at', 'source', 'source_data', 'dataset_url']) {
+      if (collection[key] !== undefined) merged[key] = collection[key];
+      else delete merged[key];
+    }
+    merged.retained_previous = true;
+  } else {
+    // Old pending/error snapshots used zero as a placeholder, not an observation.
+    merged.supports_total = null;
+    merged.stations_total = null;
+    merged.average_support_height_m = null;
+    merged.supports_points = [];
+    merged.retained_previous = false;
+    merged.last_attempt_at = next.last_attempt_at || next.updated_at;
+    delete merged.updated_at;
+  }
+  return merged;
+}
+
+function anfrMetric(payload = {}) {
+  if (!anfrHasKnownCollection(payload)) return 'Données ANFR temporairement indisponibles';
+  return `${anfrNumericValue(payload.supports_total)} support(s) mobile recensés${anfrHasConfirmedCollection(payload) ? '' : ' · dernière collecte connue'}`;
+}
+
+function anfrAvailabilityMessage(payload = {}) {
+  if (payload.status === 'pending' || payload.meta?.refreshing) {
+    return anfrHasKnownCollection(payload) ? 'Actualisation ANFR en cours ; dernière collecte conservée.' : 'Collecte ANFR en cours.';
+  }
+  if (payload.error || !anfrHasConfirmedCollection(payload)) {
+    return anfrHasKnownCollection(payload)
+      ? 'Actualisation ANFR indisponible ; dernière collecte conservée. Nouvelle tentative automatique.'
+      : 'Source ANFR temporairement indisponible. Nouvelle tentative automatique.';
+  }
+  return '';
+}
+
+function renderAnfrSummary(payload = {}) {
+  const known = anfrHasKnownCollection(payload);
+  const confirmed = anfrHasConfirmedCollection(payload);
+  const supports = known ? anfrNumericValue(payload.supports_total) : null;
+  const stations = known ? anfrNumericValue(payload.stations_total) : null;
+  const height = known ? anfrNumericValue(payload.average_support_height_m) : null;
+  const availability = anfrAvailabilityMessage(payload);
+  setRiskText('anfr-status', `${confirmed ? 'En ligne' : known ? 'Dernière collecte connue' : payload.status === 'pending' ? 'En cours' : 'Indisponible'}${supports !== null ? ` · ${supports} support(s)` : ''}`, confirmed ? 'vert' : 'jaune');
+  setText('anfr-info', known
+    ? `${stations !== null ? `${stations} station(s)` : 'Stations non renseignées'} · hauteur moyenne ${height !== null ? `${height} m` : 'non renseignée'}`
+    : availability);
+  setHtml('anfr-list', [
+    `<li><strong>Publication:</strong> ${escapeHtml(known ? payload.data_release || 'Non renseignée' : 'Indisponible')}</li>`,
+    `<li><strong>Supports recensés:</strong> ${supports !== null ? supports : 'Indisponible'}</li>`,
+    `<li><strong>Stations ANFR:</strong> ${stations !== null ? stations : 'Indisponible'}</li>`,
+    known && availability ? `<li>${escapeHtml(availability)}</li>` : '',
+  ].join(''));
 }
 
 function isUnknownStatusValue(value) {
@@ -1054,13 +1155,7 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
         index: keepPreviousValue((prevAtmo.today || {}).index, (nextAtmo.today || {}).index),
       },
     },
-    anfr_isere: {
-      ...prevAnfr,
-      ...nextAnfr,
-      supports_total: keepPreviousValue(prevAnfr.supports_total, nextAnfr.supports_total),
-      stations_total: keepPreviousValue(prevAnfr.stations_total, nextAnfr.stations_total),
-      average_support_height_m: keepPreviousValue(prevAnfr.average_support_height_m, nextAnfr.average_support_height_m),
-    },
+    anfr_isere: mergeAnfrSlot(prevAnfr, nextAnfr),
     arcep_isere: mergeServiceSlot(prevArcep, nextArcep, (p, n) => ({
       ...p,
       ...n,
@@ -6679,24 +6774,82 @@ function buildTelecomWhiteZoneResources(anfrResources = [], arcepResources = [])
     .filter(Boolean);
 }
 
-async function loadTelecomPoints() {
-  if (telecomLoaded) return telecomPointsCache;
+function anfrMapRevision(payload = {}) {
+  if (!anfrHasKnownCollection(payload) || !Array.isArray(payload.supports_points)) return '';
+  if (Number(payload.supports_total) > 0 && !payload.supports_points.length) return '';
+  return JSON.stringify([payload.schema_version || 0, payload.last_success_at || payload.updated_at
+    || payload.resource_updated_at || payload.data_release || '', Number(payload.supports_total), payload.supports_points.length]);
+}
 
-  // Vérifier le cache localStorage en premier (24h) pour un affichage immédiat
-  const cached = readFreshSnapshot(STORAGE_KEYS.staticTelecomCache, TELECOM_POINTS_CACHE_TTL_MS);
-  if (Array.isArray(cached) && cached.length > 0) {
-    telecomPointsCache = cached.filter((point) => point?.type !== 'telecom_white_zone');
+function telecomCacheRecord(payload) {
+  const points = Array.isArray(payload) ? payload : payload?.points;
+  return { points: Array.isArray(points) ? points.filter((point) => point?.type !== 'telecom_white_zone') : [],
+    anfr_revision: typeof payload?.anfr_revision === 'string' ? payload.anfr_revision : '' };
+}
+
+function scheduleTelecomRetry() {
+  if (telecomRetryTimer !== null) return;
+  telecomRetryTimer = setTimeout(async () => {
+    telecomRetryTimer = null;
+    telecomLoaded = false;
+    if (!isMapPanelActive() || !leafletMap) return;
+    if (_telecomLoadInFlight) { scheduleTelecomRetry(); return; }
+    _telecomLoadInFlight = true;
+    try {
+      await loadTelecomPoints(true);
+    } finally {
+      _telecomLoadInFlight = false;
+      if (isMapPanelActive()) _drawResourceMarkers();
+    }
+  }, 3 * 60 * 1000);
+}
+
+function syncAnfrTelecomSnapshot(payload = {}) {
+  const revision = anfrMapRevision(payload);
+  if (!revision || revision === telecomAnfrRevision) return false;
+  telecomLoaded = false;
+  if (!isMapPanelActive() || !leafletMap || _telecomLoadInFlight) return true;
+  _telecomLoadInFlight = true;
+  loadTelecomPoints(true)
+    .then(() => { _telecomLoadInFlight = false; if (isMapPanelActive()) _drawResourceMarkers(); })
+    .catch(() => { _telecomLoadInFlight = false; });
+  return true;
+}
+
+async function loadTelecomPoints(forceRefresh = false) {
+  if (telecomLoaded && !forceRefresh) return telecomPointsCache;
+
+  const snapshotAnfr = cachedExternalRisksSnapshot?.anfr_isere || {};
+  const desiredRevision = anfrMapRevision(snapshotAnfr);
+  const cached = telecomCacheRecord(readFreshSnapshot(STORAGE_KEYS.staticTelecomCache, TELECOM_POINTS_CACHE_TTL_MS));
+  const hasCachedAnfr = cached.points.some((point) => point.type === 'anfr_antenna');
+  // Un cache ARCEP seul ne prouve pas que la collecte des antennes ANFR est terminée.
+  if (!forceRefresh && (cached.points.length || cached.anfr_revision)
+    && (hasCachedAnfr || cached.anfr_revision) && (!desiredRevision || desiredRevision === cached.anfr_revision)) {
+    telecomPointsCache = cached.points;
+    telecomAnfrRevision = cached.anfr_revision;
     telecomLoaded = true;
+    if (!anfrHasConfirmedCollection(snapshotAnfr)) scheduleTelecomRetry();
     return telecomPointsCache;
   }
 
-  let anfrPending = false;
+  let anfrPending = true;
+  let confirmedEmpty = false;
   try {
-    // Cache court (2 min) pour permettre les nouvelles tentatives rapides si les données sont en attente
-    const payload = await api('/external/isere/risks', { cacheTtlMs: 2 * 60 * 1000 });
+    // Réutiliser la collecte reçue par SSE au lieu de relire une ancienne réponse HTTP.
+    const canUseSnapshot = desiredRevision && Array.isArray(cachedExternalRisksSnapshot?.arcep_isere?.outages_points)
+      && (!forceRefresh || anfrHasConfirmedCollection(snapshotAnfr) || desiredRevision !== telecomAnfrRevision);
+    let payload = canUseSnapshot
+      ? cachedExternalRisksSnapshot
+      : await api('/external/isere/risks', { cacheTtlMs: forceRefresh ? 0 : 2 * 60 * 1000, bypassCache: forceRefresh });
+    const latestRevision = anfrMapRevision(cachedExternalRisksSnapshot?.anfr_isere || {});
+    if (latestRevision && latestRevision !== desiredRevision) {
+      payload = { ...payload, anfr_isere: cachedExternalRisksSnapshot.anfr_isere };
+    }
     const anfrData = payload?.anfr_isere || {};
-    anfrPending = anfrData?.status === 'pending' && !Array.isArray(anfrData?.supports_points);
-    const anfrPoints = Array.isArray(anfrData?.supports_points) ? anfrData.supports_points : [];
+    anfrPending = !anfrHasConfirmedCollection(anfrData);
+    confirmedEmpty = !anfrPending && Number(anfrData.supports_total) === 0;
+    const anfrPoints = anfrHasKnownCollection(anfrData) && Array.isArray(anfrData.supports_points) ? anfrData.supports_points : [];
     const arcepPoints = Array.isArray(payload?.arcep_isere?.outages_points) ? payload.arcep_isere.outages_points : [];
 
     const anfrResources = anfrPoints.map((point) => {
@@ -6719,7 +6872,7 @@ async function loadTelecomPoints() {
         address: 'Isère (38)',
         priority: 'standard',
         info: `Support ANFR ${supportId || '-'} · opérateur ${operator} · voix ${availableVoice} · data ${dataLabel}`,
-        source: 'https://www.data.gouv.fr/fr/datasets/donnees-sur-les-installations-radioelectriques-de-plus-de-5-watts-1/',
+        source: anfrData.source || 'https://data.anfr.fr/visualisation/information/?id=observatoire_2g_3g_4g',
         dynamic: true,
       };
     }).filter(Boolean);
@@ -6750,42 +6903,31 @@ async function loadTelecomPoints() {
       };
     }).filter(Boolean);
 
-    telecomPointsCache = [...anfrResources, ...arcepResources];
+    const retainedAntennas = !confirmedEmpty && !anfrResources.length && anfrPending
+      ? Array.from(new Map([...cached.points, ...telecomPointsCache]
+        .filter((point) => point.type === 'anfr_antenna').map((point) => [point.id, point])).values()) : [];
+    telecomPointsCache = [...anfrResources, ...retainedAntennas, ...arcepResources];
+    telecomAnfrRevision = anfrMapRevision(anfrData);
 
-    // Sauvegarder en localStorage uniquement si on a de vraies données
-    if (telecomPointsCache.length > 0) {
-      saveSnapshot(STORAGE_KEYS.staticTelecomCache, telecomPointsCache);
+    if (telecomPointsCache.length > 0 || confirmedEmpty) {
+      saveSnapshot(STORAGE_KEYS.staticTelecomCache, { points: telecomPointsCache, anfr_revision: telecomAnfrRevision });
     }
   } catch {
-    telecomPointsCache = [];
+    // Garder les points déjà affichés pendant une coupure du serveur.
   }
 
-  // Si on a des données, terminé
-  if (telecomPointsCache.length > 0) {
-    telecomLoaded = true;
-    return telecomPointsCache;
+  if (!telecomPointsCache.length && !confirmedEmpty) {
+    const stale = telecomCacheRecord(readSnapshot(STORAGE_KEYS.staticTelecomCache));
+    telecomPointsCache = stale.points;
+    telecomAnfrRevision = stale.anfr_revision;
   }
 
-  // Fallback sur le cache périmé si disponible
-  const stale = readSnapshot(STORAGE_KEYS.staticTelecomCache);
-  if (Array.isArray(stale) && stale.length > 0) {
-    telecomPointsCache = stale;
-    telecomLoaded = true;
-    return telecomPointsCache;
-  }
-
-  // Si le backend charge encore les données ANFR, planifier une nouvelle tentative automatique
+  telecomLoaded = true;
   if (anfrPending) {
-    setTimeout(async () => {
-      telecomLoaded = false;
-      apiGetCache.delete(getRequestCacheKey('/external/isere/risks', {}));
-      _telecomLoadInFlight = true;
-      await loadTelecomPoints();
-      _telecomLoadInFlight = false;
-      if (telecomPointsCache.length > 0) _drawResourceMarkers();
-    }, 3 * 60 * 1000);
-  } else {
-    telecomLoaded = true;
+    scheduleTelecomRetry();
+  } else if (telecomRetryTimer !== null) {
+    clearTimeout(telecomRetryTimer);
+    telecomRetryTimer = null;
   }
 
   return telecomPointsCache;
@@ -14656,7 +14798,7 @@ const SVC_CARD_META = {
   feux_foret_isere:      { statusId: 'feux-svc-status',        infoId: null,                   url: 'https://feuxdeforet.fr/auvergne-rhone-alpes/isere/' },
   copernicus_ems:        { statusId: 'copernicus-svc-status',  infoId: null,                   url: 'https://www.gdacs.org' },
   cols_alpins_isere:     { statusId: 'cols-svc-status',        infoId: null,                   url: 'https://itinisere.fr/mod_turbolead/mod/inforoute/index.php?action=367&layer=Layer-repere_cols' },
-  anfr_isere:            { statusId: 'anfr-status',            infoId: 'anfr-info',            url: 'https://www.data.gouv.fr/fr/datasets/donnees-sur-les-installations-radioelectriques-de-plus-de-5-watts-1/' },
+  anfr_isere:            { statusId: 'anfr-status',            infoId: 'anfr-info',            url: 'https://data.anfr.fr/visualisation/information/?id=observatoire_2g_3g_4g' },
   arcep_isere:           { statusId: 'arcep-status',           infoId: 'arcep-info',           url: 'https://www.data.gouv.fr/fr/datasets/sites-indisponibles/' },
   isere_opendata:        { statusId: 'opendata-status',        infoId: 'opendata-info',        url: 'https://opendata.isere.fr' },
   finess_isere:          { statusId: 'finess-status',          infoId: 'finess-info',          url: 'https://www.data.gouv.fr/datasets/finess-extraction-du-fichier-des-etablissements' },
@@ -15251,6 +15393,7 @@ function renderExternalRisks(data = {}) {
 
   lastRenderedExternalRisksSignature = signature;
   cachedExternalRisksSnapshot = mergedData;
+  syncAnfrTelecomSnapshot(mergedData.anfr_isere || {});
   window.OfficialSources?.update(mergedData);
   window.PublicSources?.update(mergedData);
   const meteo = mergedData?.meteo_france || {};
@@ -15336,13 +15479,7 @@ function renderExternalRisks(data = {}) {
   const atmoIndex = keepLastKnownStatus('atmo_index', atmoToday.index ?? '-');
   setRiskText('atmo-status', `${atmo.status || 'inconnu'} · indice ${atmoIndex}`, atmoToday.level || 'vert');
   setText('atmo-info', `${atmoToday.date || 'date inconnue'} · niveau ${atmoLabel}${atmo.has_pollution_episode ? ' · épisode en cours' : ''}`);
-  setRiskText('anfr-status', `${anfr.status || 'inconnu'} · ${anfr.supports_total ?? 0} support(s)`, anfr.status === 'online' ? 'vert' : 'jaune');
-  setText('anfr-info', `${anfr.stations_total ?? 0} station(s) · hauteur moyenne ${anfr.average_support_height_m ?? '-'} m`);
-  setHtml('anfr-list', [
-    `<li><strong>Publication:</strong> ${escapeHtml(anfr.data_release || '-')}</li>`,
-    `<li><strong>Supports recensés:</strong> ${Number(anfr.supports_total ?? 0)}</li>`,
-    `<li><strong>Stations ANFR:</strong> ${Number(anfr.stations_total ?? 0)}</li>`,
-  ].join(''));
+  renderAnfrSummary(anfr);
   const arcepLevel = normalizeLevel(arcep.level || (Number(arcep.outages_total ?? 0) > 0 ? 'jaune' : 'vert'));
   setRiskText('arcep-status', `${arcep.status || 'inconnu'} · ${arcep.outages_total ?? 0} indisponibilité(s)`, arcepLevel);
   setText('arcep-info', `${arcep.communes_total ?? 0} commune(s) · voix HS ${arcep.voice_impacted_total ?? 0} · data HS ${arcep.data_impacted_total ?? 0}`);
@@ -15497,7 +15634,7 @@ function renderApiInterconnections(data = {}) {
       : (() => { try { return svc.metric(payload); } catch (_) { return '–'; } })();
     const { text: ageText, css: ageCss } = _fluxAgeLabel(ageMs, svc.interval, state);
     const nextText = _fluxNextLabel(updatedAt, svc.interval, state);
-    const errorText = payload.error
+    const errorText = svc.key === 'anfr_isere' ? anfrAvailabilityMessage(payload) : payload.error
       ? payload.error
       : (state === 'stale' ? 'Données périmées — le service externe répond lentement' : '');
     const sourceCandidates = [payload.source_data, payload.source, payload.source_reseaux, payload.dataset_url, payload.source_url, payload.link];
@@ -17345,6 +17482,9 @@ function logout() {
   if (mapLiveRefreshTimer) clearInterval(mapLiveRefreshTimer);
   mapLiveRefreshTimer = null;
   mapLiveRefreshInFlight = null;
+  if (telecomRetryTimer !== null) clearTimeout(telecomRetryTimer);
+  telecomRetryTimer = null;
+  telecomLoaded = false;
   if (stationTimetableTimer) clearInterval(stationTimetableTimer);
   if (apiPanelTimer) clearInterval(apiPanelTimer);
   if (apiResyncTimer) clearInterval(apiResyncTimer);

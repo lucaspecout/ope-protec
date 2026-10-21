@@ -1223,7 +1223,10 @@ def _get_external_risks_snapshot() -> dict:
         snapshot = _external_risks_snapshot.get("payload") or {}
     # Writers replace the root and service slots; published objects are never
     # mutated. Copying this stable version need not block other reads/updates.
-    return deepcopy(snapshot)
+    result = deepcopy(snapshot)
+    if isinstance(result.get("anfr_isere"), dict):
+        result["anfr_isere"] = _normalise_anfr_service_payload(result["anfr_isere"])
+    return result
 
 
 def _sync_shared_risk_snapshots() -> None:
@@ -1241,6 +1244,8 @@ def _sync_shared_risk_snapshots() -> None:
             if revision <= _external_risks_revisions.get(key, ""):
                 continue
             slot = record["payload"]
+            if key == "anfr_isere":
+                slot = _normalise_anfr_service_payload(slot)
             payload[key] = slot
             _external_risks_revisions[key] = revision
             payload["updated_at"] = max(str(payload.get("updated_at") or ""), revision)
@@ -1303,7 +1308,76 @@ def _annotate_service_payload(key: str, payload: dict, *, status: str | None = N
         "refreshing": local_meta["refreshing"],
         "status": local_meta["status"],
     }
+    return _normalise_anfr_service_payload(result) if key == "anfr_isere" else result
+
+
+def _normalise_anfr_service_payload(payload: dict | None) -> dict:
+    """Keep dated antenna data while hiding obsolete network errors and false zeroes."""
+    result = dict(payload or {})
+    safe_error = "Source ANFR temporairement indisponible ; nouvelle tentative automatique prévue."
+    status = str(result.get("status") or "unavailable").lower()
+    supports = result.get("supports_total")
+    stations = result.get("stations_total")
+    counts_valid = (type(supports) is int and supports >= 0
+                    and type(stations) is int and stations >= 0)
+    try:
+        collected_at = str(result.get("updated_at") or "")
+        datetime.fromisoformat(collected_at.replace("Z", "+00:00"))
+        dated = True
+    except (ValueError, TypeError):
+        dated = False
+    verified = result.get("schema_version") == 3 and counts_valid and isinstance(result.get("supports_points"), list)
+    complete = verified and dated and status == "online" and result.get("complete") is True and not result.get("error")
+    # Older snapshots with real, dated counts remain useful. Old error payloads
+    # frequently claimed zero supports and must never be presented as a census.
+    has_data = dated and ((verified and (complete or result.get("retained_previous") is True))
+                         or (type(supports) is int and supports > 0))
+    failed = bool(result.get("error")) or status not in {"pending", "idle", "online"} or status == "online" and not complete
+    result.pop("error_detail", None)
+    result["data_available"] = bool(has_data)
+    if not has_data:
+        result.update(supports_total=None, stations_total=None, supports_points=[], updated_at=None, last_success_at=None)
+    else:
+        result["last_success_at"] = result.get("last_success_at") or result["updated_at"]
+        if type(stations) is not int or stations < 0:
+            result["stations_total"] = None
+        if not isinstance(result.get("supports_points"), list):
+            result["supports_points"] = []
+        if not verified:
+            result["legacy_unverified"] = True
+    if failed:
+        result.update(status="stale" if has_data else "unavailable", complete=False, error=safe_error)
+        if has_data:
+            result.update(retained_previous=True, stale_reason=safe_error)
+        else:
+            result.pop("stale_reason", None)
+            result.pop("retained_previous", None)
+    elif status in {"pending", "idle"}:
+        result["complete"] = False
+        result.pop("stale_reason", None)
+    else:
+        result.pop("stale_reason", None)
+    if isinstance(result.get("meta"), dict):
+        meta = dict(result["meta"])
+        if meta.get("last_error"):
+            meta["last_error"] = safe_error
+        if not has_data:
+            meta["last_success_at"] = None
+        result["meta"] = meta
     return result
+
+
+def _anfr_history_preference(payload: dict) -> tuple[datetime, bool]:
+    """Order retained observations by their UTC collection time, then schema."""
+    try:
+        collected_at = datetime.fromisoformat(str(payload.get("updated_at") or "").replace("Z", "+00:00"))
+        offset = collected_at.utcoffset()
+        collected_at = collected_at.replace(tzinfo=None)
+        if offset is not None:
+            collected_at -= offset
+    except (ValueError, TypeError, OverflowError):
+        collected_at = datetime.min
+    return collected_at, payload.get("schema_version") == 3 and not payload.get("legacy_unverified")
 
 
 def _annotate_external_snapshot(payload: dict) -> dict:
@@ -1320,6 +1394,8 @@ def _update_service_slot(key: str, result: dict) -> None:
     Les autres services ne sont pas affectés."""
     result = dict(result)
     result["meta"] = _service_meta(key, status=str(result.get("status") or "unknown"))
+    if key == "anfr_isere":
+        result = _normalise_anfr_service_payload(result)
     slot = deepcopy(result)
     with _external_risks_snapshot_lock:
         revision = datetime.utcnow().isoformat(timespec="microseconds") + "Z"
@@ -1374,6 +1450,8 @@ def _refresh_one_service(key: str) -> bool | None:
             pending_payload = dict((_external_risks_snapshot.get("payload") or {}).get(key) or {})
         if pending_payload:
             pending_payload["meta"] = _service_meta(key, status="refreshing")
+            if key == "anfr_isere":
+                pending_payload = _normalise_anfr_service_payload(pending_payload)
             _broadcast_risk_update_from_thread({
                 "type": "service_update",
                 "service_key": key,
@@ -1402,12 +1480,27 @@ def _refresh_one_service(key: str) -> bool | None:
         started = monotonic()
         try:
             result = fetcher()
+            if key == "anfr_isere":
+                result = _normalise_anfr_service_payload(result)
+                result["last_attempt_at"] = result.get("last_attempt_at") or utc_timestamp()
+                if result.get("status") != "online":
+                    result = _normalise_anfr_service_payload({**result, "status": "unavailable"})
+                    previous_anfr = _normalise_anfr_service_payload(prev_slot)
+                    if (previous_anfr.get("data_available") and
+                            (not result.get("data_available") or
+                             _anfr_history_preference(previous_anfr) > _anfr_history_preference(result))):
+                        last_attempt_at = result.get("last_attempt_at") or utc_timestamp()
+                        result = {**previous_anfr, "status": "stale", "complete": False,
+                                  "retained_previous": True, "error": result["error"],
+                                  "stale_reason": result["error"], "last_attempt_at": last_attempt_at}
             duration_ms = int((monotonic() - started) * 1000)
             success_statuses = {"online", "partial", "stale", "degraded"}
             result_status = str(result.get("status") or "").lower()
             additional_source = key in {"insee_population", "meteo_observations", "vigicrues_forecasts", "meteo_radar", "industrial_sites", "enedis", "fuel_isere", "onde_isere", "catnat_isere", "energy_aura", "recalls"}
             awaiting_access = additional_source and result_status in {"pending", "idle", "configuration_required", "access_required"}
             is_success = result_status in {"online", "partial"} if additional_source else result_status in success_statuses or not result.get("error")
+            if key == "anfr_isere":
+                is_success = result_status == "online" and result.get("complete") is True and not result.get("error")
             with _service_runtime_lock:
                 runtime = _service_runtime.setdefault(key, {})
                 runtime["refreshing"] = False
@@ -1417,7 +1510,7 @@ def _refresh_one_service(key: str) -> bool | None:
                                    next_retry_mono=0, next_retry_at=None)
                 elif is_success:
                     runtime["failure_count"] = 0
-                    runtime["last_success_at"] = datetime.utcnow().isoformat() + "Z"
+                    runtime["last_success_at"] = result.get("updated_at") if key == "anfr_isere" else datetime.utcnow().isoformat() + "Z"
                     runtime["last_error"] = None
                     runtime["circuit_open"] = False
                     runtime["next_retry_mono"] = 0
@@ -1426,6 +1519,8 @@ def _refresh_one_service(key: str) -> bool | None:
                     failure_count = int(runtime.get("failure_count") or 0) + 1
                     backoff = SERVICE_BACKOFF_SECONDS[min(failure_count - 1, len(SERVICE_BACKOFF_SECONDS) - 1)]
                     runtime["failure_count"] = failure_count
+                    if key == "anfr_isere":
+                        runtime["last_success_at"] = result.get("last_success_at")
                     runtime["circuit_open"] = failure_count >= SERVICE_CIRCUIT_BREAKER_OPEN_AFTER
                     runtime["last_error"] = str(result.get("error") or result.get("stale_reason") or result.get("message") or result.get("info_state") or "service indisponible")
                     runtime["last_error_at"] = datetime.utcnow().isoformat() + "Z"
@@ -1435,19 +1530,28 @@ def _refresh_one_service(key: str) -> bool | None:
             duration_ms = int((monotonic() - started) * 1000)
             # Conserver les données précédentes (articles, alertes…) :
             # seul le statut et l'erreur sont mis à jour.
-            result = prev_slot if prev_slot else dict(fallback)
+            result = dict(prev_slot) if prev_slot else dict(fallback)
             result["status"] = "stale" if prev_slot else "unavailable"
             result["error"] = str(exc)
             result.setdefault("updated_at", utc_timestamp())
+            if key == "anfr_isere":
+                previous_anfr = _normalise_anfr_service_payload(prev_slot)
+                if previous_anfr.get("data_available"):
+                    result = {**previous_anfr, "status": "stale", "complete": False,
+                              "retained_previous": True, "error": str(exc)}
+                result["last_attempt_at"] = utc_timestamp()
+                result = _normalise_anfr_service_payload(result)
             with _service_runtime_lock:
                 runtime = _service_runtime.setdefault(key, {})
                 failure_count = int(runtime.get("failure_count") or 0) + 1
                 backoff = SERVICE_BACKOFF_SECONDS[min(failure_count - 1, len(SERVICE_BACKOFF_SECONDS) - 1)]
                 runtime["refreshing"] = False
                 runtime["failure_count"] = failure_count
+                if key == "anfr_isere":
+                    runtime["last_success_at"] = result.get("last_success_at")
                 runtime["circuit_open"] = failure_count >= SERVICE_CIRCUIT_BREAKER_OPEN_AFTER
                 runtime["last_duration_ms"] = duration_ms
-                runtime["last_error"] = str(exc)
+                runtime["last_error"] = result["error"] if key == "anfr_isere" else str(exc)
                 runtime["last_error_at"] = datetime.utcnow().isoformat() + "Z"
                 runtime["next_retry_mono"] = monotonic() + backoff
                 runtime["next_retry_at"] = (datetime.utcnow() + timedelta(seconds=backoff)).isoformat() + "Z"
@@ -1479,11 +1583,30 @@ def _service_scheduler() -> None:
     services = sorted(SERVICE_REFRESH_INTERVALS.items(), key=lambda item: item[1])
     now = monotonic()
     next_runs = {key: now + index * 0.4 for index, (key, _) in enumerate(services)}
+    anfr_future = None
+    anfr_next_dispatch = now
     while not _refresh_stop_event.is_set():
         now = monotonic()
         for key, interval in services:
-            if now >= next_runs[key]:
-                _refresh_executor.submit(_refresh_one_service, key)
+            due_at = next_runs[key]
+            if key == "anfr_isere":
+                # A failed six-hour feed must honour its short retry deadline.
+                # Keep its queued Future, since `refreshing` starts only when a
+                # worker picks it up; otherwise every tick could enqueue it again.
+                if anfr_future is not None and not anfr_future.done():
+                    continue
+                with _service_runtime_lock:
+                    runtime = _service_runtime.get(key) or {}
+                    if runtime.get("refreshing"):
+                        continue
+                    due_at = max(float(runtime.get("next_retry_mono") or due_at), anfr_next_dispatch)
+            if now >= due_at:
+                future = _refresh_executor.submit(_refresh_one_service, key)
+                if key == "anfr_isere":
+                    anfr_future = future
+                    # A lock held by another worker can leave the old retry due.
+                    # Rate-limit that election while the owning worker finishes.
+                    anfr_next_dispatch = now + 5.0
                 next_runs[key] = now + interval
         _refresh_stop_event.wait(0.5)
 
@@ -2136,7 +2259,7 @@ def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str])
         "sncf_isere": (lambda: fetch_sncf_isere_alerts(force_refresh=refresh), {"status": "pending", "alerts": [], "alerts_total": 0}),
         "vigieau": (lambda: fetch_vigieau_restrictions(force_refresh=refresh), {"status": "pending", "alerts": [], "max_level": "vert"}),
         "atmo_aura": (lambda: fetch_atmo_aura_isere_air_quality(force_refresh=refresh), {"status": "pending", "today": {}, "tomorrow": {}}),
-        "anfr_isere": (lambda: fetch_anfr_isere_antennas(force_refresh=refresh), {"status": "pending", "supports_total": 0}),
+        "anfr_isere": (lambda: fetch_anfr_isere_antennas(force_refresh=refresh), {"status": "pending", "complete": False, "data_available": False, "supports_total": None, "stations_total": None, "supports_points": [], "updated_at": None}),
         "arcep_isere": (lambda: fetch_arcep_isere_mobile_outages(force_refresh=refresh), {"status": "pending", "outages_total": 0, "communes": []}),
         "apic_isere": (lambda: fetch_apic_isere_alerts(force_refresh=refresh), {"status": "pending", "level": "vert", "alerts_total": 0, "alerts": []}),
         "vigicrues_flash_isere": (lambda: fetch_vigicrues_flash_isere_alerts(force_refresh=refresh), {"status": "pending", "level": "vert", "alerts_total": 0, "alerts": []}),
