@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
-  <link rel="stylesheet" href="/styles.css?v=20260824-info-page" />
+  <link rel="stylesheet" href="/styles.css?v=20261021-vigieau" />
   <link rel="stylesheet" href="/official_sources.css?v=20261020" />
   <link rel="stylesheet" href="/api_credentials.css?v=20261020" />
   <link rel="stylesheet" href="/public_sources.css?v=20261020" />
@@ -271,6 +271,14 @@
         </section>
 
         <section id="water-panel" class="panel view hidden" hidden>
+          <article class="tile water-restrictions">
+            <div class="water-restrictions__head">
+              <div><p class="tag">VigiEau · Isère</p><h3>Restrictions d’eau et sécheresse</h3><p id="water-vigieau-info" class="muted">Collecte des zones de restriction en cours.</p></div>
+              <span id="water-vigieau-status" class="water-restrictions__status">Collecte en cours</span>
+            </div>
+            <div id="water-vigieau-content" class="vigieau-panel"></div>
+            <a href="https://www.vigieau.gouv.fr" target="_blank" rel="noopener noreferrer" class="water-restrictions__link">Vérifier les règles à mon adresse sur VigiEau ↗</a>
+          </article>
           <div class="water-hero tile">
             <div>
               <p class="tag">Hub'Eau</p>
@@ -1666,6 +1674,6 @@
   <script defer src="/official_sources.js?v=20261020"></script>
   <script defer src="/public_sources.js?v=20261020"></script>
   <script defer src="/api_credentials.js?v=20261020"></script>
-  <script defer src="/script.js?v=20261021-loading"></script>
+  <script defer src="/script.js?v=20261021-vigieau"></script>
 </body>
 </html>

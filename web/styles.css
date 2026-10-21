@@ -695,8 +695,38 @@ label { display: block; margin-bottom: .8rem; }
 .water-restriction-card__head span.jaune { color: #8b6900; }
 .water-restriction-card__head span.orange { color: #b25208; }
 .water-restriction-card__head span.rouge { color: #b32626; }
+.water-restriction-card__head span.gris { color: var(--muted); }
 .water-restrictions__notice { color: var(--muted); font-size: .78rem; margin: .75rem 0 .35rem; }
 .water-restrictions__link { font-weight: 700; }
+.vigieau-panel { min-width: 0; }
+.vigieau-summary { display: flex; flex-wrap: wrap; gap: .4rem; margin: .65rem 0 .8rem; }
+.vigieau-stat { border: 1px solid #dbe7f8; border-radius: 8px; padding: .35rem .5rem; font-size: .76rem; background: #f6f9ff; }
+.vigieau-stat strong { margin-right: .15rem; }
+.vigieau-stat.jaune { border-color: #e3b319; }
+.vigieau-stat.orange { border-color: #e57b25; }
+.vigieau-stat.rouge { border-color: #c93636; }
+.vigieau-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 165px), 1fr)); gap: .55rem; }
+.vigieau-controls label { display: grid; align-content: start; gap: .2rem; font-size: .78rem; font-weight: 700; min-width: 0; }
+.vigieau-controls input, .vigieau-controls select { box-sizing: border-box; width: 100%; min-width: 0; margin: 0; font-size: .82rem; }
+.vigieau-panel .water-restriction-card { overflow-wrap: anywhere; }
+.vigieau-zone-meta { font-size: .8rem; color: var(--muted); }
+.vigieau-documents { display: flex; flex-wrap: wrap; gap: .4rem .8rem; font-size: .8rem; }
+.vigieau-pagination { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: .6rem; margin: .75rem 0; font-size: .8rem; }
+.vigieau-pagination button { padding: .35rem .6rem; }
+.vigieau-pagination button:disabled { opacity: .45; cursor: default; }
+.vigieau-usages, .vigieau-communes, .vigieau-guide { margin-top: .6rem; border-top: 1px solid #dbe7f8; padding-top: .5rem; }
+.vigieau-usages > summary, .vigieau-communes > summary, .vigieau-guide > summary { cursor: pointer; font-weight: 700; font-size: .82rem; }
+.vigieau-communes p { font-size: .8rem; }
+.vigieau-guide .water-restrictions__guide { margin-top: .65rem; }
+.vigieau-usage-group h5 { font-size: .85rem; margin: .8rem 0 .4rem; }
+.vigieau-usage { border-left: 3px solid #b6d5ed; padding: .45rem .6rem; margin-top: .4rem; background: #f1f6fc; font-size: .8rem; }
+.vigieau-description { white-space: pre-line; }
+.water-banner--uncertain { border: 1px solid #dcc38c; background: #fff8e8; padding: .65rem; border-radius: 8px; font-size: .82rem; }
+@media (max-width: 600px) {
+  .water-restrictions__head { flex-direction: column; }
+  .water-restrictions__status { white-space: normal; }
+  .water-restriction-card__head { flex-wrap: wrap; }
+}
 .water-summary-grid,
 .water-kpi-grid {
   display: grid;

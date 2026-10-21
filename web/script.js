@@ -100,7 +100,7 @@ const FLUX_SERVICES = [
   { key: 'apic_isere',             label: 'APIC · Pluie intense',      icon: '🌧️', category: 'Météo',        interval: 180,   metric: (d) => `${d.alerts_total ?? 0} avertissement(s)` },
   { key: 'vigicrues',              label: 'Vigicrues',                 icon: '🌊', category: 'Eau',           interval: 120,   metric: (d) => `${(d.stations || []).length} station(s) · niveau ${d.water_alert_level || '?'}` },
   { key: 'vigicrues_flash_isere',  label: 'Vigicrues Flash',           icon: '⚡', category: 'Eau',           interval: 180,   metric: (d) => `${d.alerts_total ?? 0} alerte(s) crues rapides` },
-  { key: 'vigieau',                label: 'Vigieau · Restrictions eau', icon: '💧', category: 'Eau',          interval: 600,   metric: (d) => `${(d.alerts || []).length} restriction(s)` },
+  { key: 'vigieau',                label: 'VigiEau · Restrictions eau', icon: '💧', category: 'Eau',          interval: 600,   metric: (d) => `${d.alerts_total ?? (d.alerts || []).length} zone(s) signalée(s)` },
   { key: 'groundwater_isere',      label: "Hub'Eau · Nappes phréatiques", icon: '🏔️', category: 'Eau',        interval: 3600,  metric: (d) => `${d.stations_total ?? 0} station(s) · ↑${d.trend_summary?.hausse ?? 0} ↓${d.trend_summary?.baisse ?? 0} =${d.trend_summary?.stable ?? 0}` },
   { key: 'rnb_isere',              label: 'RNB · Bâtiments Isère',        icon: '🏢', category: 'Données',     interval: 1800,  metric: (d) => `${d.buildings_total ?? 0} bâtiment(s) détecté(s)` },
   { key: 'atmo_aura',              label: "Atmo AURA · Qualité de l'air", icon: '🌫️', category: 'Environnement', interval: 600, metric: (d) => d.today?.index ? `Indice ${d.today.index}${d.today.label ? ' — ' + d.today.label : ''}` : 'Indice non disponible' },
@@ -790,6 +790,35 @@ function mergeServiceSlot(prev, next, merge) {
   return merge(prev, next);
 }
 
+function mergeVigieauSlot(previous = {}, next = {}) {
+  if (!Object.keys(next).length) return previous;
+  const alerts = Array.isArray(next.alerts) ? next.alerts : null;
+  const confirmed = next.status === 'online' && next.complete !== false && next.truncated !== true && alerts !== null;
+  if (!confirmed && !alerts?.length && previous.alerts?.length) {
+    // A failed/partial refresh cannot withdraw a previously published restriction.
+    // Keep its observation date and counters, while clearly marking it unconfirmed.
+    const retained = { ...previous, ...next, alerts: previous.alerts, complete: false, retained_previous: true };
+    for (const key of ['max_level', 'alerts_total', 'usages_total', 'communes_total', 'level_counts', 'water_type_counts', 'profiles', 'updated_at']) {
+      if (previous[key] !== undefined) retained[key] = previous[key];
+    }
+    return retained;
+  }
+  const merged = { ...previous, ...next };
+  if (alerts !== null) merged.alerts = alerts;
+  if (confirmed) {
+    merged.complete = true;
+    merged.retained_previous = false;
+    merged.alerts_total = next.alerts_total ?? alerts.length;
+    merged.usages_total = next.usages_total ?? alerts.reduce((count, alert) => count + (Array.isArray(alert.usages) ? alert.usages.length : 0), 0);
+    merged.communes_total = next.communes_total ?? 0;
+    merged.level_counts = next.level_counts || {};
+    merged.water_type_counts = next.water_type_counts || {};
+    merged.profiles = next.profiles || [];
+    if (!alerts.length) merged.max_level = 'vert';
+  }
+  return merged;
+}
+
 function isUnknownStatusValue(value) {
   if (value === undefined || value === null) return true;
   const text = String(value).trim().toLowerCase();
@@ -1013,12 +1042,7 @@ function mergeExternalRisksSnapshot(previous = {}, next = {}) {
       alerts_total: keepPreviousValue(p.alerts_total, n.alerts_total),
       alerts: keepPreviousArray(p.alerts, n.alerts),
     })),
-    vigieau: {
-      ...prevVigieau,
-      ...nextVigieau,
-      alerts: keepPreviousArray(prevVigieau.alerts, nextVigieau.alerts),
-      max_level: keepPreviousValue(prevVigieau.max_level, nextVigieau.max_level),
-    },
+    vigieau: mergeVigieauSlot(prevVigieau, nextVigieau),
     atmo_aura: {
       ...prevAtmo,
       ...nextAtmo,
@@ -10857,42 +10881,181 @@ function bisonTrafficSplitBar(departureLevel, arrivalLevel) {
 }
 
 function renderVigieauAlerts(vigieau = {}) {
-  const alerts = Array.isArray(vigieau.alerts) ? vigieau.alerts : [];
-  const maxLevel = vigieau.max_level || 'vert';
-  const updatedLabel = vigieau.updated_at ? formatWaterDate(vigieau.updated_at) : 'date inconnue';
-  const levelGuide = [
-    ['vigilance', 'Économiser l’eau, sans restriction générale'],
-    ['alerte', 'Prélèvements réduits et usages limités'],
-    ['alerte renforcée', 'Limitations plus strictes'],
-    ['crise', 'Usages prioritaires uniquement'],
-  ];
-  const unavailable = ['degraded', 'offline', 'error'].includes(String(vigieau.status || '').toLowerCase());
-  const statusLabel = unavailable
-    ? 'Données temporairement indisponibles'
-    : (alerts.length ? `Niveau max · ${normalizeLevel(maxLevel)}` : 'Aucune restriction signalée');
-  setRiskText('vigieau-status', statusLabel, unavailable ? 'gris' : maxLevel);
-  setText('vigieau-info', `${alerts.length} zone(s) concernée(s) en Isère · mise à jour ${updatedLabel}`);
-  setHtml('vigieau-level-guide', levelGuide.map(([level, description]) => {
-    const color = _vigieauDisplayColor(level);
-    return `<article class="water-restrictions__guide-item ${color}"><strong>${escapeHtml(level)}</strong><span>${escapeHtml(description)}</span></article>`;
-  }).join(''));
-  setHtml('vigieau-list', alerts.slice(0, 12).map((alert) => {
-    const zone = escapeHtml(alert.zone || 'Zone Isère');
-    const level = escapeHtml(alert.level || 'non définie');
-    const measure = escapeHtml(alert.measure || 'Restriction en vigueur');
-    const usages = Array.isArray(alert.usages) ? alert.usages.filter(Boolean).join(' · ') : (alert.usages || alert.resources || '');
-    const period = alert.start_date || alert.end_date
-      ? `<p class="muted"><strong>Période :</strong> ${escapeHtml(alert.start_date || 'début non précisé')} → ${escapeHtml(alert.end_date || 'jusqu’à nouvel ordre')}</p>`
-      : '';
-    return `<article class="water-restriction-card">
-      <div class="water-restriction-card__head"><strong>${zone}</strong><span class="${escapeHtml(alert.level_color || _vigieauDisplayColor(alert.level))}">${level}</span></div>
-      <p>${measure}</p>
-      ${usages ? `<p><strong>Usages / ressources concernés :</strong> ${escapeHtml(String(usages))}</p>` : ''}
-      ${period}
-    </article>`;
-  }).join('') || (unavailable
-    ? `<p class="error">Impossible de confirmer la situation actuelle sur VigiEau. Utilisez le lien ci-dessous pour une vérification officielle.</p>`
-    : `<div class="water-banner">Aucune restriction d'eau active signalée pour l'Isère par VigiEau.</div>`));
+  const alerts = (Array.isArray(vigieau.alerts) ? vigieau.alerts : []).filter((alert) => alert && typeof alert === 'object');
+  const status = String(vigieau.status || 'pending').toLowerCase();
+  const confirmed = status === 'online' && Array.isArray(vigieau.alerts) && !vigieau.stale && vigieau.complete !== false && !vigieau.truncated;
+  const pending = ['pending', 'loading'].includes(status);
+  const strongest = alerts.reduce((best, alert) => vigieauLevelRank(alert.level) > vigieauLevelRank(best) ? alert.level : best, '');
+  const statusLabel = !confirmed
+    ? (pending ? 'Collecte en cours' : 'Situation actuelle à confirmer')
+    : (alerts.length ? `Niveau maximal · ${strongest || 'non renseigné'}` : 'Aucune restriction signalée');
+  const updated = vigieau.updated_at ? `mise à jour ${formatWaterDate(vigieau.updated_at)}` : 'mise à jour non renseignée';
+  const info = `${alerts.length} zone(s) ${confirmed ? 'signalée(s)' : 'dans les données disponibles'} en Isère · ${updated}`;
+  const dataSignature = JSON.stringify(vigieau);
+  for (const prefix of ['vigieau', 'water-vigieau']) {
+    setRiskText(`${prefix}-status`, statusLabel, confirmed ? (alerts.length ? _vigieauDisplayColor(strongest) : 'vert') : 'gris');
+    setText(`${prefix}-info`, info);
+    const root = document.getElementById(`${prefix}-content`);
+    if (!root) continue;
+    if (!root._vigieauState) {
+      root._vigieauState = { search: '', level: '', water: '', profile: '', page: 0 };
+      root.innerHTML = vigieauPanelMarkup(prefix);
+      root.addEventListener('input', (event) => vigieauFilterChanged(root, prefix, event));
+      root.addEventListener('change', (event) => vigieauFilterChanged(root, prefix, event));
+      root.addEventListener('click', (event) => {
+        const button = event.target.closest('[data-vigieau-page]');
+        if (!button || !root.contains(button)) return;
+        root._vigieauState.page += Number(button.dataset.vigieauPage) || 0;
+        renderVigieauZoneList(root, prefix);
+      });
+      // Descriptions can be long: create their DOM only when a zone is opened.
+      root.addEventListener('toggle', (event) => {
+        const details = event.target;
+        if (!details.open || details.dataset.vigieauZone == null) return;
+        const body = details.querySelector('[data-vigieau-usage-body]');
+        if (body && !body.dataset.loaded) {
+          body.innerHTML = vigieauUsageDetails(root._vigieauAlerts[Number(details.dataset.vigieauZone)], root._vigieauState.profile);
+          body.dataset.loaded = '1';
+        }
+      }, true);
+    }
+    root._vigieauAlerts = alerts;
+    root._vigieauPayload = vigieau;
+    root._vigieauConfirmed = confirmed;
+    const signature = `${dataSignature}\n${JSON.stringify(root._vigieauState)}`;
+    if (root._vigieauSignature === signature) continue;
+    root._vigieauSignature = signature;
+    setHtml(`${prefix}-notice`, confirmed ? '' : `<div class="water-banner water-banner--uncertain">${pending ? 'La collecte VigiEau est en cours.' : 'Les données sont indisponibles, anciennes ou incomplètes.'} ${alerts.length ? 'Les zones ci-dessous sont fournies à titre indicatif.' : 'L’absence de résultat ne permet pas de conclure à une absence de restriction.'} Vérifiez la situation sur le portail officiel.</div>`);
+    const levels = ['vigilance', 'alerte', 'alerte renforcée', 'crise'];
+    const count = (key, value) => alerts.filter((alert) => key === 'level' ? vigieauLevelKey(alert.level) === value : alert[key] === value).length;
+    setHtml(`${prefix}-summary`, !alerts.length && !confirmed ? '<span class="muted">Répartition indisponible tant que la collecte n’est pas confirmée.</span>' : [
+      ...levels.map((level) => `<span class="vigieau-stat ${_vigieauDisplayColor(level)}"><strong>${count('level', level)}</strong> ${escapeHtml(level)}</span>`),
+      ...['SUP', 'SOU', 'AEP'].map((water) => `<span class="vigieau-stat"><strong>${count('water_type', water)}</strong> ${escapeHtml(vigieauWaterLabel(water))}</span>`),
+    ].join(''));
+    renderVigieauZoneList(root, prefix);
+  }
+}
+
+function vigieauLevelKey(value) {
+  return String(value || '').toLowerCase().replace(/_/g, ' ').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim().replace('renforcee', 'renforcée');
+}
+
+function vigieauLevelRank(value) {
+  return ({ vigilance: 1, alerte: 2, 'alerte renforcée': 3, crise: 4 })[vigieauLevelKey(value)] || 0;
+}
+
+function vigieauWaterLabel(value) {
+  return ({ SUP: 'Eaux superficielles', SOU: 'Eaux souterraines', AEP: 'Eau potable' })[value] || 'Ressource non renseignée';
+}
+
+function vigieauProfileLabel(value) {
+  return ({ particulier: 'Particuliers', entreprise: 'Entreprises', collectivite: 'Collectivités', exploitation: 'Exploitations agricoles' })[value] || String(value || 'Public non précisé');
+}
+
+function vigieauPanelMarkup(prefix) {
+  return `<div id="${prefix}-notice" role="status"></div>
+    <div id="${prefix}-summary" class="vigieau-summary" aria-label="Répartition des zones disponibles"></div>
+    <div class="vigieau-controls">
+      <label for="${prefix}-search">Zone ou code<input id="${prefix}-search" type="search" data-vigieau-filter="search" placeholder="Nom de zone, code…" autocomplete="off" /></label>
+      <label for="${prefix}-level">Niveau<select id="${prefix}-level" data-vigieau-filter="level"><option value="">Tous les niveaux</option><option value="vigilance">Vigilance</option><option value="alerte">Alerte</option><option value="alerte renforcée">Alerte renforcée</option><option value="crise">Crise</option></select></label>
+      <label for="${prefix}-water">Ressource<select id="${prefix}-water" data-vigieau-filter="water"><option value="">Toutes les ressources</option><option value="SUP">Eaux superficielles</option><option value="SOU">Eaux souterraines</option><option value="AEP">Eau potable</option></select></label>
+      <label for="${prefix}-profile">Public concerné<select id="${prefix}-profile" data-vigieau-filter="profile"><option value="">Tous les publics</option><option value="particulier">Particuliers</option><option value="entreprise">Entreprises</option><option value="collectivite">Collectivités</option><option value="exploitation">Exploitations agricoles</option></select></label>
+    </div>
+    <p id="${prefix}-count" class="muted" role="status" aria-live="polite"></p>
+    <div id="${prefix}-list" class="water-restrictions__list"></div>
+    <div id="${prefix}-pagination" class="vigieau-pagination"></div>
+    <details class="vigieau-guide"><summary>Comprendre les niveaux de restriction</summary><div class="water-restrictions__guide">${[
+      ['vigilance', 'Économiser l’eau et éviter les usages non essentiels.'],
+      ['alerte', 'Certains usages sont limités selon la ressource et l’arrêté.'],
+      ['alerte renforcée', 'Les limitations sont renforcées pour préserver la ressource.'],
+      ['crise', 'Les usages prioritaires sont préservés ; consultez les mesures applicables.'],
+    ].map(([level, description]) => `<article class="water-restrictions__guide-item ${_vigieauDisplayColor(level)}"><strong>${escapeHtml(level)}</strong><span>${escapeHtml(description)}</span></article>`).join('')}</div></details>
+    <p class="water-restrictions__notice">Une zone peut concerner une seule ressource. La recherche porte sur les communes uniquement lorsque leur liste est fournie. Pour connaître les règles à une adresse précise, vérifiez VigiEau et l’arrêté préfectoral.</p>`;
+}
+
+function vigieauFilterChanged(root, prefix, event) {
+  const key = event.target.dataset.vigieauFilter;
+  if (!['search', 'level', 'water', 'profile'].includes(key)) return;
+  const value = String(event.target.value || '');
+  if (root._vigieauState[key] === value) return;
+  root._vigieauState[key] = value;
+  root._vigieauState.page = 0;
+  renderVigieauZoneList(root, prefix);
+}
+
+function vigieauFilteredZones(alerts, state) {
+  const normalize = (text) => String(text || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const search = normalize(state.search).trim();
+  return alerts.map((alert, index) => ({ alert, index })).filter(({ alert }) => {
+    if (state.level && vigieauLevelKey(alert.level) !== state.level) return false;
+    if (state.water && alert.water_type !== state.water) return false;
+    if (state.profile && !vigieauUsages(alert).some((usage) => (usage.profiles || []).includes(state.profile))) return false;
+    const communes = (Array.isArray(alert.communes) ? alert.communes : []).filter(Boolean).map((commune) => typeof commune === 'string' ? commune : `${commune.name || ''} ${commune.code || ''}`).join(' ');
+    return !search || normalize(`${alert.zone || ''} ${alert.code || ''} ${communes}`).includes(search);
+  }).sort((a, b) => vigieauLevelRank(b.alert.level) - vigieauLevelRank(a.alert.level));
+}
+
+function vigieauUsages(alert = {}) {
+  const usages = Array.isArray(alert.usages) ? alert.usages : (alert.usages ? [alert.usages] : []);
+  return usages.filter(Boolean).map((usage) => typeof usage === 'string'
+    ? { name: usage, description: '', profiles: [] }
+    : { ...usage, profiles: Array.isArray(usage.profiles) ? usage.profiles : [] });
+}
+
+function vigieauDocumentLink(raw, label) {
+  try {
+    const url = new URL(String(raw || ''));
+    if (url.protocol !== 'https:') return '';
+    return `<a href="${escapeHtml(url.href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)} ↗</a>`;
+  } catch (_) { return ''; }
+}
+
+function renderVigieauZoneList(root, prefix) {
+  const state = root._vigieauState;
+  const filtered = vigieauFilteredZones(root._vigieauAlerts, state);
+  const pageSize = 12;
+  const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  state.page = Math.max(0, Math.min(pages - 1, state.page));
+  const start = state.page * pageSize;
+  setText(`${prefix}-count`, filtered.length ? `${filtered.length} zone(s) sur ${root._vigieauAlerts.length} · affichage ${start + 1} à ${Math.min(start + pageSize, filtered.length)}` : `Aucune zone affichée sur ${root._vigieauAlerts.length}`);
+  setHtml(`${prefix}-list`, filtered.slice(start, start + pageSize).map(({ alert, index }) => vigieauZoneCard(alert, index, state.profile)).join('') || `<p class="muted">${root._vigieauAlerts.length ? 'Aucune zone ne correspond à ces filtres. Essayez un autre nom ou supprimez un filtre.' : root._vigieauConfirmed ? 'Aucune restriction d’eau active signalée pour l’Isère par VigiEau.' : 'La situation actuelle ne peut pas être confirmée avec les données disponibles.'}</p>`);
+  setHtml(`${prefix}-pagination`, pages > 1 ? `<button type="button" data-vigieau-page="-1" ${state.page === 0 ? 'disabled' : ''} aria-label="Page précédente des zones VigiEau">Précédent</button><span>Page ${state.page + 1} / ${pages}</span><button type="button" data-vigieau-page="1" ${state.page + 1 === pages ? 'disabled' : ''} aria-label="Page suivante des zones VigiEau">Suivant</button>` : '');
+}
+
+function vigieauZoneCard(alert, index, profile) {
+  const decree = alert.arrete && typeof alert.arrete === 'object' ? alert.arrete : {};
+  const usages = vigieauUsages(alert).filter((usage) => !profile || usage.profiles.includes(profile));
+  const communes = (Array.isArray(alert.communes) ? alert.communes : []).filter(Boolean);
+  const date = (value) => {
+    if (!value) return '';
+    const parsed = new Date(value);
+    return Number.isFinite(parsed.getTime()) ? parsed.toLocaleDateString('fr-FR', { timeZone: 'Europe/Paris' }) : String(value);
+  };
+  const start = date(alert.start_date || decree.start_date);
+  const end = date(alert.end_date || decree.end_date);
+  const links = [vigieauDocumentLink(decree.url, 'Arrêté préfectoral (PDF)'), vigieauDocumentLink(decree.framework_url, 'Arrêté cadre (PDF)'), vigieauDocumentLink(decree.municipal_url, 'Arrêté municipal (PDF)')].filter(Boolean);
+  const resources = alert.water_type_label || (alert.water_type ? vigieauWaterLabel(alert.water_type) : typeof alert.resources === 'string' ? alert.resources : 'Ressource non renseignée');
+  return `<article class="water-restriction-card">
+    <div class="water-restriction-card__head"><strong>${escapeHtml(alert.zone || 'Zone Isère')}</strong><span class="${_vigieauDisplayColor(alert.level)}">${escapeHtml(alert.level || 'Niveau non renseigné')}</span></div>
+    <p class="vigieau-zone-meta">${escapeHtml(resources)}${alert.code ? ` · Code ${escapeHtml(String(alert.code))}` : ''}${alert.influenced_resource ? ' · Ressource influencée' : ''}</p>
+    <p>${escapeHtml(alert.measure || 'Consultez les mesures de la zone dans l’arrêté officiel.')}</p>
+    <p class="muted"><strong>Période :</strong> ${start ? `depuis le ${escapeHtml(start)}` : 'début non renseigné'}${end ? ` · fin prévue le ${escapeHtml(end)}` : ' · fin non renseignée'}</p>
+    ${decree.number ? `<p><strong>Arrêté :</strong> ${escapeHtml(String(decree.number))}</p>` : ''}
+    ${links.length ? `<p class="vigieau-documents">${links.join(' ')}</p>` : '<p class="muted">Document officiel non fourni par la source.</p>'}
+    ${communes.length ? `<details class="vigieau-communes"><summary>${communes.length} commune(s) renseignée(s)</summary><p>${communes.map((commune) => escapeHtml(typeof commune === 'string' ? commune : `${commune.name || commune.code || 'Commune'}${commune.name && commune.code ? ` (${commune.code})` : ''}`)).join(' · ')}</p></details>` : '<p class="muted">Périmètre communal non fourni par la source.</p>'}
+    ${usages.length ? `<details class="vigieau-usages" data-vigieau-zone="${index}"><summary>${usages.length} mesure(s) détaillée(s)${profile ? ` · ${escapeHtml(vigieauProfileLabel(profile))}` : ''}</summary><div data-vigieau-usage-body></div></details>` : '<p class="muted">Détail des usages non fourni pour cette zone.</p>'}
+    ${alert.details_truncated ? '<p class="muted">Le détail de cette zone est partiel. Consultez l’arrêté officiel pour toutes les mesures.</p>' : ''}
+  </article>`;
+}
+
+function vigieauUsageDetails(alert, profile) {
+  const groups = new Map();
+  for (const usage of vigieauUsages(alert).filter((item) => !profile || item.profiles.includes(profile))) {
+    const theme = String(usage.theme || 'Autres usages');
+    if (!groups.has(theme)) groups.set(theme, []);
+    groups.get(theme).push(usage);
+  }
+  return [...groups].map(([theme, usages]) => `<section class="vigieau-usage-group"><h5>${escapeHtml(theme)}</h5>${usages.map((usage) => `<article class="vigieau-usage"><strong>${escapeHtml(usage.name || 'Usage concerné')}</strong>${usage.profiles.length ? `<p class="muted">${usage.profiles.map((item) => escapeHtml(vigieauProfileLabel(item))).join(' · ')}</p>` : ''}<p class="vigieau-description">${escapeHtml(usage.description || 'Description non fournie ; consultez l’arrêté officiel.')}</p></article>`).join('')}</section>`).join('');
 }
 
 async function loadVigieauCard(forceRefresh = false) {
@@ -10910,12 +11073,16 @@ async function loadVigieauCard(forceRefresh = false) {
     saveSnapshot(STORAGE_KEYS.externalRisksSnapshot, cachedExternalRisksSnapshot);
     return cachedExternalRisksSnapshot.vigieau;
   } catch (error) {
-    renderVigieauAlerts({
-      status: 'degraded',
-      alerts: [],
-      max_level: 'vert',
-      error: sanitizeErrorMessage(error?.message || 'Service VigiEau indisponible'),
+    cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, {
+      vigieau: {
+        status: 'degraded',
+        alerts: [],
+        complete: false,
+        max_level: 'gris',
+        error: sanitizeErrorMessage(error?.message || 'Service VigiEau indisponible'),
+      },
     });
+    renderVigieauAlerts(cachedExternalRisksSnapshot.vigieau || {});
     return null;
   }
 }
@@ -10925,7 +11092,8 @@ function _vigieauDisplayColor(level = '') {
   if (value.includes('crise')) return 'rouge';
   if (value.includes('renforc')) return 'orange';
   if (value.includes('alerte')) return 'jaune';
-  return 'vert';
+  if (value.includes('vigilance') || value === 'vert') return 'vert';
+  return ['jaune', 'orange', 'rouge'].includes(value) ? value : 'gris';
 }
 
 
@@ -12249,6 +12417,47 @@ function buildMeteoSituationModalContent(meteo = {}) {
   `;
 }
 
+function getVigieauSituationState(payload = {}) {
+  const alerts = (Array.isArray(payload.alerts) ? payload.alerts : []).filter((alert) => alert && typeof alert === 'object');
+  const reportedTotal = Number(payload.alerts_total);
+  const total = Math.max(alerts.length, Number.isFinite(reportedTotal) && reportedTotal >= 0 ? reportedTotal : 0);
+  const confirmed = payload.status === 'online' && Array.isArray(payload.alerts) && payload.complete !== false && !payload.truncated && !payload.stale && !payload.retained_previous;
+  const strongest = alerts.reduce((best, alert) => vigieauLevelRank(alert.level) > vigieauLevelRank(best) ? alert.level : best, '');
+  const color = alerts.length ? (strongest ? _vigieauDisplayColor(strongest) : 'gris') : 'vert';
+  return { alerts, total, confirmed, color, strongest };
+}
+
+function summarizeVigieauUsages(alert = {}, limit = 4) {
+  const usages = Array.isArray(alert.usages) ? alert.usages : [];
+  const names = usages.map((usage) => typeof usage === 'string' ? usage : usage?.name || usage?.nom || '').filter(Boolean);
+  if (!names.length) return typeof alert.usages === 'string' ? alert.usages : (alert.measure || 'Détails dans l’arrêté officiel');
+  const remaining = names.length > limit ? ` · +${names.length - limit} autre(s)` : '';
+  return names.slice(0, limit).join(' · ') + remaining;
+}
+
+function buildVigieauSituationMarkup(payload = {}) {
+  const state = getVigieauSituationState(payload);
+  const notice = state.confirmed ? '' : '<p class="muted">Situation actuelle à confirmer : données anciennes, incomplètes ou indisponibles.</p>';
+  const rows = state.alerts.slice(0, 8).map((alert) => `<li><strong>${escapeHtml(alert.zone || 'Zone Isère')}</strong> · ${escapeHtml(alert.level || 'Niveau non renseigné')}<br><span class="muted">${escapeHtml(alert.water_type_label || vigieauWaterLabel(alert.water_type))}</span><br>${escapeHtml(summarizeVigieauUsages(alert))}</li>`).join('');
+  const empty = state.confirmed ? '<li>Aucune restriction signalée par VigiEau.</li>' : '<li>Impossible de confirmer les restrictions actuelles.</li>';
+  return `${notice}<p><strong>Zones signalées en Isère :</strong> ${state.total}</p><ul class="situation-kpi-modal__list">${rows || empty}</ul><p class="muted">${state.total > 8 ? 'Aperçu des huit premières zones. ' : ''}Les mesures par public et les arrêtés PDF sont accessibles dans « Eau potable » et « Services connectés ».</p>`;
+}
+
+function buildVigieauReportMarkup(payload = {}) {
+  const state = getVigieauSituationState(payload);
+  const rows = state.alerts.slice(0, 8).map((alert) => sitrepRow([
+    sitrepLevelBadge(alert.level_color || _vigieauDisplayColor(alert.level)),
+    escapeHtml(alert.zone || '—'),
+    escapeHtml(alert.water_type_label || vigieauWaterLabel(alert.water_type)),
+    escapeHtml(summarizeVigieauUsages(alert)),
+  ]));
+  const notice = state.confirmed ? '' : '<p style="color:#8b6900;font-size:12px">Situation actuelle à confirmer : données anciennes, incomplètes ou indisponibles.</p>';
+  const content = rows.length
+    ? sitrepTable(['Niveau', 'Zone', 'Ressource', 'Usages concernés'], rows, `${state.total} zone(s) signalée(s) au total${state.total > 8 ? ' · aperçu des huit premières' : ''}`)
+    : `<p style="font-size:12px">${state.confirmed ? 'Aucune restriction signalée par VigiEau.' : 'Impossible de confirmer les restrictions actuelles.'}</p>`;
+  return sitrepSection('VigiEau · Restrictions eau', notice + content, '💧');
+}
+
 function buildSituationKpiModalContent(key, externalRisks = {}) {
   const dashboard = cachedDashboardSnapshot || {};
   const meteo = externalRisks?.meteo_france || {};
@@ -12313,7 +12522,7 @@ function buildSituationKpiModalContent(key, externalRisks = {}) {
     case 'arcep':
       return `<p><strong>Sites mobiles indisponibles:</strong> ${Number(arcep.outages_total ?? 0)}</p><p class="muted">Source: ARCEP / data.gouv.fr.</p>`;
     case 'vigieau':
-      return `<p><strong>Restrictions eau:</strong> ${Number((vigieau.alerts || []).length)}</p><ul class="situation-kpi-modal__list">${(vigieau.alerts || []).slice(0, 8).map((alert) => `<li><strong>${escapeHtml(alert.zone || 'Isère')}</strong> · ${escapeHtml(alert.level || 'non définie')}<br><span class="muted">${escapeHtml(alert.measure || 'Restriction')}</span></li>`).join('') || '<li>Aucune alerte restriction d’eau.</li>'}</ul>`;
+      return buildVigieauSituationMarkup(vigieau);
     case 'atmo':
       return `<p><strong>Qualité de l’air:</strong> ${escapeHtml(String(atmo.today?.label || normalizeLevel(atmo.today?.level || 'inconnu')).toLowerCase())}</p><p><strong>Indice:</strong> ${escapeHtml(String(atmo.today?.index ?? '-'))}</p>`;
     case 'apic':
@@ -12620,7 +12829,8 @@ function _renderSituationOverview() {
   const bisonDeparture = normalizeLevel(externalRisks?.bison_fute?.today?.isere?.departure || 'inconnu');
   const bisonReturn = normalizeLevel(externalRisks?.bison_fute?.today?.isere?.return || 'inconnu');
   const bisonCombinedLevel = riskRank(bisonReturn) > riskRank(bisonDeparture) ? bisonReturn : bisonDeparture;
-  const vigieauAlertsCount = Number((externalRisks?.vigieau?.alerts || []).length);
+  const vigieauState = getVigieauSituationState(externalRisks?.vigieau || {});
+  const vigieauAlertsCount = vigieauState.total;
   const atmoLevel = normalizeLevel(externalRisks?.atmo_aura?.today?.level || 'inconnu');
   const atmoLabel = String(externalRisks?.atmo_aura?.today?.label || atmoLevel || 'inconnu').toLowerCase();
   const apicAlerts = Number(externalRisks?.apic_isere?.alerts_total ?? (externalRisks?.apic_isere?.alerts || []).length);
@@ -12631,7 +12841,7 @@ function _renderSituationOverview() {
     { key: 'bison', icon: '🚗', label: 'Bison Futé (38) · Départ / Arrivée', value: `${bisonDeparture} / ${bisonReturn}`, info: 'Tendance Isère départ / arrivée', css: bisonCombinedLevel },
     { key: 'sncf', icon: '🚆', label: 'SNCF · alertes Isère', value: `${sncfAlerts}`, info: 'Accidents / travaux de voie', css: sncfAlerts > 0 ? 'orange' : 'vert' },
     { key: 'arcep', icon: '📡', label: 'ARCEP · Sites mobiles indisponibles Isère', value: `${arcepOutages}`, info: 'Source data.gouv.fr / ARCEP', css: arcepOutages > 0 ? 'jaune' : 'vert' },
-    { key: 'vigieau', icon: '💧', label: 'Vigieau', value: `${vigieauAlertsCount}`, info: "Restriction(s) d'eau active(s)", css: vigieauAlertsCount > 0 ? 'jaune' : 'vert' },
+    { key: 'vigieau', icon: '💧', label: 'VigiEau', value: `${vigieauAlertsCount}`, info: 'Zone(s) signalée(s) · restrictions par ressource', css: vigieauState.color },
     { key: 'atmo', icon: '〰', label: "Qualité de l'air", value: atmoLabel, info: 'Source Atmo AURA', css: atmoLevel },
     { key: 'apic', icon: '🔔', label: 'APIC · alertes Isère', value: `${apicAlerts}`, info: 'Pluie intense à l’échelle communale', css: apicAlerts > 0 ? 'orange' : 'vert' },
     { key: 'vigicrues-flash', icon: '≋', label: 'Vigicrues Flash · alertes Isère', value: `${vigicruesFlashAlerts}`, info: 'Avertissements crues rapides', css: vigicruesFlashAlerts > 0 ? 'orange' : 'vert' },
@@ -12654,7 +12864,7 @@ function _renderSituationOverview() {
     bison: situationPayloadReady(externalRisks?.bison_fute),
     sncf: situationPayloadReady(externalRisks?.sncf_isere),
     arcep: situationPayloadReady(externalRisks?.arcep_isere),
-    vigieau: situationPayloadReady(externalRisks?.vigieau),
+    vigieau: situationPayloadReady(externalRisks?.vigieau) && vigieauState.confirmed,
     atmo: situationPayloadReady(externalRisks?.atmo_aura),
     apic: situationPayloadReady(externalRisks?.apic_isere),
     'vigicrues-flash': situationPayloadReady(externalRisks?.vigicrues_flash_isere),
@@ -13020,7 +13230,7 @@ function buildSitrepHtml() {
 
   const prefItems    = Array.isArray(prefData.items) ? sortPrefectureItemsByRecency(prefData.items).slice(0, 6) : [];
   const dauphItems   = Array.isArray(dauphineData.items) ? sortPrefectureItemsByRecency(dauphineData.items).slice(0, 4) : [];
-  const vigieauAlerts = Array.isArray(vigieau.alerts) ? vigieau.alerts.slice(0, 8) : [];
+  const vigieauState = getVigieauSituationState(vigieau);
   const sncfAlerts   = Array.isArray(sncf.alerts) ? sncf.alerts.slice(0, 8) : [];
   const apicAlerts   = Array.isArray(apic.alerts) ? apic.alerts.slice(0, 5) : [];
   const flashAlerts  = Array.isArray(vigiFlash.alerts) ? vigiFlash.alerts.slice(0, 5) : [];
@@ -13062,7 +13272,7 @@ function buildSitrepHtml() {
     <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:16px">
       ${sitrepKpiCard('APIC pluie intense', String(Number(apic.alerts_total ?? apicAlerts.length)))}
       ${sitrepKpiCard('Vigicrues Flash', String(Number(vigiFlash.alerts_total ?? flashAlerts.length)))}
-      ${sitrepKpiCard('Restrictions eau', String(vigieauAlerts.length))}
+      ${sitrepKpiCard('Zones VigiEau', vigieauState.confirmed ? String(vigieauState.total) : 'À confirmer')}
       ${sitrepKpiCard('Alertes SNCF', String(sncfAlerts.length))}
       ${sitrepKpiCard('Qualité air', escapeHtml(String(atmo?.today?.label || atmo?.today?.index || '—')))}
       ${sitrepKpiCard('MCO orange/rouge', String(logsAlert.length), logsAlert.length > 0 ? 'orange' : 'vert')}
@@ -13127,10 +13337,7 @@ function buildSitrepHtml() {
     : '<p style="color:#2e7d32;font-size:12px">✔ Aucune alerte SNCF en Isère.</p>'), '🚦');
 
   // Vigieau
-  const vigieauRows = vigieauAlerts.map((a) => sitrepRow([sitrepLevelBadge(a.level || 'jaune'), escapeHtml(a.zone || '—'), escapeHtml(a.usages || a.title || '—')]));
-  const vigieauSection = sitrepSection('Vigieau · Restrictions eau', vigieauAlerts.length
-    ? sitrepTable(['Niveau', 'Zone', 'Usages concernés'], vigieauRows)
-    : '<p style="color:#2e7d32;font-size:12px">✔ Aucune restriction eau en vigueur.</p>', '💧');
+  const vigieauSection = buildVigieauReportMarkup(vigieau);
 
   // Réseaux ARCEP
   const arcepHtml = `<p style="font-size:12px">Sites mobiles indisponibles : <strong>${Number(arcep.outages_total ?? 0)}</strong> · Communes impactées : <strong>${Number(arcep.communes_total ?? 0)}</strong> · Voix : ${Number(arcep.voice_impacted_total ?? 0)} · Data : ${Number(arcep.data_impacted_total ?? 0)}</p>`;
@@ -14783,7 +14990,8 @@ function buildServiceCards() {
       if (hasDetail) {
         html += `<div class="svc-card-detail">`;
         if (infoId) html += `<p id="${escapeHtml(infoId)}" class="svc-card-info muted">–</p>`;
-        for (const lst of lists) {
+        if (svc.key === 'vigieau') html += '<div id="vigieau-content" class="vigieau-panel"></div>';
+        for (const lst of svc.key === 'vigieau' ? [] : lists) {
           const titleAttr = lst.titleId ? ` id="${escapeHtml(lst.titleId)}"` : '';
           html += `<p class="svc-list-label"${titleAttr}>${escapeHtml(lst.label)}</p>`;
           html += `<ul id="${escapeHtml(lst.id)}" class="list svc-card-list"></ul>`;

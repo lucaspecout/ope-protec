@@ -3198,7 +3198,28 @@ def _extract_service_level(key: str, data: dict) -> str:
         n = int(data.get("alerts_total") or 0)
         return "orange" if n > 0 else "vert"
     if key == "vigieau":
-        return "jaune" if len(data.get("alerts") or []) > 0 else "vert"
+        # VigiEau's severity is per zone: a crisis must reach red thresholds,
+        # while vigilance alone does not mean a restriction-level alert.
+        def water_level(value):
+            raw = str(value or "").strip().lower()
+            if raw in _LEVEL_ORDER:
+                return raw
+            if "crise" in raw:
+                return "rouge"
+            if "renforc" in raw:
+                return "orange"
+            if "alerte" in raw:
+                return "jaune"
+            if "vigilance" in raw:
+                return "vert"
+            return None
+
+        alerts = [alert for alert in (data.get("alerts") or []) if isinstance(alert, dict)]
+        levels = [water_level(data.get("max_level"))]
+        for alert in alerts:
+            levels.extend((water_level(alert.get("level_color")), water_level(alert.get("level"))))
+        known_levels = [level for level in levels if level is not None]
+        return max(known_levels, key=_LEVEL_ORDER.get) if known_levels else ("jaune" if alerts else "vert")
     if key == "atmo_aura":
         # Utilise le level calculé par services.py (échelle 1-6 : 5-6=rouge, 4=orange, 3=jaune, 1-2=vert)
         lvl = str((data.get("today") or {}).get("level") or "vert").lower()
@@ -3291,15 +3312,44 @@ def _notification_content_fingerprint(data: dict, service_key: str = "") -> str:
     fingerprint_data: Any = data
     if service_key == "vigieau":
         alerts = data.get("alerts") if isinstance(data, dict) else []
+
+        def restriction_content(alert):
+            content = {
+                "zone": alert.get("zone") or "",
+                "level": alert.get("level") or "",
+                "measure": alert.get("measure") or "",
+                "start_date": alert.get("start_date") or "",
+                "end_date": alert.get("end_date") or "",
+            }
+            for key in ("code", "water_type", "influenced_resource"):
+                if key in alert:
+                    content[key] = alert[key]
+            if isinstance(alert.get("communes"), list):
+                content["communes"] = [
+                    {key: commune[key] for key in ("code", "name") if key in commune}
+                    if isinstance(commune, dict) else commune
+                    for commune in alert["communes"]
+                ]
+            if isinstance(alert.get("usages"), list):
+                # Usage IDs may be regenerated when the same decree is
+                # republished. The actual rule and affected people matter.
+                content["usages"] = [
+                    {key: usage[key] for key in ("name", "theme", "description", "profiles") if key in usage}
+                    if isinstance(usage, dict) else usage
+                    for usage in alert["usages"]
+                ]
+            if isinstance(alert.get("arrete"), dict):
+                arrete = alert["arrete"]
+                content["arrete"] = {
+                    key: arrete[key]
+                    for key in ("id", "number", "start_date", "end_date")
+                    if key in arrete
+                }
+            return content
+
         fingerprint_data = {
             "alerts": [
-                {
-                    "zone": alert.get("zone") or "",
-                    "level": alert.get("level") or "",
-                    "measure": alert.get("measure") or "",
-                    "start_date": alert.get("start_date") or "",
-                    "end_date": alert.get("end_date") or "",
-                }
+                restriction_content(alert)
                 for alert in (alerts or [])
                 if isinstance(alert, dict)
             ],

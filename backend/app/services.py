@@ -568,7 +568,7 @@ _SEISMES_ISERE_CACHE_TTL_SECONDS = 600
 _seismes_isere_cache_lock = Lock()
 _seismes_isere_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "seismes_isere"}
 _vigieau_cache_lock = Lock()
-_vigieau_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "vigieau"}
+_vigieau_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "vigieau_v2"}
 _atmo_aura_cache_lock = Lock()
 _atmo_aura_cache: dict[str, Any] = {"payload": None, "expires_at": datetime.min, "redis_key": "atmo_aura"}
 _sncf_isere_cache_lock = Lock()
@@ -7052,16 +7052,14 @@ def fetch_bison_fute_live_events(
 
 
 def _vigieau_level_rank(level: str) -> int:
-    return {
-        "vigilance": 1,
-        "alerte": 2,
-        "alerte renforcee": 3,
-        "crise": 4,
-    }.get(str(level or "").strip().lower(), 0)
+    return {"vigilance": 1, "alerte": 2, "alerte renforcée": 3, "crise": 4}.get(
+        _normalize_vigieau_level(level), 0
+    )
 
 
 def _normalize_vigieau_level(value: str) -> str:
-    raw = str(value or "").strip().lower()
+    raw = unicodedata.normalize("NFKD", str(value or "").strip().lower())
+    raw = "".join(char for char in raw if not unicodedata.combining(char))
     if "crise" in raw:
         return "crise"
     if "renforc" in raw:
@@ -7074,223 +7072,212 @@ def _normalize_vigieau_level(value: str) -> str:
 
 
 def _vigieau_level_to_color(level: str) -> str:
-    normalized = str(level or "").lower()
-    if "crise" in normalized:
-        return "rouge"
-    if "renforc" in normalized:
-        return "orange"
-    if "alerte" in normalized:
-        return "jaune"
-    if "vigilance" in normalized:
-        return "vert"
-    return "vert"
+    return {1: "vert", 2: "jaune", 3: "orange", 4: "rouge"}.get(_vigieau_level_rank(level), "gris")
 
 
 def _vigieau_list(payload: Any) -> list[dict[str, Any]]:
-    if isinstance(payload, list):
-        return [item for item in payload if isinstance(item, dict)]
-    if not isinstance(payload, dict):
-        return []
-    for key in ("restrictions", "data", "results", "items", "records"):
-        value = payload.get(key)
-        if isinstance(value, list):
-            return [item for item in value if isinstance(item, dict)]
-    return []
+    """Accept the official list and known envelopes, never an error as an empty list."""
+    if isinstance(payload, dict):
+        if payload.get("error") or str(payload.get("status") or "").lower() in {"error", "offline", "failed"}:
+            raise ValueError("Le fournisseur VigiEau a signalé une erreur")
+        for key in ("restrictions", "data", "results", "items", "records"):
+            if isinstance(payload.get(key), list):
+                payload = payload[key]
+                break
+    if not isinstance(payload, list) or any(not isinstance(item, dict) for item in payload):
+        raise ValueError("Réponse VigiEau invalide : liste des zones attendue")
+    return payload
 
 
-def _vigieau_collect_zone_alerts() -> list[dict[str, Any]]:
-    # The department route is the authoritative complete view. Geographic probes
-    # are kept only as a compatibility fallback for older API deployments.
-    try:
-        payload = _http_get_json("https://api.vigieau.beta.gouv.fr/api/zones/departement/38", timeout=18)
-        department_entries = _vigieau_list(payload)
-        if department_entries:
-            return department_entries
-    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError):
-        pass
-
-    probe_points = [
-        (45.1885, 5.7245),  # Grenoble
-        (45.3640, 5.5920),  # Voiron
-        (45.3930, 5.5050),  # Rives
-        (45.2100, 5.6800),  # Échirolles
-        (45.6110, 5.1500),  # Bourgoin-Jallieu
-        (45.5270, 4.8740),  # Vienne
-        (45.2980, 5.6360),  # Saint-Égrève
-    ]
-
-    def fetch_probe(point: tuple[float, float]) -> list[dict[str, Any]]:
-        lat, lon = point
-        query = urlencode({"lat": lat, "lon": lon})
-        try:
-            payload = _http_get_json(f"https://api.vigieau.beta.gouv.fr/api/zones?{query}", timeout=10)
-            return _vigieau_list(payload)
-        except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError):
-            return []
-
-    entries: list[dict[str, Any]] = []
-    with ThreadPoolExecutor(max_workers=len(probe_points)) as executor:
-        for probe_entries in executor.map(fetch_probe, probe_points):
-            entries.extend(probe_entries)
-
-    deduped: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for item in entries:
-        key = "|".join(
-            [
-                str(item.get("id") or ""),
-                str(item.get("nom_zone") or item.get("nom") or item.get("name") or ""),
-                str(item.get("niveau_gravite") or item.get("niveau") or item.get("niveauAlerte") or ""),
-            ]
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(item)
-    return deduped
+def _vigieau_text(value: Any, limit: int = 20000) -> str:
+    return str(value).strip()[:limit] if isinstance(value, (str, int, float)) else ""
 
 
-def _fetch_vigieau_restrictions_live() -> dict[str, Any]:
-    source_page = "https://www.vigieau.gouv.fr"
-    candidates = [
-        "https://api.vigieau.beta.gouv.fr/api/zones/departement/38",
-        "https://www.vigieau.gouv.fr/api/v1/restrictions?code_departement=38",
-        "https://www.vigieau.gouv.fr/api/v1/restrictions?departement=38",
-        "https://www.vigieau.gouv.fr/api/restrictions?code_departement=38",
-    ]
-    last_error: Exception | None = None
+def _vigieau_url(value: Any) -> str:
+    url = _vigieau_text(value, 4000)
+    parsed = urlparse(url)
+    return url if parsed.scheme in {"http", "https"} and parsed.netloc else ""
 
-    for candidate in candidates:
-        try:
-            payload = _http_get_json(candidate, timeout=10)
-            restrictions = _vigieau_list(payload)
-            alerts: list[dict[str, Any]] = []
-            for item in restrictions:
-                dept = str(
-                    item.get("code_departement")
-                    or item.get("departement")
-                    or item.get("codeDepartement")
-                    or ""
-                ).strip()
-                if dept and dept != "38":
-                    continue
-                level = _normalize_vigieau_level(
-                    item.get("niveau_gravite")
-                    or item.get("niveau")
-                    or item.get("niveauAlerte")
-                    or item.get("libelle_niveau_gravite")
-                    or item.get("severity")
-                    or ""
-                )
-                alerts.append(
-                    {
-                        "zone": item.get("nom_zone")
-                        or item.get("zone")
-                        or item.get("nomZoneAlerte")
-                        or item.get("nom_alerte")
-                        or "Zone Isère",
-                        "level": level,
-                        "level_color": _vigieau_level_to_color(level),
-                        "measure": item.get("mesure")
-                        or item.get("restriction")
-                        or item.get("libelle_mesure")
-                        or item.get("mesurePrincipale")
-                        or "Mesure de restriction d'eau active",
-                        "start_date": item.get("date_debut")
-                        or item.get("debut_validite")
-                        or item.get("dateDebut")
-                        or "",
-                        "end_date": item.get("date_fin")
-                        or item.get("fin_validite")
-                        or item.get("dateFin")
-                        or "",
-                    }
-                )
 
-            alerts.sort(key=lambda alert: _vigieau_level_rank(alert.get("level", "")), reverse=True)
-            max_level = alerts[0]["level_color"] if alerts else "vert"
-            return {
-                "service": "Vigieau",
-                "status": "online",
-                "source": candidate,
-                "department": "Isère",
-                "alerts": alerts[:20],
-                "max_level": max_level,
-                "updated_at": datetime.utcnow().isoformat() + "Z",
-            }
-        except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
-            last_error = exc
-
-    try:
-        restrictions = _vigieau_collect_zone_alerts()
-        alerts: list[dict[str, Any]] = []
-        for item in restrictions:
-            level = _normalize_vigieau_level(
-                item.get("niveau_gravite")
-                or item.get("niveau")
-                or item.get("niveauAlerte")
-                or item.get("libelle_niveau_gravite")
-                or item.get("severity")
-                or ""
-            )
-            alerts.append(
-                {
-                    "zone": item.get("nom_zone")
-                    or item.get("zone")
-                    or item.get("nom")
-                    or item.get("name")
-                    or "Zone Isère",
-                    "level": level,
-                    "level_color": _vigieau_level_to_color(level),
-                    "measure": item.get("mesure")
-                    or item.get("restriction")
-                    or item.get("libelle_mesure")
-                    or item.get("description")
-                    or "Mesure de restriction d'eau active",
-                    "start_date": item.get("date_debut")
-                    or item.get("debut_validite")
-                    or item.get("dateDebut")
-                    or "",
-                    "end_date": item.get("date_fin")
-                    or item.get("fin_validite")
-                    or item.get("dateFin")
-                    or "",
-                }
-            )
-        alerts.sort(key=lambda alert: _vigieau_level_rank(alert.get("level", "")), reverse=True)
-        max_level = alerts[0]["level_color"] if alerts else "vert"
-        return {
-            "service": "Vigieau",
-            "status": "online",
-            "source": "https://api.vigieau.beta.gouv.fr/api/zones/departement/38",
-            "department": "Isère",
-            "alerts": alerts[:20],
-            "max_level": max_level,
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
-    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
-        last_error = exc
-
+def _vigieau_normalize_zone(item: dict[str, Any]) -> dict[str, Any]:
+    """Retain official restrictions and their audiences without adding inferred rules."""
+    zone = _vigieau_text(item.get("nom") or item.get("nom_zone") or item.get("zone")
+                          or item.get("nomZoneAlerte") or item.get("LbZAS") or item.get("name"), 500)
+    if not zone:
+        raise ValueError("Zone VigiEau sans nom")
+    level = _normalize_vigieau_level(item.get("niveauGravite") or item.get("niveau_gravite")
+                                     or item.get("niveau") or item.get("niveauAlerte")
+                                     or item.get("libelle_niveau_gravite") or item.get("severity"))
+    water_type = _vigieau_text(item.get("type") or item.get("TypeZAS") or item.get("water_type"), 20).upper()
+    decree = item.get("arrete") if isinstance(item.get("arrete"), dict) else {}
+    start_date = _vigieau_text(decree.get("dateDebutValidite") or item.get("date_debut")
+                               or item.get("debut_validite") or item.get("dateDebut"), 50)
+    end_date = _vigieau_text(decree.get("dateFinValidite") or item.get("date_fin")
+                             or item.get("fin_validite") or item.get("dateFin"), 50)
+    raw_usages = item.get("usages") or []
+    if not isinstance(raw_usages, list) or any(not isinstance(usage, dict) for usage in raw_usages):
+        raise ValueError("Liste des usages VigiEau invalide")
+    profile_fields = {"particulier": "concerneParticulier", "entreprise": "concerneEntreprise",
+                      "collectivite": "concerneCollectivite", "exploitation": "concerneExploitation"}
+    usages = []
+    details_truncated = len(raw_usages) > 200
+    for usage in raw_usages[:200]:
+        description = _vigieau_text(usage.get("description"))
+        if len(str(usage.get("description") or "")) > 20000:
+            details_truncated = True
+        usages.append({
+            "id": usage.get("id") if isinstance(usage.get("id"), (int, str)) else None,
+            "name": _vigieau_text(usage.get("nom") or usage.get("name"), 500),
+            "theme": _vigieau_text(usage.get("thematique") or usage.get("theme"), 300),
+            "description": description,
+            "profiles": [profile for profile, field in profile_fields.items() if usage.get(field) is True],
+        })
+    raw_communes = item.get("communes") or []
+    if not isinstance(raw_communes, list):
+        raw_communes = []
+    communes = []
+    for commune in raw_communes[:600]:
+        if isinstance(commune, dict):
+            communes.append({"code": _vigieau_text(commune.get("code") or commune.get("codeInsee"), 10),
+                             "name": _vigieau_text(commune.get("nom") or commune.get("name"), 200)})
+        elif isinstance(commune, str):
+            communes.append({"code": commune if commune.isdigit() else "", "name": "" if commune.isdigit() else commune[:200]})
+    details_truncated = details_truncated or len(raw_communes) > 600
+    measure = _vigieau_text(item.get("mesure") or item.get("restriction") or item.get("libelle_mesure")
+                            or item.get("mesurePrincipale") or item.get("description"), 2000)
+    if not measure:
+        measure = f"{len(raw_usages)} usage(s) détaillé(s) par VigiEau" if raw_usages else "Consulter l'arrêté préfectoral pour les mesures applicables"
     return {
-        "service": "Vigieau",
-        "status": "degraded",
-        "source": source_page,
-        "department": "Isère",
-        "alerts": [],
-        "max_level": "vert",
-        "error": str(last_error or "Service Vigieau indisponible"),
+        "id": item.get("id") if isinstance(item.get("id"), (int, str)) else None,
+        "code": _vigieau_text(item.get("code") or item.get("CdZAS"), 100),
+        "zone": zone, "level": level, "level_color": _vigieau_level_to_color(level),
+        "water_type": water_type,
+        "water_type_label": {"SUP": "Eaux superficielles", "SOU": "Eaux souterraines", "AEP": "Eau potable"}.get(water_type, "Ressource non précisée"),
+        "influenced_resource": item.get("ressourceInfluencee") if isinstance(item.get("ressourceInfluencee"), bool) else None,
+        "measure": measure, "start_date": start_date, "end_date": end_date,
+        "usages": usages, "usage_count": len(raw_usages), "communes": communes,
+        "details_truncated": details_truncated,
+        "arrete": {"id": decree.get("id") if isinstance(decree.get("id"), (int, str)) else None,
+                   "number": _vigieau_text(decree.get("numero") or decree.get("number"), 100),
+                   "start_date": start_date, "end_date": end_date,
+                   "url": _vigieau_url(decree.get("cheminFichier")),
+                   "framework_url": _vigieau_url(decree.get("cheminFichierArreteCadre")),
+                   "municipal_url": _vigieau_url(item.get("arreteMunicipalCheminFichier"))},
     }
 
 
+def _vigieau_is_empty_department_error(error: HTTPError) -> bool:
+    if error.code != 404:
+        return False
+    try:
+        body = json.loads(error.read(16384).decode("utf-8"))
+    except (OSError, ValueError, UnicodeError):
+        return False
+    message = body.get("message") if isinstance(body, dict) else ""
+    normalized = _vigieau_text(message).replace("’", "'").lower().rstrip(". ")
+    return normalized == "aucune zone d'alerte en vigueur sur ce département"
+
+
+def _fetch_vigieau_restrictions_live() -> dict[str, Any]:
+    # One authoritative departmental request includes every zone, usage and decree.
+    # Sampling a handful of coordinates cannot establish the absence of restrictions.
+    source = "https://api.vigieau.beta.gouv.fr/api/zones/departement/38"
+    base = {"service": "Vigieau", "schema_version": 2, "source": source,
+            "source_page": "https://www.vigieau.gouv.fr", "department": "Isère", "department_code": "38"}
+    try:
+        try:
+            payload = _http_get_json(source, timeout=18)
+        except HTTPError as exc:
+            if not _vigieau_is_empty_department_error(exc):
+                raise
+            payload = []
+        restrictions = _vigieau_list(payload)
+        upstream_incomplete = False
+        if isinstance(payload, dict):
+            total = payload.get("total_count", payload.get("total"))
+            upstream_incomplete = (payload.get("complete") is False or payload.get("truncated") is True
+                                   or isinstance(total, int) and total > len(restrictions))
+        alerts = []
+        invalid_zones = 0
+        seen = set()
+        for item in restrictions:
+            department = item.get("departement") or item.get("code_departement") or item.get("codeDepartement")
+            if isinstance(department, dict):
+                department = department.get("code")
+            if department and str(department) != "38":
+                continue
+            try:
+                alert = _vigieau_normalize_zone(item)
+            except (ValueError, TypeError):
+                invalid_zones += 1
+                continue
+            key = (alert["id"], alert["code"], alert["zone"], alert["water_type"], alert["level"], alert["arrete"]["id"])
+            if key not in seen:
+                seen.add(key)
+                alerts.append(alert)
+        if restrictions and not alerts:
+            raise ValueError("Réponse VigiEau sans zone exploitable pour l'Isère")
+        alerts.sort(key=lambda alert: (-_vigieau_level_rank(alert["level"]), alert["zone"].casefold(), alert["water_type"]))
+        alerts_total = len(alerts)
+        truncated = alerts_total > 300 or any(alert["details_truncated"] for alert in alerts)
+        unknown_levels = sum(_vigieau_level_rank(alert["level"]) == 0 for alert in alerts)
+        complete = not invalid_zones and not unknown_levels and not truncated and not upstream_incomplete
+        level_counts = {}
+        water_type_counts = {}
+        profiles = set()
+        communes = set()
+        for alert in alerts:
+            level_counts[alert["level"]] = level_counts.get(alert["level"], 0) + 1
+            water_type_counts[alert["water_type"]] = water_type_counts.get(alert["water_type"], 0) + 1
+            for usage in alert["usages"]:
+                profiles.update(usage["profiles"])
+            communes.update((commune["code"] or commune["name"]) for commune in alert["communes"])
+        result = {**base, "status": "online" if complete else "partial", "complete": complete, "truncated": truncated,
+                  "alerts": alerts[:300], "alerts_total": alerts_total,
+                  "usages_total": sum(alert["usage_count"] for alert in alerts), "communes_total": len(communes),
+                  "level_counts": level_counts, "water_type_counts": water_type_counts, "profiles": sorted(profiles),
+                  "max_level": alerts[0]["level_color"] if alerts else "vert",
+                  "updated_at": datetime.utcnow().isoformat() + "Z"}
+        if invalid_zones or unknown_levels or upstream_incomplete:
+            result["error"] = "Certaines données VigiEau sont indisponibles ou invalides ; couverture incomplète."
+        return result
+    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, IncompleteRead, OSError, ValueError, TypeError) as exc:
+        return {**base, "status": "offline", "complete": False, "truncated": False,
+                "alerts": [], "alerts_total": 0, "usages_total": 0, "communes_total": 0,
+                "level_counts": {}, "water_type_counts": {}, "profiles": [], "max_level": "gris",
+                "error": str(exc or "Service VigiEau indisponible")}
+
 
 def fetch_vigieau_restrictions(force_refresh: bool = False) -> dict[str, Any]:
-    return _cached_external_payload(
+    payload = _cached_external_payload(
         cache=_vigieau_cache,
         lock=_vigieau_cache_lock,
         ttl_seconds=_VIGIEAU_CACHE_TTL_SECONDS,
         force_refresh=force_refresh,
         loader=_fetch_vigieau_restrictions_live,
     )
+    # The shared cache updates stale timestamps. Retain the observation date here,
+    # so a failed refresh cannot make an older water restriction appear current.
+    if payload.get("status") == "stale":
+        with _vigieau_cache_lock:
+            previous = _vigieau_cache.get("payload") or {}
+            if previous.get("updated_at"):
+                payload["updated_at"] = previous["updated_at"]
+        payload["complete"] = False
+    elif payload.get("status") == "online":
+        try:
+            observed_at = datetime.fromisoformat(str(payload.get("updated_at") or "").rstrip("Z"))
+            age_seconds = (datetime.utcnow() - observed_at).total_seconds()
+        except (TypeError, ValueError):
+            age_seconds = _VIGIEAU_CACHE_TTL_SECONDS + 1
+        if age_seconds > _VIGIEAU_CACHE_TTL_SECONDS:
+            # Persistent Redis values survive restarts for seven days. The
+            # background worker will refresh them; meanwhile label their age.
+            payload = deepcopy(payload)
+            payload["status"] = "stale"
+            payload["complete"] = False
+            payload["stale_reason"] = "Dernières données connues, en attente d'actualisation"
+    return payload
 
 
 def _apic_level_from_raw(value: Any) -> str:
