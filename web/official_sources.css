@@ -33,7 +33,7 @@
 @media (max-width: 600px) { .official-source-grid { gap: .65rem; } .official-controls { gap: .4rem; } .official-controls label { min-width: 100%; } .official-table-wrap { max-height: 360px; } }
 
 /* Source explorer: catalogue and focused data view. */
-#official-sources-panel { min-width: 0; }
+#official-sources-panel { min-width: 0; backdrop-filter: none; -webkit-backdrop-filter: none; }
 #official-sources-panel [hidden] { display: none !important; }
 .source-hero { display: flex; align-items: center; justify-content: space-between; gap: 32px; padding: 30px 34px; border-radius: 18px; color: #fff; background: radial-gradient(ellipse at 95% 10%, #24626f88, transparent 60%), linear-gradient(120deg, #0c2442, #193b61); overflow: hidden; }
 .source-eyebrow { display: block; font-size: .67rem; font-weight: 750; letter-spacing: .14em; }
@@ -59,7 +59,7 @@
 .source-catalog-heading h4 { margin: 0; font-size: .95rem; color: #203f5d; }
 .source-catalog-heading > span { font-size: .72rem; color: #718096; }
 .source-catalog-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 245px), 1fr)); gap: 15px; }
-.source-choice { --source-accent: #217a89; --source-soft: #e9f5f5; display: flex; flex-direction: column; align-items: stretch; text-align: left; min-width: 0; padding: 19px; border: 1px solid #dfe7ef; border-radius: 14px; color: #17344e; background: #fff; cursor: pointer; box-shadow: 0 2px 5px #203e5903; transition: transform .16s, box-shadow .16s, border-color .16s; animation: source-arrive .3s both; animation-delay: calc(var(--source-order, 0) * 22ms); }
+.source-choice { --source-accent: #217a89; --source-soft: #e9f5f5; display: flex; flex-direction: column; align-items: stretch; text-align: left; min-width: 0; padding: 19px; border: 1px solid #dfe7ef; border-radius: 14px; color: #17344e; background: #fff; cursor: pointer; box-shadow: 0 2px 5px #203e5903; transition: transform .16s, box-shadow .16s, border-color .16s; }
 .source-choice--territory { --source-accent: #7760ac; --source-soft: #f0edf8; }
 .source-choice--energy { --source-accent: #b17b22; --source-soft: #fcf4df; }
 .source-choice--daily { --source-accent: #3365a0; --source-soft: #edf3fc; }
@@ -115,7 +115,6 @@
 .source-catalog-grid[data-mode="list"] .source-choice-description { margin: 0; }
 .source-catalog-grid[data-mode="list"] .source-choice-metric { margin: 0; flex-direction: column; gap: 3px; }
 .source-catalog-grid[data-mode="list"] .source-choice-footer { margin: 0; border: 0; padding: 0; }
-@keyframes source-arrive { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 @media (max-width: 1250px) { .source-catalog-grid[data-mode="list"] .source-choice { grid-template-columns: 155px 1fr 150px; gap: 15px; } .source-catalog-grid[data-mode="list"] .source-choice-description, .source-catalog-grid[data-mode="list"] .source-choice-footer { display: none; } }
 @media (max-width: 800px) { .source-hero { padding: 23px; gap: 22px; align-items: start; flex-direction: column; } .source-hero-stats { width: 100%; justify-content: space-between; padding: 17px 0 0; border-left: 0; border-top: 1px solid #ffffff24; } .source-hero-stats strong { font-size: 1.55rem; } .source-detail-header { grid-template-columns: 1fr auto; gap: 14px; } .source-detail-header > div { grid-column: 1 / -1; grid-row: 2; } }
 @media (max-width: 600px) { .source-hero { padding: 22px 20px; border-radius: 13px; } .source-hero h3 { font-size: 1.45rem; } .source-hero p br { display: none; } .source-toolbar { padding: 12px; gap: 12px; margin: 17px 0; } .source-catalog-filters { flex-basis: 100%; gap: 9px; } .source-search { flex: 1; min-width: 0; } .source-theme { flex: 0 1 135px; } .source-toolbar input, .source-toolbar select { font-size: .72rem; padding: 8px; } .source-catalog-grid { grid-template-columns: 1fr; gap: 12px; } .source-choice { padding: 17px; } .source-choice-top { margin-bottom: 13px; } .source-choice-description { margin-bottom: 14px; } .source-detail-switch { flex-basis: 100%; max-width: none; } .source-catalog-grid[data-mode="list"] .source-choice { grid-template-columns: 44px minmax(0, 1fr) 85px; gap: 12px; padding: 12px; } .source-catalog-grid[data-mode="list"] .source-choice-top .source-status { display: none; } .source-catalog-grid[data-mode="list"] .source-choice-heading > strong { font-size: .78rem; } .source-catalog-grid[data-mode="list"] .source-choice-metric strong { font-size: .95rem; } .source-catalog-grid[data-mode="list"] .source-choice-metric > span { font-size: .58rem; } .source-catalog-grid[data-mode="list"] .source-choice-metric { text-align: right; align-items: end; } }

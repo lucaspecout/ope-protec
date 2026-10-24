@@ -151,6 +151,25 @@ CHECKS = """<script>
     check('legacy Services navigation redirects to unified page',localStorage.getItem('activePanel')==='official-sources-panel'&&!panel.hidden);
     document.getElementById('source-back').click();
     await new Promise(r=>setTimeout(r,500));
+    for(const mode of ['cards','list']){
+      document.querySelector('[data-source-mode="'+mode+'"]').click();
+      await new Promise(r=>setTimeout(r,500));
+      const grid=document.getElementById('source-catalog-grid');
+      const anchor=grid.querySelector('[data-source-open="sncf_isere"]');
+      anchor.scrollIntoView({block:'center',behavior:'instant'});
+      const position=scrollY, height=grid.getBoundingClientRect().height;
+      const cards=[...grid.children];
+      const payload={...cachedExternalRisksSnapshot.sncf_isere};
+      for(let iteration=0;iteration<5;iteration++){
+        window.SourceExplorer.update({sncf_isere:{...payload,updated_at:new Date(Date.now()+iteration*1000).toISOString()}});
+        await new Promise(r=>requestAnimationFrame(r));
+      }
+      check('live updates preserve every card node in '+mode,cards.every((card,index)=>grid.children[index]===card));
+      check('live updates preserve scroll position in '+mode,Math.abs(scrollY-position)<=1);
+      check('live updates preserve catalogue height in '+mode,Math.abs(grid.getBoundingClientRect().height-height)<=1);
+      check('live updates never hide cards in '+mode,[...grid.children].every(card=>getComputedStyle(card).opacity==='1'));
+    }
+    document.querySelector('[data-source-mode="cards"]').click();
     window.scrollTo({top:0,behavior:'instant'});
     await new Promise(r=>setTimeout(r,200));
     check('new map layers available',document.getElementById('filter-public-fuel')&&document.getElementById('filter-public-onde'));

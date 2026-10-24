@@ -145,6 +145,20 @@
     }
     if (source.connected) renderServiceData(source, slot);
   }
+  function updateCard(card, source) {
+    const slot = state.snapshot[source.key] || {}, badge = status(slot), value = metric(source.key, slot);
+    const text = (selector, next) => {
+      const node = card.querySelector(selector);
+      if (node && node.textContent !== String(next)) node.textContent = String(next);
+    };
+    const statusNode = card.querySelector('.source-status');
+    const statusClass = `source-status source-status--${badge.tone}`;
+    if (statusNode && statusNode.className !== statusClass) statusNode.className = statusClass;
+    text('.source-status', badge.label);
+    text('.source-choice-metric > strong', value.value);
+    text('.source-choice-metric > span', value.label);
+    text('.source-choice-footer > span', slot.updated_at || slot.checked_at ? `Collecte du ${when(slot.updated_at || slot.checked_at)}` : 'Date non disponible');
+  }
   function render() {
     if (!el('source-catalog-grid')) return;
     const detail = Boolean(state.selected);
@@ -167,13 +181,19 @@
     el('source-result-count').textContent = `${matches.length} source${matches.length > 1 ? 's' : ''} sur ${SOURCES.length}`;
     el('source-empty').hidden = matches.length > 0;
     el('source-catalog-grid').dataset.mode = state.mode;
-    const signature = JSON.stringify([matches.map(source => source.key), state.mode, state.snapshot]);
-    if (signature === state.signature) return;
+    const signature = JSON.stringify(matches.map(source => source.key));
+    const grid = el('source-catalog-grid');
+    // Live snapshots must not replace focused/visible cards or restart their
+    // entrance effects. Modes are CSS-only; rebuild only for a different set.
+    if (signature === state.signature && grid.children?.length === matches.length) {
+      matches.forEach((source, index) => updateCard(grid.children[index], source));
+      return;
+    }
     state.signature = signature;
     const focused = document.activeElement?.dataset?.sourceOpen;
-    el('source-catalog-grid').innerHTML = matches.map((source, index) => {
+    grid.innerHTML = matches.map(source => {
       const slot = state.snapshot[source.key] || {}, badge = status(slot), value = metric(source.key, slot);
-      return `<button type="button" class="source-choice source-choice--${source.theme}${source.connected ? ' source-choice--connected' : ''}" data-source-open="${source.key}" style="--source-order:${Math.min(index, 10)}" aria-label="Consulter ${esc(source.title)}"><span class="source-choice-top"><span class="source-choice-icon" aria-hidden="true"><svg viewBox="0 0 24 26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="${source.icon}"/></svg></span><span class="source-status source-status--${badge.tone}">${esc(badge.label)}</span></span><span class="source-choice-heading"><span class="source-choice-publisher">${esc(source.publisher)}</span><strong>${esc(source.title)}</strong></span><span class="source-choice-description">${esc(source.description)}</span><span class="source-choice-metric"><strong>${esc(value.value)}</strong><span>${esc(value.label)}</span></span><span class="source-choice-footer"><span>${esc(slot.updated_at || slot.checked_at ? `Collecte du ${when(slot.updated_at || slot.checked_at)}` : 'Date non disponible')}</span><span class="source-choice-arrow" aria-hidden="true">↗</span></span></button>`;
+      return `<button type="button" class="source-choice source-choice--${source.theme}${source.connected ? ' source-choice--connected' : ''}" data-source-open="${source.key}" aria-label="Consulter ${esc(source.title)}"><span class="source-choice-top"><span class="source-choice-icon" aria-hidden="true"><svg viewBox="0 0 24 26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="${source.icon}"/></svg></span><span class="source-status source-status--${badge.tone}">${esc(badge.label)}</span></span><span class="source-choice-heading"><span class="source-choice-publisher">${esc(source.publisher)}</span><strong>${esc(source.title)}</strong></span><span class="source-choice-description">${esc(source.description)}</span><span class="source-choice-metric"><strong>${esc(value.value)}</strong><span>${esc(value.label)}</span></span><span class="source-choice-footer"><span>${esc(slot.updated_at || slot.checked_at ? `Collecte du ${when(slot.updated_at || slot.checked_at)}` : 'Date non disponible')}</span><span class="source-choice-arrow" aria-hidden="true">↗</span></span></button>`;
     }).join('');
     if (focused) document.querySelector(`[data-source-open="${focused}"]`)?.focus({ preventScroll: true });
   }

@@ -158,3 +158,25 @@ test('motorway data aggregates providers and refresh requests target the three r
   await h.get('source-refresh').listeners.click();
   assert.deepEqual(h.calls.map(call => call.url), ['bison_fute', 'aprr_isere', 'vinci_autoroutes'].map(key => `/external/isere/risks/${key}/refresh`));
 });
+
+test('live values and display mode update existing cards without replacing the catalogue', () => {
+  const h = harness(), grid = h.get('source-catalog-grid');
+  const cards = [...grid.innerHTML.matchAll(/data-source-open="([^"]+)"/g)].map(match => {
+    const fields = new Map(['.source-status', '.source-choice-metric > strong', '.source-choice-metric > span', '.source-choice-footer > span'].map(selector => [selector, { textContent: '', className: '' }]));
+    return { key: match[1], fields, querySelector: selector => fields.get(selector) };
+  });
+  grid.children = cards;
+  let replacements = 0, html = grid.innerHTML;
+  Object.defineProperty(grid, 'innerHTML', { get: () => html, set: value => { ++replacements; html = value; } });
+  h.ui.update({ fuel_isere: { status: 'online', stations_total: 190 } });
+  const fuel = cards.find(card => card.key === 'fuel_isere');
+  assert.equal(fuel.fields.get('.source-choice-metric > strong').textContent, '190');
+  assert.equal(fuel.fields.get('.source-status').textContent, 'À jour');
+  h.ui.update({ fuel_isere: { status: 'stale', stations_total: 190, updated_at: '2026-10-24T12:00:00Z' } });
+  assert.equal(fuel.fields.get('.source-status').textContent, 'Données anciennes');
+  assert.match(fuel.fields.get('.source-status').className, /warning/);
+  h.clickMode('list');
+  assert.equal(grid.dataset.mode, 'list');
+  assert.equal(replacements, 0, 'live data and mode changes preserve mounted buttons and focus');
+  assert.equal(grid.children, cards);
+});
