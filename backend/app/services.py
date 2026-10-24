@@ -7440,122 +7440,56 @@ def _fetch_georisques_v2_collection(
     if not token:
         raise ValueError("Clé API Géorisques absente")
 
+    from time import sleep
     headers = {"Authorization": f"Bearer {token}"}
-    base_query = deepcopy(extra_query) if extra_query else {}
-
-    if not any(key in base_query for key in ("departement", "department", "codeDepartement")):
-        base_query["departement"] = departement
-
-    query_candidates: list[tuple[dict[str, Any], tuple[str, str] | None]] = []
-    pagination_variants = [
-        ("pageSize", "pageNumber"),
-        ("size", "page"),
-        ("page_size", "page"),
-    ]
-
-    for dept_key in ("departement", "department", "codeDepartement"):
-        candidate_base = deepcopy(base_query)
-        if "departement" in candidate_base and dept_key != "departement":
-            candidate_base[dept_key] = candidate_base.pop("departement")
-        elif dept_key != "departement" and "departement" not in candidate_base and dept_key not in candidate_base and "department" in candidate_base:
-            candidate_base[dept_key] = candidate_base.pop("department")
-        for size_key, page_key in pagination_variants:
-            candidate = deepcopy(candidate_base)
-            candidate[size_key] = page_size
-            candidate[page_key] = 0
-            query_candidates.append((candidate, (size_key, page_key)))
-        query_candidates.append((candidate_base, None))
-
-    deduped_candidates: list[tuple[dict[str, Any], tuple[str, str] | None]] = []
-    seen: set[str] = set()
-    for candidate, pagination in query_candidates:
-        candidate_key = json.dumps(candidate, sort_keys=True, default=str)
-        if candidate_key in seen:
-            continue
-        seen.add(candidate_key)
-        deduped_candidates.append((candidate, pagination))
-
-    last_error: Exception | None = None
-    first_page: dict[str, Any] | None = None
-    page_config: tuple[str, str] | None = None
-    selected_query: dict[str, Any] | None = None
-
-    for candidate_query, pagination in deduped_candidates:
-        try:
-            payload = _credentialed_http_json(
-                f"https://www.georisques.gouv.fr/api/v2/{endpoint}?{urlencode(candidate_query, doseq=True)}",
-                headers=headers,
-            )
-            first_page = payload if isinstance(payload, dict) else {}
-            selected_query = deepcopy(candidate_query)
-            page_config = pagination
-            break
-        except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
-            last_error = exc
-
-    if first_page is None or selected_query is None:
-        raise last_error or ValueError(f"Réponse Géorisques vide pour {endpoint}")
-
-    content = list(first_page.get("content") or first_page.get("data") or [])
-    total_pages = int(first_page.get("totalPages") or first_page.get("total_pages") or 1)
-    current_page = int(first_page.get("pageNumber") or first_page.get("page") or 0)
-
-    if page_config and total_pages > 1:
-        _, page_key = page_config
-        if current_page == 0:
-            page_numbers = range(1, total_pages)
-        else:
-            page_numbers = range(current_page + 1, total_pages + 1)
-
-        for page_number in page_numbers:
-            selected_query[page_key] = page_number
-            page_payload = _credentialed_http_json(
-                f"https://www.georisques.gouv.fr/api/v2/{endpoint}?{urlencode(selected_query, doseq=True)}",
-                headers=headers,
-            )
-            content.extend(page_payload.get("content") or page_payload.get("data") or [])
-
-    return {
-        "total_elements": int(first_page.get("totalElements") or first_page.get("total_elements") or first_page.get("results") or len(content)),
-        "content": content,
-    }
+    query = deepcopy(extra_query) if extra_query else {"departement": departement}
+    query.update(pageSize=min(max(int(page_size), 1), 1000), pageNumber=0)
+    content = []
+    total = None
+    pages = 1
+    for page in range(100):
+        query["pageNumber"] = page
+        sleep(0.06)  # Official v2 quota: 20 requests per second.
+        payload = _credentialed_http_json(
+            f"https://www.georisques.gouv.fr/api/v2/{endpoint}?{urlencode(query, doseq=True)}", headers=headers)
+        if not isinstance(payload, dict) or not isinstance(payload.get("content"), list) or any(not isinstance(row, dict) for row in payload["content"]):
+            raise ValueError("Invalid Georisques collection")
+        content.extend(payload["content"])
+        if page == 0:
+            total = int(payload.get("totalElements", len(content)))
+            pages = int(payload.get("totalPages", 1))
+        if page + 1 >= pages:
+            return {"total_elements": total, "content": content}
+    raise ValueError("Georisques pagination limit exceeded")
 
 
 def _resolve_commune_insee_codes(names: list[str], departement: str = "38") -> dict[str, str]:
-    resolved: dict[str, str] = {}
+    resolved = {}
     for name in names:
-        label = (name or "").strip()
-        if not label:
-            continue
-        try:
-            payload = _http_get_json(
-                f"https://geo.api.gouv.fr/communes?nom={quote_plus(label)}&departement={quote_plus(departement)}&fields=nom,code&boost=population&limit=1"
-            )
-            if isinstance(payload, list) and payload:
-                code = str(payload[0].get("code") or "").strip()
-                if code:
-                    resolved[code] = label
-        except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
-            continue
+        code = resolve_commune_insee_code(name, departement=departement)
+        if code:
+            resolved[code] = name
     return resolved
 
 
 def resolve_commune_insee_code(name: str, postal_code: str | None = None, departement: str = "38") -> str | None:
-    label = (name or "").strip()
-    if not label:
+    def normalize(value):
+        return re.sub(r"[^a-z0-9]", "", unicodedata.normalize("NFKD", str(value)).encode("ascii", "ignore").decode().lower())
+    if not name or not name.strip():
         return None
-    query = f"https://geo.api.gouv.fr/communes?nom={quote_plus(label)}&fields=nom,code&boost=population&limit=1"
+    query = {"nom": name.strip(), "fields": "nom,code", "limit": 20}
+    if departement:
+        query["codeDepartement"] = departement
     if postal_code:
-        query = f"https://geo.api.gouv.fr/communes?nom={quote_plus(label)}&codePostal={quote_plus(str(postal_code))}&fields=nom,code&boost=population&limit=1"
-    elif departement:
-        query = f"https://geo.api.gouv.fr/communes?nom={quote_plus(label)}&departement={quote_plus(departement)}&fields=nom,code&boost=population&limit=1"
+        query["codePostal"] = str(postal_code)
     try:
-        payload = _http_get_json(query)
-        if isinstance(payload, list) and payload:
-            code = str(payload[0].get("code") or "").strip()
-            return code or None
-    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
-        return None
+        payload = _http_get_json("https://geo.api.gouv.fr/communes?" + urlencode(query))
+        for item in payload if isinstance(payload, list) else []:
+            code = str(item.get("code") or "")
+            if len(code) == 5 and code.startswith(departement) and normalize(item.get("nom")) == normalize(name):
+                return code
+    except (HTTPError, URLError, TimeoutError, OSError, ValueError):
+        pass
     return None
 
 
@@ -7570,386 +7504,29 @@ def _georisques_danger_label(risk_total: int) -> str:
 
 
 def fetch_georisques_commune_risks(codes_insee: list[str]) -> dict[str, Any]:
-    normalized_codes = []
-    for code in codes_insee:
-        candidate = str(code or "").strip()
-        if candidate and candidate.isdigit() and len(candidate) == 5 and candidate not in normalized_codes:
-            normalized_codes.append(candidate)
-
-    if not normalized_codes:
-        return {"service": "Géorisques", "source": "https://georisques.gouv.fr/api/v1/gaspar/risques", "communes": [], "updated_at": datetime.utcnow().isoformat() + "Z"}
-
-    query = urlencode({"code_insee": ",".join(normalized_codes), "page_size": 100}, doseq=True)
-    try:
-        payload = _http_get_json(f"https://www.georisques.gouv.fr/api/v1/gaspar/risques?{query}")
-    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
-        return {
-            "service": "Géorisques",
-            "source": "https://georisques.gouv.fr/api/v1/gaspar/risques",
-            "communes": [{"code_insee": code, "risks": [], "risk_total": 0, "danger_level": "Faible", "errors": [str(exc)]} for code in normalized_codes],
-            "error": str(exc),
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
-
-    content = payload.get("data") or payload.get("content") or payload.get("items") or []
-    by_commune = {code: [] for code in normalized_codes}
-
-    for item in content:
-        communes = item.get("communes") if isinstance(item, dict) else None
-        risk_name = str(item.get("libelle_risque") or item.get("libelle") or item.get("risque") or "Risque non précisé").strip()
-        if communes:
-            for commune in communes:
-                code = str(commune.get("code_insee") or commune.get("codeInsee") or "").strip()
-                if code in by_commune and risk_name:
-                    by_commune[code].append(risk_name)
-            continue
-        code = str(item.get("code_insee") or item.get("codeInsee") or "").strip()
-        if code in by_commune and risk_name:
-            by_commune[code].append(risk_name)
-
-    communes_payload = []
-    for code in normalized_codes:
-        risks = sorted({risk for risk in by_commune.get(code, []) if risk})
-        communes_payload.append({
-            "code_insee": code,
-            "risks": risks,
-            "risk_total": len(risks),
-            "danger_level": _georisques_danger_label(len(risks)),
-        })
-
-    return {
-        "service": "Géorisques",
-        "source": "https://www.georisques.gouv.fr/api/v1/gaspar/risques",
-        "communes": communes_payload,
-        "updated_at": datetime.utcnow().isoformat() + "Z",
-    }
+    from .georisques_sources import collect_public_risks
+    return collect_public_risks(codes_insee, _http_get_json)
 
 
 def _fetch_georisques_isere_summary_live(commune_names: list[str] | None = None) -> dict[str, Any]:
-    source = "https://georisques.gouv.fr/api/v2"
-    configuration_error = "Clé API Géorisques v2 absente"
+    from .georisques_sources import collect_summary
     try:
         token = str(resolve_credentials("georisques").get("token") or "").strip()
     except CredentialStoreError:
         token = ""
-        configuration_error = "Configuration des accès Géorisques indisponible"
-    if not token:
-        return {
-            "service": "Géorisques",
-            "status": "degraded",
-            "source": source,
-            "api_mode": "v2-token-required",
-            "department": "Isère (38)",
-            "highest_seismic_zone_code": 0,
-            "highest_seismic_zone_label": "inconnue",
-            "flood_documents_total": 0,
-            "ppr_total": 0,
-            "ground_movements_total": 0,
-            "cavities_total": 0,
-            "communes_with_radon_moderate_or_high": 0,
-            "movement_types": {},
-            "movement_reliability": {},
-            "cavity_types": {},
-            "ppr_categories": {"pprn": 0, "pprm": 0, "pprt": 0},
-            "dicrim_total": 0,
-            "tim_total": 0,
-            "risques_information_total": 0,
-            "seismic_zone_distribution": {},
-            "radon_distribution": {"faible": 0, "moyen": 0, "eleve": 0},
-            "recent_ground_movements": [],
-            "monitored_communes": [],
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-            "errors": [configuration_error],
-            "error": configuration_error,
-        }
-
-    monitored_names = commune_names or ["Grenoble", "Bourgoin-Jallieu", "Vienne", "Voiron"]
-    monitored_codes = _resolve_commune_insee_codes(monitored_names)
-    if not monitored_codes:
-        return {
-            "service": "Géorisques",
-            "status": "degraded",
-            "source": source,
-            "api_mode": "v2-token",
-            "department": "Isère (38)",
-            "highest_seismic_zone_code": 0,
-            "highest_seismic_zone_label": "inconnue",
-            "flood_documents_total": 0,
-            "ppr_total": 0,
-            "ground_movements_total": 0,
-            "cavities_total": 0,
-            "communes_with_radon_moderate_or_high": 0,
-            "movement_types": {},
-            "movement_reliability": {},
-            "cavity_types": {},
-            "ppr_categories": {"pprn": 0, "pprm": 0, "pprt": 0},
-            "dicrim_total": 0,
-            "tim_total": 0,
-            "risques_information_total": 0,
-            "seismic_zone_distribution": {},
-            "radon_distribution": {"faible": 0, "moyen": 0, "eleve": 0},
-            "recent_ground_movements": [],
-            "monitored_communes": [],
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-            "errors": ["Aucun code INSEE trouvé pour les communes PCS"],
-            "error": "Aucun code INSEE trouvé pour les communes PCS",
-        }
-
-    filters = {"codesInsee": sorted(monitored_codes.keys())}
-    radon_labels = {"1": "Faible", "2": "Moyen", "3": "Élevé"}
-
-    try:
-        mvt_payload = _fetch_georisques_v2_collection("mvt", extra_query=filters, token=token)
-        cavites_payload = _fetch_georisques_v2_collection("cavites", extra_query=filters, token=token)
-        radon_payload = _fetch_georisques_v2_collection("radon", extra_query=filters, token=token)
-        azi_payload = _fetch_georisques_v2_collection("gaspar/azi", extra_query=filters, token=token)
-        pprn_payload = _fetch_georisques_v2_collection("gaspar/pprn", extra_query=filters, token=token)
-        pprm_payload = _fetch_georisques_v2_collection("gaspar/pprm", extra_query=filters, token=token)
-        pprt_payload = _fetch_georisques_v2_collection("gaspar/pprt", extra_query=filters, token=token)
-        dicrim_payload = _fetch_georisques_v2_collection("gaspar/dicrim", extra_query=filters, token=token)
-        tim_payload = _fetch_georisques_v2_collection("gaspar/tim", extra_query=filters, token=token)
-        risques_payload = _fetch_georisques_v2_collection("gaspar/risques", extra_query=filters, token=token)
-        zonage_payload = _fetch_georisques_v2_collection("zonage_sismique", extra_query=filters, token=token)
-    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
-        return {
-            "service": "Géorisques",
-            "status": "degraded",
-            "source": source,
-            "api_mode": "v2-token",
-            "department": "Isère (38)",
-            "highest_seismic_zone_code": 0,
-            "highest_seismic_zone_label": "inconnue",
-            "flood_documents_total": 0,
-            "ppr_total": 0,
-            "ground_movements_total": 0,
-            "cavities_total": 0,
-            "communes_with_radon_moderate_or_high": 0,
-            "movement_types": {},
-            "movement_reliability": {},
-            "cavity_types": {},
-            "ppr_categories": {"pprn": 0, "pprm": 0, "pprt": 0},
-            "dicrim_total": 0,
-            "tim_total": 0,
-            "risques_information_total": 0,
-            "seismic_zone_distribution": {},
-            "radon_distribution": {"faible": 0, "moyen": 0, "eleve": 0},
-            "recent_ground_movements": [],
-            "monitored_communes": [],
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-            "errors": ["API Géorisques v2 indisponible"],
-            "error": "API Géorisques v2 indisponible",
-        }
-
-    movements = mvt_payload["content"]
-    movement_types: dict[str, int] = {}
-    movement_reliability: dict[str, int] = {}
-    recent_movements: list[dict[str, Any]] = []
-    for item in movements:
-        movement_type = str(item.get("type") or "Type non renseigné").strip()
-        movement_types[movement_type] = movement_types.get(movement_type, 0) + 1
-        reliability = str(item.get("fiabilite") or "Non précisée").strip()
-        movement_reliability[reliability] = movement_reliability.get(reliability, 0) + 1
-        recent_movements.append(
-            {
-                "commune": monitored_codes.get(str(item.get("codeInsee") or ""), item.get("codeInsee") or "Commune inconnue"),
-                "type": movement_type,
-                "date": item.get("dateDebut") or item.get("dateMaj"),
-                "location": item.get("lieu") or item.get("commentaireLieu"),
-                "identifier": item.get("identifiant"),
-                "reliability": item.get("fiabilite"),
-            }
-        )
-
-    cavities = cavites_payload["content"]
-    cavity_types: dict[str, int] = {}
-    for item in cavities:
-        cavity_type = str(item.get("type") or "Non renseigné").strip()
-        cavity_types[cavity_type] = cavity_types.get(cavity_type, 0) + 1
-
-    radon_entries = radon_payload["content"]
-    radon_distribution = {"1": 0, "2": 0, "3": 0}
-    radon_by_commune: dict[str, str] = {}
-    for item in radon_entries:
-        code = str(item.get("codeInsee") or "")
-        classe = str(item.get("classePotentiel") or "")
-        if classe in radon_distribution:
-            radon_distribution[classe] += 1
-        if code:
-            radon_by_commune[code] = classe
-
-    flood_documents_total = azi_payload["total_elements"]
-
-    zonage_entries = zonage_payload["content"]
-    seismic_zone_distribution: dict[str, int] = {}
-    highest_seismic_zone_code = 0
-    for item in zonage_entries:
-        zone_label = str(item.get("zoneSismicite") or item.get("typeZone") or "inconnue").strip()
-        seismic_zone_distribution[zone_label] = seismic_zone_distribution.get(zone_label, 0) + 1
-        zone_match = re.search(r"(\d+)", zone_label)
-        if zone_match:
-            highest_seismic_zone_code = max(highest_seismic_zone_code, int(zone_match.group(1)))
-
-    ppr_total = pprn_payload["total_elements"] + pprm_payload["total_elements"] + pprt_payload["total_elements"]
-    ppr_categories = {
-        "pprn": pprn_payload["total_elements"],
-        "pprm": pprm_payload["total_elements"],
-        "pprt": pprt_payload["total_elements"],
-    }
-
-    tim_by_commune: dict[str, int] = {}
-    for item in tim_payload["content"]:
-        for commune in item.get("communes") or []:
-            code = str(commune.get("codeInsee") or "")
-            if code:
-                tim_by_commune[code] = tim_by_commune.get(code, 0) + 1
-
-    risques_by_commune: dict[str, int] = {}
-    for item in risques_payload["content"]:
-        for commune in item.get("communes") or []:
-            code = str(commune.get("codeInsee") or "")
-            if code:
-                risques_by_commune[code] = risques_by_commune.get(code, 0) + 1
-
-    dicrim_by_commune: dict[str, str] = {}
-    for item in dicrim_payload["content"]:
-        code = str(item.get("codeInsee") or item.get("code_insee") or "")
-        if not code:
-            continue
-        year = str(item.get("anneePublication") or item.get("annee_publication") or "").strip()
-        if year:
-            best = dicrim_by_commune.get(code)
-            if not best or year > best:
-                dicrim_by_commune[code] = year
-
-    monitored_flood_documents = {code: [] for code in monitored_codes}
-    for doc in azi_payload["content"]:
-        for commune in doc.get("communes") or []:
-            code = str(commune.get("codeInsee") or "")
-            if code not in monitored_flood_documents:
-                continue
-            direct_url = (
-                doc.get("urlDocument")
-                or doc.get("url_document")
-                or doc.get("lienDocument")
-                or doc.get("lien_document")
-                or None
-            )
-            monitored_flood_documents[code].append(
-                {
-                    "code": doc.get("idGaspar"),
-                    "title": doc.get("libelle"),
-                    "river_basin": doc.get("libBassinRisques"),
-                    "published_at": (commune.get("aleas") or [{}])[0].get("dateDiffusion"),
-                    "url": direct_url,
-                }
-            )
-
-    zone_by_commune = {
-        str(item.get("codeInsee") or ""): str(item.get("zoneSismicite") or "inconnue")
-        for item in zonage_entries
-        if item.get("codeInsee")
-    }
-
-    monitored = []
-    for code, name in monitored_codes.items():
-        radon_class = radon_by_commune.get(code, "")
-        docs = monitored_flood_documents.get(code) or []
-        zone_label = zone_by_commune.get(code, "inconnue")
-        center = _commune_center(code)
-        latitude = center[0] if center else None
-        longitude = center[1] if center else None
-        monitored.append(
-            {
-                "name": name,
-                "code_insee": code,
-                "latitude": latitude,
-                "longitude": longitude,
-                "seismic_zone": zone_label,
-                "flood_documents": len(docs),
-                "flood_documents_details": docs,
-                "ppr_total": sum(
-                    1
-                    for dataset in (pprn_payload["content"], pprm_payload["content"], pprt_payload["content"])
-                    for item in dataset
-                    if any(str(commune.get("codeInsee") or "") == code for commune in item.get("communes") or [])
-                ),
-                "ppr_by_risk": {
-                    "pprn": sum(
-                        1
-                        for item in pprn_payload["content"]
-                        if any(str(commune.get("codeInsee") or "") == code for commune in item.get("communes") or [])
-                    ),
-                    "pprm": sum(
-                        1
-                        for item in pprm_payload["content"]
-                        if any(str(commune.get("codeInsee") or "") == code for commune in item.get("communes") or [])
-                    ),
-                    "pprt": sum(
-                        1
-                        for item in pprt_payload["content"]
-                        if any(str(commune.get("codeInsee") or "") == code for commune in item.get("communes") or [])
-                    ),
-                },
-                "ground_movements_total": sum(1 for item in movements if str(item.get("codeInsee") or "") == code),
-                "cavities_total": sum(1 for item in cavities if str(item.get("codeInsee") or "") == code),
-                "radon_class": radon_class,
-                "radon_label": radon_labels.get(radon_class, "inconnu"),
-                "dicrim_publication_year": dicrim_by_commune.get(code),
-                "tim_total": tim_by_commune.get(code, 0),
-                "risques_information_total": risques_by_commune.get(code, 0),
-                "gaspar_risks": [],
-                "gaspar_risk_total": 0,
-                "gaspar_danger_level": "Faible",
-                "errors": [],
-            }
-        )
-
-    gaspar_payload = fetch_georisques_commune_risks(list(monitored_codes.keys()))
-    gaspar_by_code = {item.get("code_insee"): item for item in gaspar_payload.get("communes") or []}
-    gaspar_error = str(gaspar_payload.get("error") or "").strip()
-    for commune in monitored:
-        details = gaspar_by_code.get(commune.get("code_insee")) or {}
-        commune["gaspar_risks"] = details.get("risks", [])
-        commune["gaspar_risk_total"] = details.get("risk_total", 0)
-        commune["gaspar_danger_level"] = details.get("danger_level", "Faible")
-        detail_errors = details.get("errors") if isinstance(details, dict) else None
-        if isinstance(detail_errors, list):
-            commune["errors"].extend(str(err) for err in detail_errors if err)
-        if gaspar_error:
-            commune["errors"].append(f"GASPAR: {gaspar_error}")
-
-    return {
-        "service": "Géorisques",
-        "status": "online",
-        "source": source,
-        "api_mode": "v2-token",
-        "department": "Isère (38)",
-        "highest_seismic_zone_code": highest_seismic_zone_code,
-        "highest_seismic_zone_label": f"Zone {highest_seismic_zone_code}" if highest_seismic_zone_code else "inconnue",
-        "flood_documents_total": flood_documents_total,
-        "ppr_total": ppr_total,
-        "ground_movements_total": mvt_payload["total_elements"],
-        "cavities_total": cavites_payload["total_elements"],
-        "communes_with_radon_moderate_or_high": radon_distribution["2"] + radon_distribution["3"],
-        "movement_types": movement_types,
-        "movement_reliability": movement_reliability,
-        "cavity_types": cavity_types,
-        "ppr_categories": ppr_categories,
-        "dicrim_total": dicrim_payload["total_elements"],
-        "tim_total": tim_payload["total_elements"],
-        "risques_information_total": risques_payload["total_elements"],
-        "seismic_zone_distribution": seismic_zone_distribution,
-        "radon_distribution": {
-            "faible": radon_distribution["1"],
-            "moyen": radon_distribution["2"],
-            "eleve": radon_distribution["3"],
-        },
-        "recent_ground_movements": sorted(recent_movements, key=lambda item: item.get("date") or "", reverse=True)[:12],
-        "monitored_communes": monitored,
-        "updated_at": datetime.utcnow().isoformat() + "Z",
-        "errors": [],
-        "error": None,
-    }
+    names = commune_names if commune_names is not None else ["Grenoble", "Bourgoin-Jallieu", "Vienne", "Voiron"]
+    codes = _resolve_commune_insee_codes(names)
+    previous = _file_cache_load("georisques_detailed.json") or {}
+    # Keep the last resolved commune codes when the geographic reference API fails.
+    if not codes:
+        codes = {c["code_insee"]: c["name"] for c in previous.get("monitored_communes", []) if c.get("name") in names}
+    result = collect_summary(codes, token, _fetch_georisques_v2_collection, previous, public_get=_http_get_json)
+    unresolved = [name for name in names if name not in codes.values()]
+    if unresolved:
+        result["status"] = "degraded"
+        result["errors"].append("Code INSEE non résolu : " + ", ".join(unresolved))
+    _file_cache_save("georisques_detailed.json", result)
+    return result
 
 
 def fetch_georisques_isere_summary(force_refresh: bool = False, commune_names: list[str] | None = None) -> dict[str, Any]:

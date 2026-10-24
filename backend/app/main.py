@@ -2817,7 +2817,7 @@ def municipality_georisques_risks(
             db.commit()
 
     if not insee_code:
-        return {"municipality_id": municipality_id, "name": municipality.name, "code_insee": None, "risks": [], "danger_level": "Faible"}
+        return {"municipality_id": municipality_id, "name": municipality.name, "code_insee": None, "risks": [], "danger_level": "Non évalué", "status": "unavailable", "risk_total": None}
 
     payload = fetch_georisques_commune_risks([insee_code])
     entry = (payload.get("communes") or [{}])[0]
@@ -2826,9 +2826,11 @@ def municipality_georisques_risks(
         "name": municipality.name,
         "code_insee": insee_code,
         "risks": entry.get("risks", []),
-        "risk_total": entry.get("risk_total", 0),
-        "danger_level": entry.get("danger_level", "Faible"),
+        "risk_total": entry.get("risk_total"),
+        "danger_level": entry.get("danger_level", "Non évalué"),
         "updated_at": payload.get("updated_at"),
+        "status": entry.get("status", "unavailable"),
+        "errors": entry.get("errors", []),
     }
 
 
