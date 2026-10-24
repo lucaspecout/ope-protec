@@ -1,10 +1,18 @@
 from sqlalchemy import create_engine
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from .config import settings
 
+def database_url_with_driver(value: str):
+    url = make_url(value)
+    # SQLAlchemy 2.1 defaults bare PostgreSQL URLs to psycopg 3. Keep the
+    # installed psycopg2 driver and existing deployment URLs compatible.
+    return url.set(drivername="postgresql+psycopg2") if url.drivername == "postgresql" else url
+
+
 engine = create_engine(
-    settings.database_url,
+    database_url_with_driver(settings.database_url),
     pool_pre_ping=True,
     pool_size=settings.db_pool_size,
     max_overflow=settings.db_max_overflow,

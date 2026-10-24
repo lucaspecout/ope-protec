@@ -1,35 +1,45 @@
 from datetime import datetime, timedelta, timezone
 
 from jose import jwt
-from passlib.context import CryptContext
+import bcrypt
 
 from .config import settings
 
-# 8 rounds : ~25ms sur un serveur standard, 2× plus rapide que 10 rounds.
-# Toujours conforme aux recommandations de sécurité actuelles pour bcrypt.
-# Les anciens hashes à 10 rounds sont mis à jour silencieusement au prochain login
-# via verify_and_upgrade (upgrade automatique vers 8 rounds).
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=8)
+# Preserve the existing bcrypt cost and stored $2a$/$2b$/$2y$ hashes.
+BCRYPT_ROUNDS = 8
+
+
+def _password_bytes(password: str) -> bytes:
+    if "\x00" in password:
+        raise ValueError("Le mot de passe ne peut pas contenir de caractère nul.")
+    # Passlib previously truncated UTF-8 passwords to bcrypt's 72-byte limit.
+    # Preserve that behavior when verifying existing hashes with bcrypt >= 5.
+    return password.encode("utf-8")[:72]
 
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    return bcrypt.hashpw(_password_bytes(password), bcrypt.gensalt(rounds=BCRYPT_ROUNDS)).decode("ascii")
 
 
 def verify_password(password: str, hashed: str) -> bool:
-    return pwd_context.verify(password, hashed)
+    try:
+        return bcrypt.checkpw(_password_bytes(password), hashed.encode("ascii"))
+    except (ValueError, UnicodeError):
+        return False
 
 
 def verify_and_upgrade(password: str, hashed: str) -> tuple[bool, str | None]:
     """Vérifie le mot de passe et retourne le nouveau hash si upgrade vers 8 rounds nécessaire."""
-    ok, new_hash = pwd_context.verify_and_update(password, hashed)
-    return ok, new_hash
+    if not verify_password(password, hashed):
+        return False, None
+    rounds = int(hashed.split("$")[2])
+    return True, hash_password(password) if rounds != BCRYPT_ROUNDS else None
 
 
 def warmup_crypto() -> None:
     """Pré-chauffe bcrypt au démarrage pour éviter la latence sur la première connexion."""
     try:
-        pwd_context.verify("warmup", pwd_context.hash("warmup"))
+        verify_password("warmup", hash_password("warmup"))
     except Exception:
         pass
 

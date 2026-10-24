@@ -79,8 +79,8 @@ const LAZY_ASSETS = {
   leafletJs: 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
   leafletDrawJs: 'https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js',
   leafletHeatJs: 'https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js',
-  turfJs: 'https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js',
-  chartJs: 'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js',
+  turfJs: 'https://cdn.jsdelivr.net/npm/@turf/turf@7.4.0/turf.min.js',
+  chartJs: 'https://cdn.jsdelivr.net/npm/chart.js@4.6.1/dist/chart.umd.min.js',
 };
 const lazyAssetPromises = new Map();
 let mapBootstrapPromise = null;
@@ -3771,7 +3771,7 @@ async function computeZoneMunicipalityBreakdown(geometry, municipalitiesInZone =
             String(municipality.code_insee || municipality.insee || '').trim() === commune.code
           )) || {};
           const communeFeature = window.turf.feature(commune.geometry);
-          const overlapFeature = window.turf.intersect(zoneFeature, communeFeature);
+          const overlapFeature = window.turf.intersect(window.turf.featureCollection([zoneFeature, communeFeature]));
           if (!overlapFeature) return null;
           const overlapAreaM2 = Number(window.turf.area(overlapFeature) || 0);
           if (!Number.isFinite(overlapAreaM2) || overlapAreaM2 <= 0) return null;
@@ -4381,7 +4381,7 @@ async function estimatePopulationInZoneByArea(geometry, municipalitiesInZone = [
         const communeFeature = window.turf.feature(commune.geometry);
         const communeArea = Number(window.turf.area(communeFeature) || 0);
         if (!Number.isFinite(communeArea) || communeArea <= 0) return sum;
-        const overlapFeature = window.turf.intersect(zoneFeature, communeFeature);
+        const overlapFeature = window.turf.intersect(window.turf.featureCollection([zoneFeature, communeFeature]));
         if (!overlapFeature) return sum;
         const overlapArea = Number(window.turf.area(overlapFeature) || 0);
         if (!Number.isFinite(overlapArea) || overlapArea <= 0) return sum;

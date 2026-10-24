@@ -2,7 +2,7 @@
 # Séparation des responsabilités : les paramètres lourds ici, pas dans CMD Docker.
 
 workers = 2
-worker_class = "uvicorn.workers.UvicornWorker"
+worker_class = "uvicorn_worker.UvicornWorker"
 bind = "0.0.0.0:8000"
 
 # Délai maximum pour un worker avant d'être tué et redémarré.

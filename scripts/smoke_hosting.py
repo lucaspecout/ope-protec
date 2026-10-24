@@ -22,9 +22,10 @@ ASSETS = {
     "leaflet.draw.js": "https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js",
     "leaflet.draw.css": "https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css",
     "leaflet-heat.js": "https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js",
-    "turf.min.js": "https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js",
+    "turf.min.js": "https://cdn.jsdelivr.net/npm/@turf/turf@7.4.0/turf.min.js",
+    "chart.umd.min.js": "https://cdn.jsdelivr.net/npm/chart.js@4.6.1/dist/chart.umd.min.js",
 }
-ASSET_DIR = base.ROOT / ".test-data/hosting/assets"
+ASSET_DIR = base.ROOT / ".test-data/hosting/assets-2026-10"
 SOURCE = "https://equipements.sports.gouv.fr/explore/dataset/data-es/"
 
 
@@ -107,6 +108,21 @@ CHECKS = r"""<script>
   setActivePanel('map-panel',{refreshSnapshot:false});
   await waitFor(()=>window.L&&leafletMap&&document.getElementById('hosting-data-status').textContent.includes('indisponib'));
   check('real Leaflet map initialized',Boolean(window.L&&leafletMap&&document.querySelector('.leaflet-map-pane')));
+  const originalGeometryLoader=loadIsereCommunesGeometry;
+  try {
+   const commune={type:'Polygon',coordinates:[[[5,45],[6,45],[6,46],[5,46],[5,45]]]};
+   const half={type:'Polygon',coordinates:[[[5,45],[5.5,45],[5.5,46],[5,46],[5,45]]]};
+   loadIsereCommunesGeometry=async()=>[{code:'38185',name:'Commune test',population:1000,geometry:commune}];
+   const estimate=await estimatePopulationInZoneByArea(half,[],new Map([['38185',1000]]));
+   check('Turf 7 intersection preserves population estimate',Math.abs(estimate.estimatedPopulation-500)<1);
+   const breakdown=await computeZoneMunicipalityBreakdown(half,[],new Map([['38185',1000]]));
+   check('Turf 7 intersection preserves commune breakdown',breakdown.length===1&&breakdown[0].estimatedPopulation===500);
+  } finally { loadIsereCommunesGeometry=originalGeometryLoader; }
+  await ensureChartAssets();
+  const canvas=document.createElement('canvas');document.body.append(canvas);
+  const chart=new Chart(canvas,{type:'line',data:{labels:['J0','J1'],datasets:[{data:[0,10]}]},options:{animation:false,responsive:false}});
+  check('Chart.js 4.6.1 renders a real canvas chart',Chart.version==='4.6.1'&&chart.getDatasetMeta(0).data.length===2);
+  chart.destroy();canvas.remove();
   check('cold failure does not become successful empty collection',!verifiedHostingLoaded&&verifiedHostingPointsCache.length===0);
   check('cold failure displays actionable status',document.getElementById('hosting-data-status').textContent.toLowerCase().includes('indisponib'));
   const retry=document.getElementById('hosting-data-retry');
