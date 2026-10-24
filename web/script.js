@@ -12807,7 +12807,47 @@ function buildVigieauReportMarkup(payload = {}) {
   return sitrepSection('VigiEau · Restrictions eau', notice + content, '💧');
 }
 
+function situationPublicData(externalRisks = {}, now = new Date()) {
+  const calendar = new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit' });
+  const parts = Object.fromEntries(calendar.formatToParts(now).map(part => [part.type, part.value]));
+  const month = `${parts.year}-${parts.month}`;
+  const recalls = (externalRisks.recalls?.items || []).filter(row => {
+    const date = new Date(row.published_at);
+    return Number.isFinite(date.getTime()) && date <= now;
+  }).sort((a, b) => Date.parse(b.published_at) - Date.parse(a.published_at));
+  const monthlyRecalls = recalls.filter(row => {
+    const dateParts = Object.fromEntries(calendar.formatToParts(new Date(row.published_at)).map(part => [part.type, part.value]));
+    return `${dateParts.year}-${dateParts.month}` === month;
+  });
+  const catnat = externalRisks.catnat_isere || {};
+  return { year: Number(parts.year), month, recalls, monthlyRecalls,
+    annualCatnat: Number(catnat.current_year) === Number(parts.year) && Array.isArray(catnat.current_year_events) ? catnat.current_year_events : null };
+}
+
+function buildSituationPublicModal(key, externalRisks = {}) {
+  const data = situationPublicData(externalRisks);
+  const sourceKey = { 'fuel-shortages': 'fuel_isere', 'regional-energy': 'energy_aura', 'monthly-recalls': 'recalls', 'annual-catnat': 'catnat_isere' }[key];
+  const slot = externalRisks[sourceKey] || {};
+  const available = ['online', 'partial', 'stale'].includes(slot.status);
+  const notice = `<p class="muted">${escapeHtml(slot.status === 'stale' ? 'Données anciennes · ' : slot.status === 'partial' ? 'Collecte partielle · ' : '')}Collecte : ${escapeHtml(slot.updated_at ? safeDateToLocale(slot.updated_at) : 'date indisponible')}</p>`;
+  if (!available) return `${notice}<p>Données indisponibles ou en cours de collecte.</p>`;
+  const list = rows => `<ul class="situation-kpi-modal__list">${rows.join('') || '<li>Aucun résultat pour cette période.</li>'}</ul>`;
+  if (key === 'monthly-recalls') {
+    const rows = data.recalls.slice(0, 30).map(row => {
+      let link = '';
+      try { const url = new URL(row.source_url); if (url.protocol === 'https:') link = `<a href="${escapeHtml(url.href)}" target="_blank" rel="noopener noreferrer">Fiche officielle et consignes</a>`; } catch (_) { /* Missing provider link. */ }
+      return `<li><strong>${escapeHtml(row.name || 'Produit non renseigné')}</strong>${row.brand ? ` · ${escapeHtml(row.brand)}` : ''}<br>${escapeHtml(safeDateToLocale(row.published_at))} · ${escapeHtml(row.sale_area || 'Zone de vente non renseignée')}<br>${link}</li>`;
+    });
+    return `${notice}<p><strong>${data.monthlyRecalls.length} rappel(s) publié(s) ce mois.</strong> Les ${Math.min(30, data.recalls.length)} derniers rappels collectés sont affichés ci-dessous, tous territoires et toutes procédures confondus.</p>${list(rows)}`;
+  }
+  if (key === 'annual-catnat') return `${notice}<p>Reconnaissances publiées au Journal officiel en ${data.year} en Isère. Comptage par commune/arrêté ; un arrêté peut concerner plusieurs communes.</p>${data.annualCatnat === null ? '<p>Synthèse annuelle en attente de la collecte serveur.</p>' : list(data.annualCatnat.map(row => `<li><strong>${escapeHtml(row.commune)}</strong> · ${escapeHtml(row.risk)}<br>JO : ${escapeHtml(row.published_at)} · Arrêté : ${escapeHtml(row.id)}<br>Événement : ${escapeHtml(row.event_start || 'date inconnue')} – ${escapeHtml(row.event_end || 'date inconnue')}</li>`))}`;
+  if (key === 'fuel-shortages') return `${notice}<p>Stations de l’Isère déclarant au moins une rupture temporaire. Chaque station compte une seule fois.</p>${list((slot.stations || []).filter(row => (row.fuels || []).some(fuel => fuel.shortage === 'temporary')).map(row => `<li><strong>${escapeHtml(row.commune)}</strong> · ${escapeHtml(row.address)}<br>${escapeHtml(row.fuels.filter(fuel => fuel.shortage === 'temporary').map(fuel => fuel.fuel).join(', '))}</li>`))}`;
+  const format = value => value !== null && value !== undefined && Number.isFinite(Number(value)) ? `${Number(value).toLocaleString('fr-FR')} MW` : 'Indisponible';
+  return `${notice}<p>Auvergne-Rhône-Alpes · RTE éCO2mix</p><p><strong>Consommation :</strong> ${format(slot.latest?.consumption_mw)}</p><p><strong>Production :</strong> ${format(slot.latest?.production_mw)}</p><p class="muted">Mesure : ${escapeHtml(slot.observed_at ? safeDateToLocale(slot.observed_at) : 'date indisponible')}. Puissances régionales ; ces données ne renseignent pas les coupures locales.</p>`;
+}
+
 function buildSituationKpiModalContent(key, externalRisks = {}) {
+  if (['fuel-shortages', 'regional-energy', 'monthly-recalls', 'annual-catnat'].includes(key)) return buildSituationPublicModal(key, externalRisks);
   const dashboard = cachedDashboardSnapshot || {};
   const meteo = externalRisks?.meteo_france || {};
   const vigicrues = externalRisks?.vigicrues || {};
@@ -13203,6 +13243,20 @@ function _renderSituationOverview() {
     { key: 'cols', icon: '▲', label: 'Cols alpins', value: `${colsData.dangereux_total ?? 0} à surveiller`, info: `${colsData.cols_total ?? 0} cols suivis`, css: (colsData.dangereux_total ?? 0) > 3 ? 'orange' : (colsData.dangereux_total ?? 0) > 0 ? 'jaune' : 'vert' },
   ];
 
+  const publicData = situationPublicData(externalRisks);
+  const publicReady = key => !_situationAwaitingFreshSnapshot && ['online', 'partial', 'stale'].includes(externalRisks[key]?.status);
+  const publicInfo = key => {
+    const slot = externalRisks[key] || {};
+    return `${slot.status === 'stale' ? 'Données anciennes · ' : slot.status === 'partial' ? 'Collecte partielle · ' : ''}${slot.updated_at ? safeDateToLocale(slot.updated_at) : 'Collecte en attente'}`;
+  };
+  const mw = value => value !== null && value !== undefined && Number.isFinite(Number(value)) ? `${Number(value).toLocaleString('fr-FR')} MW` : '—';
+  const publicCards = [
+    { key: 'fuel-shortages', icon: '⛽', label: 'Stations en rupture · Isère', value: externalRisks.fuel_isere?.temporary_shortage_stations ?? '—', info: `Au moins un carburant en rupture temporaire · ${publicInfo('fuel_isere')}`, source: 'fuel_isere' },
+    { key: 'regional-energy', icon: '⚡', label: 'Électricité · Auvergne-Rhône-Alpes', value: `Conso. ${mw(externalRisks.energy_aura?.latest?.consumption_mw)}`, secondary: `Production ${mw(externalRisks.energy_aura?.latest?.production_mw)}`, info: `RTE · ${externalRisks.energy_aura?.observed_at ? safeDateToLocale(externalRisks.energy_aura.observed_at) : publicInfo('energy_aura')}${externalRisks.energy_aura?.status === 'stale' ? ' · Données anciennes' : ''}`, source: 'energy_aura' },
+    { key: 'monthly-recalls', icon: '📦', label: 'RappelConso · mois en cours', value: publicData.monthlyRecalls.length, info: `${publicData.month} · Toutes zones · Voir les 30 derniers rappels · ${publicInfo('recalls')}`, source: 'recalls' },
+    { key: 'annual-catnat', icon: '📚', label: `CatNat · année ${publicData.year}`, value: publicData.annualCatnat?.length ?? '—', info: `Reconnaissances publiées au JO · Isère · ${publicInfo('catnat_isere')}`, source: 'catnat_isere' },
+  ].map(card => ({ ...card, value: publicReady(card.source) ? card.value : '—', secondary: publicReady(card.source) ? card.secondary : undefined, css: 'gris' }));
+
   // Chaque tuile reste neutre tant que sa propre source n'a pas répondu.
   // Un zéro reçu du serveur reste en revanche une vraie valeur et est affiché.
   const situationCardReady = {
@@ -13247,6 +13301,7 @@ function _renderSituationOverview() {
         <h3>${escapeHtml(card.label)}</h3>
       </div>
       <p class="kpi-value ${escapeHtml(card.css)}">${escapeHtml(card.value)}</p>
+      ${card.secondary ? `<p class="situation-energy-production">${escapeHtml(card.secondary)}</p>` : ''}
       <p class="muted">${escapeHtml(card.info)}</p>
       ${progressHtml}
     </article>`;
@@ -13295,6 +13350,10 @@ function _renderSituationOverview() {
       ${risquesNaturelsCards.map((card) => {
         return renderIllustratedCard(card);
       }).join('')}
+    </div>
+
+    <div class="situation-top-grid situation-top-grid--major situation-public-grid" aria-label="Carburants, électricité, rappels et CatNat">
+      ${publicCards.map(card => renderDashboardCard(card)).join('')}
     </div>
 
     <div class="situation-middle-grid situation-middle-grid--dashboard">

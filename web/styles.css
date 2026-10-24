@@ -5842,6 +5842,16 @@ body {
 .situation-top-grid--major {
   grid-template-columns: repeat(4, minmax(190px, 1fr));
 }
+.situation-public-grid .situation-tile .kpi-value {
+  font-size: clamp(1.2rem, 1.7vw, 1.8rem);
+  overflow-wrap: anywhere;
+}
+.situation-public-grid .situation-energy-production {
+  margin: 0 0 8px;
+  color: var(--text);
+  font-size: 1.1rem;
+  font-weight: 700;
+}
 .situation-top-grid--compact {
   grid-template-columns: repeat(7, minmax(132px, 1fr));
 }

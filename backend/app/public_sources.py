@@ -425,7 +425,17 @@ def _catnat_loader():
 
 
 def fetch_catnat_isere(force_refresh=False):
-    return _collected("catnat_isere", _catnat_loader, force_refresh)
+    result = _collected("catnat_isere", _catnat_loader, force_refresh)
+    # The public preview is capped at 150; annual totals need the full local history.
+    history = _read("catnat_history")
+    if history and result.get("status") in {"online", "partial", "stale"}:
+        # Paris is UTC+1 at the year boundary (no timezone database required).
+        year = (_now() + timedelta(hours=1)).year
+        annual = [row for row in history.get("events", [])
+                  if str(row.get("published_at") or "").startswith(f"{year}-")]
+        result = {**result, "current_year": year, "current_year_events": annual,
+                  "current_year_total": len(annual)}
+    return result
 
 
 def read_catnat_history(code_insee):

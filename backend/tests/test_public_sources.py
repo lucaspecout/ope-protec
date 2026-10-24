@@ -229,6 +229,17 @@ class PublicSourceTests(unittest.TestCase):
         self.assertEqual(result["updated_at"], previous["updated_at"])
         self.assertNotIn("private", json.dumps(result))
 
+    def test_catnat_annual_summary_uses_full_history_and_paris_year(self):
+        events = [{"published_at": "2027-01-01", "id": str(i)} for i in range(175)]
+        events.append({"published_at": "2026-12-31", "id": "old"})
+        module._write("catnat_history", {"events": events})
+        with patch.object(module, "_now", return_value=datetime(2026, 12, 31, 23, 30, tzinfo=timezone.utc)), patch.object(module, "_collected", return_value={"status": "partial", "events": events[:150]}):
+            result = module.fetch_catnat_isere()
+        self.assertEqual(result["current_year"], 2027)
+        self.assertEqual(result["current_year_total"], 175)
+        self.assertEqual(len(result["current_year_events"]), 175)
+        self.assertEqual(result["status"], "partial")
+
     def test_first_failure_does_not_fabricate_zero_counts(self):
         with patch.object(module, "_json", side_effect=module.SourceError("rate_limited")):
             result = module.fetch_fuel_isere(True)
