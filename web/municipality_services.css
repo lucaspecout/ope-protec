@@ -1,0 +1,19 @@
+#municipality-details-modal .muni-detail-tabs { flex-wrap: wrap; gap: 4px; padding: 6px; border: 1px solid #dfe7ef; border-radius: 11px; background: #edf3f8; overflow: visible; }
+#municipality-details-modal .muni-tab-btn { margin: 0; padding: 9px 13px; border: 0; border-radius: 7px; font-size: .78rem; }
+#municipality-details-modal .muni-tab-btn.active { background: #fff; color: #176b7c; box-shadow: 0 1px 5px #193b6110; }
+.muni-service-intro { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin: 18px 0; }
+.muni-service-intro h5 { margin: 6px 0; font-size: 1.2rem; color: #193e5c; }
+.muni-service-intro p { margin: 0; font-size: .8rem; color: #678096; }
+.muni-service-intro > button { flex: 0 0 auto; padding: 8px 12px; font-size: .76rem; }
+.muni-service-card { min-width: 0; border: 1px solid #dce6ef; border-radius: 12px; padding: 18px; margin: 14px 0; background: #fff; }
+.muni-service-card-head { display: flex; align-items: start; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid #edf2f7; margin-bottom: 12px; }
+.muni-service-card-head h5 { margin: 0; font-size: .95rem; color: #24465f; }
+.muni-source-link { display: inline-block; color: #176b7c; font-size: .75rem; font-weight: 650; text-decoration: none; }
+.muni-source-link:hover { text-decoration: underline; }
+.muni-service-note { font-size: .77rem; line-height: 1.5; overflow-wrap: anywhere; }
+.muni-service-table { max-width: 100%; max-height: 430px; overflow: auto; border: 1px solid #e3eaf2; border-radius: 8px; }
+.muni-service-table table { width: 100%; min-width: 520px; border-collapse: collapse; text-align: left; font-size: .78rem; }
+.muni-service-table th { padding: 11px; background: #f0f5fa; color: #3c5872; position: sticky; top: 0; z-index: 1; }
+.muni-service-table td { padding: 11px; border-top: 1px solid #e8eef4; vertical-align: top; color: #294960; overflow-wrap: anywhere; }
+.muni-service-list { padding-left: 22px; color: #294960; font-size: .82rem; line-height: 1.8; }
+@media (max-width: 600px) { #municipality-details-modal .muni-tab-btn { padding: 9px 10px; font-size: .73rem; } .muni-service-card { padding: 13px; } .muni-service-intro { align-items: start; } .muni-service-intro h5 { font-size: 1.05rem; } }

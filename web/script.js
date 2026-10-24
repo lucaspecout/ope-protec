@@ -12179,7 +12179,11 @@ async function openMunicipalityFile(municipalityId, fileId) {
   currentMunicipalityPreviewUrl = objectUrl;
 }
 
+let municipalityDetailsOpenVersion = 0;
+
 function closeMunicipalityDetailsModal() {
+  ++municipalityDetailsOpenVersion;
+  window.MunicipalityServices?.reset();
   const modal = document.getElementById('municipality-details-modal');
   cleanupMunicipalityPreview();
   if (!modal) return;
@@ -12338,11 +12342,14 @@ async function openMunicipalityDetailsModal(municipality) {
   const modal = document.getElementById('municipality-details-modal');
   const content = document.getElementById('municipality-details-content');
   if (!modal || !content || !municipality) return;
+  const openVersion = ++municipalityDetailsOpenVersion;
+  window.MunicipalityServices?.reset();
 
   const [logs, publicServices] = await Promise.all([
     api('/logs').catch(() => []),
     api(`/municipalities/${municipality.id}/public-services`).catch(() => ({})),
   ]);
+  if (openVersion !== municipalityDetailsOpenVersion) return;
   const municipalityLogs = (Array.isArray(logs) ? logs : [])
     .filter((log) => String(log.municipality_id || '') === String(municipality.id))
     .slice(0, 10);
@@ -12447,6 +12454,7 @@ async function openMunicipalityDetailsModal(municipality) {
       }).join('')
     : '<p class="muted">Aucune entrée main courante associée.</p>';
 
+  const serviceTabs = window.MunicipalityServices?.markup() || { tabs: '', sections: '' };
   // ── Assemble HTML ─────────────────────────────────────────
   setHtml('municipality-details-content', `
     <div class="muni-detail-hero">
@@ -12468,14 +12476,17 @@ async function openMunicipalityDetailsModal(municipality) {
     </div>
     <nav class="muni-detail-tabs" id="muni-tabs-nav-${municipality.id}">
       <button class="muni-tab-btn active" data-muni-tab="fiche">Fiche</button>
+      ${serviceTabs.tabs}
       <button class="muni-tab-btn" data-muni-tab="events">Évènements${municipalityEvents.length > 0 ? `<span class="muni-tab-badge">${municipalityEvents.length}</span>` : ''}</button>
       <button class="muni-tab-btn" data-muni-tab="mco">MCO${municipalityLogs.length > 0 ? `<span class="muni-tab-badge">${municipalityLogs.length}</span>` : ''}</button>
     </nav>
     <div class="muni-detail-section active" data-muni-section="fiche">${ficheTab}</div>
+    ${serviceTabs.sections}
     <div class="muni-detail-section" data-muni-section="events">${eventsTab}</div>
     <div class="muni-detail-section" data-muni-section="mco">${mcoTab}</div>
   `);
 
+  window.MunicipalityServices?.mount(content, municipality, () => cachedExternalRisksSnapshot);
   // Tab switching
   content.querySelectorAll('.muni-tab-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -12485,6 +12496,7 @@ async function openMunicipalityDetailsModal(municipality) {
       btn.classList.add('active');
       const section = content.querySelector(`[data-muni-section="${tab}"]`);
       if (section) section.classList.add('active');
+      window.MunicipalityServices?.activate(tab);
     });
   });
   content.querySelectorAll('[data-muni-tab-jump]').forEach((btn) => {
@@ -17357,6 +17369,8 @@ function bindAppInteractions() {
     cleanupMunicipalityPreview();
   });
   document.getElementById('municipality-details-modal')?.addEventListener('close', () => {
+    ++municipalityDetailsOpenVersion;
+    window.MunicipalityServices?.reset();
     cleanupMunicipalityPreview();
   });
   document.getElementById('municipality-details-modal')?.addEventListener('click', (event) => {
