@@ -63,6 +63,11 @@
 .source-choice--territory { --source-accent: #7760ac; --source-soft: #f0edf8; }
 .source-choice--energy { --source-accent: #b17b22; --source-soft: #fcf4df; }
 .source-choice--daily { --source-accent: #3365a0; --source-soft: #edf3fc; }
+.source-choice--transport { --source-accent: #986129; --source-soft: #faf0e4; }
+.source-choice--telecom { --source-accent: #7652a3; --source-soft: #f1ebf9; }
+.source-choice--environment, .source-choice--health { --source-accent: #2b7b5f; --source-soft: #eaf6ef; }
+.source-choice--news { --source-accent: #46677f; --source-soft: #ecf2f6; }
+.source-choice--connected .source-choice-metric strong { font-size: .88rem; line-height: 1.45; letter-spacing: 0; overflow-wrap: anywhere; }
 .source-choice:hover { transform: translateY(-3px); border-color: var(--source-accent); background: #fff; box-shadow: 0 8px 24px #193b6110; }
 .source-choice:focus-visible, .source-mode-switch button:focus-visible { outline: 3px solid #288eae; outline-offset: 3px; }
 .source-choice-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 17px; }
@@ -92,6 +97,16 @@
 #source-detail-meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; color: #7c8fa0; font-size: .68rem; }
 #source-detail-meta a { color: #246f88; }
 .source-detail-header > button { font-size: .73rem; padding: 8px 11px; }
+.source-detail-actions { display: flex; flex-direction: column; align-items: stretch; gap: 9px; }
+.source-official-link { display: block; padding: 10px 13px; border-radius: 8px; color: #fff; background: #176b7c; text-decoration: none; font-size: .74rem; font-weight: 700; text-align: center; }
+.source-official-link:hover { background: #105365; color: #fff; }
+.source-official-link:focus-visible { outline: 3px solid #288eae; outline-offset: 3px; }
+.source-detail-actions button { font-size: .74rem; padding: 8px 11px; }
+.source-connected-view { padding: 20px; min-width: 0; overflow-wrap: anywhere; }
+.source-connected-view .svc-card-list { max-height: none; }
+.source-service-status { font-size: .9rem; font-weight: 700; }
+.source-service-metric { padding: 15px; border-radius: 10px; background: #f1f6fa; margin: 12px 0; }
+@media (max-width: 800px) { .source-detail-header > .source-detail-intro { grid-column: 1 / -1; grid-row: 2; } .source-detail-header > .source-detail-actions { grid-column: 1 / -1; grid-row: 3; flex-direction: row; flex-wrap: wrap; } }
 #official-sources-panel .source-data-view { margin: 0; border-radius: 13px; border-color: #dfe7ef; box-shadow: none; }
 #official-sources-panel details.source-data-view > summary { display: none; }
 .source-catalog-grid[data-mode="list"] { grid-template-columns: 1fr; gap: 9px; }

@@ -135,7 +135,7 @@ const AUTOROUTES_ISERE_ROAD_REGEX = /\bA\s?(480|49|48|51|43|41)\b/i;
 const PANEL_TITLES = {
   'situation-panel': 'Situation opérationnelle',
   'services-panel': 'Services connectés',
-  'official-sources-panel': 'Sources officielles · Mesures et référentiels',
+  'official-sources-panel': 'Sources & services · Isère',
   'stations-panel': 'Horaires gares Isere',
   'meteo-panel': 'Météo hebdomadaire Isère',
   'water-panel': 'Eau potable et assainissement',
@@ -3185,6 +3185,7 @@ async function ensureMapReady() {
 }
 
 function setActivePanel(panelId, { refreshSnapshot = true } = {}) {
+  if (panelId === 'services-panel') panelId = 'official-sources-panel';
   if (!canAccessPanel(panelId)) panelId = 'situation-panel';
   closeMobileSidebar();
   localStorage.setItem(STORAGE_KEYS.activePanel, panelId);
@@ -15085,6 +15086,7 @@ async function loadDashboard(forceRefresh = false) {
 /* ── Services panel — cards builder & groundwater renderers ──────────────── */
 
 const SVC_CARD_META = {
+  meteo_forets_isere: { url: 'https://meteofrance.com/meteo-des-forets' },
   fuel_isere: { statusId: 'fuel_isere-public-status', infoId: 'fuel_isere-public-info', url: 'https://www.prix-carburants.gouv.fr/rubrique/opendata/' },
   onde_isere: { statusId: 'onde_isere-public-status', infoId: 'onde_isere-public-info', url: 'https://www.data.gouv.fr/dataservices/hubeau-ecoulement-des-cours-deau' },
   catnat_isere: { statusId: 'catnat_isere-public-status', infoId: 'catnat_isere-public-info', url: 'https://www.georisques.gouv.fr/doc-api' },
@@ -15413,60 +15415,27 @@ function _queuePendingServiceAutoRefresh(serviceKey, payload = {}) {
 
 function buildServiceCards() {
   const root = document.getElementById('svc-cards-root');
+  window.SourceExplorer?.registerServices(FLUX_SERVICES, SVC_CARD_META, getFluxPayload);
   if (!root || root.dataset.built) return;
   root.dataset.built = '1';
-
-  const groups = new Map();
-  for (const svc of getServicesPanelFluxServices()) {
-    if (!groups.has(svc.category)) groups.set(svc.category, []);
-    groups.get(svc.category).push(svc);
-  }
-
-  let html = '';
-  for (const [cat, svcs] of groups) {
-    const color = SVC_CAT_COLORS[cat] || 'var(--primary)';
-    const visibleSvcs = svcs.filter((s) => s.key !== 'groundwater_isere');
-    if (!visibleSvcs.length) continue;
-    html += `<div class="svc-cat-group"><div class="svc-cat-hd" style="--cat-color:${color}">`;
-    html += `<span class="svc-cat-dot"></span><span class="svc-cat-label">${escapeHtml(cat)}</span>`;
-    html += `<span class="svc-cat-count">${visibleSvcs.length}</span></div><div class="svc-cat-cards">`;
-    for (const svc of visibleSvcs) {
+  const services = FLUX_SERVICES.filter(svc => !window.SourceExplorer?.hasNativeView(svc.key));
+  root.innerHTML = services.map(svc => {
       const meta     = SVC_CARD_META[svc.key] || {};
       const statusId = meta.statusId || '';
       const infoId   = meta.infoId || '';
-      const url      = meta.url || '#';
       const lists    = SVC_DETAIL_LISTS[svc.key] || [];
-      const hasDetail = lists.length > 0 || infoId;
-
-      // Résumé compact toujours visible (summary)
-      html += `<details class="svc-card" data-svc-key="${escapeHtml(svc.key)}">`;
-      html += `<summary class="svc-card-summary">`;
-      html += `<span class="svc-card-icon">${svc.icon}</span>`;
-      html += `<div class="svc-card-body">`;
-      html += `<h5 class="svc-card-title">${escapeHtml(svc.label)}</h5>`;
-      if (statusId) html += `<p id="${escapeHtml(statusId)}" class="svc-card-status">–</p>`;
-      html += `</div>`;
-      if (hasDetail) html += `<span class="svc-chevron" aria-hidden="true"></span>`;
-      html += `</summary>`;
-
-      // Contenu déplié
-      if (hasDetail) {
-        html += `<div class="svc-card-detail">`;
-        if (infoId) html += `<p id="${escapeHtml(infoId)}" class="svc-card-info muted">–</p>`;
+      let html = `<article class="tile source-data-view source-connected-view" data-source-view="${escapeHtml(svc.key)}" hidden>`;
+      if (statusId) html += `<p id="${escapeHtml(statusId)}" class="source-service-status"></p>`;
+      if (infoId) html += `<p id="${escapeHtml(infoId)}" class="muted"></p>`;
         if (svc.key === 'vigieau') html += '<div id="vigieau-content" class="vigieau-panel"></div>';
         for (const lst of svc.key === 'vigieau' ? [] : lists) {
           const titleAttr = lst.titleId ? ` id="${escapeHtml(lst.titleId)}"` : '';
           html += `<p class="svc-list-label"${titleAttr}>${escapeHtml(lst.label)}</p>`;
           html += `<ul id="${escapeHtml(lst.id)}" class="list svc-card-list"></ul>`;
         }
-        html += `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer" class="svc-ext-link">Ouvrir le portail ↗</a>`;
-        html += `</div>`;
-      }
-      html += `</details>`;
-    }
-    html += '</div></div>';
-  }
-  root.innerHTML = html;
+      if (!lists.length) html += `<div id="source-service-extra-${escapeHtml(svc.key)}"></div>`;
+      return `${html}</article>`;
+  }).join('');
 }
 
 function renderSvcSummaryBar(data = {}) {
@@ -15717,6 +15686,7 @@ function renderExternalRisks(data = {}) {
   syncAnfrTelecomSnapshot(mergedData.anfr_isere || {});
   window.OfficialSources?.update(mergedData);
   window.PublicSources?.update(mergedData);
+  // The catalogue also includes aggregated feeds (e.g. all motorway operators).
   window.SourceExplorer?.update(mergedData);
   const meteo = mergedData?.meteo_france || {};
   const vigicrues = mergedData?.vigicrues || {};

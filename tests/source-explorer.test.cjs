@@ -83,7 +83,8 @@ test('source metadata escapes provider text and rejects unsafe URLs', () => {
   assert.doesNotMatch(h.get('source-radar-body').innerHTML, /<img/);
   assert.doesNotMatch(h.get('source-detail-meta').innerHTML, /javascript:/);
   h.ui.update({ meteo_radar: { status: 'online', source_url: 'https://example.org/?a=1&b=2', frames: [] } });
-  assert.match(h.get('source-detail-meta').innerHTML, /noopener noreferrer/);
+  assert.equal(h.get('source-official-link').href, 'https://meteofrance.com/meteo-radar');
+  assert.equal(h.get('source-official-link').hidden, false);
 });
 
 test('pending refresh stays disabled across snapshots and source navigation', async () => {
@@ -114,4 +115,46 @@ test('logout clears catalogue data and ignores a late refresh result', async () 
   assert.equal(h.get('source-available-count').textContent, '—');
   h.get('source-back').listeners.click();
   assert.doesNotMatch(h.get('source-catalog-grid').innerHTML, />190</);
+});
+
+test('complete application registry is merged without duplicates and every producer has a link', () => {
+  const main = fs.readFileSync(path.join(__dirname, '../web/script.js'), 'utf8');
+  const registryContext = vm.createContext({ anfrMetric: () => 'Inventaire ANFR' });
+  const fluxStart = main.indexOf('const FLUX_SERVICES = [');
+  const metaStart = main.indexOf('const SVC_CARD_META = {');
+  vm.runInContext(main.slice(fluxStart, main.indexOf('\n];', fluxStart) + 3) + main.slice(metaStart, main.indexOf('\n};', metaStart) + 3) + '\nthis.services = FLUX_SERVICES; this.metadata = SVC_CARD_META;', registryContext);
+  const h = harness();
+  h.ui.registerServices(registryContext.services, registryContext.metadata);
+  h.ui.registerServices(registryContext.services, registryContext.metadata);
+  assert.equal((h.get('source-catalog-grid').innerHTML.match(/data-source-open=/g) || []).length, registryContext.services.length);
+  assert.equal(h.get('source-total-count').textContent, String(registryContext.services.length));
+  for (const service of registryContext.services) {
+    h.ui.open(service.key);
+    assert.equal(h.get('source-official-link').hidden, false, service.key);
+    assert.match(h.get('source-official-link').href, /^https:\/\//, service.key);
+  }
+  assert.equal(h.calls.length, 0, 'opening a source reads its existing snapshot');
+});
+
+test('connected feed deltas preserve data and cannot replace curated official links', () => {
+  const h = harness();
+  h.ui.registerServices([{ key: 'sncf_isere', label: 'SNCF Isère', category: 'Transport', metric: data => `${data.alerts.length} alertes` }], { sncf_isere: { url: 'https://www.sncf.com/' } });
+  h.ui.update({ sncf_isere: { status: 'online', alerts: [{}], source_url: 'https://untrusted.example/' } });
+  h.ui.update({ fuel_isere: { status: 'online', stations_total: 190 } });
+  assert.match(h.get('source-catalog-grid').innerHTML, /1 alertes/);
+  h.ui.open('sncf_isere');
+  assert.equal(h.get('source-official-link').href, 'https://www.sncf.com/');
+  h.get('source-back').listeners.click();
+  h.input('source-theme', 'transport', 'change');
+  assert.equal((h.get('source-catalog-grid').innerHTML.match(/data-source-open=/g) || []).length, 1);
+});
+
+test('motorway data aggregates providers and refresh requests target the three real feeds', async () => {
+  const h = harness();
+  h.ui.registerServices([{ key: 'autoroutes_isere', label: 'Autoroutes Isère', category: 'Transport', metric: data => `${data.events_total} événements` }], { autoroutes_isere: { url: 'https://www.bison-fute.gouv.fr/' } }, (key, snapshot) => ({ status: 'online', events_total: snapshot.bison_fute.events_total }));
+  h.ui.update({ bison_fute: { events_total: 3 } });
+  assert.match(h.get('source-catalog-grid').innerHTML, /3 événements/);
+  h.ui.open('autoroutes_isere');
+  await h.get('source-refresh').listeners.click();
+  assert.deepEqual(h.calls.map(call => call.url), ['bison_fute', 'aprr_isere', 'vinci_autoroutes'].map(key => `/external/isere/risks/${key}/refresh`));
 });

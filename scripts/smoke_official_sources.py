@@ -33,6 +33,10 @@ RISKS = {
     "meteo_france": {"status": "online", "level": "vert"},
     "vigicrues": {"status": "online", "stations": [], "troncons": [], "water_alert_level": "vert"},
     "cols_alpins_isere": {"status": "online", "cols": []},
+    "meteo_forets_isere": {"status": "online", "updated_at": STAMP, "forecasts": [{"date": NOW.date().isoformat(), "danger": "Élevé", "level": "orange"}]},
+    "groundwater_isere": {"status": "online", "updated_at": STAMP, "stations_total": 1, "trend_summary": {"hausse": 1, "baisse": 0, "stable": 0}, "stations": [{"name": "Nappe de test", "commune": "Grenoble", "code_bss": "BSS-TEST", "groundwater_level_m_ngf": 210, "trend": "hausse", "date_measure": NOW.date().isoformat()}]},
+    "sncf_isere": {"status": "online", "updated_at": STAMP, "alerts": [{"title": "Travaux ferroviaires de test", "description": "Interruption locale de test", "level": "jaune"}]},
+    "prefecture_isere": {"status": "online", "updated_at": STAMP, "items": [{"title": "Publication préfectorale de test", "link": "https://www.isere.gouv.fr/", "published_at": STAMP}]},
 }
 USER = {"id": 1, "username": "smoke", "role": "admin", "must_change_password": False}
 BOOTSTRAP = {"updated_at": STAMP, "dashboard": {"vigilance": "vert", "crues": "vert", "global_risk": "vert", "latest_logs": [], "communes_crise": 0}, "external_risks": RISKS, "municipalities": [], "logs": [], "events": [], "users": [], "perf": {"backend_duration_ms": 2}}
@@ -50,10 +54,12 @@ CHECKS = """<script>
   const check=(name,ok)=>results.push({name,pass:Boolean(ok)});
   try {
     for(let i=0;i<100;i++) {
-      if(document.getElementById('source-available-count')?.textContent!=='—'&&document.querySelectorAll('.source-choice').length===11) break;
+      if(typeof FLUX_SERVICES!=='undefined'&&document.getElementById('source-available-count')?.textContent!=='—'&&document.querySelectorAll('.source-choice').length===FLUX_SERVICES.length) break;
       await new Promise(r=>setTimeout(r,100));
     }
-    check('eleven unified source cards',document.querySelectorAll('.source-choice').length===11);
+    const sourceCount=FLUX_SERVICES.length;
+    check('all connected and official sources appear exactly once',document.querySelectorAll('.source-choice').length===sourceCount&&new Set([...document.querySelectorAll('.source-choice')].map(e=>e.dataset.sourceOpen)).size===sourceCount);
+    check('single source navigation entry',!document.querySelector('.menu-btn[data-target="services-panel"]'));
     check('no data views initially visible',[...document.querySelectorAll('[data-source-view]')].every(e=>e.hidden));
     check('source cards are accessible buttons',[...document.querySelectorAll('.source-choice')].every(e=>e.tagName==='BUTTON'&&e.getAttribute('aria-label')));
     check('panel navigation',!document.getElementById('official-sources-panel').hidden);
@@ -66,7 +72,7 @@ CHECKS = """<script>
     catalogSearch.value='introuvable';catalogSearch.dispatchEvent(new Event('input'));
     check('empty search has recovery action',!document.getElementById('source-empty').hidden);
     document.getElementById('source-clear-filters').click();
-    check('clear filters restores eleven sources',document.querySelectorAll('.source-choice').length===11);
+    check('clear filters restores every source',document.querySelectorAll('.source-choice').length===sourceCount);
     document.querySelector('[data-source-mode="list"]').click();
     check('list mode selected',document.getElementById('source-catalog-grid').dataset.mode==='list'&&document.querySelector('[data-source-mode="list"]').getAttribute('aria-pressed')==='true');
     check('list fits viewport',panel.scrollWidth<=panel.clientWidth+2);
@@ -90,7 +96,7 @@ CHECKS = """<script>
     setActivePanel('official-sources-panel',{refreshSnapshot:false});
     const pop=await window.OfficialSources.estimatePopulation({type:'Polygon',coordinates:[[[5.7,45.1],[5.8,45.1],[5.8,45.2],[5.7,45.1]]]});
     check('population API integrated',pop.population_estimated===1234);
-    check('all source types present in picker',sourceSelect.options.length===11);
+    check('all source types present in picker',sourceSelect.options.length===sourceCount);
     window.SourceExplorer.open('fuel_isere');
     check('public source opens without other tables',[...document.querySelectorAll('[data-source-view]')].filter(e=>!e.hidden).length===1&&document.getElementById('public-fuel_isere').open);
     check('fuel data rendered',document.getElementById('public-fuel-results').textContent.includes('Station carburant test'));
@@ -119,10 +125,30 @@ CHECKS = """<script>
     document.getElementById('source-back').click();
     check('back restores list mode',!document.getElementById('source-catalog').hidden&&document.getElementById('source-catalog-grid').dataset.mode==='list');
     document.querySelector('[data-source-mode="cards"]').click();
-    check('cards mode restores full catalogue',document.getElementById('source-catalog-grid').dataset.mode==='cards'&&document.querySelectorAll('.source-choice').length===11);
+    check('cards mode restores full catalogue',document.getElementById('source-catalog-grid').dataset.mode==='cards'&&document.querySelectorAll('.source-choice').length===sourceCount);
     window.SourceExplorer.open('fuel_isere');document.getElementById('public-fuel-search').value='Grenoble';document.getElementById('public-fuel-search').dispatchEvent(new Event('input'));
     window.SourceExplorer.open('onde_isere');window.SourceExplorer.open('fuel_isere');
     check('data filters retained across source navigation',document.getElementById('public-fuel-search').value==='Grenoble');
+    for(const service of FLUX_SERVICES){
+      window.SourceExplorer.open(service.key,{focus:false});
+      const visible=[...document.querySelectorAll('[data-source-view]')].filter(e=>!e.hidden);
+      check('single data view for '+service.key,visible.length===1&&visible[0].dataset.sourceView===service.key);
+      const link=document.getElementById('source-official-link');
+      check('official producer link for '+service.key,!link.hidden&&link.href.startsWith('https://')&&link.target==='_blank'&&link.rel.includes('noopener'));
+      check('source detail fits viewport: '+service.key,panel.scrollWidth<=panel.clientWidth+2);
+    }
+    const ids=[...document.querySelectorAll('[id]')].map(e=>e.id);
+    check('source data controls have unique identifiers',ids.length===new Set(ids).size);
+    window.SourceExplorer.open('groundwater_isere',{focus:false});
+    check('groundwater source keeps its station table',document.getElementById('groundwater-stations').textContent.includes('Nappe de test'));
+    window.SourceExplorer.open('sncf_isere',{focus:false});
+    check('connected source keeps its real alerts',document.getElementById('sncf-alerts-list').textContent.includes('Travaux ferroviaires de test'));
+    window.SourceExplorer.open('prefecture_isere',{focus:false});
+    check('news source keeps its publications',document.getElementById('prefecture-news-list').textContent.includes('Publication préfectorale de test'));
+    window.SourceExplorer.open('meteo_forets_isere',{focus:false});
+    check('forest weather exposes its forecasts',document.getElementById('source-service-extra-meteo_forets_isere').textContent.includes('Élevé'));
+    setActivePanel('services-panel',{refreshSnapshot:false});
+    check('legacy Services navigation redirects to unified page',localStorage.getItem('activePanel')==='official-sources-panel'&&!panel.hidden);
     document.getElementById('source-back').click();
     await new Promise(r=>setTimeout(r,500));
     window.scrollTo({top:0,behavior:'instant'});

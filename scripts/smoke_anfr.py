@@ -51,7 +51,8 @@ CHECKS = """<script>
   check('official mobile source linked',row().querySelector('a.flux-source-link').href===fresh.source);
   check('complete map points retained',cachedExternalRisksSnapshot.anfr_isere.supports_points.length===fresh.supports_points.length);
   setActivePanel('services-panel',{refreshSnapshot:false});
-  const card=document.querySelector('details[data-svc-key="anfr_isere"]');card.open=true;
+  window.SourceExplorer.open('anfr_isere');
+  const card=document.querySelector('[data-source-view="anfr_isere"]');
   check('service summary displays actual stations',document.getElementById('anfr-info').textContent.includes(`${fresh.stations_total} station(s)`));
   check('source publication displayed',document.getElementById('anfr-list').textContent.includes('2026-10-15'));
   check('expanded summary fits viewport',card.scrollWidth<=card.clientWidth+2&&card.getBoundingClientRect().right<=innerWidth);

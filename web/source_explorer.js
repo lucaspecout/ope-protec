@@ -1,7 +1,47 @@
 /* Source navigation keeps the existing data views and their filters mounted. */
 (function () {
   'use strict';
-  const THEMES = { weather: 'Météo & eau', territory: 'Territoire & risques', energy: 'Énergie', daily: 'Vie quotidienne' };
+  const THEMES = { weather: 'Météo & eau', territory: 'Territoire & risques', energy: 'Énergie', daily: 'Vie quotidienne', transport: 'Transport & circulation', telecom: 'Télécommunications', environment: 'Environnement', news: 'Actualités & veille', health: 'Santé & ressources' };
+  const CATEGORY_THEMES = { 'Météo': 'weather', 'Eau': 'weather', 'Référentiels': 'territory', 'Risques': 'territory', 'Données': 'territory', 'Électricité': 'energy', 'Énergie': 'energy', 'Logistique': 'daily', 'Veille': 'daily', 'Transport': 'transport', 'Télécom': 'telecom', 'Actualités': 'news', 'Santé': 'health', 'Environnement': 'environment' };
+  const DESCRIPTIONS = {
+    meteo_france: 'Vigilance départementale, phénomènes suivis et bulletins Météo-France.',
+    meteo_forets_isere: 'Danger météorologique de feux de forêt prévu pour l’Isère.',
+    apic_isere: 'Avertissements de pluie intense à l’échelle des communes.',
+    vigicrues: 'Mesures des stations et vigilance des tronçons des cours d’eau.',
+    vigicrues_flash_isere: 'Avertissements de crues rapides pour les cours d’eau surveillés.',
+    vigieau: 'Zones de restriction d’eau, publics concernés et arrêtés applicables.',
+    groundwater_isere: 'Niveaux, profondeur et tendances des nappes phréatiques de l’Isère.',
+    rnb_isere: 'Référentiel national des bâtiments et couverture disponible en Isère.',
+    atmo_aura: 'Indice de qualité de l’air et informations sur les épisodes de pollution.',
+    georisques: 'Synthèse des risques naturels et technologiques du territoire.',
+    itinisere: 'Perturbations, incidents et événements sur les routes de l’Isère.',
+    autoroutes_isere: 'Événements des grands axes, réunis depuis Bison Futé, APRR et Vinci.',
+    sncf_isere: 'Alertes ferroviaires, incidents et travaux concernant l’Isère.',
+    ter_aura: 'Perturbations et informations de circulation des TER de la région.',
+    mreseau: 'Alertes tramway, bus et cars du réseau de l’agglomération grenobloise.',
+    cars_region_aura: 'Informations de circulation et perturbations des cars régionaux.',
+    prefecture_isere: 'Dernières publications de la préfecture de l’Isère.',
+    dauphine_isere: 'Articles et informations locales du Dauphiné Libéré.',
+    france_bleu_isere: 'Informations locales de la rédaction France Bleu / ici Isère.',
+    placegrenet: 'Derniers articles de la rédaction Place Gre’net.',
+    grenoble_metro: 'Actualités et publications de Grenoble Alpes Métropole.',
+    ars_aura: 'Alertes sanitaires et publications de l’Agence régionale de santé.',
+    seismes_isere: 'Séismes récents détectés, localisation et magnitude.',
+    avalanche_isere: 'Bulletins de risque d’avalanche et niveaux par massif.',
+    feux_foret_isere: 'Derniers signalements d’incendies publiés par FeuxDeForet.fr.',
+    copernicus_ems: 'Événements de catastrophe suivis par GDACS en France et en Europe.',
+    cols_alpins_isere: 'État et conditions de circulation des cols alpins surveillés.',
+    anfr_isere: 'Supports, stations et caractéristiques des réseaux mobiles recensés.',
+    arcep_isere: 'Sites mobiles déclarés indisponibles et communes concernées.',
+    isere_opendata: 'Écoles, maisons de santé et points d’aide alimentaire du département.',
+    finess_isere: 'Établissements de santé et ressources du référentiel FINESS.',
+    geodae_isere: 'Défibrillateurs recensés, localisation et accessibilité déclarée.',
+  };
+  const DEFAULT_URLS = {
+    meteo_observations: 'https://meteofrance.com/', meteo_radar: 'https://meteofrance.com/meteo-radar', vigicrues_forecasts: 'https://www.vigicrues.gouv.fr/',
+    onde_isere: 'https://onde.eaufrance.fr/', insee_population: 'https://www.insee.fr/fr/statistiques/8735162', industrial_sites: 'https://www.georisques.gouv.fr/', catnat_isere: 'https://www.georisques.gouv.fr/',
+    energy_aura: 'https://www.rte-france.com/donnees-publications/eco2mix-donnees-temps-reel/donnees-regionales', enedis: 'https://www.enedis.fr/panne-et-interruption', fuel_isere: 'https://www.prix-carburants.gouv.fr/', recalls: 'https://rappel.conso.gouv.fr/',
+  };
   const SOURCES = [
     { key: 'meteo_observations', title: 'Observations météo', publisher: 'Météo-France', theme: 'weather', description: 'Température, pluie et rafales mesurées dans les stations de l’Isère.', icon: 'M7 16a4 4 0 0 1 0-8 5 5 0 0 1 9-1 4 4 0 1 1 1 9H7M8 19v2m4-2v2m4-2v2' },
     { key: 'meteo_radar', title: 'Radar de pluie', publisher: 'Météo-France', theme: 'weather', description: 'Images de précipitations collectées et animation sur la carte.', icon: 'M12 3v9l6-6M3 12a9 9 0 1 0 9-9M7 12a5 5 0 1 0 5-5' },
@@ -15,6 +55,9 @@
     { key: 'fuel_isere', title: 'Stations & carburants', publisher: 'Prix des carburants', theme: 'daily', description: 'Prix déclarés, ruptures temporaires et localisation des stations-service.', icon: 'M4 21V4h10v17M6 7h6v5H6V7m-4 14h14m-2-14 4 4v7a2 2 0 0 0 4 0v-7l-4-5' },
     { key: 'recalls', title: 'Rappels de produits', publisher: 'RappelConso', theme: 'daily', description: 'Produits rappelés, lots concernés et consignes officielles aux consommateurs.', icon: 'M3 7l9-4 9 4v12l-9 4-9-4V7m0 0 9 4 9-4M12 11v12M8 5l9 4' },
   ];
+  const nativeKeys = new Set(SOURCES.map(source => source.key).concat('groundwater_isere'));
+  SOURCES.forEach(source => { source.url = DEFAULT_URLS[source.key]; });
+  let payloadForService = (key, snapshot) => snapshot[key];
   const state = { snapshot: {}, selected: null, mode: 'cards', search: '', theme: 'all', signature: '', session: 0, refreshing: new Set() };
   const el = id => document.getElementById(id);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -34,6 +77,11 @@
     if (key === 'enedis') return { value: 'À l’adresse', label: 'diagnostic sur le site Enedis' };
     if (!['online', 'partial', 'stale', 'degraded', 'no_forecast'].includes(slot.status)) return { value: '—', label: 'en attente de données' };
     const items = (value, label) => ({ value: fmt(value), label });
+    const service = SOURCES.find(source => source.key === key);
+    if (service?.connected && service.liveMetric) {
+      try { return { value: service.liveMetric(slot), label: 'Dernier état collecté' }; }
+      catch (_) { return { value: '—', label: 'Données à consulter' }; }
+    }
     switch (key) {
       case 'meteo_observations': return items(slot.stations?.length, 'stations météorologiques');
       case 'meteo_radar': return items(slot.frames?.length, 'images radar collectées');
@@ -48,6 +96,35 @@
       default: return items(null, 'données à consulter');
     }
   }
+  function renderMenus() {
+    if (el('source-select')) el('source-select').innerHTML = SOURCES.map(source => `<option value="${esc(source.key)}">${esc(source.title)}</option>`).join('');
+    if (el('source-theme')) { el('source-theme').innerHTML = '<option value="all">Tous les thèmes</option>' + Object.entries(THEMES).map(([key, label]) => `<option value="${key}">${esc(label)}</option>`).join(''); el('source-theme').value = state.theme; }
+  }
+  function registerServices(services = [], metadata = {}, getPayload) {
+    if (typeof getPayload === 'function') payloadForService = getPayload;
+    for (const service of services) {
+      if (!/^[a-z0-9_]+$/.test(service.key)) continue;
+      const existing = SOURCES.find(source => source.key === service.key);
+      const url = DEFAULT_URLS[service.key] || metadata[service.key]?.url;
+      if (existing) { if (url) existing.url = url; continue; }
+      const theme = CATEGORY_THEMES[service.category] || 'daily';
+      const icon = SOURCES.find(source => source.theme === theme)?.icon || 'M4 5h16v14H4V5m4 4h8m-8 4h8m-8 4h4';
+      SOURCES.push({ key: service.key, title: service.label, publisher: service.label.split('·')[0].trim(), theme, icon,
+        description: DESCRIPTIONS[service.key] || `Données et informations publiées par ${service.label}.`,
+        url, connected: true, liveMetric: service.metric });
+    }
+    renderMenus(); state.signature = ''; render();
+  }
+  function renderServiceData(source, slot) {
+    const target = el(`source-service-extra-${source.key}`);
+    if (!target) return;
+    const available = ['online', 'partial', 'stale', 'degraded', 'no_forecast'].includes(slot.status);
+    const summary = available ? metric(source.key, slot).value : status(slot).label;
+    const data = slot.data && typeof slot.data === 'object' ? { ...slot.data, ...slot } : slot;
+    const rows = [data.forecasts, data.resources, data.points, data.buildings, data.items].find(Array.isArray) || [];
+    const table = available && rows.length ? `<div class="official-table-wrap"><table><caption>${rows.length} élément(s) collecté(s)${rows.length > 200 ? ' · aperçu des 200 premiers' : ''}</caption><thead><tr><th>Élément</th><th>Localisation / date</th><th>Informations</th></tr></thead><tbody>${rows.slice(0, 200).map(row => `<tr><th scope="row">${esc(row.name || row.nom || row.title || row.nom_etablissement || row.danger || 'Élément recensé')}</th><td>${esc(row.commune || row.municipality || row.ville || row.date || row.day || row.address || 'Non renseignée')}</td><td>${esc(row.description || row.type || row.category || row.level || row.danger || row.adresse || 'Consulter la source pour le détail.')}</td></tr>`).join('')}</tbody></table></div>` : '';
+    target.innerHTML = `<div class="source-service-metric"><strong>${esc(summary)}</strong></div>${slot.info_state || slot.note || slot.coverage_note ? `<p class="muted">${esc(slot.info_state || slot.note || slot.coverage_note)}</p>` : ''}${slot.error ? `<p class="error">${esc(slot.error)}</p>` : ''}${table}`;
+  }
   function renderDetail() {
     const source = SOURCES.find(row => row.key === state.selected);
     if (!source) return;
@@ -55,9 +132,10 @@
     el('source-detail-title').textContent = source.title;
     el('source-detail-category').textContent = `${THEMES[source.theme]} · ${source.publisher}`;
     el('source-detail-description').textContent = source.description;
-    let sourceLink = '';
-    try { const url = new URL(slot.source_url || slot.source); if (url.protocol === 'https:') sourceLink = `<a href="${esc(url.href)}" target="_blank" rel="noopener noreferrer">Site du producteur ↗</a>`; } catch (_) { /* No published source URL. */ }
-    el('source-detail-meta').innerHTML = `<span class="source-status source-status--${badge.tone}">${esc(badge.label)}</span><span>Collecte : ${esc(when(slot.updated_at || slot.checked_at))}</span>${sourceLink}`;
+    el('source-detail-meta').innerHTML = `<span class="source-status source-status--${badge.tone}">${esc(badge.label)}</span><span>Collecte : ${esc(when(slot.updated_at || slot.checked_at))}</span>`;
+    const officialLink = el('source-official-link');
+    officialLink.hidden = true;
+    try { const url = new URL(source.url); if (url.protocol === 'https:') { officialLink.href = url.href; officialLink.hidden = false; } } catch (_) { /* Only curated producer links are used. */ }
     el('source-select').value = source.key;
     el('source-refresh').disabled = source.key === 'enedis' || state.refreshing.has(source.key);
     el('source-refresh').textContent = state.refreshing.has(source.key) ? 'Demande en cours…' : 'Actualiser';
@@ -65,6 +143,7 @@
       const frames = Array.isArray(slot.frames) ? slot.frames : [];
       el('source-radar-body').innerHTML = `<div class="official-kpis"><span><strong>${esc(metric(source.key, slot).value)}</strong>images collectées</span><span><strong>${esc(frames.length ? when(frames[frames.length - 1].observed_at) : '—')}</strong>dernière image</span></div><p>${esc(slot.info_state || slot.message || 'Consultez la pluie sur la carte et faites défiler les images collectées.')}</p><p class="muted">${esc(slot.history_note || 'L’animation se construit au fil des collectes. Les zones sans mesure restent distinctes des zones sans pluie.')}</p>`;
     }
+    if (source.connected) renderServiceData(source, slot);
   }
   function render() {
     if (!el('source-catalog-grid')) return;
@@ -80,6 +159,7 @@
     });
     document.querySelectorAll('[data-source-mode]').forEach(button => button.setAttribute('aria-pressed', String(!detail && button.dataset.sourceMode === state.mode)));
     const known = SOURCES.filter(source => state.snapshot[source.key]?.status);
+    el('source-total-count').textContent = String(SOURCES.length);
     el('source-available-count').textContent = known.length ? String(known.filter(source => state.snapshot[source.key].status === 'online').length) : '—';
     el('source-attention-count').textContent = known.length ? String(known.filter(source => ['warning', 'setup', 'error'].includes(status(state.snapshot[source.key]).tone)).length) : '—';
     if (detail) { renderDetail(); return; }
@@ -93,7 +173,7 @@
     const focused = document.activeElement?.dataset?.sourceOpen;
     el('source-catalog-grid').innerHTML = matches.map((source, index) => {
       const slot = state.snapshot[source.key] || {}, badge = status(slot), value = metric(source.key, slot);
-      return `<button type="button" class="source-choice source-choice--${source.theme}" data-source-open="${source.key}" style="--source-order:${index}" aria-label="Consulter ${esc(source.title)}"><span class="source-choice-top"><span class="source-choice-icon" aria-hidden="true"><svg viewBox="0 0 24 26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="${source.icon}"/></svg></span><span class="source-status source-status--${badge.tone}">${esc(badge.label)}</span></span><span class="source-choice-heading"><span class="source-choice-publisher">${esc(source.publisher)}</span><strong>${esc(source.title)}</strong></span><span class="source-choice-description">${esc(source.description)}</span><span class="source-choice-metric"><strong>${esc(value.value)}</strong><span>${esc(value.label)}</span></span><span class="source-choice-footer"><span>${esc(slot.updated_at || slot.checked_at ? `Collecte du ${when(slot.updated_at || slot.checked_at)}` : 'Date non disponible')}</span><span class="source-choice-arrow" aria-hidden="true">↗</span></span></button>`;
+      return `<button type="button" class="source-choice source-choice--${source.theme}${source.connected ? ' source-choice--connected' : ''}" data-source-open="${source.key}" style="--source-order:${Math.min(index, 10)}" aria-label="Consulter ${esc(source.title)}"><span class="source-choice-top"><span class="source-choice-icon" aria-hidden="true"><svg viewBox="0 0 24 26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="${source.icon}"/></svg></span><span class="source-status source-status--${badge.tone}">${esc(badge.label)}</span></span><span class="source-choice-heading"><span class="source-choice-publisher">${esc(source.publisher)}</span><strong>${esc(source.title)}</strong></span><span class="source-choice-description">${esc(source.description)}</span><span class="source-choice-metric"><strong>${esc(value.value)}</strong><span>${esc(value.label)}</span></span><span class="source-choice-footer"><span>${esc(slot.updated_at || slot.checked_at ? `Collecte du ${when(slot.updated_at || slot.checked_at)}` : 'Date non disponible')}</span><span class="source-choice-arrow" aria-hidden="true">↗</span></span></button>`;
     }).join('');
     if (focused) document.querySelector(`[data-source-open="${focused}"]`)?.focus({ preventScroll: true });
   }
@@ -105,7 +185,7 @@
     window.OfficialSources?.activate('official-sources-panel');
     window.PublicSources?.activate('official-sources-panel');
     if (focus) el('source-detail-title')?.focus({ preventScroll: true });
-    el('source-detail-header')?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+    if (focus) el('source-detail-header')?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
   }
   function catalog(mode = state.mode) {
     const previous = state.selected;
@@ -116,7 +196,12 @@
   }
   function update(snapshot = {}) {
     let changed = false;
-    SOURCES.forEach(source => { if (snapshot[source.key] && typeof snapshot[source.key] === 'object' && JSON.stringify(snapshot[source.key]) !== JSON.stringify(state.snapshot[source.key])) { state.snapshot[source.key] = snapshot[source.key]; changed = true; } });
+    SOURCES.forEach(source => {
+      const derived = source.key === 'autoroutes_isere';
+      if (derived && !['bison_fute', 'aprr_isere', 'vinci_autoroutes'].some(key => key in snapshot)) return;
+      const payload = derived ? payloadForService(source.key, snapshot) : snapshot[source.key];
+      if (payload && typeof payload === 'object' && JSON.stringify(payload) !== JSON.stringify(state.snapshot[source.key])) { state.snapshot[source.key] = payload; changed = true; }
+    });
     if (changed) render();
   }
   function reset() {
@@ -129,7 +214,7 @@
   function bind() {
     const panel = el('official-sources-panel');
     if (!panel) return;
-    el('source-select').innerHTML = SOURCES.map(source => `<option value="${source.key}">${esc(source.title)}</option>`).join('');
+    renderMenus();
     panel.addEventListener('click', event => {
       const card = event.target.closest('[data-source-open]');
       if (card) open(card.dataset.sourceOpen);
@@ -148,12 +233,13 @@
       state.refreshing.add(key);
       button.disabled = true;
       button.textContent = 'Demande en cours…';
-      try { await api(`/external/isere/risks/${encodeURIComponent(key)}/refresh`, { method: 'POST', maxRetries: 0 }); if (session === state.session && state.selected === key) button.textContent = 'Collecte demandée'; }
+      const keys = key === 'autoroutes_isere' ? ['bison_fute', 'aprr_isere', 'vinci_autoroutes'] : [key];
+      try { await Promise.all(keys.map(serviceKey => api(`/external/isere/risks/${encodeURIComponent(serviceKey)}/refresh`, { method: 'POST', maxRetries: 0 }))); if (session === state.session && state.selected === key) button.textContent = 'Collecte demandée'; }
       catch (_) { if (session === state.session && state.selected === key) button.textContent = 'Réessayer'; }
       finally { if (session === state.session) { state.refreshing.delete(key); if (state.selected === key) button.disabled = false; } }
     });
     render();
   }
-  window.SourceExplorer = { update, open, reset, activate: panel => { if (panel === 'official-sources-panel') render(); }, isSourceVisible: key => state.selected === key && localStorage.getItem('activePanel') === 'official-sources-panel' };
+  window.SourceExplorer = { update, open, reset, registerServices, hasNativeView: key => nativeKeys.has(key), activate: panel => { if (panel === 'official-sources-panel') render(); }, isSourceVisible: key => state.selected === key && localStorage.getItem('activePanel') === 'official-sources-panel' };
   document.addEventListener('DOMContentLoaded', bind, { once: true });
 })();

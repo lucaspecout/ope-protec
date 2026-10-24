@@ -80,7 +80,7 @@
     }
     const coverage = slot.coverage || {};
     put('public-catnat-summary', summary('catnat_isere', `${fmt(slot.events_total)} reconnaissances commune/arrêté · ${fmt(coverage.communes_checked)}/${fmt(coverage.communes_total)} communes vérifiées`));
-    if (select?.value) { loadHistory(); return; }
+    if (select?.value) { if (!window.SourceExplorer || window.SourceExplorer.isSourceVisible('catnat_isere')) loadHistory(); return; }
     ++state.historyVersion;
     put('public-catnat-results', hasData(slot) ? note(`Aperçu des ${slot.preview_limit || 150} dernières reconnaissances au maximum. Choisir une commune pour lire son historique complet collecté. Un même arrêté peut concerner plusieurs communes.`) + catnatTable(slot.events || []) : note('Historique en attente de collecte.'));
   }

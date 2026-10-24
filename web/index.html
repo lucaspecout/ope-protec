@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
   <link rel="stylesheet" href="/styles.css?v=20261021-map-menu" />
-  <link rel="stylesheet" href="/official_sources.css?v=20261024-explorer" />
+  <link rel="stylesheet" href="/official_sources.css?v=20261024-unified" />
   <link rel="stylesheet" href="/api_credentials.css?v=20261020" />
   <link rel="stylesheet" href="/public_sources.css?v=20261020" />
 </head>
@@ -65,8 +65,7 @@
         </div>
         <nav class="side-nav" aria-label="Menu principal">
           <button class="menu-btn" data-target="situation-panel" data-icon="📊"><span class="menu-label">Situation</span></button>
-          <button class="menu-btn" data-target="services-panel" data-icon="🔌"><span class="menu-label">Services connectés</span></button>
-          <button class="menu-btn" data-target="official-sources-panel" data-icon="📡"><span class="menu-label">Sources officielles</span></button>
+          <button class="menu-btn" data-target="official-sources-panel" data-icon="📡"><span class="menu-label">Sources & services</span></button>
           <button class="menu-btn" data-target="stations-panel" data-icon="🚆"><span class="menu-label">Horaires gares</span></button>
           <button class="menu-btn" data-target="meteo-panel" data-icon="🌤️"><span class="menu-label">Météo semaine</span></button>
           <button class="menu-btn" data-target="water-panel" data-icon="🚰"><span class="menu-label">Eau potable</span></button>
@@ -139,32 +138,6 @@
           </div>
         </section>
 
-        <section id="services-panel" class="panel view hidden" hidden>
-          <div class="svc-panel-hd">
-            <div>
-              <h3>Services connectés</h3>
-              <p class="muted">Surveillance temps réel des flux opérationnels pour la cellule de crise Isère.</p>
-            </div>
-            <div id="svc-summary-bar" class="svc-summary-bar"></div>
-          </div>
-
-          <!-- Cartes par catégorie — générées dynamiquement par buildServiceCards() -->
-          <div id="svc-cards-root" class="svc-cards-root"></div>
-
-          <!-- Nappes phréatiques — section dédiée -->
-          <div class="svc-gw-section">
-            <div class="svc-gw-hd">
-              <span class="svc-gw-icon">🏔️</span>
-              <div>
-                <h4 class="svc-gw-title">Nappes phréatiques Isère · Hub'Eau</h4>
-                <div id="groundwater-summary" class="svc-gw-kpis"></div>
-              </div>
-            </div>
-            <div id="groundwater-stations" class="svc-gw-stations"></div>
-          </div>
-
-        </section>
-
         <section id="stations-panel" class="panel view hidden" hidden>
           <div class="panel-head stations-panel-head">
             <div>
@@ -188,8 +161,8 @@
 
         <section id="official-sources-panel" class="panel view hidden" hidden>
           <header class="source-hero">
-            <div><span class="source-eyebrow">LE CATALOGUE DES DONNÉES</span><h3>Sources officielles<span>Isère & région</span></h3><p>Une source, une vue claire.<br> Choisissez les données dont vous avez besoin.</p></div>
-            <div class="source-hero-stats"><div><strong>11</strong><span>sources réunies</span></div><div><strong id="source-available-count">—</strong><span>à jour</span></div><div><strong id="source-attention-count">—</strong><span>à vérifier</span></div></div>
+            <div><span class="source-eyebrow">LE CATALOGUE DES DONNÉES</span><h3>Sources & services<span>Isère & région</span></h3><p>Tous vos flux, un seul point d’entrée.<br> Choisissez une source pour consulter ses données.</p></div>
+            <div class="source-hero-stats"><div><strong id="source-total-count">—</strong><span>sources réunies</span></div><div><strong id="source-available-count">—</strong><span>à jour</span></div><div><strong id="source-attention-count">—</strong><span>à vérifier</span></div></div>
           </header>
           <div class="source-toolbar">
             <div class="source-mode-switch" role="group" aria-label="Mode d’affichage"><button type="button" data-source-mode="cards" aria-pressed="true"><span aria-hidden="true">▦</span> Cartes</button><button type="button" data-source-mode="list" aria-pressed="false"><span aria-hidden="true">☰</span> Liste</button></div>
@@ -197,7 +170,9 @@
             <label id="source-detail-switch" class="source-detail-switch" hidden><span>Changer de source</span><select id="source-select" aria-label="Choisir une source"></select></label>
           </div>
           <div id="source-catalog"><div class="source-catalog-heading"><h4>Explorez les sources</h4><span id="source-result-count" aria-live="polite">11 sources</span></div><div id="source-catalog-grid" class="source-catalog-grid"></div><div id="source-empty" class="source-empty" hidden><strong>Aucune source ne correspond.</strong><p>Essayez un autre mot-clé ou un autre thème.</p><button type="button" class="ghost" id="source-clear-filters">Effacer les filtres</button></div></div>
-          <div id="source-detail-header" class="source-detail-header" hidden><button type="button" class="ghost" id="source-back">← Toutes les sources</button><div><span id="source-detail-category" class="source-eyebrow"></span><h4 id="source-detail-title" tabindex="-1"></h4><p id="source-detail-description"></p><div id="source-detail-meta"></div></div><button type="button" class="ghost" id="source-refresh">Actualiser</button></div>
+          <div id="source-detail-header" class="source-detail-header" hidden><button type="button" class="ghost" id="source-back">← Toutes les sources</button><div class="source-detail-intro"><span id="source-detail-category" class="source-eyebrow"></span><h4 id="source-detail-title" tabindex="-1"></h4><p id="source-detail-description"></p><div id="source-detail-meta"></div></div><div class="source-detail-actions"><a id="source-official-link" class="source-official-link" target="_blank" rel="noopener noreferrer">Site officiel de la source ↗</a><button type="button" class="ghost" id="source-refresh">Actualiser</button></div></div>
+          <div id="svc-cards-root"></div>
+          <article class="tile source-data-view svc-gw-section" data-source-view="groundwater_isere" hidden><div id="groundwater-summary" class="svc-gw-kpis"></div><div id="groundwater-stations" class="svc-gw-stations"></div></article>
           <details id="public-fuel_isere" class="tile public-feed source-data-view" data-source-view="fuel_isere" hidden>
             <summary>Stations-service et carburants · Isère</summary>
             <div id="public-fuel-summary"></div>
@@ -1703,11 +1678,11 @@
   <svg aria-hidden="true" width="0" height="0" focusable="false" style="position:absolute">
     <path id="isere-shape" d="M0 0h1v1H0z"></path>
   </svg>
-  <script defer src="/source_explorer.js?v=20261024"></script>
+  <script defer src="/source_explorer.js?v=20261024-unified"></script>
   <script defer src="/official_sources.js?v=20261024-explorer"></script>
-  <script defer src="/public_sources.js?v=20261024-explorer"></script>
+  <script defer src="/public_sources.js?v=20261024-unified"></script>
   <script defer src="/api_credentials.js?v=20261020"></script>
   <script defer src="/map_filters.js?v=20261021-map-menu"></script>
-  <script defer src="/script.js?v=20261024-explorer"></script>
+  <script defer src="/script.js?v=20261024-unified"></script>
 </body>
 </html>

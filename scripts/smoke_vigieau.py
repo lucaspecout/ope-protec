@@ -93,11 +93,11 @@ CHECKS = """<script>
   check('expanded cards fit viewport',[...root.querySelectorAll('.water-restriction-card')].every(el=>el.scrollWidth<=el.clientWidth+2));
   setFilter('water-vigieau','profile','');
   setActivePanel('services-panel',{refreshSnapshot:false});
+  window.SourceExplorer.open('vigieau');
   renderVigieauAlerts(cachedExternalRisksSnapshot.vigieau);
   const serviceRoot=document.getElementById('vigieau-content');
-  const serviceCard=serviceRoot.closest('details[data-svc-key="vigieau"]');
-  serviceCard.open=true;
-  check('services view visible',!document.getElementById('services-panel').hidden&&serviceRoot.getBoundingClientRect().width>0&&serviceCard.open);
+  const serviceCard=serviceRoot.closest('[data-source-view="vigieau"]');
+  check('services view visible',!document.getElementById('official-sources-panel').hidden&&serviceRoot.getBoundingClientRect().width>0&&!serviceCard.hidden);
   check('services view also receives rich controls',Boolean(document.getElementById('vigieau-search')));
   check('services view renders zones',document.querySelectorAll('#vigieau-list .water-restriction-card').length===12);
   check('services card fits available width',serviceCard.scrollWidth<=serviceCard.clientWidth+2&&serviceCard.getBoundingClientRect().right<=innerWidth);
