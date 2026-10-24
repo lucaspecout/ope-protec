@@ -57,6 +57,14 @@ CHECKS = """<script>
   await waitFor(()=>document.querySelectorAll('#water-vigieau-list .water-restriction-card').length>0);
   const root=document.getElementById('water-vigieau-content');
   const alerts=root._vigieauAlerts||[];
+  check('water page defaults to restrictions only',!document.getElementById('water-mode-restrictions').hidden&&document.getElementById('water-mode-quality').hidden);
+  const retainedFilter=root.querySelector('[data-vigieau-filter="search"]');
+  document.querySelector('[data-water-page-mode="quality"]').click();
+  check('quality mode hides restrictions and shows sanitation',document.getElementById('water-mode-restrictions').hidden&&!document.getElementById('water-mode-quality').hidden);
+  check('mode choice is accessible',document.querySelector('[data-water-page-mode="quality"]').getAttribute('aria-pressed')==='true'&&document.querySelector('[data-water-page-mode="restrictions"]').getAttribute('aria-pressed')==='false');
+  check('water mode menu fits viewport',document.querySelector('.water-page-menu').scrollWidth<=document.querySelector('.water-page-menu').clientWidth+2);
+  document.querySelector('[data-water-page-mode="restrictions"]').click();
+  check('restrictions can be restored without replacing filters',!document.getElementById('water-mode-restrictions').hidden&&document.getElementById('water-mode-quality').hidden&&root.querySelector('[data-vigieau-filter="search"]')===retainedFilter);
   check('water view active',!document.getElementById('water-panel').hidden);
   check('all departmental zones received',alerts.length===window.__fixtureZoneCount);
   check('first page bounded to 12 zone cards',document.querySelectorAll('#water-vigieau-list .water-restriction-card').length===Math.min(12,window.__fixtureZoneCount));

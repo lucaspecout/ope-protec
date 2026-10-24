@@ -489,6 +489,7 @@ const meteoAirQualityCache = new Map();
 const meteoAirQualityInFlight = new Map();
 let selectedMeteoCityKey = ISERE_MAJOR_CITIES[0]?.key || 'grenoble';
 let selectedWaterMunicipalityId = '';
+let selectedWaterPageMode = 'restrictions';
 let selectedContactsCity = '';
 let stationsTimetableCache = null;
 let stationsTimetableInFlight = null;
@@ -3195,6 +3196,7 @@ function setActivePanel(panelId, { refreshSnapshot = true } = {}) {
   updateGlobalLoadingVisual(getStartupQueuePercent());
   updateMobileNavActive(panelId);
   document.getElementById('panel-title').textContent = PANEL_TITLES[panelId] || 'Centre opérationnel';
+  if (panelId === 'water-panel') renderWaterPageMode();
   window.SourceExplorer?.activate(panelId);
   window.OfficialSources?.activate(panelId);
   window.PublicSources?.activate(panelId);
@@ -3225,7 +3227,7 @@ function setActivePanel(panelId, { refreshSnapshot = true } = {}) {
       if (errorTarget && !errorTarget.textContent.trim()) errorTarget.textContent = sanitizeErrorMessage(error.message);
     });
   }
-  if (panelId === 'water-panel' && token) {
+  if (panelId === 'water-panel' && token && selectedWaterPageMode === 'quality') {
     withPanelLoading('water-panel', 'Chargement eau potable...', () => loadAndRenderWaterPanel(false)).catch((error) => {
       waterPanelEmptyState(sanitizeErrorMessage(error.message));
     });
@@ -14880,6 +14882,29 @@ function refreshStationTimetables({ forceRefresh = false, silent = true } = {}) 
   });
 }
 
+function renderWaterPageMode() {
+  const quality = selectedWaterPageMode === 'quality';
+  const restrictionsView = document.getElementById('water-mode-restrictions');
+  const qualityView = document.getElementById('water-mode-quality');
+  if (restrictionsView) restrictionsView.hidden = quality;
+  if (qualityView) qualityView.hidden = !quality;
+  document.querySelectorAll('[data-water-page-mode]').forEach(button => {
+    button.setAttribute('aria-pressed', String(button.dataset.waterPageMode === selectedWaterPageMode));
+  });
+  if (localStorage.getItem(STORAGE_KEYS.activePanel) === 'water-panel') {
+    const municipality = (Array.isArray(cachedMunicipalities) ? cachedMunicipalities : []).find(item => String(item.id) === String(selectedWaterMunicipalityId));
+    const title = document.getElementById('panel-title');
+    if (title) title.textContent = quality ? `Eau potable et assainissement${municipality?.name ? ` - ${municipality.name}` : ''}` : 'Restrictions d’eau et sécheresse';
+  }
+}
+
+async function setWaterPageMode(mode) {
+  const previous = selectedWaterPageMode;
+  selectedWaterPageMode = mode === 'quality' ? 'quality' : 'restrictions';
+  renderWaterPageMode();
+  if (selectedWaterPageMode === 'quality' && previous !== 'quality' && token) await loadAndRenderWaterPanel(false);
+}
+
 async function loadAndRenderWaterPanel(forceRefresh = false) {
   renderWaterMunicipalitySelector();
   if (!selectedWaterMunicipalityId) {
@@ -14910,7 +14935,7 @@ async function loadAndRenderWaterPanel(forceRefresh = false) {
     waterPanelCache.set(cacheKey, payload);
     renderWaterQualityPanel(payload?.quality || {});
     renderWaterServicesPanel(payload?.services || {});
-    if ((localStorage.getItem(STORAGE_KEYS.activePanel) || '') === 'water-panel') {
+    if ((localStorage.getItem(STORAGE_KEYS.activePanel) || '') === 'water-panel' && selectedWaterPageMode === 'quality') {
       document.getElementById('panel-title').textContent = municipality?.name
         ? `Eau potable et assainissement - ${municipality.name}`
         : PANEL_TITLES['water-panel'];
@@ -16962,6 +16987,10 @@ function bindAppInteractions() {
       : georisquesPayload;
     renderGeorisquesPcsRisks(georisquesData.monitored_communes || georisquesData.monitored_municipalities || georisquesData.communes || []);
   });
+  document.querySelectorAll('[data-water-page-mode]').forEach(button => {
+    button.addEventListener('click', () => setWaterPageMode(button.dataset.waterPageMode));
+  });
+  renderWaterPageMode();
   document.getElementById('water-municipality-select')?.addEventListener('change', async (event) => {
     selectedWaterMunicipalityId = String(event.target?.value || '').trim();
     await loadAndRenderWaterPanel(false);

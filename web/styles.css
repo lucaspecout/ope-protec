@@ -32,6 +32,14 @@ h1, h2, h3, h4, p { margin-top: 0; }
 .tag { text-transform: uppercase; letter-spacing: .08em; color: #2e5c96; font-size: .72rem; font-weight: 700; margin-bottom: .25rem; }
 .lead { color: #2f476f; line-height: 1.5; }
 .muted { color: var(--muted); }
+.water-page-menu { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 14px; margin-bottom: 18px; border: 1px solid #dfe7ef; border-radius: 13px; background: #f8fafc; }
+.water-page-menu > span { color: #61768b; font-size: .74rem; font-weight: 650; }
+.water-page-menu > div { display: flex; flex-wrap: wrap; gap: 5px; padding: 4px; border-radius: 9px; background: #eaf0f5; }
+.water-page-menu button { padding: 10px 14px; border: 0; border-radius: 7px; color: #52677c; background: transparent; box-shadow: none; font-size: .8rem; }
+.water-page-menu button[aria-pressed="true"] { color: #176b7c; background: #fff; box-shadow: 0 1px 5px #193b6115; }
+.water-page-menu button:focus-visible { outline: 3px solid #288eae; outline-offset: 2px; }
+#water-panel > [hidden] { display: none !important; }
+@media (max-width: 600px) { .water-page-menu { gap: 8px; padding: 11px; } .water-page-menu > div { width: 100%; } .water-page-menu button { width: 100%; text-align: left; font-size: .76rem; } }
 .error { color: var(--danger); min-height: 1rem; }
 .hidden { display: none !important; }
 

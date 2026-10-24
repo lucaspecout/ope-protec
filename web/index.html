@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
-  <link rel="stylesheet" href="/styles.css?v=20261021-map-menu" />
+  <link rel="stylesheet" href="/styles.css?v=20261024-water-modes" />
   <link rel="stylesheet" href="/official_sources.css?v=20261024-scroll-fix" />
   <link rel="stylesheet" href="/api_credentials.css?v=20261020" />
   <link rel="stylesheet" href="/public_sources.css?v=20261020" />
@@ -254,6 +254,14 @@
         </section>
 
         <section id="water-panel" class="panel view hidden" hidden>
+          <nav class="water-page-menu" aria-label="Choisir le mode de la page Eau potable">
+            <span>Afficher</span>
+            <div role="group" aria-label="Mode d’affichage">
+              <button type="button" data-water-page-mode="restrictions" aria-controls="water-mode-restrictions" aria-pressed="true">Restrictions d’eau et sécheresse</button>
+              <button type="button" data-water-page-mode="quality" aria-controls="water-mode-quality" aria-pressed="false">Eau potable et assainissement</button>
+            </div>
+          </nav>
+          <div id="water-mode-restrictions">
           <article class="tile water-restrictions">
             <div class="water-restrictions__head">
               <div><p class="tag">VigiEau · Isère</p><h3>Restrictions d’eau et sécheresse</h3><p id="water-vigieau-info" class="muted">Collecte des zones de restriction en cours.</p></div>
@@ -262,6 +270,8 @@
             <div id="water-vigieau-content" class="vigieau-panel"></div>
             <a href="https://www.vigieau.gouv.fr" target="_blank" rel="noopener noreferrer" class="water-restrictions__link">Vérifier les règles à mon adresse sur VigiEau ↗</a>
           </article>
+          </div>
+          <div id="water-mode-quality" hidden>
           <div class="water-hero tile">
             <div>
               <p class="tag">Hub'Eau</p>
@@ -294,6 +304,7 @@
                 <div id="water-services-list" class="water-cards"></div>
               </article>
             </div>
+          </div>
           </div>
         </section>
 
@@ -1685,6 +1696,6 @@
   <script defer src="/public_sources.js?v=20261024-unified"></script>
   <script defer src="/api_credentials.js?v=20261020"></script>
   <script defer src="/map_filters.js?v=20261021-map-menu"></script>
-  <script defer src="/script.js?v=20261024-commune-services"></script>
+  <script defer src="/script.js?v=20261024-water-modes"></script>
 </body>
 </html>
