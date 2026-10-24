@@ -95,7 +95,7 @@
     put('official-observation-table', stations.length ? `<table><caption>${stations.length} station(s) selon les filtres de la carte — pluie sur six minutes, rafale maximale</caption><thead><tr><th>Station</th><th>Observation</th><th>Température</th><th>Pluie / 6 min</th><th>Rafale</th></tr></thead><tbody>${rows}</tbody></table>` : note(all.length ? 'Aucune station correspondant aux filtres de la carte.' : 'Les mesures apparaîtront après activation de l’accès Météo-France. Les prévisions météo habituelles restent disponibles.'));
     put('official-weather-inline', all.length ? `<strong>Mesures officielles : ${all.length} station(s)</strong><p>Pluie max. ${esc(fmt(summaries.max_rain_6m_mm, 'mm/6 min'))} · Rafale max. ${esc(fmt(summaries.max_gust_kmh, 'km/h'))}</p><button type="button" class="ghost" data-open-official>Voir les observations et le radar</button>` : `<strong>Observations et radar Météo-France</strong>${note(data.info_state || status(data))}<button type="button" class="ghost" data-open-official>Consulter les sources officielles</button>`);
     // History is read only when this panel is visible, never during bootstrap.
-    if (activePanel() === 'official-sources-panel' && stations.length) loadHistory();
+    if (activePanel() === 'official-sources-panel' && stations.length && (!window.SourceExplorer || window.SourceExplorer.isSourceVisible('meteo_observations'))) loadHistory();
   }
 
   function activePanel() { return typeof localStorage !== 'undefined' ? localStorage.getItem('activePanel') : ''; }
@@ -288,7 +288,7 @@
 
   function activate(panel) {
     if (panel !== 'map-panel') { stopAnimation(); ++state.radarVersion; }
-    if (panel === 'official-sources-panel') { renderForecasts(); loadHistory(); }
+    if (panel === 'official-sources-panel') { renderForecasts(); if (!window.SourceExplorer || window.SourceExplorer.isSourceVisible('meteo_observations')) loadHistory(); }
     if (panel === 'map-panel') syncMap();
   }
 
@@ -328,7 +328,7 @@
     el('official-radar-play')?.addEventListener('click', toggleAnimation);
     el('official-radar-frame')?.addEventListener('input', () => { stopAnimation(); state.frameIndex = Number(el('official-radar-frame').value); showRadar(); });
     document.addEventListener('click', async (event) => {
-      if (event.target.closest('[data-open-official]')) setActivePanel('official-sources-panel');
+      if (event.target.closest('[data-open-official]')) { if (window.SourceExplorer) window.SourceExplorer.open('meteo_observations'); else setActivePanel('official-sources-panel'); }
       if (event.target.closest('[data-open-official-map]')) setActivePanel('map-panel');
       const button = event.target.closest('[data-official-refresh]');
       if (!button || button.disabled) return;

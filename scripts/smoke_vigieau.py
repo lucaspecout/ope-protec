@@ -187,7 +187,7 @@ class BrowserSession:
                 return response.get("result", {})
 
 
-def run(browser, width, output):
+def run(browser, width, output, height=1080):
     server=ThreadingHTTPServer(("127.0.0.1",0), Handler)
     Thread(target=server.serve_forever,daemon=True).start()
     try:
@@ -197,7 +197,7 @@ def run(browser, width, output):
                 "--headless=new", "--disable-gpu", "--force-device-scale-factor=1", "--no-first-run", "--disable-extensions",
                 "--disable-background-networking", "--no-proxy-server",
                 "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost",
-                f"--user-data-dir={profile}", f"--window-size={width},1080",
+                f"--user-data-dir={profile}", f"--window-size={width},{height}",
                 "--remote-debugging-port=0", "about:blank",
             ],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
             session = None
@@ -212,7 +212,7 @@ def run(browser, width, output):
                 with urlopen(f"http://127.0.0.1:{port}/json/list", timeout=5) as response:
                     pages = json.load(response)
                 session = BrowserSession(next(page["webSocketDebuggerUrl"] for page in pages if page["type"] == "page"))
-                session.command("Emulation.setDeviceMetricsOverride", {"width": width, "height": 1080, "deviceScaleFactor": 1, "mobile": False})
+                session.command("Emulation.setDeviceMetricsOverride", {"width": width, "height": height, "deviceScaleFactor": 1, "mobile": False})
                 session.command("Page.navigate", {"url": f"http://127.0.0.1:{server.server_port}/"})
                 report_text = None
                 deadline = time.monotonic() + 20

@@ -211,6 +211,7 @@
     document.addEventListener('click', async event => {
       const focus = event.target.closest('[data-public-focus]');
       if (focus) {
+        window.SourceExplorer?.open(focus.dataset.publicFocus);
         if (typeof setActivePanel === 'function') setActivePanel('official-sources-panel', { refreshSnapshot: false });
         const target = el(`public-${focus.dataset.publicFocus}`);
         if (target) { target.open = true; target.scrollIntoView?.({ behavior: 'smooth', block: 'start' }); }

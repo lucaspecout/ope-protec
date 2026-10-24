@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
   <link rel="stylesheet" href="/styles.css?v=20261021-map-menu" />
-  <link rel="stylesheet" href="/official_sources.css?v=20261020" />
+  <link rel="stylesheet" href="/official_sources.css?v=20261024-explorer" />
   <link rel="stylesheet" href="/api_credentials.css?v=20261020" />
   <link rel="stylesheet" href="/public_sources.css?v=20261020" />
 </head>
@@ -187,10 +187,18 @@
         </section>
 
         <section id="official-sources-panel" class="panel view hidden" hidden>
-          <div class="panel-head"><div><h3>Sources officielles · Isère</h3><p class="muted">Mesures, prévisions et référentiels. Les dates et les limites de couverture accompagnent chaque source.</p></div></div>
-          <div id="official-source-cards" class="official-source-grid" aria-live="polite"><p class="muted">Lecture des données collectées par le serveur…</p></div>
-          <div id="public-source-cards" class="official-source-grid" aria-live="polite"></div>
-          <details id="public-fuel_isere" class="tile public-feed" open>
+          <header class="source-hero">
+            <div><span class="source-eyebrow">LE CATALOGUE DES DONNÉES</span><h3>Sources officielles<span>Isère & région</span></h3><p>Une source, une vue claire.<br> Choisissez les données dont vous avez besoin.</p></div>
+            <div class="source-hero-stats"><div><strong>11</strong><span>sources réunies</span></div><div><strong id="source-available-count">—</strong><span>à jour</span></div><div><strong id="source-attention-count">—</strong><span>à vérifier</span></div></div>
+          </header>
+          <div class="source-toolbar">
+            <div class="source-mode-switch" role="group" aria-label="Mode d’affichage"><button type="button" data-source-mode="cards" aria-pressed="true"><span aria-hidden="true">▦</span> Cartes</button><button type="button" data-source-mode="list" aria-pressed="false"><span aria-hidden="true">☰</span> Liste</button></div>
+            <div id="source-catalog-filters" class="source-catalog-filters"><label class="source-search"><span>Rechercher</span><input id="source-search" type="search" placeholder="Météo, carburants, population…" /></label><label class="source-theme"><span>Thème</span><select id="source-theme"><option value="all">Tous les thèmes</option><option value="weather">Météo & eau</option><option value="territory">Territoire & risques</option><option value="energy">Énergie</option><option value="daily">Vie quotidienne</option></select></label></div>
+            <label id="source-detail-switch" class="source-detail-switch" hidden><span>Changer de source</span><select id="source-select" aria-label="Choisir une source"></select></label>
+          </div>
+          <div id="source-catalog"><div class="source-catalog-heading"><h4>Explorez les sources</h4><span id="source-result-count" aria-live="polite">11 sources</span></div><div id="source-catalog-grid" class="source-catalog-grid"></div><div id="source-empty" class="source-empty" hidden><strong>Aucune source ne correspond.</strong><p>Essayez un autre mot-clé ou un autre thème.</p><button type="button" class="ghost" id="source-clear-filters">Effacer les filtres</button></div></div>
+          <div id="source-detail-header" class="source-detail-header" hidden><button type="button" class="ghost" id="source-back">← Toutes les sources</button><div><span id="source-detail-category" class="source-eyebrow"></span><h4 id="source-detail-title" tabindex="-1"></h4><p id="source-detail-description"></p><div id="source-detail-meta"></div></div><button type="button" class="ghost" id="source-refresh">Actualiser</button></div>
+          <details id="public-fuel_isere" class="tile public-feed source-data-view" data-source-view="fuel_isere" hidden>
             <summary>Stations-service et carburants · Isère</summary>
             <div id="public-fuel-summary"></div>
             <div class="official-controls">
@@ -201,7 +209,7 @@
             </div>
             <div id="public-fuel-results" class="official-table-wrap"></div>
           </details>
-          <details id="public-onde_isere" class="tile public-feed" open>
+          <details id="public-onde_isere" class="tile public-feed source-data-view" data-source-view="onde_isere" hidden>
             <summary>Écoulement des petits cours d’eau · ONDE</summary>
             <div id="public-onde-summary"></div>
             <div class="official-controls">
@@ -211,19 +219,19 @@
             </div>
             <div id="public-onde-results" class="official-table-wrap"></div>
           </details>
-          <details id="public-catnat_isere" class="tile public-feed">
+          <details id="public-catnat_isere" class="tile public-feed source-data-view" data-source-view="catnat_isere" hidden>
             <summary>Historique des catastrophes naturelles · CatNat</summary>
             <div id="public-catnat-summary"></div>
             <div class="official-controls"><label>Commune<select id="public-catnat-commune"><option value="">Dernières publications départementales</option></select></label></div>
             <div id="public-catnat-results" class="official-table-wrap" aria-live="polite"></div>
           </details>
-          <details id="public-energy_aura" class="tile public-feed" open>
+          <details id="public-energy_aura" class="tile public-feed source-data-view" data-source-view="energy_aura" hidden>
             <summary>Électricité régionale · Auvergne-Rhône-Alpes</summary>
             <div id="public-energy-summary"></div>
             <div id="public-energy-chart"></div>
             <div id="public-energy-generation" class="public-energy-grid"></div>
           </details>
-          <details id="public-recalls" class="tile public-feed">
+          <details id="public-recalls" class="tile public-feed source-data-view" data-source-view="recalls" hidden>
             <summary>Rappels de produits · RappelConso</summary>
             <div id="public-recalls-summary"></div>
             <div class="official-controls">
@@ -233,13 +241,12 @@
             </div>
             <div id="public-recalls-results"></div>
           </details>
-          <div class="official-source-grid">
-            <article class="tile"><h4>Population exposée · INSEE</h4><div id="official-population-body"></div></article>
-            <article class="tile"><h4>Électricité · Enedis</h4><div id="official-enedis-body"></div></article>
-          </div>
-          <article class="tile official-section"><h4>Observations Météo-France</h4><div id="official-observation-summary"></div><div class="official-controls"><label>Station<select id="official-observation-station" aria-label="Station météorologique observée"></select></label><label>Mesure<select id="official-observation-metric"><option value="temperature_c">Température</option><option value="rain_6m_mm">Pluie sur 6 minutes</option><option value="gust_kmh">Rafales</option></select></label></div><div id="official-observation-chart"></div><div id="official-observation-table" class="official-table-wrap"></div></article>
-          <article class="tile official-section"><h4>Prévisions hydrologiques · Vigicrues</h4><div id="official-forecast-summary"></div><div class="official-controls"><label>Station<select id="official-forecast-station" aria-label="Station avec prévisions Vigicrues"></select></label><label>Grandeur<select id="official-forecast-variable"><option value="H">Hauteur d’eau</option><option value="Q">Débit</option></select></label></div><div id="official-forecast-chart"></div></article>
-          <article class="tile official-section"><h4>Installations industrielles · ICPE / Seveso</h4><div id="official-industry-summary"></div><div class="official-controls"><label>Rechercher<input id="official-industry-search" type="search" placeholder="Établissement ou commune" /></label><label>Classement<select id="official-industry-filter"><option value="all">Tous les établissements</option><option value="haut">Seveso seuil haut</option><option value="bas">Seveso seuil bas</option><option value="non">Non Seveso</option></select></label></div><div id="official-industry-table" class="official-table-wrap"></div></article>
+          <article class="tile source-data-view" data-source-view="insee_population" hidden><div id="official-population-body"></div></article>
+          <article class="tile source-data-view" data-source-view="enedis" hidden><div id="official-enedis-body"></div></article>
+          <article class="tile source-data-view" data-source-view="meteo_radar" hidden><div id="source-radar-body"></div><button type="button" class="ghost" id="source-radar-map">Ouvrir le radar sur la carte</button></article>
+          <article class="tile official-section source-data-view" data-source-view="meteo_observations" hidden><div id="official-observation-summary"></div><div class="official-controls"><label>Station<select id="official-observation-station" aria-label="Station météorologique observée"></select></label><label>Mesure<select id="official-observation-metric"><option value="temperature_c">Température</option><option value="rain_6m_mm">Pluie sur 6 minutes</option><option value="gust_kmh">Rafales</option></select></label></div><div id="official-observation-chart"></div><div id="official-observation-table" class="official-table-wrap"></div></article>
+          <article class="tile official-section source-data-view" data-source-view="vigicrues_forecasts" hidden><div id="official-forecast-summary"></div><div class="official-controls"><label>Station<select id="official-forecast-station" aria-label="Station avec prévisions Vigicrues"></select></label><label>Grandeur<select id="official-forecast-variable"><option value="H">Hauteur d’eau</option><option value="Q">Débit</option></select></label></div><div id="official-forecast-chart"></div></article>
+          <article class="tile official-section source-data-view" data-source-view="industrial_sites" hidden><div id="official-industry-summary"></div><div class="official-controls"><label>Rechercher<input id="official-industry-search" type="search" placeholder="Établissement ou commune" /></label><label>Classement<select id="official-industry-filter"><option value="all">Tous les établissements</option><option value="haut">Seveso seuil haut</option><option value="bas">Seveso seuil bas</option><option value="non">Non Seveso</option></select></label></div><div id="official-industry-table" class="official-table-wrap"></div></article>
         </section>
 
         <section id="meteo-panel" class="panel view hidden" hidden>
@@ -1696,10 +1703,11 @@
   <svg aria-hidden="true" width="0" height="0" focusable="false" style="position:absolute">
     <path id="isere-shape" d="M0 0h1v1H0z"></path>
   </svg>
-  <script defer src="/official_sources.js?v=20261021-map-menu"></script>
-  <script defer src="/public_sources.js?v=20261021-map-menu"></script>
+  <script defer src="/source_explorer.js?v=20261024"></script>
+  <script defer src="/official_sources.js?v=20261024-explorer"></script>
+  <script defer src="/public_sources.js?v=20261024-explorer"></script>
   <script defer src="/api_credentials.js?v=20261020"></script>
   <script defer src="/map_filters.js?v=20261021-map-menu"></script>
-  <script defer src="/script.js?v=20261021-flood"></script>
+  <script defer src="/script.js?v=20261024-explorer"></script>
 </body>
 </html>

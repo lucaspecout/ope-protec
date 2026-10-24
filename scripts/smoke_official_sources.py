@@ -5,13 +5,9 @@ to this test server; application JavaScript and HTML are served unchanged.
 """
 import argparse
 from datetime import datetime, timedelta, timezone
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 import json
 from pathlib import Path
-import re
-import subprocess
-import tempfile
-from threading import Thread
 from urllib.parse import urlsplit
 
 
@@ -54,18 +50,37 @@ CHECKS = """<script>
   const check=(name,ok)=>results.push({name,pass:Boolean(ok)});
   try {
     for(let i=0;i<100;i++) {
-      if(document.querySelectorAll('.official-source-card').length===6) break;
+      if(document.getElementById('source-available-count')?.textContent!=='—'&&document.querySelectorAll('.source-choice').length===11) break;
       await new Promise(r=>setTimeout(r,100));
     }
-    check('six source cards',document.querySelectorAll('.official-source-card').length===6);
+    check('eleven unified source cards',document.querySelectorAll('.source-choice').length===11);
+    check('no data views initially visible',[...document.querySelectorAll('[data-source-view]')].every(e=>e.hidden));
+    check('source cards are accessible buttons',[...document.querySelectorAll('.source-choice')].every(e=>e.tagName==='BUTTON'&&e.getAttribute('aria-label')));
     check('panel navigation',!document.getElementById('official-sources-panel').hidden);
     const panel=document.getElementById('official-sources-panel');
     check('source panel fits viewport',panel.scrollWidth<=panel.clientWidth+2);
+    const theme=document.getElementById('source-theme');theme.value='energy';theme.dispatchEvent(new Event('change'));
+    check('theme filter selects two energy sources',document.querySelectorAll('.source-choice').length===2);
+    const catalogSearch=document.getElementById('source-search');catalogSearch.value='electricite';catalogSearch.dispatchEvent(new Event('input'));
+    check('accent-insensitive source search',document.querySelectorAll('.source-choice').length===1&&document.querySelector('.source-choice').dataset.sourceOpen==='energy_aura');
+    catalogSearch.value='introuvable';catalogSearch.dispatchEvent(new Event('input'));
+    check('empty search has recovery action',!document.getElementById('source-empty').hidden);
+    document.getElementById('source-clear-filters').click();
+    check('clear filters restores eleven sources',document.querySelectorAll('.source-choice').length===11);
+    document.querySelector('[data-source-mode="list"]').click();
+    check('list mode selected',document.getElementById('source-catalog-grid').dataset.mode==='list'&&document.querySelector('[data-source-mode="list"]').getAttribute('aria-pressed')==='true');
+    check('list fits viewport',panel.scrollWidth<=panel.clientWidth+2);
+    document.querySelector('[data-source-open="meteo_observations"]').click();
+    check('card opens only selected source',[...document.querySelectorAll('[data-source-view]')].filter(e=>!e.hidden).length===1&&!document.querySelector('[data-source-view="meteo_observations"]').hidden);
+    check('catalogue hidden in focused view',document.getElementById('source-catalog').hidden&&!document.getElementById('source-detail-switch').hidden);
+    check('detail title receives keyboard focus',document.activeElement.id==='source-detail-title');
     check('observations wired',document.getElementById('official-observation-table').textContent.includes('Station test Grenoble'));
     check('forecast chart',document.querySelector('#official-forecast-chart svg'));
     check('industrial reference',document.getElementById('official-industry-table').textContent.includes('Usine test officielle'));
     check('enedis diagnostic',document.querySelector('#official-enedis-body a[href="https://www.enedis.fr/panne-et-interruption"]'));
     check('no invented outages',!document.getElementById('official-enedis-body').textContent.includes('0 coupure'));
+    const sourceSelect=document.getElementById('source-select');sourceSelect.value='industrial_sites';sourceSelect.dispatchEvent(new Event('change'));
+    check('source dropdown switches focused data',!document.querySelector('[data-source-view="industrial_sites"]').hidden&&document.querySelector('[data-source-view="meteo_observations"]').hidden);
     const search=document.getElementById('official-industry-search');
     search.value='introuvable';search.dispatchEvent(new Event('input'));
     check('industrial search',document.getElementById('official-industry-table').textContent.includes('Aucun établissement'));
@@ -75,30 +90,47 @@ CHECKS = """<script>
     setActivePanel('official-sources-panel',{refreshSnapshot:false});
     const pop=await window.OfficialSources.estimatePopulation({type:'Polygon',coordinates:[[[5.7,45.1],[5.8,45.1],[5.8,45.2],[5.7,45.1]]]});
     check('population API integrated',pop.population_estimated===1234);
-    check('five additional public sources',document.querySelectorAll('.public-source-card').length===5);
+    check('all source types present in picker',sourceSelect.options.length===11);
+    window.SourceExplorer.open('fuel_isere');
+    check('public source opens without other tables',[...document.querySelectorAll('[data-source-view]')].filter(e=>!e.hidden).length===1&&document.getElementById('public-fuel_isere').open);
     check('fuel data rendered',document.getElementById('public-fuel-results').textContent.includes('Station carburant test'));
     check('declared shortages rendered',document.getElementById('public-fuel-results').textContent.includes('Rupture temporaire déclarée'));
     const fuelSearch=document.getElementById('public-fuel-search');fuelSearch.value='introuvable';fuelSearch.dispatchEvent(new Event('input'));
     check('fuel search works',document.getElementById('public-fuel-results').textContent.includes('Aucune station'));
     fuelSearch.value='';fuelSearch.dispatchEvent(new Event('input'));
+    window.SourceExplorer.open('onde_isere');
     check('ONDE campaign date visible',document.getElementById('public-onde-results').textContent.includes('25/09/2026'));
     check('ONDE observation rendered',document.getElementById('public-onde-results').textContent.includes('Assec'));
+    window.SourceExplorer.open('catnat_isere');
     const catnat=document.getElementById('public-catnat-commune');catnat.value='38185';catnat.dispatchEvent(new Event('change'));
     for(let i=0;i<50&&!document.getElementById('public-catnat-results').textContent.includes('Historique complet test');i++)await new Promise(r=>setTimeout(r,100));
     check('CatNat reads selected commune history',document.getElementById('public-catnat-results').textContent.includes('Historique complet test'));
     check('regional zero consumption retained',document.getElementById('public-energy-summary').textContent.includes('0 MW'));
     check('regional energy graph rendered',document.querySelector('#public-energy-chart svg'));
     check('recall default excludes other zones',!document.getElementById('public-recalls-results').textContent.includes('Autre zone test'));
+    window.SourceExplorer.open('recalls');
     const recall=document.querySelector('[data-public-recall-id="123"]');recall.open=true;
     for(let i=0;i<50&&!document.getElementById('public-recall-detail-123').textContent.includes('LOT-CACHE-TEST');i++)await new Promise(r=>setTimeout(r,100));
     check('recall details loaded from cache',document.getElementById('public-recall-detail-123').textContent.includes('LOT-CACHE-TEST'));
     const scope=document.getElementById('public-recalls-scope');scope.value='unspecified';scope.dispatchEvent(new Event('input'));
     check('other recall scopes remain accessible',document.getElementById('public-recalls-results').textContent.includes('Autre zone test'));
-    check('new data sections fit viewport',[...document.querySelectorAll('.public-feed')].every(e=>e.scrollWidth<=e.clientWidth+2));
+    check('selected source fits viewport',panel.scrollWidth<=panel.clientWidth+2);
+    for(const key of ['energy_aura','insee_population','enedis','meteo_radar','vigicrues_forecasts']){window.SourceExplorer.open(key);check('focused source opens: '+key,[...document.querySelectorAll('[data-source-view]')].filter(e=>!e.hidden).length===1&&!document.querySelector('[data-source-view="'+key+'"]').hidden);}
+    document.getElementById('source-back').click();
+    check('back restores list mode',!document.getElementById('source-catalog').hidden&&document.getElementById('source-catalog-grid').dataset.mode==='list');
+    document.querySelector('[data-source-mode="cards"]').click();
+    check('cards mode restores full catalogue',document.getElementById('source-catalog-grid').dataset.mode==='cards'&&document.querySelectorAll('.source-choice').length===11);
+    window.SourceExplorer.open('fuel_isere');document.getElementById('public-fuel-search').value='Grenoble';document.getElementById('public-fuel-search').dispatchEvent(new Event('input'));
+    window.SourceExplorer.open('onde_isere');window.SourceExplorer.open('fuel_isere');
+    check('data filters retained across source navigation',document.getElementById('public-fuel-search').value==='Grenoble');
+    document.getElementById('source-back').click();
+    await new Promise(r=>setTimeout(r,500));
+    window.scrollTo({top:0,behavior:'instant'});
+    await new Promise(r=>setTimeout(r,200));
     check('new map layers available',document.getElementById('filter-public-fuel')&&document.getElementById('filter-public-onde'));
     check('no uncaught JavaScript errors',window.__smokeErrors.length===0);
   } catch(e) { results.push({name:'unexpected error',pass:false,error:String(e)}); }
-  const report=document.createElement('pre');report.id='smoke-results';report.textContent=JSON.stringify({results,errors:window.__smokeErrors});document.body.append(report);
+  const report=document.createElement('pre');report.id='smoke-results';report.hidden=true;report.textContent=JSON.stringify({results,errors:window.__smokeErrors,metrics:{innerWidth,bodyWidth:document.body.scrollWidth}});document.body.append(report);
 })();
 </script>"""
 
@@ -158,25 +190,13 @@ def main():
     parser.add_argument("--width", type=int, default=1440)
     parser.add_argument("--height", type=int, default=1080)
     args = parser.parse_args()
-    output = ROOT / ".test-data"
-    output.mkdir(exist_ok=True)
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    Thread(target=server.serve_forever, daemon=True).start()
-    try:
-        with tempfile.TemporaryDirectory(prefix="edge-smoke-", dir=output) as profile:
-            command = [args.browser, "--headless=new", "--disable-gpu", "--no-first-run", "--disable-extensions", "--disable-background-networking", "--no-proxy-server", "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost", f"--user-data-dir={profile}", f"--window-size={args.width},{args.height}", "--virtual-time-budget=15000", "--dump-dom", f"--screenshot={output / ('official-sources-smoke-' + str(args.width) + '.png')}", f"http://127.0.0.1:{server.server_port}/"]
-            result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=50)
-            (output / "official-sources-smoke.html").write_text(result.stdout, encoding="utf-8")
-            match = re.search(r'<pre id="smoke-results">(.*?)</pre>', result.stdout, re.DOTALL)
-            if not match:
-                raise RuntimeError("No browser test report: " + result.stderr[-2000:])
-            from html import unescape
-            report = json.loads(unescape(match[1]))
-            print(json.dumps(report, ensure_ascii=False, indent=2))
-            if not all(item["pass"] for item in report["results"]):
-                raise SystemExit(1)
-    finally:
-        server.shutdown()
+    # Device emulation avoids Edge's minimum native window width on mobile.
+    import smoke_vigieau as browser
+    browser.Handler = Handler
+    output = ROOT / ".test-data/official-sources"
+    output.mkdir(parents=True, exist_ok=True)
+    if not browser.run(args.browser, args.width, output, height=args.height):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

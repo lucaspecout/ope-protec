@@ -3194,6 +3194,7 @@ function setActivePanel(panelId, { refreshSnapshot = true } = {}) {
   updateGlobalLoadingVisual(getStartupQueuePercent());
   updateMobileNavActive(panelId);
   document.getElementById('panel-title').textContent = PANEL_TITLES[panelId] || 'Centre opérationnel';
+  window.SourceExplorer?.activate(panelId);
   window.OfficialSources?.activate(panelId);
   window.PublicSources?.activate(panelId);
   window.ApiCredentials?.activate(panelId);
@@ -15716,6 +15717,7 @@ function renderExternalRisks(data = {}) {
   syncAnfrTelecomSnapshot(mergedData.anfr_isere || {});
   window.OfficialSources?.update(mergedData);
   window.PublicSources?.update(mergedData);
+  window.SourceExplorer?.update(mergedData);
   const meteo = mergedData?.meteo_france || {};
   const vigicrues = mergedData?.vigicrues || {};
   cachedVigicruesPayload = {
@@ -17799,6 +17801,7 @@ function bindAppInteractions() {
 function logout() {
   window.OfficialSources?.reset();
   window.PublicSources?.reset();
+  window.SourceExplorer?.reset();
   window.ApiCredentials?.reset();
   token = null;
   currentUser = null;
