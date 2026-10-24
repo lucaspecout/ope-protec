@@ -6,7 +6,7 @@ const test = require('node:test');
 const source = fs.readFileSync(path.join(__dirname, '../web/script.js'), 'utf8');
 function harness() {
   const context = vm.createContext({ Intl, Date, URL, escapeHtml: value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])), safeDateToLocale: value => String(value) });
-  for (const name of ['situationPublicData', 'buildSituationPublicModal']) {
+  for (const name of ['situationPublicData', 'situationPublicIndicator', 'buildSituationPublicModal']) {
     const start = source.indexOf(`function ${name}(`);
     vm.runInContext(source.slice(start, source.indexOf('\n}', start) + 2), context);
   }
@@ -49,4 +49,38 @@ test('unavailable data stays unknown; regional zero is a valid reading', () => {
   assert.match(html, /0 MW/);
   assert.match(html, /Indisponible/);
   assert.match(html, /Données anciennes/);
+});
+
+test('fuel colours use station proportions and exact boundaries', () => {
+  const h = harness();
+  for (const [count, colour] of [[0, 'vert'], [4, 'vert'], [5, 'jaune'], [14, 'jaune'], [15, 'orange'], [29, 'orange'], [30, 'rouge']]) {
+    assert.equal(h.situationPublicIndicator('fuel-shortages', { fuel_isere: { status: 'online', stations_total: 100, temporary_shortage_stations: count } }).css, colour);
+  }
+  for (const status of ['stale', 'partial', 'unavailable']) assert.equal(h.situationPublicIndicator('fuel-shortages', { fuel_isere: { status, stations_total: 100, temporary_shortage_stations: 0 } }).css, 'gris');
+});
+test('energy colours describe regional coverage with fresh valid measurements only', () => {
+  const h = harness(), now = new Date('2026-10-24T12:00:00Z');
+  for (const [production, colour] of [[100, 'vert'], [99, 'jaune'], [80, 'jaune'], [79, 'orange'], [60, 'orange'], [59, 'rouge'], [null, 'gris']]) {
+    assert.equal(h.situationPublicIndicator('regional-energy', { energy_aura: { status: 'online', observed_at: now.toISOString(), latest: { consumption_mw: 100, production_mw: production } } }, now).css, colour);
+  }
+  assert.equal(h.situationPublicIndicator('regional-energy', { energy_aura: { status: 'online', observed_at: '2026-10-23T12:00:00Z', latest: { consumption_mw: 100, production_mw: 200 } } }, now).css, 'gris');
+});
+test('annual CatNat colours count distinct communes, not recognitions', () => {
+  const h = harness(), now = new Date('2026-10-24T12:00:00Z');
+  for (const [count, colour] of [[0, 'vert'], [1, 'jaune'], [4, 'jaune'], [5, 'orange'], [14, 'orange'], [15, 'rouge']]) {
+    const events = Array.from({ length: count }, (_, i) => ({ code_insee: String(38000 + i) }));
+    if (events.length) events.push(events[0]);
+    const result = h.situationPublicIndicator('annual-catnat', { catnat_isere: { status: 'online', current_year: 2026, current_year_events: events, coverage: { communes_total: 100 } } }, now);
+    assert.equal(result.css, colour);
+    assert.match(result.summary, new RegExp(`^${count} commune`));
+  }
+});
+test('recall colours compare daily pace to the preceding 28 days', () => {
+  const h = harness(), now = new Date('2026-10-14T12:00:00Z');
+  const baseline = Array.from({ length: 28 }, () => ({ published_at: '2026-09-20T12:00:00Z' }));
+  for (const [count, colour] of [[0, 'vert'], [14, 'vert'], [15, 'jaune'], [21, 'jaune'], [22, 'orange'], [28, 'orange'], [29, 'rouge']]) {
+    const items = [...baseline, ...Array.from({ length: count }, () => ({ published_at: '2026-10-10T12:00:00Z' }))];
+    assert.equal(h.situationPublicIndicator('monthly-recalls', { recalls: { status: 'online', items } }, now).css, colour);
+  }
+  assert.equal(h.situationPublicIndicator('monthly-recalls', { recalls: { status: 'online', items: [] } }, now).css, 'gris');
 });

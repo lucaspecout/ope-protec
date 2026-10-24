@@ -12824,12 +12824,60 @@ function situationPublicData(externalRisks = {}, now = new Date()) {
     annualCatnat: Number(catnat.current_year) === Number(parts.year) && Array.isArray(catnat.current_year_events) ? catnat.current_year_events : null };
 }
 
+function situationPublicIndicator(key, externalRisks = {}, now = new Date()) {
+  const source = { 'fuel-shortages': 'fuel_isere', 'regional-energy': 'energy_aura', 'monthly-recalls': 'recalls', 'annual-catnat': 'catnat_isere' }[key];
+  const slot = externalRisks[source] || {};
+  const unknown = { css: 'gris', summary: 'Évaluation indisponible', explanation: 'Une collecte complète et à jour est nécessaire pour attribuer une couleur.' };
+  if (slot.status !== 'online' || slot.coverage?.complete === false) return unknown;
+  const finite = value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
+  const percent = value => `${value.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} %`;
+  if (key === 'fuel-shortages') {
+    const total = slot.stations_total, count = slot.temporary_shortage_stations;
+    if (!finite(total) || !finite(count) || total <= 0 || count < 0 || count > total) return unknown;
+    const rate = 100 * count / total;
+    return { css: rate < 5 ? 'vert' : rate < 15 ? 'jaune' : rate < 30 ? 'orange' : 'rouge', summary: `${percent(rate)} des stations en rupture`, explanation: 'Part des stations recensées déclarant au moins une rupture temporaire : vert < 5 %, jaune de 5 à moins de 15 %, orange de 15 à moins de 30 %, rouge ≥ 30 %. Une station compte une seule fois.' };
+  }
+  if (key === 'regional-energy') {
+    const consumption = slot.latest?.consumption_mw, production = slot.latest?.production_mw;
+    const observed = Date.parse(slot.observed_at);
+    if (!finite(consumption) || !finite(production) || consumption <= 0 || production < 0 || !Number.isFinite(observed) || now - observed > 10800000 || observed - now > 900000) return unknown;
+    const rate = 100 * production / consumption;
+    return { css: rate >= 100 ? 'vert' : rate >= 80 ? 'jaune' : rate >= 60 ? 'orange' : 'rouge', summary: `Production / conso. : ${percent(rate)}`, explanation: 'Couverture de la consommation par la production régionale : vert ≥ 100 %, jaune de 80 à moins de 100 %, orange de 60 à moins de 80 %, rouge < 60 %. Ce repère décrit le besoin d’apports extérieurs, pas un risque de coupure : les régions échangent normalement de l’électricité.' };
+  }
+  const data = situationPublicData(externalRisks, now);
+  if (key === 'monthly-recalls') {
+    if (!Array.isArray(slot.items)) return unknown;
+    const calendar = new Intl.DateTimeFormat('fr-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' });
+    const dayNumber = date => {
+      const parts = Object.fromEntries(calendar.formatToParts(date).map(part => [part.type, part.value]));
+      return Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day)) / 86400000;
+    };
+    const start = Date.parse(`${data.month}-01T00:00:00Z`) / 86400000;
+    const elapsedDays = dayNumber(now) - start + 1;
+    const baseline = data.recalls.filter(row => { const day = dayNumber(new Date(row.published_at)); return day >= start - 28 && day < start; }).length;
+    const explanation = 'Rythme quotidien des publications du mois comparé aux 28 jours précédant ce mois, toutes zones et procédures : vert ≤ 1×, jaune > 1 à 1,5×, orange > 1,5 à 2×, rouge > 2×. Le jour courant est inclus. Ce repère mesure le volume de publications, pas la gravité des produits. Au moins 5 publications de référence sont nécessaires.';
+    if (baseline < 5) return { ...unknown, summary: 'Référence de comparaison insuffisante', explanation };
+    const ratio = (data.monthlyRecalls.length / elapsedDays) / (baseline / 28);
+    return { css: ratio <= 1 ? 'vert' : ratio <= 1.5 ? 'jaune' : ratio <= 2 ? 'orange' : 'rouge', summary: `Rythme du mois : ${ratio.toLocaleString('fr-FR', { maximumFractionDigits: 1 })}× la référence`, explanation };
+  }
+  if (key === 'annual-catnat') {
+    const total = slot.coverage?.communes_total;
+    if (!data.annualCatnat || !finite(total) || total <= 0 || data.annualCatnat.some(row => !row.code_insee)) return unknown;
+    const count = new Set(data.annualCatnat.map(row => row.code_insee)).size;
+    const rate = 100 * count / total;
+    if (rate > 100) return unknown;
+    return { css: count === 0 ? 'vert' : rate < 5 ? 'jaune' : rate < 15 ? 'orange' : 'rouge', summary: `${count} commune(s) · ${percent(rate)} du département`, explanation: 'Part des communes ayant au moins une reconnaissance publiée au JO cette année : vert = aucune, jaune > 0 à moins de 5 %, orange de 5 à moins de 15 %, rouge ≥ 15 %. Les communes sont dédoublonnées. Ce repère mesure l’étendue des reconnaissances annuelles, pas un danger en cours.' };
+  }
+  return unknown;
+}
+
 function buildSituationPublicModal(key, externalRisks = {}) {
   const data = situationPublicData(externalRisks);
   const sourceKey = { 'fuel-shortages': 'fuel_isere', 'regional-energy': 'energy_aura', 'monthly-recalls': 'recalls', 'annual-catnat': 'catnat_isere' }[key];
   const slot = externalRisks[sourceKey] || {};
   const available = ['online', 'partial', 'stale'].includes(slot.status);
-  const notice = `<p class="muted">${escapeHtml(slot.status === 'stale' ? 'Données anciennes · ' : slot.status === 'partial' ? 'Collecte partielle · ' : '')}Collecte : ${escapeHtml(slot.updated_at ? safeDateToLocale(slot.updated_at) : 'date indisponible')}</p>`;
+  const indicator = situationPublicIndicator(key, externalRisks);
+  const notice = `<p class="muted">${escapeHtml(slot.status === 'stale' ? 'Données anciennes · ' : slot.status === 'partial' ? 'Collecte partielle · ' : '')}Collecte : ${escapeHtml(slot.updated_at ? safeDateToLocale(slot.updated_at) : 'date indisponible')}</p><p><strong>${escapeHtml(indicator.summary)}</strong></p><p class="muted">Repères du tableau de bord, sans valeur d’alerte officielle. ${escapeHtml(indicator.explanation)}</p>`;
   if (!available) return `${notice}<p>Données indisponibles ou en cours de collecte.</p>`;
   const list = rows => `<ul class="situation-kpi-modal__list">${rows.join('') || '<li>Aucun résultat pour cette période.</li>'}</ul>`;
   if (key === 'monthly-recalls') {
@@ -13255,7 +13303,12 @@ function _renderSituationOverview() {
     { key: 'regional-energy', icon: '⚡', label: 'Électricité · Auvergne-Rhône-Alpes', value: `Conso. ${mw(externalRisks.energy_aura?.latest?.consumption_mw)}`, secondary: `Production ${mw(externalRisks.energy_aura?.latest?.production_mw)}`, info: `RTE · ${externalRisks.energy_aura?.observed_at ? safeDateToLocale(externalRisks.energy_aura.observed_at) : publicInfo('energy_aura')}${externalRisks.energy_aura?.status === 'stale' ? ' · Données anciennes' : ''}`, source: 'energy_aura' },
     { key: 'monthly-recalls', icon: '📦', label: 'RappelConso · mois en cours', value: publicData.monthlyRecalls.length, info: `${publicData.month} · Toutes zones · Voir les 30 derniers rappels · ${publicInfo('recalls')}`, source: 'recalls' },
     { key: 'annual-catnat', icon: '📚', label: `CatNat · année ${publicData.year}`, value: publicData.annualCatnat?.length ?? '—', info: `Reconnaissances publiées au JO · Isère · ${publicInfo('catnat_isere')}`, source: 'catnat_isere' },
-  ].map(card => ({ ...card, value: publicReady(card.source) ? card.value : '—', secondary: publicReady(card.source) ? card.secondary : undefined, css: 'gris' }));
+  ].map(card => {
+    const ready = publicReady(card.source);
+    const indicator = situationPublicIndicator(card.key, externalRisks);
+    return { ...card, value: ready ? card.value : '—', secondary: ready ? card.secondary : undefined,
+      indicator: ready ? indicator.summary : 'Évaluation indisponible', css: ready ? indicator.css : 'gris' };
+  });
 
   // Chaque tuile reste neutre tant que sa propre source n'a pas répondu.
   // Un zéro reçu du serveur reste en revanche une vraie valeur et est affiché.
@@ -13302,6 +13355,7 @@ function _renderSituationOverview() {
       </div>
       <p class="kpi-value ${escapeHtml(card.css)}">${escapeHtml(card.value)}</p>
       ${card.secondary ? `<p class="situation-energy-production">${escapeHtml(card.secondary)}</p>` : ''}
+      ${card.indicator ? `<p class="situation-public-indicator ${escapeHtml(card.css)}">${escapeHtml(card.indicator)}</p>` : ''}
       <p class="muted">${escapeHtml(card.info)}</p>
       ${progressHtml}
     </article>`;
