@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="/api_credentials.css?v=20261020" />
   <link rel="stylesheet" href="/public_sources.css?v=20261020" />
   <link rel="stylesheet" href="/municipality_services.css?v=20261024" />
-  <link rel="stylesheet" href="/georisques.css?v=20261024-details" />
+  <link rel="stylesheet" href="/georisques.css?v=20261025-redesign" />
 </head>
 <body>
   <div id="network-offline-banner" role="alert" aria-live="assertive">
@@ -347,85 +347,33 @@
         </section>
 
         <section id="georisques-panel" class="panel view hidden" hidden>
-          <div class="georisques-hero tile">
+          <div class="georisques-hero">
             <div>
-              <p class="tag">Géo-risque opérationnel</p>
-              <h3>Isère · relief, vallées exposées et événements récents</h3>
-              <p class="muted">Vue entièrement recentrée sur les enjeux du 38 : sismicité alpine, mouvements de terrain, inondation, radon et suivi communal.</p>
+              <p class="tag">COMPRENDRE SON TERRITOIRE <span>ISÈRE · 38</span></p>
+              <h3>Géorisques</h3>
+              <p>Les risques, les repères et les documents utiles<br class="geo-desktop-break" /> pour mieux connaître votre commune.</p>
+              <p id="georisques-page-source" class="geo-hero-source">Données officielles · collecte en attente</p>
             </div>
-            <div class="georisques-hero__meta">
-              <p id="georisques-page-source" class="muted">Source: -</p>
-              <p id="georisques-page-debug" class="muted"></p>
-            </div>
+            <svg class="geo-landscape" viewBox="0 0 480 210" fill="none" aria-hidden="true"><circle cx="370" cy="58" r="26" fill="#efb779" opacity=".8"/><path d="M0 210 130 43 242 185 330 86 480 210" fill="#426c88"/><path d="m72 118 58-75 61 77-36-13-25 19-24-16Z" fill="#a6c2d0"/><path d="M0 210 94 126 186 194 268 111 355 210" fill="#244b69"/><path d="m219 163 49-52 47 54-29-10-17 13-22-14Z" fill="#8baebb"/><path d="M0 210 137 178 260 201 379 148 480 180V210" fill="#16364f"/><path d="M12 191c72-29 119 37 188 9s146-16 192-24" stroke="#72b6b5" stroke-width="2" stroke-dasharray="4 6"/><circle cx="268" cy="111" r="5" fill="#f2ba7a"/><circle cx="268" cy="111" r="12" stroke="#f2ba7a" opacity=".4"/></svg>
           </div>
 
           <div id="georisques-rich-overview" aria-live="polite"></div>
           <div class="georisques-focus-layout">
-            <article class="tile georisques-focus-selector">
-              <p class="tag">Commune PCS</p>
-              <h4>Choisir d'abord une commune</h4>
-              <p class="muted">Sélectionnez une commune PCS pour afficher immédiatement les risques utiles, les documents disponibles et les priorités opérationnelles.</p>
+            <article class="georisques-focus-selector">
+              <div><p class="tag">VOTRE TERRITOIRE</p><h4>Explorer une commune</h4></div>
               <div class="georisques-pcs-toolbar">
-                <label for="georisques-pcs-select">Commune PCS</label>
+                <label for="georisques-pcs-select">Commune suivie dans le PCS</label>
                 <select id="georisques-pcs-select" aria-label="Sélectionner une commune PCS">
                   <option value="">Sélectionnez une commune PCS</option>
                 </select>
               </div>
             </article>
-            <article class="tile georisques-focus-detail">
-              <h4>Lecture opérationnelle</h4>
+            <article class="georisques-focus-detail">
               <div id="georisques-pcs-detail" class="georisques-pcs-detail muted">Sélectionnez une commune PCS pour afficher ses informations.</div>
             </article>
           </div>
 
-          <div id="georisques-overview" class="hidden" hidden>
-          <div class="kpis georisques-kpis">
-            <article class="tile"><h3>Statut service</h3><p id="georisques-page-status">-</p></article>
-            <article class="tile"><h3>Sismicité max Isère</h3><p id="georisques-page-seismic">-</p></article>
-            <article class="tile"><h3>Communes exposées radon</h3><p id="georisques-page-radon-alert">0</p></article>
-            <article class="tile"><h3>Inondation (documents)</h3><p id="georisques-page-flood-docs">0</p></article>
-            <article class="tile"><h3>PPR recensés</h3><p id="georisques-page-ppr-total">0</p></article>
-            <article class="tile"><h3>Mouvements terrain</h3><p id="georisques-page-ground-movements">0</p></article>
-            <article class="tile"><h3>Cavités</h3><p id="georisques-page-cavities">0</p></article>
-            <article class="tile"><h3>Mode API</h3><p id="georisques-page-api-mode">-</p></article>
-          </div>
-
-          <div class="georisques-isere-layout">
-            <article class="tile georisques-isere-territories">
-              <h4>Éléments essentiels en Isère</h4>
-              <ul class="list compact">
-                <li><strong>Vallée du Grésivaudan</strong> · risque combiné crue + mouvement de terrain.</li>
-                <li><strong>Agglomération grenobloise</strong> · concentration population, cavités et vulnérabilité urbaine.</li>
-                <li><strong>Oisans / Belledonne / Chartreuse</strong> · zones de pente sensibles (éboulis, glissements, chutes de blocs).</li>
-                <li><strong>Axes A48 / A49 / A41</strong> · impact direct sur mobilité de secours en cas d'aléa géologique.</li>
-              </ul>
-            </article>
-            <article class="tile">
-              <h4>Types de mouvements dominants</h4>
-              <ul id="georisques-movement-types-list" class="list compact"></ul>
-            </article>
-          </div>
-
-          <div class="georisques-lists">
-            <article class="tile">
-              <h4>Événements récents (terrain)</h4>
-              <ul id="georisques-recent-movements-list" class="list"></ul>
-            </article>
-            <article class="tile">
-              <h4>Communes prioritaires (score multi-risques)</h4>
-              <ul id="georisques-priority-communes-list" class="list"></ul>
-            </article>
-          </div>
-
-          <article class="tile">
-            <h4>Suivi détaillé des communes</h4>
-            <ul id="georisques-communes-list" class="list"></ul>
-          </article>
-          <article class="tile">
-            <h4>Documents Géorisques de la commune (AZI, DICRIM, PPR, TIM…)</h4>
-            <ul id="georisques-documents-list" class="list"></ul>
-          </article>
-          </div>
+          <div id="geo-diagnostics"></div>
         </section>
 
         <section id="api-panel" class="panel view hidden" hidden>
@@ -1693,7 +1641,7 @@
     <path id="isere-shape" d="M0 0h1v1H0z"></path>
   </svg>
   <script defer src="/source_explorer.js?v=20261024-scroll-fix"></script>
-  <script defer src="/georisques.js?v=20261024-official-fallback"></script>
+  <script defer src="/georisques.js?v=20261025-redesign"></script>
   <script defer src="/municipality_services.js?v=20261024"></script>
   <script defer src="/official_sources.js?v=20261024-explorer"></script>
   <script defer src="/public_sources.js?v=20261024-unified"></script>

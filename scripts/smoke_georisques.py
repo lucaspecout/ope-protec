@@ -45,14 +45,20 @@ base.CHECKS = r'''<script>
   check('radon and individual seismic zone',detail.textContent.includes('Classe de potentiel')&&detail.textContent.includes('Zone de sismicité'));
   check('official report carries exact INSEE',detail.querySelector('a').href.includes('codeInsee=38185'));
   check('large list starts collapsed',detail.querySelectorAll('[data-geo-extra][hidden]').length===2);
+  check('natural details start collapsed',detail.querySelectorAll('.geo-card-details:not([open])').length===4);
+  detail.querySelector('[data-geo-more]').closest('details').open=true;
   detail.querySelector('[data-geo-more]').click();
+  const openedDetails=detail.querySelector('details[open]');renderGeorisquesPcsRisks(cachedExternalRisksSnapshot.georisques.monitored_communes);
+  check('identical snapshot preserves open details',detail.contains(openedDetails)&&openedDetails.open);
   check('all movement records accessible',detail.querySelectorAll('[data-geo-extra][hidden]').length===0);
   detail.querySelector('[data-geo-tab="prevention"]').click();
   check('PAPI TRI and TIM details',detail.textContent.includes('Programmes')&&detail.textContent.includes('Territoires')&&detail.textContent.includes('Transmission'));
   check('TIM is not dangerous-goods transport',!detail.textContent.includes('matières dangereuses'));
-  check('PPR lists available with honest scope',document.getElementById('georisques-rich-overview').textContent.includes('Plan de prévention de test'));
+  check('PPR lists available with honest scope',document.getElementById('geo-diagnostics').textContent.includes('Plan de prévention de test'));
   detail.querySelector('[data-geo-tab="history"]').click();
   check('local CatNat and industrial sites',detail.textContent.includes('Inondation de test')&&detail.textContent.includes('Usine test officielle'));
+  detail.querySelector('[data-geo-history]').closest('details').open=true;
+  check('history action is visible when expanded',detail.querySelector('[data-geo-history]').getBoundingClientRect().height>0);
   detail.querySelector('[data-geo-history]').click();
   check('full history endpoint works',await wait(()=>detail.textContent.includes('Historique complet test')));
   select.value='38563';select.dispatchEvent(new Event('change'));
@@ -91,11 +97,11 @@ const wait=async fn=>{for(let i=0;i<150;i++){if(fn())return true;await new Promi
 try {
  await wait(()=>document.querySelectorAll('#georisques-pcs-select option').length===5);
  setActivePanel('georisques-panel',{refreshSnapshot:false});
- const root=document.getElementById('georisques-pcs-detail'),summary=document.getElementById('georisques-rich-overview'),select=document.getElementById('georisques-pcs-select');
+ const root=document.getElementById('georisques-pcs-detail'),summary=document.getElementById('georisques-rich-overview'),diagnostics=document.getElementById('geo-diagnostics'),select=document.getElementById('georisques-pcs-select');
  const choose=code=>{select.value=code;select.dispatchEvent(new Event('change'));};
  check('ten themes restored',summary.textContent.includes('10 / 12'));
- check('only two unavailable themes',summary.textContent.includes('2 source(s) encore'));
- check('official fallback explicitly identified',summary.textContent.includes('Mode secours actif'));
+ check('only two unavailable themes',diagnostics.textContent.includes('2 source(s) encore'));
+ check('official fallback explicitly identified',diagnostics.textContent.includes('Mode secours actif'));
  check('first commune automatically visible',Boolean(root.querySelector('.geo-tabs')));
  choose('38436');
  check('Saint Paul real movements',root.textContent.includes('Saint-Paul-de-Varces')&&root.textContent.includes('Code BRGM'));
