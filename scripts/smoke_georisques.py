@@ -38,7 +38,7 @@ base.CHECKS = r'''<script>
   setActivePanel('georisques-panel',{refreshSnapshot:false});
   const select=document.getElementById('georisques-pcs-select'),detail=document.getElementById('georisques-pcs-detail');
   check('six scoped summary cards',document.querySelectorAll('.geo-summary .tile').length===6);
-  check('partial collection error visible',document.querySelector('.geo-api-details summary').textContent.includes('probl'));
+  check('partial collection error visible',document.querySelector('.geo-api-details summary').textContent.includes('source'));
   select.value='38185';select.dispatchEvent(new Event('change'));
   check('selected commune details',detail.textContent.includes('Grenoble')&&detail.textContent.includes('Versant de test'));
   check('unknown cavities are not zero', [...detail.querySelectorAll('.geo-data-section')].find(s=>s.textContent.includes('Cavités')).textContent.includes('—'));
@@ -73,9 +73,52 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--width', type=int, default=1440)
     parser.add_argument('--height', type=int, default=1080)
+    parser.add_argument('--official-references', action='store_true')
     args = parser.parse_args()
+    if args.official_references:
+        import json
+        from app.georisques_files import BUNDLE
+        codes = {'38436':'Saint-Paul-de-Varces','38310':'Poliénas','38034':'Beaurepaire','38179':'Gières'}
+        def fail(*args, **kwargs):
+            raise ConnectionError('API unavailable')
+        references = json.loads(BUNDLE.read_text(encoding='utf-8'))['datasets']
+        base.RISKS['georisques'] = collect_summary(codes, 'fixture', fail, reference_loader=lambda: references)
+        base.BOOTSTRAP['municipalities'] = [{'id':i+1,'name':name,'insee_code':code,'pcs_active':True} for i,(code,name) in enumerate(codes.items())]
+        base.CHECKS = r'''<script>
+(async()=>{
+const results=[],check=(name,pass)=>results.push({name,pass:Boolean(pass)});
+const wait=async fn=>{for(let i=0;i<150;i++){if(fn())return true;await new Promise(r=>setTimeout(r,50));}return false;};
+try {
+ await wait(()=>document.querySelectorAll('#georisques-pcs-select option').length===5);
+ setActivePanel('georisques-panel',{refreshSnapshot:false});
+ const root=document.getElementById('georisques-pcs-detail'),summary=document.getElementById('georisques-rich-overview'),select=document.getElementById('georisques-pcs-select');
+ const choose=code=>{select.value=code;select.dispatchEvent(new Event('change'));};
+ check('ten themes restored',summary.textContent.includes('10 / 12'));
+ check('only two unavailable themes',summary.textContent.includes('2 source(s) encore'));
+ check('official fallback explicitly identified',summary.textContent.includes('Mode secours actif'));
+ check('first commune automatically visible',Boolean(root.querySelector('.geo-tabs')));
+ choose('38436');
+ check('Saint Paul real movements',root.textContent.includes('Saint-Paul-de-Varces')&&root.textContent.includes('Code BRGM'));
+ check('real movement count', [...root.querySelectorAll('.geo-data-section')].some(s=>s.querySelector('h4')?.textContent.includes('Mouvements')&&s.querySelector('strong')?.textContent==='12'));
+ check('geographic inventory limits visible',root.textContent.includes('non localis'));
+ check('source dates do not claim recent radon data',root.textContent.includes('2019-05-06'));
+ check('official source links present',root.querySelectorAll('a[target="_blank"]').length>=4);
+ root.querySelector('[data-geo-tab="prevention"]').click();
+ check('real risks exposed',root.textContent.includes('Inondation'));
+ check('PPR visible per commune from official export',root.textContent.includes('Plans de pr'));
+ choose('38179');root.querySelector('[data-geo-tab="natural"]').click();
+ check('Gieres real cavities', [...root.querySelectorAll('.geo-data-section')].some(s=>s.querySelector('h4')?.textContent.includes('Cavit')&&s.querySelector('strong')?.textContent==='2'));
+ choose('38034');
+ check('Beaurepaire does not inherit Gieres movement count', [...root.querySelectorAll('.geo-data-section')].some(s=>s.querySelector('h4')?.textContent.includes('Mouvements')&&s.querySelector('strong')?.textContent==='0'));
+ choose('38310');
+ check('Polienas uses exact commune data',root.textContent.includes('38310')&&root.textContent.includes('Code BRGM'));
+ check('no runtime errors',window.__smokeErrors.length===0);
+ check('no horizontal overflow',document.documentElement.scrollWidth<=innerWidth+1);
+}catch(e){results.push({name:'exception',pass:false,error:String(e.stack||e)});}
+const pre=document.createElement('pre');pre.id='smoke-results';pre.hidden=true;pre.textContent=JSON.stringify({results,metrics:{innerWidth,bodyWidth:document.body.scrollWidth},errors:window.__smokeErrors});document.body.appendChild(pre);
+})();</script>'''
     browser.Handler = base.Handler
-    output = base.ROOT / '.test-data/georisques'
+    output = base.ROOT / ('.test-data/georisques-references' if args.official_references else '.test-data/georisques')
     output.mkdir(parents=True, exist_ok=True)
     if not browser.run('C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', args.width, output, height=args.height):
         raise SystemExit(1)

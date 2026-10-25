@@ -1,5 +1,15 @@
 # Géorisques : données et fiabilité
 
+## Correctif du 25 octobre 2026 : page vide lorsque l’API échoue
+
+La gestion des erreurs ne suffisait pas à alimenter la page : tous les thèmes pouvaient rester indisponibles. La collecte utilise désormais, en repli, des exports officiels indépendants du serveur API : GASPAR, le référentiel radon ASNR, le zonage sismique DDT Isère et les inventaires localisés BRGM par WFS. Un extrait réel d’Isère est inclus dans l’image backend et les références sont actualisées quotidiennement lorsque leurs serveurs répondent. Les dates de publication et les limites de couverture restent affichées. Le détail des sources figure dans `backend/app/data/README.md`.
+
+Dans le cas des quatre communes de la capture (Saint-Paul-de-Varces, Poliénas, Beaurepaire et Gières), une panne totale de l’API laisse désormais 10 thèmes sur 12 disponibles, ainsi que la sismicité de chaque commune. PAPI et TRI restent indisponibles sans réponse de l’API. Aucun inventaire absent n’est assimilé à zéro.
+
+Les erreurs différencient maintenant le refus du jeton (HTTP 401/403), le quota (429), une erreur serveur et une connexion interrompue. Un refus d’accès ou une panne de connexion au serveur API coupe les appels identiques restants pour accéder rapidement au repli.
+
+Validation du 25 octobre : 297 tests Python et 160 tests JavaScript passent. Les contrôles du frontend avec le référentiel réel passent à 1440 px et 390 px ; les serveurs de secours ont également été interrogés en direct. Le rétablissement des appels API v2 eux-mêmes n’est pas affirmé. Les changements nécessitent une reconstruction et un redémarrage du backend ; les fichiers JavaScript ont un nouveau numéro de version pour invalider le cache navigateur.
+
 La page présente les inventaires des communes PCS suivies en Isère. Les totaux ne représentent pas le département entier et ne constituent pas une vigilance en temps réel.
 
 ## Données accessibles

@@ -7510,6 +7510,7 @@ def fetch_georisques_commune_risks(codes_insee: list[str]) -> dict[str, Any]:
 
 def _fetch_georisques_isere_summary_live(commune_names: list[str] | None = None) -> dict[str, Any]:
     from .georisques_sources import collect_summary
+    from .georisques_files import load_references
     try:
         token = str(resolve_credentials("georisques").get("token") or "").strip()
     except CredentialStoreError:
@@ -7520,7 +7521,8 @@ def _fetch_georisques_isere_summary_live(commune_names: list[str] | None = None)
     # Keep the last resolved commune codes when the geographic reference API fails.
     if not codes:
         codes = {c["code_insee"]: c["name"] for c in previous.get("monitored_communes", []) if c.get("name") in names}
-    result = collect_summary(codes, token, _fetch_georisques_v2_collection, previous, public_get=_http_get_json)
+    result = collect_summary(codes, token, _fetch_georisques_v2_collection, previous, public_get=_http_get_json,
+                             reference_loader=lambda: load_references(_file_cache_load, _file_cache_save))
     unresolved = [name for name in names if name not in codes.values()]
     if unresolved:
         result["status"] = "degraded"

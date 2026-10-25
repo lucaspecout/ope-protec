@@ -3,6 +3,24 @@ from datetime import datetime, timezone
 from copy import deepcopy
 from urllib.parse import urlencode
 from time import sleep
+import re
+
+
+def failure_message(error):
+    code = getattr(error, 'code', None)
+    match = re.search(r'HTTP\s*(\d{3})', str(error))
+    code = code or (int(match.group(1)) if match else None)
+    if code in (401, 403):
+        return 'Jeton refusé par Géorisques (HTTP %s) : vérifier sa validité et les droits API v2' % code
+    if code == 429:
+        return 'Quota Géorisques dépassé (HTTP 429)'
+    if code:
+        return 'Erreur du serveur Géorisques (HTTP %s)' % code
+    if isinstance(error, (ConnectionError, TimeoutError, OSError)) or 'Connexion au fournisseur' in str(error):
+        return 'Connexion à Géorisques interrompue ou impossible depuis le serveur'
+    if 'Clé API' in str(error):
+        return 'Clé API Géorisques v2 à configurer'
+    return 'Réponse Géorisques invalide ou indisponible'
 
 THEMES = {
     "mvt": "Mouvements de terrain", "cavites": "Cavités souterraines",
@@ -49,23 +67,61 @@ def collect_public_risks(codes, get):
             "updated_at": datetime.now(timezone.utc).isoformat()}
 
 
-def collect_summary(codes, token, fetch, previous=None, public_get=None):
+def collect_summary(codes, token, fetch, previous=None, public_get=None, reference_loader=None):
     now = datetime.now(timezone.utc).isoformat()
     previous = previous or {}
     if not codes:
         return {"service": "Géorisques", "status": "degraded", "datasets": {}, "monitored_communes": [], "errors": ["Référentiel des communes indisponible"], "updated_at": now}
-    datasets, errors = {}, []
+    datasets, errors, api_errors, recovered = {}, [], [], []
+    references = None
+    blocked = None
+
+    def reference(endpoint, wanted):
+        nonlocal references
+        if references is None:
+            references = reference_loader() if reference_loader else {}
+        data = references.get(endpoint)
+        if not data:
+            return None
+        content = []
+        for row in data.get('content', []):
+            if row.get('codeInsee') in wanted:
+                content.append(deepcopy(row))
+            elif any(c.get('codeInsee') in wanted for c in row.get('communes', [])):
+                item = deepcopy(row)
+                item['communes'] = [c for c in item['communes'] if c.get('codeInsee') in wanted]
+                content.append(item)
+        return {**data, 'content': content, 'total_elements': len(content)}
+
+    def api_fetch(endpoint, **kwargs):
+        nonlocal blocked
+        if blocked:
+            raise blocked
+        try:
+            return fetch(endpoint, **kwargs)
+        except Exception as error:
+            reason = failure_message(error)
+            if reason.startswith(('Jeton refusé', 'Connexion à')):
+                blocked = error
+            raise
+
     for endpoint, label in THEMES.items():
         old = ((previous.get("datasets") or {}).get(endpoint) or {}) if previous.get("scope_codes") == sorted(codes) else {}
         try:
             if not token:
                 raise ValueError("Clé API Géorisques v2 à configurer")
-            data = fetch(endpoint, extra_query={"codesInsee": sorted(codes)}, token=token)
+            data = api_fetch(endpoint, extra_query={"codesInsee": sorted(codes)}, token=token)
             datasets[endpoint] = {**data, "label": label, "status": "online", "updated_at": now}
-        except Exception:
-            message = "Clé API à configurer" if not token else "Source temporairement indisponible"
-            errors.append(f"{label} : {message}")
-            datasets[endpoint] = {**deepcopy(old), "label": label, "status": "stale" if old.get("updated_at") else "unavailable", "error": message, "checked_at": now}
+        except Exception as error:
+            message = failure_message(error)
+            api_errors.append(f"{label} : {message}")
+            backup = reference(endpoint, set(codes))
+            if backup is not None:
+                datasets[endpoint] = {**backup, 'label': label, 'api_error': message}
+                recovered.append(label)
+            else:
+                errors.append(f"{label} : {message}")
+                datasets[endpoint] = {**deepcopy(old), "label": label, "status": "stale" if old.get("updated_at") else "unavailable", "error": message, "checked_at": now}
 
     def rows(endpoint):
         return datasets[endpoint].get("content") or []
@@ -73,7 +129,7 @@ def collect_summary(codes, token, fetch, previous=None, public_get=None):
     def count(endpoint):
         return datasets[endpoint].get("total_elements")
 
-    public = collect_public_risks(list(codes), public_get) if public_get and datasets['gaspar/risques'].get('status') != 'online' else {}
+    public = collect_public_risks(list(codes), public_get) if public_get and datasets['gaspar/risques'].get('total_elements') is None else {}
     public_by_code = {row['code_insee']: row for row in public.get('communes', [])}
     monitored = []
     for code, name in codes.items():
@@ -82,19 +138,24 @@ def collect_summary(codes, token, fetch, previous=None, public_get=None):
         local_data = {}
         for endpoint, data in datasets.items():
             # PPR list DTOs do not identify communes: never attribute a batch to one town.
-            if endpoint.startswith("gaspar/ppr"):
+            if endpoint.startswith("gaspar/ppr") and not any(r.get('communes') for r in data.get('content', [])):
                 continue
             local_data[endpoint] = {**data, "content": local(endpoint), "total_elements": len(local(endpoint)) if data.get("total_elements") is not None else None}
         old_commune = next((c for c in previous.get("monitored_communes", []) if c.get("code_insee") == code), {})
         try:
             if not token:
                 raise ValueError("missing token")
-            seismic = fetch("zonage_sismique", extra_query={"codesInsee": [code]}, token=token)
+            seismic = api_fetch("zonage_sismique", extra_query={"codesInsee": [code]}, token=token)
             local_data["zonage_sismique"] = {**seismic, "label": "Zonage sismique", "status": "online", "updated_at": now}
-        except Exception:
+        except Exception as error:
             old = (old_commune.get("datasets") or {}).get("zonage_sismique") or {}
-            local_data["zonage_sismique"] = {**deepcopy(old), "label": "Zonage sismique", "status": "stale" if old.get("updated_at") else "unavailable", "error": "Zonage indisponible"}
-            errors.append(f"{name} : zonage sismique indisponible")
+            backup = reference('zonage_sismique', {code})
+            if backup and backup['content']:
+                local_data['zonage_sismique'] = {**backup, 'label': 'Zonage sismique', 'api_error': failure_message(error)}
+                recovered.append(f'{name} : zonage sismique')
+            else:
+                local_data["zonage_sismique"] = {**deepcopy(old), "label": "Zonage sismique", "status": "stale" if old.get("updated_at") else "unavailable", "error": failure_message(error)}
+                errors.append(f"{name} : {failure_message(error)}")
         radon = local("radon")
         risks = sorted({str(a.get("libelle") or "").strip() for r in local("gaspar/risques") for c in r.get("communes") or [] if str(c.get("codeInsee") or "") == code for a in c.get("aleas") or [] if a.get("libelle")})
         fallback = public_by_code.get(code, {})
@@ -124,6 +185,7 @@ def collect_summary(codes, token, fetch, previous=None, public_get=None):
     return {"service": "Géorisques", "status": "degraded" if errors else "online", "source": "https://www.georisques.gouv.fr/doc-api",
             "api_mode": "v2-token" if token else "v2-token-required", "scope": "Communes PCS suivies en Isère", "scope_codes": sorted(codes),
             "datasets": datasets, "monitored_communes": monitored, "updated_at": now, "errors": errors, "error": errors[0] if errors else None,
+            "api_errors": api_errors, "recovered_sources": recovered,
             "highest_seismic_zone_code": highest or None, "highest_seismic_zone_label": f"Zone {highest}" if highest else "inconnue",
             "ground_movements_total": count("mvt"), "cavities_total": count("cavites"), "flood_documents_total": count("gaspar/azi"),
             "ppr_total": sum(ppr) if all(v is not None for v in ppr) else None,

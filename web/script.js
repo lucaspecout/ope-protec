@@ -11622,6 +11622,9 @@ function renderGeorisquesPcsRisks(monitored = []) {
   if (selectedGeorisquesPcsCommuneKey && !pcsMonitored.some((commune) => georisquesCommuneKey(commune) === selectedGeorisquesPcsCommuneKey)) {
     selectedGeorisquesPcsCommuneKey = '';
   }
+  if (!selectedGeorisquesPcsCommuneKey && pcsMonitored.length) {
+    selectedGeorisquesPcsCommuneKey = georisquesCommuneKey(pcsMonitored[0]);
+  }
   if (currentUser?.role === 'mairie' && pcsMonitored.length === 1) {
     selectedGeorisquesPcsCommuneKey = georisquesCommuneKey(pcsMonitored[0]);
   }
