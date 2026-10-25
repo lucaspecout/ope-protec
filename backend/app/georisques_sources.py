@@ -183,7 +183,7 @@ def collect_summary(codes, token, fetch, previous=None, public_get=None, referen
             seismic_codes.append(int(value))
     highest = max(seismic_codes, default=0)
     return {"service": "Géorisques", "status": "degraded" if errors else "online", "source": "https://www.georisques.gouv.fr/doc-api",
-            "api_mode": "v2-token" if token else "v2-token-required", "scope": "Communes PCS suivies en Isère", "scope_codes": sorted(codes),
+            "api_mode": "v2-token" if token else "v2-token-required", "scope": "Communes enregistrées en Isère", "scope_codes": sorted(codes),
             "datasets": datasets, "monitored_communes": monitored, "updated_at": now, "errors": errors, "error": errors[0] if errors else None,
             "api_errors": api_errors, "recovered_sources": recovered,
             "highest_seismic_zone_code": highest or None, "highest_seismic_zone_label": f"Zone {highest}" if highest else "inconnue",

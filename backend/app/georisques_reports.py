@@ -8,10 +8,43 @@ from http.cookiejar import CookieJar
 from urllib.parse import quote, urlencode, urljoin, urlsplit
 from urllib.request import Request, build_opener, HTTPCookieProcessor
 from time import sleep
+from html.parser import HTMLParser
 
 BASE = 'https://www.georisques.gouv.fr'
 BUNDLE = Path(__file__).with_name('data') / 'georisques_reports.json'
 SOURCE_PATH = '/mes-risques/connaitre-les-risques-pres-de-chez-moi/rapport2/'
+
+class DicrimLinks(HTMLParser):
+    def __init__(self, code):
+        super().__init__()
+        self.code, self.links = code, []
+    def handle_starttag(self, tag, attrs):
+        if tag != 'a':
+            return
+        href = dict(attrs).get('href', '')
+        target = urlsplit(urljoin(BASE, href))
+        valid_page = target.netloc == 'www.georisques.gouv.fr' and target.path == '/DICRIM/' + self.code
+        valid_file = target.netloc == 'files.georisques.fr' and target.path == '/DICRIM/DICRIM_' + self.code + '.pdf'
+        if target.scheme == 'https' and (valid_page or valid_file):
+            link = target.geturl()
+            if link not in self.links:
+                self.links.append(link)
+
+def discover_dicrim(page, code, opener):
+    parser = DicrimLinks(code)
+    parser.feed(page)
+    result = []
+    for url in parser.links[:2]:
+        try:
+            with opener.open(Request(url, headers={'User-Agent':'ope-protec/1.0'}), timeout=10) as response:
+                if response.read(5) != b'%PDF-':
+                    continue
+            result.append({'kind':'DICRIM', 'title':'DICRIM publié sur Géorisques', 'url':url, 'format':'pdf',
+                           'publisher':'Géorisques / commune', 'code_insee':code, 'scope':'commune',
+                           'discovery':'official_report', 'verified_at':datetime.now(timezone.utc).date().isoformat()})
+        except Exception:
+            continue
+    return result
 
 def canonical_report(code, identity):
     if not re.fullmatch(r'38\d{3}', code) or not identity.get('name') or not re.fullmatch(r'\d{5}', str(identity.get('postal_code') or '')):
@@ -42,7 +75,7 @@ def normalize_report(payload, code, source):
                             'status_label': row['libelleStatusMunicipality'], 'description': unescape(re.sub('<[^>]*>', ' ', str(row.get('description') or '')))})
         output[key] = entries
         output[key + '_total'] = len(entries)
-    return {**output, 'code_insee': code, 'scope': 'commune', 'status': 'online', 'source': source, 'updated_at': datetime.now(timezone.utc).isoformat()}
+    return {**output, 'schema_version':2, 'code_insee': code, 'scope': 'commune', 'status': 'online', 'source': source, 'updated_at': datetime.now(timezone.utc).isoformat()}
 
 def fetch_report(code, identity, opener=None, pause=sleep):
     opener = opener or build_opener(HTTPCookieProcessor(CookieJar()))
@@ -69,7 +102,9 @@ def fetch_report(code, identity, opener=None, pause=sleep):
                 raise ValueError('Unexpected report redirect')
             url = target
             continue
-        return normalize_report(payload, code, url)
+        result = normalize_report(payload, code, url)
+        result['documents'] = discover_dicrim(page, code, opener)
+        return result
     raise ValueError('Official report redirect loop')
 
 def load_report(code, identity, read_cache, write_cache, fetch=fetch_report):
@@ -78,7 +113,8 @@ def load_report(code, identity, read_cache, write_cache, fetch=fetch_report):
     try:
         timestamp = old.get('checked_at') if old.get('status') != 'online' else old.get('updated_at')
         ttl = 900 if old.get('status') != 'online' else 86400
-        if old.get('code_insee') == code and (datetime.now(timezone.utc) - datetime.fromisoformat(timestamp)).total_seconds() < ttl:
+        compatible = old.get('status') != 'online' or old.get('schema_version') == 2
+        if compatible and old.get('code_insee') == code and (datetime.now(timezone.utc) - datetime.fromisoformat(timestamp)).total_seconds() < ttl:
             return old
     except (ValueError, KeyError, TypeError):
         pass

@@ -7508,17 +7508,26 @@ def fetch_georisques_commune_risks(codes_insee: list[str]) -> dict[str, Any]:
     return collect_public_risks(codes_insee, _http_get_json)
 
 
-def _fetch_georisques_isere_summary_live(commune_names: list[str] | None = None) -> dict[str, Any]:
+def _fetch_georisques_isere_summary_live(commune_names: list[str] | None = None, commune_records: list[dict] | None = None) -> dict[str, Any]:
     from .georisques_sources import collect_summary
     from .georisques_files import load_references
-    from .georisques_documents import enrich_commune
+    from .georisques_documents import enrich_commune, resolve_identity
     from .georisques_reports import load_report
     try:
         token = str(resolve_credentials("georisques").get("token") or "").strip()
     except CredentialStoreError:
         token = ""
-    names = commune_names if commune_names is not None else ["Grenoble", "Bourgoin-Jallieu", "Vienne", "Voiron"]
-    codes = _resolve_commune_insee_codes(names)
+    names = [row['name'] for row in commune_records] if commune_records is not None else commune_names or []
+    codes = {}
+    if commune_records is not None:
+        for row in commune_records:
+            code = str(row.get('insee_code') or '')
+            if not re.fullmatch(r'38\d{3}', code):
+                code = resolve_commune_insee_code(row['name'], row.get('postal_code')) or ''
+            if code:
+                codes[code] = row['name']
+    else:
+        codes = _resolve_commune_insee_codes(names)
     previous = _file_cache_load("georisques_detailed.json") or {}
     # Keep the last resolved commune codes when the geographic reference API fails.
     if not codes:
@@ -7526,8 +7535,12 @@ def _fetch_georisques_isere_summary_live(commune_names: list[str] | None = None)
     result = collect_summary(codes, token, _fetch_georisques_v2_collection, previous, public_get=_http_get_json,
                              reference_loader=lambda: load_references(_file_cache_load, _file_cache_save))
     for commune in result.get('monitored_communes', []):
-        enrich_commune(commune)
-        commune['official_report'] = load_report(commune['code_insee'], {'name': commune.get('official_name') or commune['name'], 'postal_code': commune.get('postal_code')}, _file_cache_load, _file_cache_save)
+        identity = resolve_identity(commune['code_insee'], _file_cache_load, _file_cache_save)
+        if not identity:
+            registered = next((row for row in commune_records or [] if str(row.get('insee_code') or '') == commune['code_insee']), {})
+            identity = {'name':commune['name'], 'postal_code':registered.get('postal_code')}
+        commune['official_report'] = load_report(commune['code_insee'], identity, _file_cache_load, _file_cache_save)
+        enrich_commune(commune, identity=identity)
     unresolved = [name for name in names if name not in codes.values()]
     if unresolved:
         result["status"] = "degraded"
@@ -7536,15 +7549,15 @@ def _fetch_georisques_isere_summary_live(commune_names: list[str] | None = None)
     return result
 
 
-def fetch_georisques_isere_summary(force_refresh: bool = False, commune_names: list[str] | None = None) -> dict[str, Any]:
-    if commune_names:
-        return _fetch_georisques_isere_summary_live(commune_names=commune_names)
+def fetch_georisques_isere_summary(force_refresh: bool = False, commune_names: list[str] | None = None, commune_records: list[dict] | None = None) -> dict[str, Any]:
+    if commune_records is not None or commune_names is not None:
+        return _fetch_georisques_isere_summary_live(commune_names=commune_names, commune_records=commune_records)
     return _cached_external_payload(
         cache=_georisques_cache,
         lock=_georisques_cache_lock,
         ttl_seconds=_GEORISQUES_CACHE_TTL_SECONDS,
         force_refresh=force_refresh,
-        loader=lambda: _fetch_georisques_isere_summary_live(commune_names=commune_names),
+        loader=lambda: _fetch_georisques_isere_summary_live(commune_names=commune_names, commune_records=commune_records),
     )
 
 

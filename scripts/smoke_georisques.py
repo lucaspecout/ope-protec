@@ -140,6 +140,17 @@ try {
  root.querySelector('[data-geo-tab="prevention"]').click();
  check('missing DICRIM is honest and never another commune PDF',root.textContent.includes('aucun lien public')&&!root.querySelector('.geo-document-link[href*="dicrim.pdf"]')&&!root.querySelector('.geo-document-link[href*="dicrim-spdv"]'));
  check('PPR state and risk details available',root.textContent.includes('Opposable')&&root.textContent.includes('Inondation'));
+ cachedMunicipalities.push({id:99,name:'Voiron',insee_code:'38563',postal_code:'38500',pcs_active:false});
+ renderGeorisquesPcsRisks(cachedExternalRisksSnapshot.georisques.monitored_communes);
+ check('new registered commune appears even without PCS flag',Boolean(select.querySelector('option[value="38563"]')));
+ choose('38563');
+ check('new commune shows automatic collection state',root.textContent.includes('Recherche automatique'));
+ const arrival={name:'Voiron',code_insee:'38563',official_report:{scope:'commune',code_insee:'38563',natural_total:1,technological_total:0,natural:[{code:'INOND',label:'Inondation de test nouvelle commune',status_label:'Risque Existant',description:'Donnée collectée pour Voiron'}],technological:[],status:'online',updated_at:new Date().toISOString()}};
+ cachedExternalRisksSnapshot.georisques.monitored_communes.push(arrival);
+ renderGeorisquesPcsRisks(cachedExternalRisksSnapshot.georisques.monitored_communes);
+ root.querySelector('[data-geo-tab="natural"]').click();
+ check('arriving collection replaces pending state without manual lookup',root.textContent.includes('Donnée collectée pour Voiron')&&!root.textContent.includes('Recherche automatique'));
+ check('new commune never inherits Gieres seven risks',root.querySelectorAll('.geo-official-risk').length===1&&!root.textContent.includes('7 risques naturels'));
  root.querySelector('[data-geo-tab="natural"]').click();
  choose('38179');root.querySelector('[data-geo-tab="prevention"]').click();
  root.querySelector('[data-geo-tab="natural"]').click();

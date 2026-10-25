@@ -11558,7 +11558,7 @@ function renderGeorisquesPcsDetail(commune) {
 
 function renderGeorisquesPcsRisks(monitored = []) {
   const pcsMunicipalities = cachedMunicipalities
-    .filter((municipality) => municipality?.pcs_active)
+    .filter((municipality) => municipality?.name)
     .sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || ''), 'fr'));
   const monitoredByKey = new Map(
     (Array.isArray(monitored) ? monitored : []).map((commune) => [georisquesCommuneKey(commune), commune]),
@@ -11577,6 +11577,7 @@ function renderGeorisquesPcsRisks(monitored = []) {
       code_insee: insee,
       insee,
       postal_code: municipality.postal_code || '',
+      collection_pending: true,
       gaspar_danger_level: municipality.vigilance_color || 'Faible',
       seismic_zone: 'inconnue',
       radon_label: 'inconnu',
@@ -11606,7 +11607,7 @@ function renderGeorisquesPcsRisks(monitored = []) {
       const key = georisquesCommuneKey(commune);
       return `<option value="${escapeHtml(key)}">${escapeHtml(commune.name || commune.commune || 'Commune inconnue')} (${escapeHtml(commune.code_insee || '-')})</option>`;
     }).join('');
-    const placeholder = currentUser?.role === 'mairie' ? '' : '<option value="">Sélectionnez une commune PCS</option>';
+    const placeholder = currentUser?.role === 'mairie' ? '' : '<option value="">Sélectionnez une commune</option>';
     setHtml('georisques-pcs-select', `${placeholder}${options}`);
     select.disabled = currentUser?.role === 'mairie';
     if (selectedGeorisquesPcsCommuneKey) {

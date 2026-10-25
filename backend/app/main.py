@@ -1461,14 +1461,12 @@ def _refresh_one_service(key: str) -> bool | None:
             })
 
         pcs_names: list[str] = []
+        georisques_communes = None
         if key == "georisques":
             db = SessionLocal()
-            pcs_names = [
-                str(name)
-                for (name,) in db.query(Municipality.name).filter(Municipality.pcs_active.is_(True)).all()
-                if name
-            ]
-        jobs = build_external_risks_fetch_jobs(refresh=True, pcs_commune_names=pcs_names)
+            georisques_communes = _georisques_commune_records(db)
+            pcs_names = [row['name'] for row in georisques_communes]
+        jobs = build_external_risks_fetch_jobs(refresh=True, pcs_commune_names=pcs_names, georisques_communes=georisques_communes)
         if key not in jobs:
             return
         fetcher, fallback = jobs[key]
@@ -2230,7 +2228,17 @@ def build_dashboard_payload(db: Session, user: User, external_risks: dict | None
     }
 
 
-def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str]) -> dict[str, tuple[Callable[[], dict], dict]]:
+def _georisques_commune_records(db: Session) -> list[dict]:
+    return [{'name':row.name, 'insee_code':row.insee_code, 'postal_code':row.postal_code}
+            for row in db.query(Municipality).order_by(Municipality.name).all() if row.name]
+
+
+def _queue_georisques_collection() -> None:
+    # Reuse the coalesced refresh coordinator, including retries if a collection is running.
+    _refresh_after_credentials_change('georisques')
+
+
+def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str], georisques_communes: list[dict] | None = None) -> dict[str, tuple[Callable[[], dict], dict]]:
     return {
         **{key: (lambda fetcher=fetcher: fetcher(force_refresh=refresh),
                  {"status": "pending", "info_state": "Collecte de la source publique en arrière-plan.",
@@ -2247,7 +2255,7 @@ def build_external_risks_fetch_jobs(refresh: bool, pcs_commune_names: list[str])
         "vigicrues": (lambda: fetch_vigicrues_isere(force_refresh=refresh), {"status": "pending", "level": "gris", "water_alert_level": "gris", "stations": [], "alerts": []}),
         "itinisere": (lambda: fetch_itinisere_disruptions(force_refresh=refresh), {"status": "pending", "events": [], "events_total": 0}),
         "bison_fute": (lambda: fetch_bison_fute_traffic(force_refresh=refresh), {"status": "pending", "alerts": []}),
-        "georisques": (lambda: fetch_georisques_isere_summary(force_refresh=refresh, commune_names=pcs_commune_names), {"status": "pending", "details": []}),
+        "georisques": (lambda: fetch_georisques_isere_summary(force_refresh=refresh, commune_names=pcs_commune_names, commune_records=georisques_communes), {"status": "pending", "details": []}),
         "rnb_isere": (lambda: fetch_rnb_isere_summary(force_refresh=refresh), {"status": "pending", "buildings_total": 0, "sample": []}),
         "prefecture_isere": (lambda: fetch_prefecture_isere_news(force_refresh=refresh), {"status": "pending", "articles": []}),
         "dauphine_isere": (lambda: fetch_dauphine_isere_news(force_refresh=refresh), {"status": "pending", "articles": []}),
@@ -2285,14 +2293,9 @@ def build_external_risks_pending_payload(
     base_snapshot: dict | None = None,
     current_key: str | None = None,
 ) -> dict:
-    pcs_commune_names: list[str] = []
-    if db is not None:
-        pcs_commune_names = [
-            str(name)
-            for (name,) in db.query(Municipality.name).filter(Municipality.pcs_active.is_(True)).all()
-            if name
-        ]
-    jobs = build_external_risks_fetch_jobs(refresh=refresh, pcs_commune_names=pcs_commune_names)
+    georisques_communes = _georisques_commune_records(db) if db is not None else None
+    pcs_commune_names = [row['name'] for row in georisques_communes or []]
+    jobs = build_external_risks_fetch_jobs(refresh=refresh, pcs_commune_names=pcs_commune_names, georisques_communes=georisques_communes)
     payload = {"updated_at": utc_timestamp()}
     for key, (_, fallback) in jobs.items():
         source_payload = base_snapshot.get(key) if isinstance(base_snapshot, dict) else None
@@ -2304,12 +2307,7 @@ def build_external_risks_pending_payload(
             elif not isinstance(source_payload, dict) and service_payload.get("status") == "pending":
                 service_payload["status"] = "idle"
         payload[key] = service_payload
-    payload["refresh"] = {
-        "in_progress": True,
-        "completed": 0,
-        "total": len(jobs),
-        "current": current_key or "Préparation des flux externes",
-    }
+    payload["refresh"] = {"in_progress":True, "completed":0, "total":len(jobs), "current":current_key or "Préparation des flux externes"}
     return payload
 
 
@@ -2320,13 +2318,8 @@ def build_external_risks_payload(
 ) -> dict:
     errors: dict[str, str] = {}
     errors_lock = Lock()
-    pcs_commune_names: list[str] = []
-    if db is not None:
-        pcs_commune_names = [
-            str(name)
-            for (name,) in db.query(Municipality.name).filter(Municipality.pcs_active.is_(True)).all()
-            if name
-        ]
+    georisques_communes = _georisques_commune_records(db) if db is not None else None
+    pcs_commune_names = [row['name'] for row in georisques_communes or []]
 
     def safe_fetch(key: str, fetcher: Callable[[], dict], fallback: dict) -> dict:
         try:
@@ -2340,7 +2333,7 @@ def build_external_risks_payload(
             payload.setdefault("updated_at", utc_timestamp())
             return payload
 
-    fetch_jobs = build_external_risks_fetch_jobs(refresh=refresh, pcs_commune_names=pcs_commune_names)
+    fetch_jobs = build_external_risks_fetch_jobs(refresh=refresh, pcs_commune_names=pcs_commune_names, georisques_communes=georisques_communes)
 
     results: dict[str, dict] = {}
     total_jobs = len(fetch_jobs)
@@ -2766,6 +2759,7 @@ def create_municipality(data: MunicipalityCreate, db: Session = Depends(get_db),
     db.add(municipality)
     db.commit()
     db.refresh(municipality)
+    _queue_georisques_collection()
     return municipality
 
 
@@ -2799,6 +2793,8 @@ def update_municipality(
 
     db.commit()
     db.refresh(municipality)
+    if {'name', 'insee_code', 'postal_code'} & changes.keys():
+        _queue_georisques_collection()
     return municipality
 
 

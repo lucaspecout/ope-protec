@@ -1,5 +1,13 @@
 # Référentiel officiel de secours Géorisques — Isère
 
+## Recherche automatique à l’ajout d’une commune
+
+Les communes utilisées en production proviennent de la base de l’application, avec leur code INSEE et code postal ; aucune liste de quatre communes n’est utilisée pour décider quoi collecter. L’ajout d’une commune et la modification de son identité mettent immédiatement en file une collecte Géorisques après validation de la transaction. Le coordinateur regroupe les demandes et relance après une collecte déjà en cours. Toutes les communes enregistrées apparaissent dans le sélecteur, y compris sans indicateur PCS actif.
+
+L’identité est recherchée par code INSEE auprès de l’API géographique et mise en cache 24 heures. Le rapport est lu automatiquement sur Géorisques pour ce code ; les fichiers embarqués ne servent qu’en secours. Le lien DICRIM est également recherché sur la page de la commune, vérifié sur sa signature PDF, puis enregistré avec le rapport. Un lien d’une autre commune est rejeté. Les PDF municipaux déjà vérifiés restent des compléments, pas une condition de recherche. Une commune inconnue du cache est donc collectée sans modification des fichiers ou du code.
+
+Contrôle en direct du 25 octobre 2026 : Voiron (`38563`), absente du cache des quatre rapports et du catalogue municipal DICRIM, a été résolue et son rapport a renvoyé 6 familles naturelles, 2 technologiques et un DICRIM découvert automatiquement. Aucun rapport Voiron n’a été ajouté en dur à la suite de ce contrôle. Les tests couvrent aussi l’apparition d’une nouvelle commune, l’état de collecte en cours et son remplacement par les données reçues sans intervention manuelle.
+
 ## Décompte des familles du rapport communal officiel
 
 `georisques_reports.json` contient les résumés publics effectivement obtenus le 25 octobre 2026 pour Gières, Saint-Paul-de-Varces, Poliénas et Beaurepaire. Le collecteur lit la page canonique `/rapport2/{INSEE}/{ville}/commune/{codePostal}`, puis la même lecture publique `/mes-risques/rapport/all-risks` que le JavaScript du site. Il conserve les seules données structurées de `risks.listRisqueType`, sans intégrer le HTML du fournisseur à l’application. Il vérifie code INSEE, portée communale, catégories, cohérence des décomptes et absence de doublons.

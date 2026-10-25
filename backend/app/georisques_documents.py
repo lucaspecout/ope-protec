@@ -3,6 +3,8 @@ from functools import lru_cache
 import json
 from pathlib import Path
 import re
+from datetime import datetime, timezone
+from urllib.request import urlopen, Request
 
 DATA = Path(__file__).with_name('data')
 DDRM_URL = 'https://www.isere.gouv.fr/contenu/telechargement/51404/350682/file/Trium_DDRM_2020_V11_finale.pdf'
@@ -16,15 +18,47 @@ def identities():
 def document_catalog():
     return json.loads((DATA / 'georisques_documents.json').read_text(encoding='utf-8'))
 
-def enrich_commune(commune):
+def fetch_identity(code):
+    if not re.fullmatch(r'38\d{3}', code):
+        raise ValueError('Invalid commune code')
+    url = f'https://geo.api.gouv.fr/communes/{code}?fields=nom,code,codesPostaux,centre&format=json'
+    with urlopen(Request(url, headers={'User-Agent':'ope-protec/1.0'}), timeout=10) as response:
+        raw = response.read(65537)
+    if len(raw) > 65536:
+        raise ValueError('Commune identity too large')
+    row = json.loads(raw)
+    if str(row.get('code')) != code or not row.get('nom') or not row.get('codesPostaux'):
+        raise ValueError('Commune identity mismatch')
+    coordinates = (row.get('centre') or {}).get('coordinates') or [None,None]
+    return {'name':row['nom'], 'postal_code':row['codesPostaux'][0], 'latitude':coordinates[1], 'longitude':coordinates[0], 'updated_at':datetime.now(timezone.utc).isoformat()}
+
+def resolve_identity(code, read_cache, write_cache, fetch=fetch_identity):
+    key = 'georisques_identity_' + code + '.json'
+    old = read_cache(key) or {}
+    try:
+        if (datetime.now(timezone.utc) - datetime.fromisoformat(old['updated_at'])).total_seconds() < 86400:
+            return old
+    except (KeyError, ValueError, TypeError):
+        pass
+    try:
+        identity = fetch(code)
+        write_cache(key, identity)
+        return identity
+    except Exception:
+        return old or identities().get(code, {})
+
+def enrich_commune(commune, identity=None):
     code = str(commune.get('code_insee') or '')
     if not re.fullmatch(r'38\d{3}', code):
         return commune
-    identity = identities().get(code, {})
+    identity = identity if identity is not None else identities().get(code, {})
     commune.update(official_name=identity.get('name'), postal_code=identity.get('postal_code'),
                    latitude=identity.get('latitude'), longitude=identity.get('longitude'))
     datasets = commune.get('datasets') or {}
-    documents = [dict(row, code_insee=code, scope='commune') for row in document_catalog().get(code, [])]
+    automatic = (commune.get('official_report') or {}).get('documents') or []
+    documents = [dict(row, scope='commune') for row in automatic if row.get('code_insee') == code]
+    # Previously verified municipal PDFs are additional offline references only.
+    documents.extend(dict(row, code_insee=code, scope='commune', discovery='previously_verified') for row in document_catalog().get(code, []) if row.get('url') not in {d.get('url') for d in documents})
     for kind in ('pprn', 'pprm', 'pprt'):
         for row in (datasets.get('gaspar/' + kind) or {}).get('content', []):
             identifier = str(row.get('idGaspar') or '')
