@@ -19,6 +19,15 @@ test('commune report carries the actual official form parameters and accented id
   assert.equal(u.searchParams.get('lat'),'45.25');
   assert.equal(u.searchParams.get('lon'),'5.47');
   assert.equal(u.searchParams.has('form-adresse'),false);
+  assert.equal(u.pathname,'/mes-risques/connaitre-les-risques-pres-de-chez-moi/rapport2/38310/Poli%C3%A9nas/commune/38210');
+});
+test('risk detail links use the official category code and commune scope',()=>{
+  const u=new URL(context.window.GeorisquesLinks.detail({code_insee:'38179',name:'Gières',postal_code:'38610'},'SEC'));
+  assert.equal(u.pathname,'/mes-risques/connaitre-les-risques-pres-de-chez-moi/detail/SEC');
+  assert.equal(u.searchParams.get('codeInsee'),'38179');
+  assert.equal(u.searchParams.get('typeForm'),'commune');
+  assert.equal(u.searchParams.get('type'),'commune');
+  assert.equal(new URL(context.window.GeorisquesLinks.detail({name:'Gières'},'../other')).hostname,'www.georisques.gouv.fr');
 });
 test('unknown coordinates never turn into a zero coordinate pair',()=>{
   for(const value of [null,undefined,'','invalid']){

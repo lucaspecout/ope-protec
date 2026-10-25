@@ -1,5 +1,13 @@
 # Référentiel officiel de secours Géorisques — Isère
 
+## Décompte des familles du rapport communal officiel
+
+`georisques_reports.json` contient les résumés publics effectivement obtenus le 25 octobre 2026 pour Gières, Saint-Paul-de-Varces, Poliénas et Beaurepaire. Le collecteur lit la page canonique `/rapport2/{INSEE}/{ville}/commune/{codePostal}`, puis la même lecture publique `/mes-risques/rapport/all-risks` que le JavaScript du site. Il conserve les seules données structurées de `risks.listRisqueType`, sans intégrer le HTML du fournisseur à l’application. Il vérifie code INSEE, portée communale, catégories, cohérence des décomptes et absence de doublons.
+
+Gières : 7 familles naturelles (inondation, remontée de nappe, séisme, mouvements de terrain, retrait-gonflement des argiles, avalanche et radon) et 3 familles technologiques (canalisations de matières dangereuses, pollution des sols et rupture de barrage). Ce résultat est celui du rapport public interrogé ; il n’est pas calculé à partir des 4 inventaires affichés auparavant ni des 14 libellés et sous-risques GASPAR.
+
+Le cache est actualisé au maximum une fois par jour par commune. Les lectures de résumé sont espacées d’une seconde ; les redirections applicatives restent limitées au même code INSEE et au domaine Géorisques. Une panne conserve une version connue avec sa date et un statut ancien ; sans version connue, aucun zéro ni classement complet n’est inventé. Les erreurs sont mises en cache 15 minutes. La lecture utilisée par le site public peut évoluer ; les tests de contrat signalent les changements de structure.
+
 ## Identité des communes et documents publics
 
 `georisques_communes.json` reprend les 512 communes de l’API officielle de découpage administratif (`https://geo.api.gouv.fr/departements/38/communes?fields=nom,code,codesPostaux,centre&format=json`), récupérées le 25 octobre 2026. Les coordonnées sont des centres communaux, jamais une adresse ou une parcelle. Ces informations complètent les liens vers le formulaire communal Géorisques, avec `form-commune=true`, `type=municipality`, code INSEE, nom, code postal et centre connus. Les coordonnées inconnues restent absentes ; elles ne deviennent pas 0,0.

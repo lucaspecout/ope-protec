@@ -14,7 +14,17 @@
     if (lat !== null && lat !== undefined && lat !== '' && lon !== null && lon !== undefined && lon !== '' && Number.isFinite(Number(lat)) && Number.isFinite(Number(lon)) && Math.abs(Number(lat)) <= 90 && Math.abs(Number(lon)) <= 180) {
       query.set('lat', String(Number(lat))); query.set('lon', String(Number(lon)));
     }
-    return `${root}/rapport2?${query.toString()}`;
+    const destination = /^\d{5}$/.test(postal) ? `${root}/rapport2/${encodeURIComponent(code)}/${encodeURIComponent(name)}/commune/${encodeURIComponent(postal)}` : `${root}/rapport2`;
+    return `${destination}?${query.toString()}`;
   }
-  window.GeorisquesLinks = { report };
+  function detail(commune, code) {
+    if (!/^[A-Z0-9_]{2,30}$/.test(String(code))) return report(commune);
+    const query = new URLSearchParams(report(commune).split('?')[1] || '');
+    if (!query.get('codeInsee')) return report(commune);
+    query.set('type', 'commune');
+    if (query.get('lat')) query.set('latitude', query.get('lat'));
+    if (query.get('lon')) query.set('longitude', query.get('lon'));
+    return `${root}/detail/${encodeURIComponent(code)}?${query.toString()}`;
+  }
+  window.GeorisquesLinks = { report, detail };
 })();

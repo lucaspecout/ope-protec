@@ -85,12 +85,16 @@ if __name__ == '__main__':
     if args.official_references:
         import json
         from app.georisques_files import BUNDLE
+        from app.georisques_reports import BUNDLE as REPORT_BUNDLE
         codes = {'38436':'Saint-Paul-de-Varces','38310':'Poliénas','38034':'Beaurepaire','38179':'Gières'}
         def fail(*args, **kwargs):
             raise ConnectionError('API unavailable')
         references = json.loads(BUNDLE.read_text(encoding='utf-8'))['datasets']
         base.RISKS['georisques'] = collect_summary(codes, 'fixture', fail, reference_loader=lambda: references)
-        for commune in base.RISKS['georisques']['monitored_communes']:enrich_commune(commune)
+        reports = json.loads(REPORT_BUNDLE.read_text(encoding='utf-8'))
+        for commune in base.RISKS['georisques']['monitored_communes']:
+            enrich_commune(commune)
+            commune['official_report'] = reports.get(commune['code_insee'])
         base.BOOTSTRAP['municipalities'] = [{'id':i+1,'name':name,'insee_code':code,'pcs_active':True} for i,(code,name) in enumerate(codes.items())]
         base.CHECKS = r'''<script>
 (async()=>{
@@ -121,6 +125,13 @@ try {
  check('Gieres current DICRIM available',Boolean(root.querySelector('.geo-document-link[href="https://www.ville-gieres.fr/images/cadre-de-vie/dicrim.pdf"]'))&&root.textContent.includes('2026'));
  check('departmental DDRM available',Boolean(root.querySelector('.geo-document-link[href*="Trium_DDRM_2020"]')));
  root.querySelector('[data-geo-tab="natural"]').click();
+ check('Gieres has exactly seven official natural risk cards',root.querySelectorAll('.geo-official-risks [data-official-risk]').length===7&&root.querySelector('.geo-report-count').textContent.includes('7 risques naturels'));
+ check('Gieres missing risk families now visible',['INOND','REMNAPPE','SEC','AVAL'].every(code=>root.querySelector(`[data-official-risk="${code}"]`)));
+ check('inventories are separate from the official risk count',root.querySelector('.geo-risk-inventories')&&!root.querySelector('.geo-risk-inventories').open);
+ root.querySelector('[data-geo-tab="technological"]').click();
+ check('Gieres has three official technological risks',root.querySelectorAll('.geo-official-risks [data-official-risk]').length===3&&['CANA','SSP','RUPTBARR'].every(code=>root.querySelector(`[data-official-risk="${code}"]`)));
+ check('risk detail links keep the selected commune',[...root.querySelectorAll('.geo-official-detail')].every(link=>new URL(link.href).searchParams.get('codeInsee')==='38179'));
+ root.querySelector('[data-geo-tab="natural"]').click();
  check('Gieres real cavities', [...root.querySelectorAll('.geo-data-section')].some(s=>s.querySelector('h4')?.textContent.includes('Cavit')&&s.querySelector('strong')?.textContent==='2'));
  choose('38034');
  check('Beaurepaire does not inherit Gieres movement count', [...root.querySelectorAll('.geo-data-section')].some(s=>s.querySelector('h4')?.textContent.includes('Mouvements')&&s.querySelector('strong')?.textContent==='0'));
@@ -131,7 +142,8 @@ try {
  check('PPR state and risk details available',root.textContent.includes('Opposable')&&root.textContent.includes('Inondation'));
  root.querySelector('[data-geo-tab="natural"]').click();
  choose('38179');root.querySelector('[data-geo-tab="prevention"]').click();
- root.querySelector('.geo-documents').scrollIntoView({block:'start'});
+ root.querySelector('[data-geo-tab="natural"]').click();
+ root.querySelector('.geo-tabs').scrollIntoView({block:'start'});
  check('no runtime errors',window.__smokeErrors.length===0);
  check('no horizontal overflow',document.documentElement.scrollWidth<=innerWidth+1);
 }catch(e){results.push({name:'exception',pass:false,error:String(e.stack||e)});}

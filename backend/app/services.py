@@ -7512,6 +7512,7 @@ def _fetch_georisques_isere_summary_live(commune_names: list[str] | None = None)
     from .georisques_sources import collect_summary
     from .georisques_files import load_references
     from .georisques_documents import enrich_commune
+    from .georisques_reports import load_report
     try:
         token = str(resolve_credentials("georisques").get("token") or "").strip()
     except CredentialStoreError:
@@ -7526,6 +7527,7 @@ def _fetch_georisques_isere_summary_live(commune_names: list[str] | None = None)
                              reference_loader=lambda: load_references(_file_cache_load, _file_cache_save))
     for commune in result.get('monitored_communes', []):
         enrich_commune(commune)
+        commune['official_report'] = load_report(commune['code_insee'], {'name': commune.get('official_name') or commune['name'], 'postal_code': commune.get('postal_code')}, _file_cache_load, _file_cache_save)
     unresolved = [name for name in names if name not in codes.values()]
     if unresolved:
         result["status"] = "degraded"

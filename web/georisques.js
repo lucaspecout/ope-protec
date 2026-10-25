@@ -34,14 +34,16 @@
     'gaspar/papi': 'Programmes d’actions de prévention contre les inondations.',
     'gaspar/tri': 'Territoires identifiés à risque important d’inondation.',
     'gaspar/tim': 'Dossiers de transmission d’information au maire.',
+    'gaspar/risques': 'Libellés administratifs incluant familles et sous-risques. Ce total est différent du nombre de risques du rapport simplifié Géorisques.',
   };
+  titles['gaspar/risques'] = 'Référentiel GASPAR';
   function records(key, data) {
     const rows = Array.isArray(data?.content) ? data.content : [];
     const available = Number.isFinite(data?.total_elements);
     const value = key === 'radon' ? rows[0]?.classePotentiel : key === 'zonage_sismique' ? rows[0]?.zoneSismicite : data?.total_elements;
     const isClass = key === 'radon' || key === 'zonage_sismique';
     const tone = !available || (isClass && !value) ? 'unknown' : key === 'radon' ? ({1:'green',2:'amber',3:'orange'}[value] || 'teal') : key === 'zonage_sismique' ? ({1:'green',2:'teal',3:'amber',4:'orange',5:'red'}[value] || 'teal') : key === 'cavites' ? 'teal' : 'blue';
-    const unit = key === 'radon' ? 'catégorie sur 3' : key === 'zonage_sismique' ? 'zone sur 5' : key === 'mvt' ? 'mouvements recensés' : key === 'cavites' ? 'cavités recensées' : 'éléments recensés';
+    const unit = key === 'radon' ? 'catégorie sur 3' : key === 'zonage_sismique' ? 'zone sur 5' : key === 'mvt' ? 'mouvements recensés' : key === 'cavites' ? 'cavités recensées' : key === 'gaspar/risques' ? 'libellés et sous-risques' : 'éléments recensés';
     return `<section class="geo-data-section geo-tone-${tone}"><header><span class="geo-card-icon">${icon(key === 'radon' ? 'atom' : key === 'zonage_sismique' ? 'pulse' : key === 'mvt' ? 'mountain' : key === 'cavites' ? 'layers' : key === 'gaspar/azi' ? 'wave' : 'document')}</span><h4>${escape(titles[key] || data?.label || key)}</h4><span class="geo-status-dot" title="${escape(state(data))}" aria-label="${escape(state(data))}"></span></header>
       <div class="geo-card-value"><strong>${isClass ? escape(value || '—') : number(value)}</strong><span>${unit}</span></div>
       <p class="geo-card-description">${escape(descriptions[key] || 'Consultez les informations et documents recensés pour ce territoire.')}</p>
@@ -75,6 +77,15 @@
       ${!dicrim.length ? `<p class="geo-document-note">DICRIM : ${recorded ? 'recensé dans GASPAR, mais aucun lien PDF public n’a été vérifié pour cette commune.' : 'aucun lien public vérifié dans les sources collectées. Cela ne signifie pas que la commune n’en possède pas.'} Contactez la mairie pour obtenir sa version à jour.</p>` : '<p class="geo-document-note">Les éditions disponibles sont indiquées ci-dessous. Elles ne sont pas nécessairement les dernières versions applicables.</p>'}
       <div class="geo-document-grid">${rows.map(row => `<a class="geo-document-link" href="${escape(safe(row.url))}" target="_blank" rel="noopener noreferrer"><span class="geo-document-symbol">${icon('document')}</span><span class="geo-document-copy"><span class="geo-document-kind">${escape(row.kind)} <small>${row.format === 'pdf' ? 'PDF' : 'FICHE OFFICIELLE'}</small></span><strong>${escape(row.title)}</strong><span>${escape(row.publisher || '')}${row.year ? ` · Édition ${escape(row.year)}` : ''}</span>${row.state ? `<span>${escape(row.state)}${row.state_date ? ` · ${date(row.state_date)}` : ''}</span>` : ''}<span>${row.scope === 'department' ? 'Document départemental · Isère' : `Commune · ${escape(commune.name)}`}${row.verified_at ? ` · Lien contrôlé le ${date(row.verified_at)}` : ''}</span></span><span aria-hidden="true">↗</span></a>`).join('')}</div></section>`;
   }
+  function officialRiskCards(report, category, commune) {
+    return report[category].map(row => {
+      const status = String(row.status_label || '').replace(/^Risque\s+/i, '');
+      const normalized = normalize(status);
+      const tone = normalized.includes('faible') ? 'green' : normalized.includes('modere') ? 'amber' : normalized.includes('important') || normalized.includes('fort') ? 'orange' : category === 'technological' ? 'teal' : 'blue';
+      const symbol = ['INOND','REMNAPPE','RUPTBARR'].includes(row.code) ? 'wave' : row.code === 'SEISM' ? 'pulse' : row.code === 'RADON' ? 'atom' : ['MVT','AVAL','SEC'].includes(row.code) ? 'mountain' : 'layers';
+      return `<section class="geo-data-section geo-official-risk geo-tone-${tone}" data-official-risk="${escape(row.code)}"><header><span class="geo-card-icon">${icon(symbol)}</span><h4>${escape(row.label || row.title)}</h4></header><div class="geo-card-value"><strong>${escape(status)}</strong></div><p class="geo-card-description">${escape(row.description)}</p><div class="geo-card-details"><a class="geo-official-detail" href="${escape(window.GeorisquesLinks.detail(commune, row.code))}" target="_blank" rel="noopener noreferrer">Consulter ce risque sur Géorisques <span aria-hidden="true">↗</span></a></div></section>`;
+    }).join('');
+  }
   function localServices() {
     const catnat = snapshot.catnat_isere || {};
     const industrial = snapshot.industrial_sites || {};
@@ -99,14 +110,18 @@
     selected = commune;
     if (!commune) { root.innerHTML = '<p>Choisissez une commune pour explorer ses données officielles par thème.</p>'; return; }
     const datasets = commune.datasets || {};
+    const candidate = commune.official_report;
+    const official = candidate?.scope === 'commune' && String(candidate.code_insee) === String(commune.code_insee) && Array.isArray(candidate.natural) && Array.isArray(candidate.technological) && candidate.natural.length === candidate.natural_total && candidate.technological.length === candidate.technological_total ? candidate : null;
     const url = window.GeorisquesLinks.report(commune);
     const dicrim = (commune.documents || []).find(row => row.kind === 'DICRIM' && String(row.code_insee) === String(commune.code_insee) && documentUrl(row.url));
     const keys = tab === 'natural' ? ['radon','zonage_sismique','mvt','cavites'] : ['gaspar/risques','gaspar/pprn','gaspar/pprm','gaspar/pprt','gaspar/azi','gaspar/tri','gaspar/papi','gaspar/dicrim','gaspar/tim'].filter(key => !key.startsWith('gaspar/ppr') || datasets[key]);
     root.innerHTML = `<div class="geo-commune-heading"><div class="geo-commune-title"><span class="geo-location-icon">${icon('pin')}</span><div><p class="geo-eyebrow">LE PROFIL DE VOTRE COMMUNE</p><h3>${escape(commune.name)}</h3><p class="geo-commune-code">Isère <span>·</span> Code INSEE ${escape(commune.code_insee || 'non renseigné')}</p></div></div><div class="geo-commune-actions"><a class="geo-report-link" href="${escape(url)}" target="_blank" rel="noopener noreferrer">${icon('document')} Rapport officiel <span>↗</span></a>${dicrim ? `<a class="geo-report-link geo-dicrim-link" href="${escape(dicrim.url)}" target="_blank" rel="noopener noreferrer">DICRIM · PDF <span>↗</span></a>` : ''}</div></div>
-      <div class="geo-tabs" role="group" aria-label="Thèmes Géorisques">${[['natural','Risques naturels'],['prevention','Prévention & documents'],['history','CatNat & industrie']].map(([key,label])=>`<button type="button" data-geo-tab="${key}" aria-pressed="${tab===key}">${label}</button>`).join('')}</div>
-      <p class="geo-tab-description">${tab === 'natural' ? 'Les repères naturels de la commune. Les couleurs du radon et de la sismicité correspondent aux classes publiées ; les inventaires ne mesurent pas le danger actuel.' : tab === 'prevention' ? 'Les risques connus et les documents pour préparer votre territoire.' : 'Les reconnaissances passées et les installations présentes sur le territoire.'}</p>
+      <div class="geo-tabs" role="group" aria-label="Thèmes Géorisques">${[['natural','Risques naturels'],['technological','Risques technologiques'],['prevention','Prévention & documents'],['history','CatNat & industrie']].map(([key,label])=>`<button type="button" data-geo-tab="${key}" aria-pressed="${tab===key}">${label}</button>`).join('')}</div>
+      ${official ? `<p class="geo-report-count"><strong>${official.natural_total} risques naturels</strong><span>·</span><strong>${official.technological_total} risques technologiques</strong> <span>identifiés dans le rapport Géorisques communal</span></p><p class="geo-report-date">Lecture du ${date(official.updated_at)}${official.status === 'stale' ? ' · Dernière version connue, actualisation momentanément indisponible.' : ''}</p>` : `<p class="geo-report-date">Le décompte complet du rapport Géorisques n’est pas disponible pour cette commune. Les inventaires ci-dessous ne représentent pas tous ses risques.</p>`}
+      <p class="geo-tab-description">${tab === 'natural' ? 'Les familles naturelles du rapport communal officiel. Les libellés sont ceux de Géorisques ; les inventaires et zonages détaillés restent accessibles en complément.' : tab === 'technological' ? 'Les familles technologiques du rapport communal officiel, distinctes des inventaires d’établissements.' : tab === 'prevention' ? 'Les risques connus et les documents pour préparer votre territoire.' : 'Les reconnaissances passées et les installations présentes sur le territoire.'}</p>
       ${tab === 'prevention' ? documents(commune) : ''}
-      <div class="geo-datasets">${tab === 'history' ? localServices() : keys.map(key => records(key, datasets[key] || {label:titles[key] || key})).join('')}</div>`;
+      ${tab === 'natural' || tab === 'technological' ? official ? `<h4 class="geo-risk-group-title">${tab === 'natural' ? 'Risques naturels' : 'Risques technologiques'} identifiés <span>${official[tab + '_total']}</span></h4><div class="geo-datasets geo-official-risks">${officialRiskCards(official, tab, commune)}</div>` : '' : ''}
+      ${tab === 'natural' && official ? `<details class="geo-risk-inventories"><summary>Inventaires et zonages : consulter les données détaillées</summary><p class="geo-tab-description">Les cavités constituent un inventaire complémentaire. Les libellés et sous-risques GASPAR se consultent dans « Prévention & documents ».</p><div class="geo-datasets">${keys.map(key => records(key, datasets[key] || {label:titles[key] || key})).join('')}</div></details>` : `<div class="geo-datasets">${tab === 'technological' ? official ? '' : '<p>Rapport technologique indisponible. Aucune absence de risque ne peut être déduite.</p>' : tab === 'history' ? localServices() : keys.map(key => records(key, datasets[key] || {label:titles[key] || key})).join('')}</div>`}`;
   }
   function update(data, external, api) {
     snapshot = external || {};
