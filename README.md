@@ -27,6 +27,8 @@ docker compose up -d --build
 
 Les protections des sessions, les fichiers privés à sauvegarder et les vérifications de mise en service sont détaillés dans le [guide de sécurité](docs/securite.md).
 
+Pour une première installation sur une base vide, ajouter `--new-install` à la préparation. Pour une stack Portainer, importer les variables privées comme indiqué dans le guide : le fichier `.env` local n'est pas envoyé avec Git.
+
 Ou via script:
 
 ```bash

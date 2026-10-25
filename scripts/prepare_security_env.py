@@ -1,5 +1,6 @@
 """Move existing Compose literals into ignored .env without rotating live credentials."""
 from pathlib import Path
+import argparse
 import os
 import re
 import secrets
@@ -7,7 +8,7 @@ import secrets
 ROOT=Path(__file__).resolve().parents[1]
 KEYS=('POSTGRES_PASSWORD','DATABASE_URL','SECRET_KEY','FIRMS_MAP_KEY','GEORISQUES_API_TOKEN','RTE_ECOWATT_B64','RTE_CONSUMPTION_B64')
 
-def migrate(root=ROOT):
+def migrate(root=ROOT, *, new_install=False):
     compose=root/'docker-compose.yml';env=root/'.env'
     source=compose.read_text(encoding='utf-8')
     existing=env.read_text(encoding='utf-8') if env.exists() else ''
@@ -30,6 +31,8 @@ def migrate(root=ROOT):
             moved.append(key)
     # Also support a new installation after all literals have been removed.
     if 'POSTGRES_PASSWORD' not in present:
+        if not new_install:
+            raise RuntimeError('Acces PostgreSQL existant introuvable. Importer la .env privee conservee ou les variables de la stack. --new-install est reserve a une base neuve et vide.')
         additions.append('POSTGRES_PASSWORD='+secrets.token_urlsafe(36));present.add('POSTGRES_PASSWORD')
     if 'SECRET_KEY' not in present:
         additions.append('SECRET_KEY='+secrets.token_urlsafe(48));present.add('SECRET_KEY')
@@ -54,7 +57,34 @@ def migrate(root=ROOT):
     if source!=compose.read_text(encoding='utf-8'):compose.write_text(source,encoding='utf-8')
     return moved
 
+def export_stack_env(root=ROOT):
+    """Resolve local dotenv syntax before import into a stack's variable editor."""
+    from dotenv import dotenv_values
+    values=dotenv_values(root/'.env')
+    for key in ('POSTGRES_PASSWORD','DATABASE_URL','SECRET_KEY'):
+        if not values.get(key):raise RuntimeError('Variable privee manquante : '+key)
+    lines=[]
+    for key,value in values.items():
+        if value is None:continue
+        if '\n' in value or '\r' in value:
+            raise RuntimeError('Valeur multiligne non exportable : '+key)
+        lines.append(key+'='+value)
+    target=root/'.env.portainer'
+    target.write_text('\n'.join(lines)+'\n',encoding='utf-8')
+    os.chmod(target,0o600)
+    return target
+
 if __name__=='__main__':
-    moved=migrate()
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--new-install',action='store_true',help='Generate database credentials only for a new empty database')
+    parser.add_argument('--export-portainer',action='store_true',help='Create private .env.portainer for the stack variable importer (requires python-dotenv)')
+    args=parser.parse_args()
+    try:
+        moved=migrate(new_install=args.new_install)
+        if args.export_portainer:
+            export_stack_env()
+            print('Private .env.portainer ready for the stack environment variable importer. Do not commit or share it.')
+    except (RuntimeError,ImportError) as exc:
+        parser.exit(1,str(exc)+'\n')
     print('Private .env prepared; database and API credentials preserved. Values are never printed.')
     print('Externalized settings: '+', '.join(moved))

@@ -9,7 +9,17 @@ python3 scripts/prepare_security_env.py
 docker compose up -d --build
 ```
 
-Le script est réexécutable. Il déplace les valeurs précédemment présentes dans Compose vers `.env`, ignorée par Git, et conserve les accès PostgreSQL et API. Il génère des secrets pour une installation neuve. Une clé de session faible est remplacée : les utilisateurs doivent alors se reconnecter avec leur mot de passe habituel. Ne pas remplacer une `.env` existante par `.env.example`.
+Le script est réexécutable. Il déplace les valeurs précédemment présentes dans Compose vers `.env`, ignorée par Git, et conserve les accès PostgreSQL et API. Pour une installation entièrement neuve avec une base vide, ajouter `--new-install` afin de générer les secrets initiaux. Sans accès PostgreSQL existant ni cette option, il s'arrête pour éviter de changer involontairement le mot de passe attendu par une base existante. Une clé de session faible est remplacée : les utilisateurs doivent alors se reconnecter avec leur mot de passe habituel. Ne pas remplacer une `.env` existante par `.env.example`.
+
+## Déploiement d'une stack dans Portainer
+
+Une stack récupérée depuis Git ne reçoit pas le fichier `.env` privé conservé sur le poste de travail. Le message `required variable POSTGRES_PASSWORD is missing a value` signifie que les variables de déploiement manquent ; il ne signifie pas que PostgreSQL a changé de mot de passe.
+
+Depuis la copie du projet qui contient les accès conservés, la commande `python scripts/prepare_security_env.py --export-portainer` prépare `.env.portainer` (avec le module `python-dotenv` des dépendances backend). Ce fichier privé, ignoré par Git, contient des valeurs résolues pour l'importeur de variables. Il ne doit pas être publié.
+
+Dans Portainer : **Stacks → la stack concernée → Environment variables → Load variables from .env file**, sélectionner `.env.portainer`, puis mettre à jour la stack. Conserver les autres variables propres au serveur. Vérifier la présence de `POSTGRES_PASSWORD`, `DATABASE_URL` et `SECRET_KEY` ; les accès API conservés sont également inclus. Ne pas ajouter un simple `env_file` au conteneur pour résoudre cette erreur : les variables sont nécessaires lors de l'interpolation du fichier Compose, avant le lancement des services.
+
+Ne pas supprimer le volume PostgreSQL ni utiliser `--new-install` pour une stack qui contient déjà des données.
 
 Le fichier `.env` préparé localement doit être présent sur la machine qui exécute Docker. Ne pas le publier ni le joindre à un ticket. Sauvegarder ensemble `.env`, la base, les documents et `/data/api_credentials.key`, qui permet de déchiffrer les accès API enregistrés. La suppression des secrets du fichier Compose ne les retire pas des anciens commits. S'ils ont été partagés, renouveler les clés auprès des fournisseurs ; un changement de mot de passe PostgreSQL doit être coordonné avec la base existante, une variable Docker seule ne changeant pas celui du volume.
 

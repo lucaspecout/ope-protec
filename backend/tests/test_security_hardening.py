@@ -273,6 +273,20 @@ class AvailabilityTests(unittest.TestCase):
             self.assertNotIn('weak-test-key',private)
             module.migrate(root)
             self.assertEqual((root/'.env').read_text(),private)
+            exported=module.export_stack_env(root)
+            values=dict(line.split('=',1) for line in exported.read_text().splitlines())
+            self.assertEqual(values['POSTGRES_PASSWORD'],'dummy-existing-password')
+            self.assertEqual(values['GEORISQUES_API_TOKEN'],'dummy-existing-georisques')
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            (root/'docker-compose.yml').write_text('environment:\n  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}\n',encoding='utf-8')
+            with self.assertRaises(RuntimeError):module.migrate(root)
+            self.assertFalse((root/'.env').exists())
+            module.migrate(root,new_install=True)
+            exported=module.export_stack_env(root)
+            values=dict(line.split('=',1) for line in exported.read_text().splitlines())
+            self.assertEqual(values['DATABASE_URL'],f"postgresql://postgres:{values['POSTGRES_PASSWORD']}@db:5432/veille")
+            self.assertNotIn('${',exported.read_text())
 
     def test_empty_compose_cookie_setting_keeps_automatic_mode(self):
         from app.config import Settings
