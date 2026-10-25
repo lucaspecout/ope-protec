@@ -345,7 +345,7 @@ async def audit_log_middleware(request: Request, call_next):
     response.headers["Server-Timing"] = f"app;dur={(monotonic() - started_at) * 1000:.1f}"
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'SAMEORIGIN'
-    response.headers['Referrer-Policy'] = 'no-referrer'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
     response.headers['Cache-Control'] = 'no-store'
     method = request.method
     path = request.url.path

@@ -2034,31 +2034,8 @@ def fetch_meteo_france_isere(force_refresh: bool = False) -> dict[str, Any]:
 
 
 def fetch_isere_boundary_geojson() -> dict[str, Any]:
-    source_url = "https://france-geojson.gregoiredavid.fr/repo/departements/38-isere/departement-38-isere.geojson"
-    try:
-        data = _http_get_json(source_url)
-        geometry = data.get("geometry", {})
-        if geometry.get("type") not in {"Polygon", "MultiPolygon"}:
-            raise ValueError("Format géométrique inattendu")
-
-        return {
-            "status": "online",
-            "source": source_url,
-            "geometry": geometry,
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-        }
-    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, ValueError, json.JSONDecodeError) as exc:
-        return {
-            "status": "degraded",
-            "source": source_url,
-            "error": str(exc),
-            "geometry": {
-                "type": "Polygon",
-                "coordinates": [[
-                    [5.09, 45.07], [5.63, 45.61], [6.45, 45.28], [6.35, 44.84], [5.73, 44.63], [5.15, 44.82], [5.09, 45.07],
-                ]],
-            },
-        }
+    from .boundaries import isere_boundary
+    return isere_boundary()
 
 
 def _vigicrues_level_from_delta(delta_m: float) -> str:

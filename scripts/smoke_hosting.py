@@ -226,7 +226,7 @@ class Handler(base.Handler):
             script = (base.ROOT / "web/script.js").read_text(encoding="utf-8")
             for filename, url in ASSETS.items():
                 script = script.replace(url, "/__fixture/assets/" + filename)
-            script = script.replace("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", "/__fixture/tile.png")
+            script = script.replace("https://tile.openstreetmap.org/{z}/{x}/{y}.png", "/__fixture/tile.png")
             return self.send(script.encode(), "application/javascript; charset=utf-8")
         if path.startswith("/__fixture/assets/"):
             filename = path.rsplit("/", 1)[-1]

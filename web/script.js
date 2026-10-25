@@ -4489,8 +4489,12 @@ function applyBasemap(style = 'osm') {
 
   const layers = {
     osm: {
-      url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-      options: { maxZoom: 20, attribution: '&copy; OpenStreetMap contributors' },
+      url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      options: {
+        maxZoom: 20, maxNativeZoom: 19,
+        referrerPolicy: 'strict-origin-when-cross-origin',
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
+      },
     },
     topo: {
       url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
@@ -5819,7 +5823,7 @@ async function loadIsereBoundary() {
   boundaryLayer = window.L.geoJSON({ type: 'Feature', geometry: data.geometry }, { style: ISERE_BOUNDARY_STYLE }).addTo(leafletMap);
   leafletMap.fitBounds(boundaryLayer.getBounds(), { padding: [16, 16] });
   const mapSourceNode = document.getElementById('map-source');
-  if (mapSourceNode) mapSourceNode.textContent = `Source carte: ${data.source}`;
+  if (mapSourceNode) mapSourceNode.textContent = `Contour : ${data.source_label || data.source}${data.data_vintage ? ` · ${data.data_vintage}` : ''}${data.generalization_m ? ` · simplification ${data.generalization_m} m` : ''}`;
   setMapFeedback('Fond de carte et contour Isère chargés.');
 }
 

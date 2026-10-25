@@ -1,5 +1,9 @@
 # Menu des filtres de la carte
 
+Le contour du département utilise les données [Etalab – Contours administratifs 2026](https://etalab-datasets.geo.data.gouv.fr/contours-administratifs/2026/geojson/), généralisées à 50 m (Licence Ouverte 2.0). La géométrie du code 38 est embarquée dans `backend/app/data/isere_boundary.geojson` : l'affichage et les filtres géographiques restent disponibles sans téléchargement externe. Le polygone de secours schématique a été retiré. Le millésime et la source sont indiqués sur la carte.
+
+Le fond OpenStreetMap utilise son URL canonique HTTPS, son attribution et une limite de zoom natif de 19. Les images transmettent uniquement l'origine du site aux services externes avec `strict-origin-when-cross-origin`. Le serveur utilise la même politique : `no-referrer` provoquait un blocage contraire aux [conditions du service de tuiles OpenStreetMap](https://operations.osmfoundation.org/policies/tiles/). Les tests navigateur utilisent exclusivement des tuiles locales, sans téléchargement automatisé sur les serveurs communautaires.
+
 Le menu démarre sur une liste de catégories. Choisir une catégorie affiche ses
 options sans reconstruire les contrôles. Le titre et le bouton **Catégories**
 restent visibles pendant le défilement. Les changements de filtres, les nouvelles
