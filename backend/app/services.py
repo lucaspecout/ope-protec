@@ -8392,11 +8392,11 @@ _APRR_ROAD_PATTERN = re.compile(r'\b(A41|A43|A48|A49|A51|A480)\b', re.IGNORECASE
 
 # URL de la synthèse nationale Bison Futé — inclut DATEX2 de APRR/AREA/Escota (réseau concédé)
 _BISON_RECAP_URL = (
-    "https://tipi.bison-fute.gouv.fr/bison-fute-ouvert/publicationsDIR/"
+    "http://tipi.bison-fute.gouv.fr/bison-fute-ouvert/publicationsDIR/"
     "Evenementiel-DIR/cnir/RecapTraficFranceEntiere.html"
 )
 _BISON_RECAP_BOUCHONS_URL = (
-    "https://tipi.bison-fute.gouv.fr/bison-fute-ouvert/publicationsDIR/"
+    "http://tipi.bison-fute.gouv.fr/bison-fute-ouvert/publicationsDIR/"
     "Evenementiel-DIR/cnir/RecapBouchonsFranceEntiere.html"
 )
 
