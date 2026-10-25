@@ -7,6 +7,7 @@ import smoke_vigieau as browser
 
 sys.path.insert(0, str(base.ROOT / 'backend'))
 from app.georisques_sources import collect_summary
+from app.georisques_documents import enrich_commune
 
 
 def fixture(endpoint, **kwargs):
@@ -89,6 +90,7 @@ if __name__ == '__main__':
             raise ConnectionError('API unavailable')
         references = json.loads(BUNDLE.read_text(encoding='utf-8'))['datasets']
         base.RISKS['georisques'] = collect_summary(codes, 'fixture', fail, reference_loader=lambda: references)
+        for commune in base.RISKS['georisques']['monitored_communes']:enrich_commune(commune)
         base.BOOTSTRAP['municipalities'] = [{'id':i+1,'name':name,'insee_code':code,'pcs_active':True} for i,(code,name) in enumerate(codes.items())]
         base.CHECKS = r'''<script>
 (async()=>{
@@ -104,20 +106,32 @@ try {
  check('official fallback explicitly identified',diagnostics.textContent.includes('Mode secours actif'));
  check('first commune automatically visible',Boolean(root.querySelector('.geo-tabs')));
  choose('38436');
+ const report=new URL(root.querySelector('.geo-report-link').href);
+ check('report opens the complete commune form',report.searchParams.get('form-commune')==='true'&&report.searchParams.get('type')==='municipality'&&report.searchParams.get('city')==='Saint-Paul-de-Varces'&&report.searchParams.get('codeInsee')==='38436'&&report.searchParams.has('lat')&&report.searchParams.has('postCode'));
  check('Saint Paul real movements',root.textContent.includes('Saint-Paul-de-Varces')&&root.textContent.includes('Code BRGM'));
  check('real movement count', [...root.querySelectorAll('.geo-data-section')].some(s=>s.querySelector('h4')?.textContent.includes('Mouvements')&&s.querySelector('strong')?.textContent==='12'));
  check('geographic inventory limits visible',root.textContent.includes('non localis'));
  check('source dates do not claim recent radon data',root.textContent.includes('2019-05-06'));
  check('official source links present',root.querySelectorAll('a[target="_blank"]').length>=4);
  root.querySelector('[data-geo-tab="prevention"]').click();
+ check('Saint Paul DICRIM available',Boolean(root.querySelector('.geo-document-link[href*="dicrim-spdv-vfbisprint"]')));
  check('real risks exposed',root.textContent.includes('Inondation'));
  check('PPR visible per commune from official export',root.textContent.includes('Plans de pr'));
- choose('38179');root.querySelector('[data-geo-tab="natural"]').click();
+ choose('38179');
+ check('Gieres current DICRIM available',Boolean(root.querySelector('.geo-document-link[href="https://www.ville-gieres.fr/images/cadre-de-vie/dicrim.pdf"]'))&&root.textContent.includes('2026'));
+ check('departmental DDRM available',Boolean(root.querySelector('.geo-document-link[href*="Trium_DDRM_2020"]')));
+ root.querySelector('[data-geo-tab="natural"]').click();
  check('Gieres real cavities', [...root.querySelectorAll('.geo-data-section')].some(s=>s.querySelector('h4')?.textContent.includes('Cavit')&&s.querySelector('strong')?.textContent==='2'));
  choose('38034');
  check('Beaurepaire does not inherit Gieres movement count', [...root.querySelectorAll('.geo-data-section')].some(s=>s.querySelector('h4')?.textContent.includes('Mouvements')&&s.querySelector('strong')?.textContent==='0'));
  choose('38310');
  check('Polienas uses exact commune data',root.textContent.includes('38310')&&root.textContent.includes('Code BRGM'));
+ root.querySelector('[data-geo-tab="prevention"]').click();
+ check('missing DICRIM is honest and never another commune PDF',root.textContent.includes('aucun lien public')&&!root.querySelector('.geo-document-link[href*="dicrim.pdf"]')&&!root.querySelector('.geo-document-link[href*="dicrim-spdv"]'));
+ check('PPR state and risk details available',root.textContent.includes('Opposable')&&root.textContent.includes('Inondation'));
+ root.querySelector('[data-geo-tab="natural"]').click();
+ choose('38179');root.querySelector('[data-geo-tab="prevention"]').click();
+ root.querySelector('.geo-documents').scrollIntoView({block:'start'});
  check('no runtime errors',window.__smokeErrors.length===0);
  check('no horizontal overflow',document.documentElement.scrollWidth<=innerWidth+1);
 }catch(e){results.push({name:'exception',pass:false,error:String(e.stack||e)});}

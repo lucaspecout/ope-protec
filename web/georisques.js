@@ -5,6 +5,7 @@
   const number = value => Number.isFinite(value) ? value.toLocaleString('fr-FR') : '—';
   const state = data => data?.status === 'online' ? 'À jour' : data?.status === 'fallback' ? 'Référentiel officiel de secours' : data?.status === 'stale' ? 'Dernières données connues · source indisponible' : 'Données indisponibles';
   const normalize = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const documentUrl = url => { try { const parsed = new URL(url); return parsed.protocol === 'https:' && !parsed.username && !parsed.password ? parsed.href : ''; } catch (_) { return ''; } };
   let snapshot = {}, selected = null, tab = 'natural', request = null, historyVersion = 0, renderedSignature = '', overviewSignature = '';
   const paths = {
     pin:'M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0Z M15 10a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z',
@@ -19,8 +20,8 @@
   const icon = name => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[name] || paths.document}"/></svg>`;
   const titles = {'radon':'Potentiel radon','zonage_sismique':'Sismicité','mvt':'Mouvements de terrain','cavites':'Cavités souterraines','gaspar/risques':'Risques recensés','gaspar/azi':'Atlas des zones inondables','gaspar/pprn':'Plans de prévention naturels','gaspar/pprm':'Plans de prévention miniers','gaspar/pprt':'Plans de prévention technologiques','gaspar/tri':'Territoires à risque d’inondation','gaspar/papi':'Programmes de prévention des inondations','gaspar/dicrim':'DICRIM','gaspar/tim':'Transmission d’information au maire'};
   const fields = {
-    'mvt': [['Type', 'type'], ['Lieu', 'lieu'], ['Début', 'dateDebut'], ['Fiabilité', 'fiabilite'], ['Commentaire', 'commentaireMvt']],
-    'cavites': [['Nom', 'nom'], ['Type', 'type'], ['Repérage', 'reperageGeographique']],
+    'mvt': [['Type', 'type'], ['Lieu', 'lieu'], ['Début', 'dateDebut'], ['Fiabilité', 'fiabilite'], ['Commentaire', 'commentaireMvt'], ['Mise à jour de la fiche', 'dateMaj']],
+    'cavites': [['Nom', 'nom'], ['Type', 'type'], ['Repérage', 'reperageGeographique'], ['Mise à jour de la fiche', 'dateMaj']],
     'radon': [['Classe de potentiel', 'classePotentiel'], ['Commune', 'libelleCommune']],
     'zonage_sismique': [['Zone de sismicité', 'zoneSismicite'], ['Type de zone', 'typeZone']],
     'gaspar/dicrim': [['Année de publication', 'anneePublication']],
@@ -53,13 +54,26 @@
         const pairs = fields[key] || [['Libellé', 'libelle'], ['Plan', 'libPpr'], ['Bassin de risques', 'libBassinRisques'], ['Modification', 'dateModification'], ['Transmission', 'dateTransmission']];
         const values = pairs.filter(([,field]) => row[field] !== undefined && row[field] !== null && row[field] !== '');
         const code = String(selected?.code_insee || '');
-        const aleas = (row.communes || []).filter(c => !code || String(c.codeInsee) === code).flatMap(c => c.aleas || []);
-        return `<article class="geo-record" ${i >= 20 ? 'hidden data-geo-extra' : ''}><dl>${values.map(([label,field]) => `<div><dt>${escape(label)}</dt><dd>${escape(row[field])}</dd></div>`).join('')}${row.identifiant || row.idGaspar ? `<div><dt>Référence</dt><dd>${escape(row.identifiant || row.idGaspar)}</dd></div>` : ''}</dl>${aleas.length ? `<p>${escape([...new Set(aleas.map(a => a.libelle).filter(Boolean))].join(' · '))}</p>` : ''}</article>`;
+        const local = (row.communes || []).filter(c => !code || String(c.codeInsee) === code);
+        const aleas = local.flatMap(c => c.aleas || []);
+        const planState = local.find(c => c.etat);
+        const planStateLabel = typeof planState?.etat === 'object' ? planState.etat.libelle : planState?.etat;
+        const planStateDate = planState?.dateEtat || (typeof planState?.etat === 'object' ? planState.etat.date : null);
+        return `<article class="geo-record" ${i >= 20 ? 'hidden data-geo-extra' : ''}><dl>${values.map(([label,field]) => `<div><dt>${escape(label)}</dt><dd>${escape(row[field])}</dd></div>`).join('')}${row.identifiant || row.idGaspar ? `<div><dt>Référence</dt><dd>${escape(row.identifiant || row.idGaspar)}</dd></div>` : ''}${planStateLabel ? `<div><dt>État pour cette commune</dt><dd>${escape(planStateLabel)}${planStateDate ? ` · ${date(planStateDate)}` : ''}</dd></div>` : ''}</dl>${aleas.length ? `<p>${escape([...new Set(aleas.map(a => a.libelle).filter(Boolean))].join(' · '))}</p>` : ''}</article>`;
       }).join('')}</div>${rows.length > 20 ? `<button type="button" class="ghost" data-geo-more>Afficher les ${rows.length - 20} autres éléments</button>` : ''}`}</div></details></section>`;
   }
   function matching(row) {
     const code = String(row.code_insee || row.codeInsee || '');
     return code ? code === String(selected?.code_insee || '') : normalize(row.commune || row.nom_commune) === normalize(selected?.name);
+  }
+  function documents(commune) {
+    const safe = documentUrl;
+    const rows = (commune.documents || []).filter(row => (row.scope === 'department' || String(row.code_insee) === String(commune.code_insee)) && safe(row.url));
+    const dicrim = rows.filter(row => row.kind === 'DICRIM');
+    const recorded = (commune.datasets?.['gaspar/dicrim']?.content || []).length > 0;
+    return `<section class="geo-documents"><div class="geo-documents-heading"><div><p class="geo-eyebrow">À CONSULTER & À CONSERVER</p><h4>Les documents utiles</h4></div><span>${rows.length} lien(s) officiel(s)</span></div>
+      ${!dicrim.length ? `<p class="geo-document-note">DICRIM : ${recorded ? 'recensé dans GASPAR, mais aucun lien PDF public n’a été vérifié pour cette commune.' : 'aucun lien public vérifié dans les sources collectées. Cela ne signifie pas que la commune n’en possède pas.'} Contactez la mairie pour obtenir sa version à jour.</p>` : '<p class="geo-document-note">Les éditions disponibles sont indiquées ci-dessous. Elles ne sont pas nécessairement les dernières versions applicables.</p>'}
+      <div class="geo-document-grid">${rows.map(row => `<a class="geo-document-link" href="${escape(safe(row.url))}" target="_blank" rel="noopener noreferrer"><span class="geo-document-symbol">${icon('document')}</span><span class="geo-document-copy"><span class="geo-document-kind">${escape(row.kind)} <small>${row.format === 'pdf' ? 'PDF' : 'FICHE OFFICIELLE'}</small></span><strong>${escape(row.title)}</strong><span>${escape(row.publisher || '')}${row.year ? ` · Édition ${escape(row.year)}` : ''}</span>${row.state ? `<span>${escape(row.state)}${row.state_date ? ` · ${date(row.state_date)}` : ''}</span>` : ''}<span>${row.scope === 'department' ? 'Document départemental · Isère' : `Commune · ${escape(commune.name)}`}${row.verified_at ? ` · Lien contrôlé le ${date(row.verified_at)}` : ''}</span></span><span aria-hidden="true">↗</span></a>`).join('')}</div></section>`;
   }
   function localServices() {
     const catnat = snapshot.catnat_isere || {};
@@ -85,11 +99,13 @@
     selected = commune;
     if (!commune) { root.innerHTML = '<p>Choisissez une commune pour explorer ses données officielles par thème.</p>'; return; }
     const datasets = commune.datasets || {};
-    const url = `https://www.georisques.gouv.fr/mes-risques/connaitre-les-risques-pres-de-chez-moi/rapport2?typeForm=commune&codeInsee=${encodeURIComponent(commune.code_insee || '')}`;
+    const url = window.GeorisquesLinks.report(commune);
+    const dicrim = (commune.documents || []).find(row => row.kind === 'DICRIM' && String(row.code_insee) === String(commune.code_insee) && documentUrl(row.url));
     const keys = tab === 'natural' ? ['radon','zonage_sismique','mvt','cavites'] : ['gaspar/risques','gaspar/pprn','gaspar/pprm','gaspar/pprt','gaspar/azi','gaspar/tri','gaspar/papi','gaspar/dicrim','gaspar/tim'].filter(key => !key.startsWith('gaspar/ppr') || datasets[key]);
-    root.innerHTML = `<div class="geo-commune-heading"><div class="geo-commune-title"><span class="geo-location-icon">${icon('pin')}</span><div><p class="geo-eyebrow">LE PROFIL DE VOTRE COMMUNE</p><h3>${escape(commune.name)}</h3><p class="geo-commune-code">Isère <span>·</span> Code INSEE ${escape(commune.code_insee || 'non renseigné')}</p></div></div><a class="geo-report-link" href="${escape(url)}" target="_blank" rel="noopener noreferrer">${icon('document')} Rapport officiel <span>↗</span></a></div>
+    root.innerHTML = `<div class="geo-commune-heading"><div class="geo-commune-title"><span class="geo-location-icon">${icon('pin')}</span><div><p class="geo-eyebrow">LE PROFIL DE VOTRE COMMUNE</p><h3>${escape(commune.name)}</h3><p class="geo-commune-code">Isère <span>·</span> Code INSEE ${escape(commune.code_insee || 'non renseigné')}</p></div></div><div class="geo-commune-actions"><a class="geo-report-link" href="${escape(url)}" target="_blank" rel="noopener noreferrer">${icon('document')} Rapport officiel <span>↗</span></a>${dicrim ? `<a class="geo-report-link geo-dicrim-link" href="${escape(dicrim.url)}" target="_blank" rel="noopener noreferrer">DICRIM · PDF <span>↗</span></a>` : ''}</div></div>
       <div class="geo-tabs" role="group" aria-label="Thèmes Géorisques">${[['natural','Risques naturels'],['prevention','Prévention & documents'],['history','CatNat & industrie']].map(([key,label])=>`<button type="button" data-geo-tab="${key}" aria-pressed="${tab===key}">${label}</button>`).join('')}</div>
       <p class="geo-tab-description">${tab === 'natural' ? 'Les repères naturels de la commune. Les couleurs du radon et de la sismicité correspondent aux classes publiées ; les inventaires ne mesurent pas le danger actuel.' : tab === 'prevention' ? 'Les risques connus et les documents pour préparer votre territoire.' : 'Les reconnaissances passées et les installations présentes sur le territoire.'}</p>
+      ${tab === 'prevention' ? documents(commune) : ''}
       <div class="geo-datasets">${tab === 'history' ? localServices() : keys.map(key => records(key, datasets[key] || {label:titles[key] || key})).join('')}</div>`;
   }
   function update(data, external, api) {

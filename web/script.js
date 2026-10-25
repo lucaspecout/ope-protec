@@ -2098,9 +2098,7 @@ function normalizeExternalUrl(value) {
 }
 
 function buildGeorisquesCommuneUrl(commune) {
-  const code = String(commune?.code_insee || commune?.insee || '').trim();
-  if (!code) return null;
-  return `https://www.georisques.gouv.fr/minformer-sur-un-risque?insee=${encodeURIComponent(code)}`;
+  return window.GeorisquesLinks.report(commune);
 }
 
 function buildGeorisquesApiSearchUrl(doc, commune) {
@@ -11551,34 +11549,7 @@ function georisquesSlugText(value) {
 }
 
 function buildGeorisquesMunicipalityUrl({ communeName = '', insee = '', postalCode = '', latitude = null, longitude = null } = {}) {
-  const safeName = String(communeName || '').trim();
-  const city = georisquesSlugText(safeName) || safeName;
-  const code = String(insee || '').trim();
-  const cp = String(postalCode || '').trim();
-  const lat = Number(latitude);
-  const lon = Number(longitude);
-  const hasCoordinates = Number.isFinite(lat) && Number.isFinite(lon);
-
-  const params = new URLSearchParams();
-  params.set('form-adresse', 'true');
-  params.set('isCadastre', 'false');
-  params.set('city', city);
-  params.set('type', 'adresse');
-  params.set('typeForm', 'adresse');
-  if (code) params.set('codeInsee', code);
-  if (hasCoordinates) {
-    params.set('lon', String(lon));
-    params.set('lat', String(lat));
-  }
-  params.set('go_back', '/');
-  params.set('propertiesType', 'municipality');
-  params.set('adresse', cp ? `${safeName}, ${cp} ${safeName}` : safeName);
-  if (hasCoordinates) {
-    params.set('longitude', String(lon));
-    params.set('latitude', String(lat));
-  }
-  params.set('commune', city);
-  return `https://www.georisques.gouv.fr/mes-risques/connaitre-les-risques-pres-de-chez-moi/rapport2?${params.toString()}`;
+  return window.GeorisquesLinks.report({name:communeName, code_insee:insee, postal_code:postalCode, latitude, longitude});
 }
 
 function renderGeorisquesPcsDetail(commune) {
@@ -11599,7 +11570,7 @@ function renderGeorisquesPcsRisks(monitored = []) {
     const insee = String(municipality.insee_code || '').trim();
     const byInsee = insee ? monitoredByKey.get(insee) : null;
     const byName = monitoredByName.get(String(municipality.name || '').trim().toLowerCase());
-    if (byInsee || byName) return byInsee || byName;
+    if (byInsee || byName) return {postal_code:municipality.postal_code || "", ...(byInsee || byName)};
     return {
       name: municipality.name || 'Commune inconnue',
       commune: municipality.name || 'Commune inconnue',
