@@ -16,7 +16,7 @@ import hashlib
 import json
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -60,6 +60,7 @@ from .schemas import (
     UserUpdate,
 )
 from .security import create_access_token, hash_password, verify_password, verify_and_upgrade, warmup_crypto
+from . import session_security
 from .operational_sources import fetch_enedis_isere_status, fetch_vigicrues_forecasts_isere
 from .territorial_sources import fetch_industrial_sites_isere, fetch_insee_population_grid
 from .weather_sources import fetch_meteo_observations_isere, fetch_meteo_radar_isere
@@ -310,9 +311,9 @@ with engine.begin() as conn:
 
 
 app = FastAPI(title=settings.app_name)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=[x.strip() for x in settings.cors_origins.split(',') if x.strip()], allow_credentials=True, allow_methods=["GET","POST","PATCH","PUT","DELETE","OPTIONS"], allow_headers=["Authorization","Content-Type","X-CSRF-Token","X-Session-Mode"])
 app.add_middleware(GZipMiddleware, minimum_size=800)
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 AUDIT_LOG_MAX_ROWS = 500
 
 
@@ -335,15 +336,17 @@ async def audit_log_middleware(request: Request, call_next):
         response = await call_next(request)
     except Exception as exc:
         logger.exception("Unhandled API error on %s %s", request.method, request.url.path)
-        return JSONResponse(
+        response = JSONResponse(
             status_code=500,
             content={
-                "detail": f"Erreur interne du serveur ({exc.__class__.__name__})",
-                "path": request.url.path,
-                "error": exc.__class__.__name__,
+                "detail": "Erreur interne du serveur. Réessayez dans quelques instants.",
             },
         )
     response.headers["Server-Timing"] = f"app;dur={(monotonic() - started_at) * 1000:.1f}"
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+    response.headers['Referrer-Policy'] = 'no-referrer'
+    response.headers['Cache-Control'] = 'no-store'
     method = request.method
     path = request.url.path
     should_log = (
@@ -357,9 +360,9 @@ async def audit_log_middleware(request: Request, call_next):
         resource_type = _path_resource_type(path)
         status_code = response.status_code
         details = json.dumps({
-            "query": str(request.url.query or ""),
+            "query_keys": sorted(set(request.query_params.keys())),
             "user_agent": str(request.headers.get("user-agent") or "")[:220],
-            "referer": str(request.headers.get("referer") or "")[:220],
+            "referer": str(request.headers.get("referer") or "").split('?')[0][:220],
         }, ensure_ascii=False)
 
         def _write():
@@ -582,7 +585,7 @@ def _check_and_record_alert(key: str, new_data: dict) -> None:
 def _get_request_username(request: Request) -> str:
     try:
         auth = request.headers.get("Authorization", "")
-        tok = auth[7:].strip() if auth.startswith("Bearer ") else ""
+        tok = request.cookies.get(session_security.COOKIE) or (auth[7:].strip() if auth.startswith("Bearer ") else "")
         if not tok:
             return "anonymous"
         payload = jwt.decode(tok, settings.secret_key, algorithms=["HS256"])
@@ -625,7 +628,7 @@ def compute_global_risk(*levels: str) -> str:
     for level in ("rouge", "orange", "jaune"):
         if level in normalized_levels:
             return level
-    return "vert"
+    return "vert" if "vert" in normalized_levels else "gris"
 
 
 def _risk_rank(level: str | None) -> int:
@@ -643,7 +646,8 @@ def _risk_level_from_score(score: int) -> str:
 
 
 def _max_level(*levels: str | None) -> str:
-    return max((str(level or "vert").lower() for level in levels), key=_risk_rank, default="vert")
+    known = [str(level).lower() for level in levels if str(level).lower() in ('vert','jaune','orange','rouge','noir')]
+    return max(known, key=_risk_rank, default="gris")
 
 
 def _safe_int(value: object, fallback: int = 0) -> int:
@@ -662,8 +666,8 @@ def _safe_float(value: object, fallback: float = 0.0) -> float:
 
 def compute_global_risk_details(
     *,
-    meteo_level: str | None = "vert",
-    crues_level: str | None = "vert",
+    meteo_level: str | None = None,
+    crues_level: str | None = None,
     external_risks: dict | None = None,
     crisis_count: int = 0,
 ) -> dict:
@@ -677,12 +681,12 @@ def compute_global_risk_details(
     meteo = risks.get("meteo_france") if isinstance(risks.get("meteo_france"), dict) else {}
 
     station_levels = [
-        str(station.get("level") or station.get("control_status") or "vert").lower()
+        str(station.get("level") or station.get("control_status") or "gris").lower()
         for station in (vigicrues.get("stations") or [])
         if isinstance(station, dict)
     ]
     troncon_levels = [
-        str(troncon.get("level") or "vert").lower()
+        str(troncon.get("level") or "gris").lower()
         for troncon in (vigicrues.get("troncons") or [])
         if isinstance(troncon, dict)
     ]
@@ -751,11 +755,13 @@ def compute_global_risk_details(
 
     score = max(0, min(100, score))
     level = _max_level(_risk_level_from_score(score), compute_global_risk(meteo_observed, crues_observed))
+    if not factors and meteo_observed == 'gris' and crues_observed == 'gris':
+        return {'level':'gris','score':None,'percent':None,'label':'Données insuffisantes','factors':[]}
     return {
         "level": level,
         "score": score,
         "percent": score,
-        "label": f"{score}%",
+        "label": f"{score}/100",
         "factors": factors[:8],
     }
 
@@ -825,18 +831,8 @@ def touch_user_site_access(user: User, db: Session, force: bool = False) -> None
     db.commit()
 
 
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
-    credentials_exception = HTTPException(status_code=401, detail="Invalid credentials")
-    try:
-        payload = jwt.decode(token, settings.secret_key, algorithms=["HS256"])
-        username = payload.get("sub")
-        if username is None:
-            raise credentials_exception
-    except JWTError as exc:
-        raise credentials_exception from exc
-    user = db.query(User).filter(User.username == username).first()
-    if not user:
-        raise credentials_exception
+def get_current_user(request: Request, token: str | None = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
+    user = session_security.authenticate(db, session_security.request_token(request, token))
     touch_user_site_access(user, db)
     return user
 
@@ -848,17 +844,7 @@ def get_active_user(user: User = Depends(get_current_user)) -> User:
 
 
 def get_user_from_token_value(token: str, db: Session) -> User:
-    credentials_exception = HTTPException(status_code=401, detail="Invalid credentials")
-    try:
-        payload = jwt.decode(token, settings.secret_key, algorithms=["HS256"])
-        username = payload.get("sub")
-        if username is None:
-            raise credentials_exception
-    except JWTError as exc:
-        raise credentials_exception from exc
-    user = db.query(User).filter(User.username == username).first()
-    if not user:
-        raise credentials_exception
+    user = session_security.authenticate(db, token)
     if user.must_change_password:
         raise HTTPException(403, "Changement du mot de passe obligatoire")
     touch_user_site_access(user, db)
@@ -1613,6 +1599,7 @@ def _service_scheduler() -> None:
 async def startup_capture_event_loop() -> None:
     """Capture la boucle asyncio pour pouvoir y soumettre des mises à jour SSE depuis les threads."""
     global _sse_risk_loop
+    session_security.validate_configuration()
     _sse_risk_loop = asyncio.get_running_loop()
 
 
@@ -1672,13 +1659,9 @@ def shutdown_background_refreshes() -> None:
 
 @app.get("/health")
 def healthcheck():
-    return {
-        "status": "ok",
-        "service": settings.app_name,
-        "deployment": "docker-ready",
-        "scope": "Département de l'Isère",
-        "project_validated": True,
-    }
+    from .health_status import readiness
+    payload, status = readiness(engine.url, _redis)
+    return JSONResponse(payload,status_code=status,headers={'Cache-Control':'no-store'})
 
 
 @app.get("/public/live")
@@ -1686,11 +1669,11 @@ def public_live_status(db: Session = Depends(get_db)):
     latest_station = db.query(RiverStation).order_by(RiverStation.updated_at.desc()).first()
     crisis_count = db.query(Municipality).filter(Municipality.crisis_mode.is_(True)).count()
 
-    crues_level = (latest_station.level if latest_station else "vert").lower()
+    crues_level = (latest_station.level if latest_station else "gris").lower()
 
     risks_snapshot = get_external_risks_payload(refresh=False)
     meteo = risks_snapshot.get("meteo_france") or {}
-    meteo_level = (meteo.get("level") or "vert").lower()
+    meteo_level = (meteo.get("level") or "gris").lower()
     vigicrues = risks_snapshot.get("vigicrues") or {}
     itinisere = risks_snapshot.get("itinisere") or {}
     bison_fute = risks_snapshot.get("bison_fute") or {}
@@ -1863,15 +1846,23 @@ def _authorize_stream_token(token: str) -> None:
 
 
 @app.get("/map/annotations/stream")
-async def stream_map_annotations(request: Request, token: str = Query(...)):
-    await asyncio.to_thread(_authorize_stream_token, token)
+async def stream_map_annotations(request: Request, bearer: str | None = Depends(oauth2_scheme)):
+    stream_token = session_security.request_token(request, bearer)
+    await asyncio.to_thread(_authorize_stream_token, stream_token)
 
     async def event_stream():
         last_sent = -1
         last_heartbeat = asyncio.get_running_loop().time()
+        last_auth = last_heartbeat
         while True:
             if await request.is_disconnected():
                 break
+            if asyncio.get_running_loop().time() - last_auth >= 30:
+                try:
+                    await asyncio.to_thread(_authorize_stream_token, stream_token)
+                except HTTPException:
+                    break
+                last_auth = asyncio.get_running_loop().time()
             with _map_annotations_revision_lock:
                 current_revision = _map_annotations_revision
             if current_revision != last_sent:
@@ -1893,9 +1884,10 @@ async def stream_map_annotations(request: Request, token: str = Query(...)):
 
 
 @app.get("/external/isere/risks/stream")
-async def stream_external_risks(request: Request, token: str = Query(...)):
+async def stream_external_risks(request: Request, bearer: str | None = Depends(oauth2_scheme)):
     """Envoie le snapshot courant, puis les mises à jour de chaque service."""
-    await asyncio.to_thread(_authorize_stream_token, token)
+    stream_token = session_security.request_token(request, bearer)
+    await asyncio.to_thread(_authorize_stream_token, stream_token)
 
     queue: asyncio.Queue = asyncio.Queue(maxsize=10)
     with _sse_risk_clients_lock:
@@ -1905,10 +1897,16 @@ async def stream_external_risks(request: Request, token: str = Query(...)):
         try:
             # Envoi immédiat du snapshot courant dès la connexion
             yield await asyncio.to_thread(_serialize_risk_event)
-
+            last_auth = asyncio.get_running_loop().time()
             while True:
                 if await request.is_disconnected():
                     break
+                if asyncio.get_running_loop().time() - last_auth >= 30:
+                    try:
+                        await asyncio.to_thread(_authorize_stream_token, stream_token)
+                    except HTTPException:
+                        break
+                    last_auth = asyncio.get_running_loop().time()
                 try:
                     yield await asyncio.wait_for(queue.get(), timeout=20.0)
                 except asyncio.TimeoutError:
@@ -2065,8 +2063,11 @@ def delete_user(user_id: int, db: Session = Depends(get_db), actor: User = Depen
 
 
 @app.post("/auth/login", response_model=LoginResponse)
-async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+async def login(request: Request, response: Response, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    session_security.check_origin(request)
     ip = _get_client_ip(request)
+    from .login_throttle import login_throttle
+    login_throttle.check(ip, form_data.username, _redis)
 
     def _audit(status: int, detail: str | None = None):
         def _write():
@@ -2135,12 +2136,15 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
     except SQLAlchemyError as exc:
         db.rollback()
         logger.exception("Database error during login for %s", username)
-        detail = sql_error_detail(exc)
-        _audit(500, f"Erreur base de donnees: {detail}")
-        raise HTTPException(500, f"Erreur base de donnees pendant la connexion ({detail})") from exc
+        _audit(503, "Base de donnees temporairement indisponible")
+        raise HTTPException(503, "Connexion temporairement indisponible. Réessayez dans quelques instants.") from exc
     _audit(200)
+    access_token = session_security.create_session(db, user)
+    browser_session = request.headers.get('x-session-mode') == 'cookie'
+    if browser_session:
+        session_security.set_cookies(response, request, access_token)
     return {
-        "access_token": create_access_token(user.username),
+        "access_token": 'cookie-session' if browser_session else access_token,
         "token_type": "bearer",
         "must_change_password": user.must_change_password,
         "user": user,
@@ -2153,8 +2157,32 @@ def auth_me(user: User = Depends(get_current_user), db: Session = Depends(get_db
     return user
 
 
+@app.post('/auth/session')
+def migrate_browser_session(request: Request, response: Response, bearer: str | None = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    session_security.check_origin(request)
+    existing = request.cookies.get(session_security.COOKIE)
+    if existing:
+        user = session_security.authenticate(db, session_security.request_token(request,bearer))
+        return {'status':'authenticated'}
+    user = session_security.authenticate(db,bearer or '',allow_legacy=True)
+    session_security.set_cookies(response,request,session_security.create_session(db,user))
+    return {'status':'authenticated'}
+
+
+@app.post('/auth/logout')
+def logout_session(request: Request, response: Response, bearer: str | None = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    session_security.check_origin(request)
+    if request.cookies.get(session_security.COOKIE):
+        token_value=session_security.request_token(request,bearer)
+    else:
+        token_value=bearer or ''
+    session_security.revoke(db,token_value)
+    session_security.clear_cookies(response)
+    return {'status':'logged_out'}
+
+
 @app.post("/auth/change-password")
-def change_password(payload: PasswordChangeRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def change_password(payload: PasswordChangeRequest, request: Request, response: Response, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     if user.auth_source == "ldap":
         raise HTTPException(400, "Le mot de passe LDAP se gere dans l'annuaire")
     if not verify_password(payload.current_password, user.hashed_password):
@@ -2163,6 +2191,8 @@ def change_password(payload: PasswordChangeRequest, db: Session = Depends(get_db
     user.hashed_password = hash_password(payload.new_password)
     user.must_change_password = False
     db.commit()
+    if request.cookies.get(session_security.COOKIE):
+        session_security.set_cookies(response,request,session_security.create_session(db,user))
     return {"status": "password_updated"}
 
 
@@ -2193,8 +2223,8 @@ def build_dashboard_payload(db: Session, user: User, external_risks: dict | None
         # Le scheduler alimente le snapshot. Un cache vide ne doit jamais
         # transformer le dashboard (ou le bootstrap) en appel réseau bloquant.
         meteo = {"status": "pending", "level": "gris"}
-    meteo_level = meteo.get("level") or "vert"
-    crues_level = river_level.level if river_level else "vert"
+    meteo_level = meteo.get("level") or "gris"
+    crues_level = river_level.level if river_level else "gris"
     global_risk_details = compute_global_risk_details(
         meteo_level=meteo_level,
         crues_level=crues_level,
@@ -2210,6 +2240,8 @@ def build_dashboard_payload(db: Session, user: User, external_risks: dict | None
         global_risk_details = {
             **global_risk_details,
             "level": "gris",
+            "score": None,
+            "percent": None,
             "label": "sync",
             "factors": [{"label": "Synchronisation", "points": 0, "detail": "Météo/crues en cours de mise à jour"}],
         }
@@ -2961,8 +2993,9 @@ def upload_municipality_file(
 
     base_dir = Path(settings.upload_dir) / "municipality-files" / str(municipality_id)
     base_dir.mkdir(parents=True, exist_ok=True)
-    final_path = base_dir / f"{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{safe_name}"
-    final_path.write_bytes(file.file.read())
+    from .upload_security import read_document, store_document
+    content = read_document(file.file,safe_name,settings.max_upload_bytes)
+    final_path = store_document(base_dir,safe_name,content)
 
     record = MunicipalityDocument(
         municipality_id=municipality_id,
@@ -2972,7 +3005,12 @@ def upload_municipality_file(
         uploaded_by_id=user.id,
     )
     db.add(record)
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        final_path.unlink(missing_ok=True)
+        raise
     db.refresh(record)
     return serialize_document(record, db)
 

@@ -1,9 +1,6 @@
 FROM python:3.12.15-slim
 
-# Configuration OpenSSL permissive pour les serveurs gouvernementaux avec TLS legacy
-# (opendata.isere.fr et autres retournent TLSV1_ALERT_INTERNAL_ERROR avec OpenSSL 3.0+ strict)
-COPY openssl-legacy.cnf /etc/ssl/legacy-openssl.cnf
-ENV OPENSSL_CONF=/etc/ssl/legacy-openssl.cnf
+# Certificate verification remains enabled, including the scoped TLS 1.2 adapter.
 
 WORKDIR /app
 COPY requirements.txt requirements.lock ./

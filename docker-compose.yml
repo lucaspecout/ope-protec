@@ -9,7 +9,7 @@ services:
     environment:
       POSTGRES_DB: veille
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run python scripts/prepare_security_env.py}
     volumes:
       - db_data:/var/lib/postgresql/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -50,7 +50,7 @@ services:
       - ./backend/app:/app/app:ro
       - ./backend/openssl-legacy.cnf:/etc/ssl/legacy-openssl.cnf:ro
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@db:5432/veille
+      DATABASE_URL: ${DATABASE_URL:?Run python scripts/prepare_security_env.py}
       REDIS_URL: redis://redis:6379/0
       DB_POOL_SIZE: ${DB_POOL_SIZE:-3}
       DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-3}
@@ -66,11 +66,14 @@ services:
       INSEE_POPULATION_CSV_URL: ${INSEE_POPULATION_CSV_URL:-https://www.insee.fr/fr/statistiques/fichier/8735162/Filosofi2021_carreaux_200m_csv.zip}
       INSEE_POPULATION_LOCAL_PATH: ${INSEE_POPULATION_LOCAL_PATH:-}
       INDUSTRIAL_SITES_CSV_URL: ${INDUSTRIAL_SITES_CSV_URL:-}
-      SECRET_KEY: change-me-in-production
-      GEORISQUES_API_TOKEN: ${GEORISQUES_API_TOKEN:-eyJhbGciOiJIUzI1NiJ9.eyJub20iOiJQRUNPVVQiLCJwcmVub20iOiJMdWNhcyBGZXJuYW5kIiwiZW1haWwiOiJsdWNhc3BlY291dEBnbWFpbC5jb20iLCJleHAiOjE4MDQ2MzY4MDAsImlhdCI6MTc3MzE0MDE1NX0.QZwqLatikYGopYKcUh3JhZHKE-xGAMlfrcAxy1jm980}
-      RTE_ECOWATT_B64: MzZlODVlNmEtMThmMi00MWUxLWEwZTItNjIyMDE3MzliMzNjOjAzMGExNmI5LWU2ZWItNDEwOC05ZDA4LTI3ZmQzYTdjMDkwZg==
-      RTE_CONSUMPTION_B64: MmU4YzhhMTQtMTcxMS00OTlmLWE5ZjItMmFlZWU0ODMzY2MzOjE0YjkxMWZhLTFmNmYtNDA1NC1hNjQ5LTc4MGMwZDM2YjQzZA==
-      FIRMS_MAP_KEY: e851c321ada39283c359d8df6c70989d
+      SECRET_KEY: ${SECRET_KEY:?Run python scripts/prepare_security_env.py}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-15728640}
+      GEORISQUES_API_TOKEN: ${GEORISQUES_API_TOKEN:-}
+      RTE_ECOWATT_B64: ${RTE_ECOWATT_B64:-}
+      RTE_CONSUMPTION_B64: ${RTE_CONSUMPTION_B64:-}
+      FIRMS_MAP_KEY: ${FIRMS_MAP_KEY:-}
       TOMTOM_API_KEY: ${TOMTOM_API_KEY:-}
       LDAP_ENABLED: ${LDAP_ENABLED:-true}
       LDAP_URL: ${LDAP_URL:-ldap://lldap:3890}

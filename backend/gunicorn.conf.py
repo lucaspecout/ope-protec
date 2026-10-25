@@ -27,6 +27,8 @@ graceful_timeout = 30
 preload_app = True
 
 accesslog = "-"
+# Exclude query strings, which may contain third-party credentials.
+access_log_format = '%(h)s %(m)s %(U)s %(s)s %(L)s'
 errorlog = "-"
 loglevel = "warning"
 

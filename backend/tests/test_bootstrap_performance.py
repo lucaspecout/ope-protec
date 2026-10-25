@@ -181,6 +181,7 @@ class DashboardTests(unittest.TestCase):
                 env["fetch_meteo_france_isere"].assert_not_called()
                 self.assertEqual(result["vigilance"], "gris")
                 self.assertEqual(result["global_risk"], "gris")
+                self.assertIsNone(result['global_risk_score'])
 
     def test_mairie_with_missing_municipality_cannot_read_departmental_logs(self):
         env, db, user = self.dashboard_environment(role="mairie")
@@ -231,6 +232,7 @@ class StreamTests(unittest.IsolatedAsyncioTestCase):
 
         env = {
             "asyncio": asyncio, "json": json, "HTTPException": FakeHTTPException,
+            "session_security": SimpleNamespace(request_token=lambda request,bearer: bearer),
             "SessionLocal": Mock(return_value=session),
             "get_user_from_token_value": Mock(side_effect=authenticate),
             "READ_ROLES": {"admin", "ope", "securite", "visiteur", "mairie"},
@@ -251,7 +253,7 @@ class StreamTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(handler=handler):
                 env, session, auth_threads = self.stream_environment()
                 request = SimpleNamespace(is_disconnected=AsyncMock(return_value=False))
-                response = await env[handler](request, token="test-token")
+                response = await env[handler](request, bearer="test-token")
                 self.assertTrue(session.closed)
                 self.assertNotEqual(auth_threads[0], threading.get_ident())
                 self.assertEqual(response.media_type, "text/event-stream")
@@ -269,7 +271,7 @@ class StreamTests(unittest.IsolatedAsyncioTestCase):
                 with self.subTest(handler=handler, status=status):
                     env, session, _ = self.stream_environment(role, auth_error)
                     with self.assertRaises(FakeHTTPException) as error:
-                        await env[handler](object(), token="test-token")
+                        await env[handler](object(), bearer="test-token")
                     self.assertEqual(error.exception.status_code, status)
                     self.assertTrue(session.closed)
                     env["StreamingResponse"].assert_not_called()
@@ -285,7 +287,7 @@ class StreamTests(unittest.IsolatedAsyncioTestCase):
 
         env["json"] = SimpleNamespace(dumps=encode)
         request = SimpleNamespace(is_disconnected=AsyncMock(return_value=False))
-        response = await env["stream_external_risks"](request, token="test-token")
+        response = await env["stream_external_risks"](request, bearer="test-token")
         frame = await anext(response.body_iterator)
         self.assertEqual(json.loads(frame.removeprefix("data: ")),
                          {"meteo_france": {"level": "vert"}})
@@ -314,7 +316,7 @@ class StreamTests(unittest.IsolatedAsyncioTestCase):
         env, _, _ = self.stream_environment()
         env["_sse_risk_loop"] = asyncio.get_running_loop()
         request = SimpleNamespace(is_disconnected=AsyncMock(return_value=False))
-        response = await env["stream_external_risks"](request, token="test-token")
+        response = await env["stream_external_risks"](request, bearer="test-token")
         await anext(response.body_iterator)
         full_client = asyncio.Queue(maxsize=1)
         full_client.put_nowait("older update")

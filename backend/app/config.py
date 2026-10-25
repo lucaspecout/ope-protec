@@ -1,4 +1,4 @@
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -8,6 +8,14 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379/0"
     secret_key: str = "change-me-in-production"
     access_token_expire_minutes: int = 1440
+    session_cookie_secure: bool | None = None
+    cors_origins: str = ''
+    max_upload_bytes: int = 15 * 1024 * 1024
+
+    @field_validator('session_cookie_secure', mode='before')
+    @classmethod
+    def empty_secure_is_automatic(cls, value):
+        return None if value == '' else value
     upload_dir: str = "/data/uploads"
     static_data_dir: str = "/data/static"
     # Persistent private key, outside served/static directories. Back up with DB.
@@ -57,6 +65,7 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
+        extra = 'ignore'
 
 
 settings = Settings()

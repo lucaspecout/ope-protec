@@ -31,12 +31,7 @@ import warnings as _warnings
 # Supprimer les avertissements de version urllib3/requests (conflit de packaging)
 _warnings.filterwarnings("ignore", message="urllib3.*doesn't match a supported version", category=Warning)
 _warnings.filterwarnings("ignore", message="charset_normalizer.*doesn't match", category=Warning)
-# Supprimer les avertissements SSL pour les hôtes externes sans cert valide
-try:
-    import urllib3 as _urllib3
-    _urllib3.disable_warnings(_urllib3.exceptions.InsecureRequestWarning)
-except Exception:
-    pass
+# Certificate warnings remain enabled for external HTTPS hosts.
 
 try:
     import requests as _requests
@@ -143,58 +138,27 @@ def _is_retryable_network_error(exc: Exception) -> bool:
 
 
 def _make_legacy_ssl_context() -> ssl.SSLContext:
-    """Contexte SSL pour serveurs avec TLS legacy (ex. opendata.isere.fr).
-    - Désactive la vérification de certificat
-    - Force TLS 1.2 exactement (min=max=TLS1.2) pour éviter TLSV1_ALERT_INTERNAL_ERROR
-    - Autorise la renégociation legacy (OpenSSL 3.0+)
-    - SECLEVEL=0 + suites larges pour accepter les chiffrement faibles des vieux serveurs"""
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    ctx.set_ciphers("ALL:@SECLEVEL=0")
-    try:
-        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
-        ctx.maximum_version = ssl.TLSVersion.TLSv1_2
-    except AttributeError:
-        pass
-    legacy_flag = getattr(ssl, "OP_LEGACY_SERVER_CONNECT", 0)
-    if legacy_flag:
-        ctx.options |= legacy_flag
-    no_tls13_flag = getattr(ssl, "OP_NO_TLSv1_3", 0)
-    if no_tls13_flag:
-        ctx.options |= no_tls13_flag
+    """TLS 1.2 compatibility while preserving certificate and hostname verification."""
+    ctx = ssl.create_default_context()
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    ctx.maximum_version = ssl.TLSVersion.TLSv1_2
     return ctx
 
 
 class _TLS12Adapter(_requests.adapters.HTTPAdapter):
-    """HTTPAdapter qui force TLS 1.2 exactement + SECLEVEL=0.
+    """HTTPAdapter qui force TLS 1.2 avec validation des certificats.
     Nécessaire pour les serveurs gouv (opendata.isere.fr) qui rejettent TLS 1.3
     avec TLSV1_ALERT_INTERNAL_ERROR depuis Docker/Linux OpenSSL 3.x."""
     def init_poolmanager(self, *args: Any, **kwargs: Any) -> None:
-        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        ctx.set_ciphers("ALL:@SECLEVEL=0")
-        try:
-            ctx.minimum_version = ssl.TLSVersion.TLSv1_2
-            ctx.maximum_version = ssl.TLSVersion.TLSv1_2
-        except AttributeError:
-            pass
-        legacy_flag = getattr(ssl, "OP_LEGACY_SERVER_CONNECT", 0)
-        if legacy_flag:
-            ctx.options |= legacy_flag
-        no_tls13_flag = getattr(ssl, "OP_NO_TLSv1_3", 0)
-        if no_tls13_flag:
-            ctx.options |= no_tls13_flag
-        kwargs["ssl_context"] = ctx
-        super().init_poolmanager(*args, **kwargs)  # type: ignore[misc]
+        kwargs["ssl_context"] = _make_legacy_ssl_context()
+        super().init_poolmanager(*args, **kwargs)
 
 
 def _requests_get_tls12(url: str, *, headers: dict[str, str] | None = None, timeout: int = 15) -> Any:
     """GET via requests en forçant TLS 1.2 max. Pour serveurs legacy gouv."""
     session = _requests.Session()
     session.mount("https://", _TLS12Adapter())
-    resp = session.get(url, headers=headers or {}, timeout=timeout, verify=False)
+    resp = session.get(url, headers=headers or {}, timeout=timeout, verify=True)
     resp.raise_for_status()
     return resp
 
@@ -8428,11 +8392,11 @@ _APRR_ROAD_PATTERN = re.compile(r'\b(A41|A43|A48|A49|A51|A480)\b', re.IGNORECASE
 
 # URL de la synthèse nationale Bison Futé — inclut DATEX2 de APRR/AREA/Escota (réseau concédé)
 _BISON_RECAP_URL = (
-    "http://tipi.bison-fute.gouv.fr/bison-fute-ouvert/publicationsDIR/"
+    "https://tipi.bison-fute.gouv.fr/bison-fute-ouvert/publicationsDIR/"
     "Evenementiel-DIR/cnir/RecapTraficFranceEntiere.html"
 )
 _BISON_RECAP_BOUCHONS_URL = (
-    "http://tipi.bison-fute.gouv.fr/bison-fute-ouvert/publicationsDIR/"
+    "https://tipi.bison-fute.gouv.fr/bison-fute-ouvert/publicationsDIR/"
     "Evenementiel-DIR/cnir/RecapBouchonsFranceEntiere.html"
 )
 
@@ -8723,7 +8687,7 @@ def _fetch_aprr_isere_live() -> dict[str, Any]:
         recap_events: list[dict[str, Any]] = []
         for recap_url in recap_urls:
             if _REQUESTS_OK and _requests is not None:
-                resp = _requests.get(recap_url, headers=hdrs, timeout=20, verify=False)
+                resp = _requests.get(recap_url, headers=hdrs, timeout=20, verify=True)
                 resp.raise_for_status()
                 try:
                     html = resp.content.decode("utf-8")
@@ -8870,7 +8834,7 @@ def _fetch_mreseau_live() -> dict[str, Any]:
     try:
         html = ""
         if _REQUESTS_OK and _requests is not None:
-            resp = _requests.get(_MRESEAU_INFOTRAFIC_URL, headers=_hdrs, timeout=15, verify=False)
+            resp = _requests.get(_MRESEAU_INFOTRAFIC_URL, headers=_hdrs, timeout=15, verify=True)
             resp.raise_for_status()
             html = resp.text
         else:
@@ -9652,7 +9616,7 @@ def _fetch_cars_region_live() -> dict[str, Any]:
         query_url = f"{_SCHEDULES_URL}?search={quote_plus(search_term)}"
         try:
             if _REQUESTS_OK and _requests is not None:
-                resp = _requests.get(query_url, headers=_hdrs_html, timeout=20, verify=False)
+                resp = _requests.get(query_url, headers=_hdrs_html, timeout=20, verify=True)
                 resp.raise_for_status()
                 html = resp.text
             else:
@@ -9693,7 +9657,7 @@ def _fetch_cars_region_live() -> dict[str, Any]:
     try:
         html = ""
         if _REQUESTS_OK and _requests is not None:
-            resp = _requests.get(_SCHEDULES_URL, headers=_hdrs_html, timeout=20, verify=False)
+            resp = _requests.get(_SCHEDULES_URL, headers=_hdrs_html, timeout=20, verify=True)
             resp.raise_for_status()
             html = resp.text
         else:

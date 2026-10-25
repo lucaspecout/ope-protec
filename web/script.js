@@ -259,7 +259,12 @@ const RESOURCE_POINTS = [
   { id: 'pc-hautes-alpes-briancon', name: 'Antenne des Hautes-Alpes — Protection Civile', type: 'protection_civile', active: true, lat: 44.89663846389449, lon: 6.635444741586887, address: '6 place Paul Blein, 05100 Briançon', priority: 'vital', info: 'Antenne Protection Civile des Hautes-Alpes.', source: '' },
 ];
 
-let token = localStorage.getItem(STORAGE_KEYS.token);
+const COOKIE_SESSION = 'cookie-session';
+function sessionCsrfToken() {
+  const entry = String(document.cookie || '').split(';').map(value => value.trim()).find(value => value.startsWith('pc_csrf='));
+  return entry ? decodeURIComponent(entry.slice(8)) : '';
+}
+let token = localStorage.getItem(STORAGE_KEYS.token) || (sessionCsrfToken() ? COOKIE_SESSION : null);
 let currentUser = null;
 window.ApiCredentials?.configure({ api, isAdmin: () => Boolean(token) && canManageUsers() });
 const MAIRIE_ALLOWED_PANELS = new Set([
@@ -1697,14 +1702,14 @@ function riskRank(level) {
 function globalRiskPercent(dashboard = {}) {
   const raw = dashboard.global_risk_percent ?? dashboard.global_risk_score;
   const score = Number(raw);
-  if (Number.isFinite(score)) return Math.max(0, Math.min(100, Math.round(score)));
-  const fallback = { vert: 8, jaune: 35, orange: 65, rouge: 90 }[normalizeLevel(dashboard.global_risk)];
-  return fallback ?? 0;
+  if (raw !== null && raw !== undefined && raw !== '' && Number.isFinite(score)) return Math.max(0, Math.min(100, Math.round(score)));
+  return null;
 }
 
 function formatGlobalRiskValue(dashboard = {}) {
-  const level = normalizeLevel(dashboard.global_risk || dashboard.vigilance || 'vert');
-  return `${globalRiskPercent(dashboard)}% · ${level}`;
+  const level = normalizeLevel(dashboard.global_risk || dashboard.vigilance);
+  const score = globalRiskPercent(dashboard);
+  return score === null ? (level === 'gris' ? 'Indisponible' : level) : `${score}/100 · ${level}`;
 }
 
 function buildGlobalRiskFactorsMarkup(dashboard = {}) {
@@ -2627,6 +2632,13 @@ function queueApiRequest(task) {
 }
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = API_REQUEST_TIMEOUT_MS, consumeResponse = null) {
+  const requestOrigin = new URL(url, window.location.origin).origin;
+  if (requestOrigin === window.location.origin) {
+    options = {...options, credentials:'same-origin', headers:{...(options.headers || {})}};
+    if (!['GET','HEAD','OPTIONS'].includes(String(options.method || 'GET').toUpperCase()) && sessionCsrfToken()) {
+      options.headers['X-CSRF-Token'] = sessionCsrfToken();
+    }
+  }
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -2661,7 +2673,7 @@ async function requestApiAcrossOrigins(path, fetchOptions = {}, {
 } = {}) {
   const headers = { 'Connection': 'keep-alive', ...(fetchOptions.headers || {}) };
   const method = String(fetchOptions.method || 'GET').toUpperCase();
-  if (token && !fetchOptions.omitAuth) headers.Authorization = `Bearer ${token}`;
+  if (token && token !== COOKIE_SESSION && !fetchOptions.omitAuth) headers.Authorization = `Bearer ${token}`;
 
   let lastError = null;
   const isLoginRequest = String(path || '').startsWith('/auth/login');
@@ -2770,7 +2782,7 @@ async function parseJsonResponse(response, path = '') {
 
 async function apiFile(path) {
   const headers = {};
-  if (token) headers.Authorization = `Bearer ${token}`;
+  if (token && token !== COOKIE_SESSION) headers.Authorization = `Bearer ${token}`;
 
   let lastError = null;
   for (const origin of apiOrigins()) {
@@ -2956,7 +2968,7 @@ async function _refreshAgentMarkers() {
   let agents = [];
   try {
     const origin = apiOrigins()[0];
-    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+    const headers = token && token !== COOKIE_SESSION ? { Authorization: `Bearer ${token}` } : {};
     const res = await fetch(`${origin}/agents/locations`, { headers });
     if (!res.ok) {
       _setAgentFilterStatus(`Erreur HTTP ${res.status}`, '#c62828');
@@ -3005,8 +3017,8 @@ async function _geoSendPosition(lat, lon, accuracy) {
   try {
     const origin = apiOrigins()[0];
     const headers = { 'Content-Type': 'application/json' };
-    if (token) headers.Authorization = `Bearer ${token}`;
-    const res = await fetch(`${origin}/agents/location`, {
+    if (token && token !== COOKIE_SESSION) headers.Authorization = `Bearer ${token}`;
+    const res = await fetchWithTimeout(`${origin}/agents/location`, {
       method: 'PUT',
       headers,
       body: JSON.stringify({ name: _geoState.name, lat, lon, accuracy }),
@@ -9852,7 +9864,7 @@ function stopMapAnnotationsSync() {
 function startMapAnnotationsSync() {
   stopMapAnnotationsSync();
   if (!token || typeof window.EventSource === 'undefined') return;
-  mapAnnotationsSync = new window.EventSource(`/map/annotations/stream?token=${encodeURIComponent(token)}`);
+  mapAnnotationsSync = new window.EventSource(`/map/annotations/stream`);
   mapAnnotationsSync.onmessage = async () => {
     await loadMapAnnotations();
   };
@@ -9889,7 +9901,7 @@ function scheduleExternalRisksRender({ map = false } = {}) {
 function startExternalRisksSSE() {
   stopExternalRisksSSE();
   if (!token || typeof window.EventSource === 'undefined') return;
-  externalRisksSSE = new window.EventSource(`/external/isere/risks/stream?token=${encodeURIComponent(token)}`);
+  externalRisksSSE = new window.EventSource(`/external/isere/risks/stream`);
   externalRisksSSE.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data);
@@ -11743,7 +11755,8 @@ function uploadMunicipalityDocument(origin, municipalityId, formData, onProgress
     xhr.open('POST', url, true);
     xhr.timeout = 90000;
     xhr.setRequestHeader('Accept', 'application/json');
-    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    if (token && token !== COOKIE_SESSION) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    if (sessionCsrfToken()) xhr.setRequestHeader('X-CSRF-Token', sessionCsrfToken());
     xhr.upload.onprogress = (event) => {
       if (!event.lengthComputable || typeof onProgress !== 'function') return;
       onProgress(Math.round((event.loaded / event.total) * 100));
@@ -17454,7 +17467,16 @@ function bindAppInteractions() {
 }
 
 
-function logout() {
+async function logout() {
+  try {
+    const response = await fetchWithTimeout('/auth/logout', {method:'POST', headers: token && token !== COOKIE_SESSION ? {Authorization:`Bearer ${token}`} : {}}, 3000);
+    if (!response.ok) throw new Error('Déconnexion non confirmée par le serveur');
+  } catch (_) {
+    if (token === COOKIE_SESSION && sessionCsrfToken()) {
+      _notifToast('Déconnexion non confirmée : vérifiez le réseau puis réessayez.', 'error');
+      return;
+    }
+  }
   window.OfficialSources?.reset();
   window.PublicSources?.reset();
   window.SourceExplorer?.reset();
@@ -18052,7 +18074,7 @@ loginForm.addEventListener('submit', async (event) => {
       const payload = new URLSearchParams({ username, password });
       const result = await api('/auth/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Session-Mode': 'cookie' },
         body: payload,
         logoutOn401: false,
         omitAuth: true,
@@ -18064,7 +18086,7 @@ loginForm.addEventListener('submit', async (event) => {
       _setLoginStatus('');
       token = result.access_token;
       clearApiCache();
-      localStorage.setItem(STORAGE_KEYS.token, token);
+      localStorage.removeItem(STORAGE_KEYS.token);
       pendingCurrentPassword = password;
       currentUser = result.user;
 
@@ -18433,6 +18455,12 @@ function updateOfflineBanner() {
   try {
     // 1 seule tentative, timeout court — on ne bloque pas l'utilisateur.
     // Si le serveur est lent au démarrage, l'utilisateur peut se connecter manuellement.
+    if (token && token !== COOKIE_SESSION) {
+      await api('/auth/session', {method:'POST', timeoutMs:SESSION_RESTORE_TIMEOUT_MS, maxRetries:0});
+      token = COOKIE_SESSION;
+      localStorage.removeItem(STORAGE_KEYS.token);
+      clearApiCache();
+    }
     currentUser = await api('/auth/me', {
       timeoutMs: SESSION_RESTORE_TIMEOUT_MS,
       maxRetries: 0,
@@ -19231,7 +19259,7 @@ function renderAuditDetails(log) {
     exportLink.addEventListener('click', async (e) => {
       e.preventDefault();
       const url = '/api/audit/export/csv?days=30';
-      const response = await queueApiRequest(() => fetchWithTimeout(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} }));
+      const response = await queueApiRequest(() => fetchWithTimeout(url, { headers: token && token !== COOKIE_SESSION ? { Authorization: `Bearer ${token}` } : {} }));
       if (!response.ok) {
         const summary = document.getElementById('audit-summary');
         if (summary) summary.innerHTML = `<span class="error">Export impossible (${response.status})</span>`;

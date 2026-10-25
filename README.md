@@ -21,8 +21,11 @@ Les stations-service, les observations ONDE, les historiques CatNat, l’électr
 ## Démarrage rapide
 
 ```bash
+python3 scripts/prepare_security_env.py
 docker compose up -d --build
 ```
+
+Les protections des sessions, les fichiers privés à sauvegarder et les vérifications de mise en service sont détaillés dans le [guide de sécurité](docs/securite.md).
 
 Ou via script:
 

@@ -9,7 +9,8 @@ const tick = () => new Promise((resolve) => setImmediate(resolve));
 
 function harness(fetch) {
   const context = vm.createContext({
-    fetch, AbortController, setTimeout, clearTimeout,
+    fetch, AbortController, setTimeout, clearTimeout, URL,
+    COOKIE_SESSION: 'cookie-session', sessionCsrfToken: () => '',
     API_REQUEST_TIMEOUT_MS: 5000,
     API_MAX_CONCURRENT_REQUESTS: 1,
     API_MAX_RETRIES_GET: 0, API_MAX_RETRIES_NON_GET: 0,
@@ -114,4 +115,23 @@ test('callers without a reader still receive the original Response', async () =>
   const context = harness(async () => response);
   assert.equal(await context.fetchWithTimeout('/download'), response);
   assert.equal(await response.blob(), 'fixture-download');
+});
+
+test('same-origin mutations attach the current CSRF cookie without exposing a bearer token', async () => {
+  let sent;
+  const context = harness(async (_url, options) => { sent = options; return { ok: true }; });
+  context.sessionCsrfToken = () => 'csrf-fixture';
+  await context.fetchWithTimeout('/auth/logout', { method: 'POST' });
+  assert.equal(sent.credentials, 'same-origin');
+  assert.equal(sent.headers['X-CSRF-Token'], 'csrf-fixture');
+  assert.equal(sent.headers.Authorization, undefined);
+});
+
+test('third-party requests never receive the session CSRF token', async () => {
+  let sent;
+  const context = harness(async (_url, options) => { sent = options; return { ok: true }; });
+  context.sessionCsrfToken = () => 'csrf-fixture';
+  await context.fetchWithTimeout('https://other.example.test/data', { method: 'POST' });
+  assert.equal(sent.credentials, undefined);
+  assert.equal(sent.headers?.['X-CSRF-Token'], undefined);
 });
