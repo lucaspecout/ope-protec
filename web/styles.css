@@ -7644,3 +7644,6 @@ body {
 
 .audit-noise-toggle { display: flex; align-items: center; gap: .5rem; margin: .6rem 0; font-size: .85rem; color: var(--muted); }
 .audit-noise-toggle input { width: auto; margin: 0; }
+
+.situation-alert-map .situation-mini-map > [hidden] { display: none !important; }
+.situation-fire-map-message { min-height: 232px; display: grid; place-content: center; margin: 0; padding: 1rem; text-align: center; color: var(--muted); }

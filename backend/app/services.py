@@ -24,6 +24,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 import xml.etree.ElementTree as ET
 import zipfile
 from zoneinfo import ZoneInfo
+from .forest_fire_map import publication_state
 
 from PIL import Image
 
@@ -568,18 +569,20 @@ _forest_fire_map_cache: dict[str, Any] = {"payload": None, "expires_at": datetim
 def fetch_forest_fire_map_isere(force_refresh: bool = False) -> dict[str, Any]:
     """Retourne l'image de la carte quotidienne publiée par la préfecture de l'Isère."""
     now = datetime.utcnow()
+    today = now.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo("Europe/Paris")).date().isoformat()
     with _forest_fire_map_cache_lock:
         cached = _forest_fire_map_cache.get("payload")
-        if not force_refresh and cached and _forest_fire_map_cache["expires_at"] > now:
+        if not force_refresh and cached and cached.get("checked_date") == today and _forest_fire_map_cache["expires_at"] > now:
             return deepcopy(cached)
 
     try:
         html = _http_get_text(_FOREST_FIRE_MAP_PAGE_URL, timeout=15, retries=2)
+        state = publication_state(html, now.replace(tzinfo=ZoneInfo("UTC")))
         image_matches = re.findall(r'<img[^>]+src=["\']([^"\']+_imagefull\.(?:jpg|jpeg|png))["\']', html, re.IGNORECASE)
         fire_image = next((src for src in image_matches if "alea-incendie" in unquote(src).lower()), "")
         if not fire_image and image_matches:
             fire_image = image_matches[0]
-        if not fire_image:
+        if not fire_image and state["status"] == "online":
             raise ValueError("Image quotidienne incendie introuvable")
 
         download_match = re.search(
@@ -589,12 +592,13 @@ def fetch_forest_fire_map_isere(force_refresh: bool = False) -> dict[str, Any]:
         )
         title_match = re.search(r'Télécharger\s+(Carte quotidienne de l[^<]+)', html, re.IGNORECASE)
         payload = {
-            "status": "online",
-            "image_url": urljoin(_FOREST_FIRE_MAP_PAGE_URL, unescape(fire_image)),
+            **state,
+            "image_url": urljoin(_FOREST_FIRE_MAP_PAGE_URL, unescape(fire_image)) if state["status"] == "online" else None,
             "page_url": _FOREST_FIRE_MAP_PAGE_URL,
-            "pdf_url": urljoin(_FOREST_FIRE_MAP_PAGE_URL, unescape(download_match.group(1))) if download_match else None,
+            "pdf_url": urljoin(_FOREST_FIRE_MAP_PAGE_URL, unescape(download_match.group(1))) if download_match and state["status"] == "online" else None,
             "title": unescape(re.sub(r"\s+", " ", title_match.group(1)).strip()) if title_match else "Carte quotidienne de l'aléa incendie",
-            "updated_at": now.isoformat() + "Z",
+            "updated_at": state["source_date"],
+            "checked_at": now.isoformat() + "Z",
         }
     except Exception as exc:
         payload = {
@@ -604,7 +608,11 @@ def fetch_forest_fire_map_isere(force_refresh: bool = False) -> dict[str, Any]:
             "pdf_url": None,
             "title": "Carte quotidienne de l'aléa incendie indisponible",
             "error": str(exc),
-            "updated_at": now.isoformat() + "Z",
+            "updated_at": None,
+            "source_date": None,
+            "checked_at": now.isoformat() + "Z",
+            "checked_date": today,
+            "message": "Carte temporairement indisponible",
         }
 
     with _forest_fire_map_cache_lock:
