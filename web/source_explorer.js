@@ -215,14 +215,19 @@
     if (previous) document.querySelector(`[data-source-open="${previous}"]`)?.focus({ preventScroll: true });
   }
   function update(snapshot = {}) {
+    const visible = localStorage.getItem('activePanel') === 'official-sources-panel' && !document.hidden;
     let changed = false;
     SOURCES.forEach(source => {
       const derived = source.key === 'autoroutes_isere';
       if (derived && !['bison_fute', 'aprr_isere', 'vinci_autoroutes'].some(key => key in snapshot)) return;
       const payload = derived ? payloadForService(source.key, snapshot) : snapshot[source.key];
-      if (payload && typeof payload === 'object' && JSON.stringify(payload) !== JSON.stringify(state.snapshot[source.key])) { state.snapshot[source.key] = payload; changed = true; }
+      if (!payload || typeof payload !== 'object') return;
+      // Hidden catalogues only retain the newest data, avoiding serialization
+      // of all services and DOM updates on each SSE notification.
+      if (!visible) { state.snapshot[source.key] = payload; return; }
+      if (JSON.stringify(payload) !== JSON.stringify(state.snapshot[source.key])) { state.snapshot[source.key] = payload; changed = true; }
     });
-    if (changed) render();
+    if (changed && visible) render();
   }
   function reset() {
     ++state.session;

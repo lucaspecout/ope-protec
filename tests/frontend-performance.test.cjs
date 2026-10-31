@@ -333,6 +333,9 @@ test('navigation and focus refresh read snapshots without forcing external provi
     loadExternalRisks: record('risks', Promise.resolve()),
     requestPriorityServicesForPanel: () => { throw new Error('Unexpected provider refresh'); },
   });
+  loadFunction(context, 'activatePanelContent');
+  context.schedulePanelActivation = (panel, refresh) => context.activatePanelContent(panel, refresh);
+  context.renderSituationOverview = () => {};
   loadFunction(context, 'setActivePanel');
   loadFunction(context, 'refreshActivePanelData');
   context.setActivePanel('situation-panel', { refreshSnapshot: false });
@@ -468,4 +471,104 @@ test('SSE bursts schedule one prompt render and retain map updates across later 
   context.scheduleExternalRisksRender();
   scheduled[1]();
   assert.equal(calls.filter(([name]) => name === 'map').length, 1);
+});
+
+test('navigation paints before activation and discards superseded menu clicks', () => {
+  const frames = [], tasks = [], activations = [];
+  const context = vm.createContext({
+    panelActivationVersion: 0,
+    window: { requestAnimationFrame: fn => frames.push(fn), setTimeout: fn => tasks.push(fn) },
+    activatePanelContent: (...args) => activations.push(args),
+  });
+  loadFunction(context, 'schedulePanelActivation');
+  context.schedulePanelActivation('map-panel', true);
+  context.schedulePanelActivation('logs-panel', true);
+  assert.equal(activations.length, 0);
+  frames.forEach(fn => fn());
+  assert.equal(activations.length, 0, 'heavy work must not run in the animation frame');
+  tasks.forEach(fn => fn());
+  assert.deepEqual(activations, [['logs-panel', true]]);
+});
+
+test('hidden Situation never builds its full dashboard markup', () => {
+  const context = vm.createContext({
+    document: { hidden: false, getElementById: id => {
+      assert.equal(id, 'situation-panel');
+      return { hidden: true };
+    } },
+  });
+  loadFunction(context, '_renderSituationOverview');
+  context._renderSituationOverview();
+});
+
+test('live risks use the current memory snapshot without parsing the offline copy', async () => {
+  const calls = [];
+  const context = vm.createContext({
+    cachedExternalRisksSnapshot: { meteo_france: { status: 'online' } },
+    STORAGE_KEYS: { externalRisksSnapshot: 'risks' }, API_CACHE_TTL_MS: 5000, API_SLOW_ENDPOINT_TIMEOUT_MS: 30000,
+    readSnapshot: () => assert.fail('Unnecessary offline JSON parse'),
+    api: async () => ({ meteo_france: { status: 'online', level: 'jaune' } }),
+    mergeExternalRisksSnapshot: (previous, next) => ({ ...previous, ...next }),
+    renderExternalRisks: data => calls.push(data), saveSnapshot() {}, isMapPanelActive: () => false,
+  });
+  loadFunction(context, 'loadExternalRisks');
+  await context.loadExternalRisks();
+  assert.equal(calls.length, 1);
+  assert.equal(context.cachedExternalRisksSnapshot.meteo_france.level, 'jaune');
+});
+
+test('large offline snapshots coalesce while operational pending logs remain synchronous', () => {
+  const idle = [], writes = [];
+  const context = vm.createContext({
+    pendingSnapshotWrites: new Map(), snapshotWriteScheduled: false,
+    STORAGE_KEYS: { externalRisksSnapshot: 'risks', apiInterconnectionsSnapshot: 'api', dashboardSnapshot: 'dashboard', usersSnapshot: 'users' },
+    window: { requestIdleCallback: fn => idle.push(fn) },
+    localStorage: { setItem: (key, value) => writes.push([key, JSON.parse(value)]), getItem: () => null },
+  });
+  for (const name of ['scheduleSnapshotWrite', 'saveSnapshot', 'readSnapshotRecord', 'flushPendingSnapshots']) loadFunction(context, name);
+  context.saveSnapshot('risks', { version: 1 });
+  context.saveSnapshot('risks', { version: 2 });
+  context.saveSnapshot('dashboard', { version: 3 });
+  assert.equal(writes.length, 0);
+  assert.equal(context.readSnapshotRecord('risks').payload.version, 2);
+  assert.equal(idle.length, 1);
+  context.saveSnapshot('pending-logs', [{ id: 'local' }]);
+  assert.equal(writes.length, 1, 'unsent operational data must persist immediately');
+  idle.shift()();
+  assert.equal(writes.length, 2, 'only one large snapshot per task');
+  assert.equal(writes[1][1].payload.version, 2);
+  context.flushPendingSnapshots();
+  assert.equal(writes.length, 3, 'pagehide persists the remaining snapshot');
+  idle.shift()();
+  assert.equal(writes.length, 3, 'already flushed idle callbacks are safe');
+  context.saveSnapshot('users', [{ secret: true }]);
+  assert.equal(writes.length, 3, 'user snapshots remain excluded');
+});
+
+test('hidden Interconnections avoids all signatures and raw JSON rendering', () => {
+  const context = vm.createContext({
+    document: { hidden: false, getElementById: () => ({ hidden: true }) },
+    createPayloadSignature: () => assert.fail('Hidden page serialized all services'),
+  });
+  loadFunction(context, 'renderApiInterconnections');
+  assert.equal(context.renderApiInterconnections({ large: [] }), false);
+});
+
+test('raw JSON is generated only for an explicitly expanded service', () => {
+  const rendered = [];
+  const pre = { innerHTML: '' };
+  const details = { matches: () => true, open: false, dataset: {serviceKey: 'example'}, querySelector: () => pre };
+  const context = vm.createContext({
+    FLUX_SERVICES: [{key: 'example'}], cachedExternalRisksSnapshot: {example: {version: 2}},
+    getFluxPayload: (key, data) => data[key],
+    formatApiJson: data => { rendered.push(data); return 'formatted'; },
+  });
+  loadFunction(context, 'renderApiRawDetails');
+  context.renderApiRawDetails({target: details});
+  assert.equal(rendered.length, 0);
+  details.open = true;
+  context.renderApiRawDetails({target: details});
+  assert.equal(rendered.length, 1);
+  assert.equal(rendered[0].version, 2);
+  assert.equal(pre.innerHTML, 'formatted');
 });

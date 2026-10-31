@@ -2472,14 +2472,48 @@ function normalizeApiErrorMessage(payload, status) {
 
 
 // Cache local horodaté pour assurer la continuité en mode dégradé.
+const pendingSnapshotWrites = new Map();
+let snapshotWriteScheduled = false;
+
+function scheduleSnapshotWrite() {
+  if (snapshotWriteScheduled || !pendingSnapshotWrites.size) return;
+  snapshotWriteScheduled = true;
+  const flush = () => {
+    snapshotWriteScheduled = false;
+    if (!pendingSnapshotWrites.size) return;
+    const [key, record] = pendingSnapshotWrites.entries().next().value;
+    pendingSnapshotWrites.delete(key);
+    try { localStorage.setItem(key, JSON.stringify(record)); } catch (_) {}
+    // At most one large snapshot per task; newer saves replace queued versions.
+    scheduleSnapshotWrite();
+  };
+  if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(flush, { timeout: 1000 });
+  else window.setTimeout(flush, 50);
+}
+
+function flushPendingSnapshots() {
+  for (const [key, record] of pendingSnapshotWrites) {
+    try { localStorage.setItem(key, JSON.stringify(record)); } catch (_) {}
+  }
+  pendingSnapshotWrites.clear();
+}
+
+window.addEventListener('pagehide', flushPendingSnapshots);
+
 function saveSnapshot(key, payload) {
   if (key === STORAGE_KEYS.usersSnapshot) return;
+  if ([STORAGE_KEYS.externalRisksSnapshot, STORAGE_KEYS.apiInterconnectionsSnapshot, STORAGE_KEYS.dashboardSnapshot].includes(key)) {
+    pendingSnapshotWrites.set(key, { savedAt: new Date().toISOString(), payload });
+    scheduleSnapshotWrite();
+    return;
+  }
   try {
     localStorage.setItem(key, JSON.stringify({ savedAt: new Date().toISOString(), payload }));
   } catch (_) {}
 }
 function readSnapshotRecord(key) {
   if (key === STORAGE_KEYS.usersSnapshot) return null;
+  if (pendingSnapshotWrites.has(key)) return pendingSnapshotWrites.get(key);
   try {
     const parsed = JSON.parse(localStorage.getItem(key) || 'null');
     return parsed && typeof parsed === 'object' && 'payload' in parsed ? parsed : null;
@@ -3195,6 +3229,19 @@ async function ensureMapReady() {
   return leafletMap;
 }
 
+let panelActivationVersion = 0;
+
+function schedulePanelActivation(panelId, refreshSnapshot) {
+  const version = ++panelActivationVersion;
+  // A microtask still blocks the next paint. Start work in a task after rAF.
+  const afterFrame = () => window.setTimeout(() => {
+    if (version !== panelActivationVersion) return;
+    activatePanelContent(panelId, refreshSnapshot);
+  }, 0);
+  if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(afterFrame);
+  else afterFrame();
+}
+
 function setActivePanel(panelId, { refreshSnapshot = true } = {}) {
   if (panelId === 'services-panel') panelId = 'official-sources-panel';
   if (!canAccessPanel(panelId)) panelId = 'situation-panel';
@@ -3206,6 +3253,12 @@ function setActivePanel(panelId, { refreshSnapshot = true } = {}) {
   updateGlobalLoadingVisual(getStartupQueuePercent());
   updateMobileNavActive(panelId);
   document.getElementById('panel-title').textContent = PANEL_TITLES[panelId] || 'Centre opérationnel';
+  schedulePanelActivation(panelId, refreshSnapshot);
+}
+
+function activatePanelContent(panelId, refreshSnapshot) {
+  if ((localStorage.getItem(STORAGE_KEYS.activePanel) || 'situation-panel') !== panelId) return;
+  if (panelId === 'situation-panel' && !refreshSnapshot) renderSituationOverview();
   if (panelId === 'water-panel') renderWaterPageMode();
   window.SourceExplorer?.activate(panelId);
   window.OfficialSources?.activate(panelId);
@@ -3213,7 +3266,9 @@ function setActivePanel(panelId, { refreshSnapshot = true } = {}) {
   window.ApiCredentials?.activate(panelId);
   if (panelId === 'map-panel') {
     withPanelLoading('map-panel', 'Chargement de la carte...', () => ensureMapReady().then(() => {
+      if (!isMapPanelActive()) return;
       setTimeout(() => {
+        if (!isMapPanelActive()) return;
         leafletMap?.invalidateSize();
         if (!window.PublicSources?.applyMapFocus()) centerMapOnIsere();
       }, 100);
@@ -5812,7 +5867,9 @@ function setSidebarCollapsed(collapsed) {
   toggle.setAttribute('aria-expanded', String(!isCollapsed));
   toggle.textContent = isCollapsed ? '↔ Agrandir menu' : '↔ Réduire menu';
   localStorage.setItem(STORAGE_KEYS.appSidebarCollapsed, String(isCollapsed));
-  if (leafletMap) setTimeout(() => leafletMap.invalidateSize(), 160);
+  if (leafletMap && isMapPanelActive()) setTimeout(() => {
+    if (isMapPanelActive()) leafletMap.invalidateSize();
+  }, 160);
 }
 
 async function loadIsereBoundary() {
@@ -12827,6 +12884,8 @@ function renderSituationOverview() {
 }
 
 function _renderSituationOverview() {
+  const panel = document.getElementById('situation-panel');
+  if (document.hidden || panel?.hidden || panel?.classList.contains('hidden')) return;
   const target = document.getElementById('situation-content');
   if (!target) return;
   // Le contenu Situation peut être recréé par les flux live. Conserver exactement
@@ -14759,7 +14818,8 @@ async function loadAndRenderContactsPanel(city = '', forceRefresh = false) {
 }
 
 async function loadDashboard(forceRefresh = false) {
-  const cached = readSnapshot(STORAGE_KEYS.dashboardSnapshot);
+  const cached = cachedDashboardSnapshot && Object.keys(cachedDashboardSnapshot).length
+    ? cachedDashboardSnapshot : readSnapshot(STORAGE_KEYS.dashboardSnapshot);
   if (cached) renderDashboard(cached);
   else renderSituationOverview();
 
@@ -15504,7 +15564,8 @@ function renderExternalRisks(data = {}) {
 }
 
 async function loadExternalRisks(forceRefresh = false) {
-  const cached = readSnapshot(STORAGE_KEYS.externalRisksSnapshot);
+  const hasMemorySnapshot = cachedExternalRisksSnapshot && Object.keys(cachedExternalRisksSnapshot).length > 0;
+  const cached = hasMemorySnapshot ? null : readSnapshot(STORAGE_KEYS.externalRisksSnapshot);
   if (cached) {
     cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, cached);
     renderExternalRisks(cachedExternalRisksSnapshot);
@@ -15563,6 +15624,8 @@ function _formatInterval(sec) {
 }
 
 function renderApiInterconnections(data = {}) {
+  const panel = document.getElementById('api-panel');
+  if (document.hidden || panel?.hidden || panel?.classList.contains('hidden')) return false;
   const signature = createPayloadSignature(data, ['updated_at', 'fetched_at', 'retrieved_at']);
   if (signature === lastRenderedApiInterconnectionsSignature) return false;
   lastRenderedApiInterconnectionsSignature = signature;
@@ -15653,10 +15716,12 @@ function renderApiInterconnections(data = {}) {
 
   setHtml('flux-service-list', listHtml || '<p class="muted" style="padding:.6rem">Aucun service dans ce filtre.</p>');
 
-  // Raw JSON (collapsed)
+  // Serialize only expanded raw data; large datasets stay out of the DOM.
+  const rawList = document.getElementById('api-raw-list');
+  const openRawKeys = new Set(Array.from(rawList?.querySelectorAll('details[open]') || [], item => item.dataset.serviceKey));
   const rawBlocks = FLUX_SERVICES.map((svc) => {
-    const payload = getFluxPayload(svc.key, data);
-    return `<details class="api-raw-item"><summary>${escapeHtml(svc.icon)} ${escapeHtml(svc.label)}</summary><pre>${formatApiJson(payload)}</pre></details>`;
+    const open = openRawKeys.has(svc.key);
+    return `<details class="api-raw-item" data-service-key="${escapeHtml(svc.key)}"${open ? ' open' : ''}><summary>${escapeHtml(svc.icon)} ${escapeHtml(svc.label)}</summary><pre>${open ? formatApiJson(getFluxPayload(svc.key, data)) : ''}</pre></details>`;
   }).join('');
   setHtml('api-raw-list', rawBlocks);
 
@@ -15665,9 +15730,19 @@ function renderApiInterconnections(data = {}) {
   return true;
 }
 
+function renderApiRawDetails(event) {
+  const details = event.target;
+  if (!details?.matches?.('.api-raw-item[data-service-key]') || !details.open) return;
+  const key = details.dataset.serviceKey;
+  if (!FLUX_SERVICES.some(service => service.key === key)) return;
+  const pre = details.querySelector('pre');
+  if (pre && !pre.innerHTML) pre.innerHTML = formatApiJson(getFluxPayload(key, cachedExternalRisksSnapshot));
+}
+
 async function loadApiInterconnections(forceRefresh = false) {
   if (!forceRefresh) {
-    const cached = readSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot);
+    const cached = cachedExternalRisksSnapshot && Object.keys(cachedExternalRisksSnapshot).length
+      ? cachedExternalRisksSnapshot : readSnapshot(STORAGE_KEYS.apiInterconnectionsSnapshot);
     if (cached) {
       cachedExternalRisksSnapshot = mergeExternalRisksSnapshot(cachedExternalRisksSnapshot, cached);
       renderApiInterconnections(cachedExternalRisksSnapshot);
@@ -16616,6 +16691,7 @@ function bindHomeInteractions() {
 }
 
 function bindAppInteractions() {
+  document.getElementById('api-raw-list')?.addEventListener('toggle', renderApiRawDetails, true);
   const appMenuButton = document.getElementById('app-menu-btn');
   const appSidebar = document.getElementById('app-sidebar');
 

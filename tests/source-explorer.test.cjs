@@ -8,6 +8,7 @@ const source = fs.readFileSync(path.join(__dirname, '../web/source_explorer.js')
 function harness(request = async () => ({})) {
   const nodes = new Map(), listeners = {}, calls = [];
   let context;
+  let activePanel = 'official-sources-panel';
   const get = id => {
     if (!nodes.has(id)) nodes.set(id, { id, dataset: {}, hidden: false, value: '', disabled: false, innerHTML: '', textContent: '', attributes: {}, listeners: {},
       setAttribute(name, value) { this.attributes[name] = value; },
@@ -24,7 +25,7 @@ function harness(request = async () => ({})) {
     document: { activeElement: null, getElementById: get, addEventListener: (name, fn) => { listeners[name] = fn; }, querySelector: () => null,
       querySelectorAll: selector => selector === '[data-source-view]' ? views : selector === '[data-source-mode]' ? modes : [],
     },
-    localStorage: { getItem: () => 'official-sources-panel' },
+    localStorage: { getItem: () => activePanel },
     URL, Date, Intl,
     api: (url, options) => { calls.push({ url, options }); return request(url, options); },
   });
@@ -32,7 +33,8 @@ function harness(request = async () => ({})) {
   listeners.DOMContentLoaded();
   const clickMode = mode => get('official-sources-panel').listeners.click({ target: { closest: selector => selector === '[data-source-mode]' ? modes.find(node => node.dataset.sourceMode === mode) : null } });
   const input = (id, value, name = 'input') => { const node = get(id); node.value = value; node.listeners[name]({ target: node }); };
-  return { ui: context.window.SourceExplorer, get, views, calls, clickMode, input };
+  return { ui: context.window.SourceExplorer, get, views, calls, clickMode, input,
+    setPanel: id => { activePanel = id; } };
 }
 
 test('catalogue has eleven sources, hides data and never fabricates missing counts', () => {
@@ -179,4 +181,18 @@ test('live values and display mode update existing cards without replacing the c
   assert.equal(grid.dataset.mode, 'list');
   assert.equal(replacements, 0, 'live data and mode changes preserve mounted buttons and focus');
   assert.equal(grid.children, cards);
+});
+
+test('hidden catalogue retains fresh snapshots without serializing or touching cards', () => {
+  const h = harness();
+  h.setPanel('logs-panel');
+  const before = h.get('source-catalog-grid').innerHTML;
+  let serialized = 0;
+  const slot = { status: 'online', latest: {consumption_mw: 123}, toJSON() { serialized += 1; return {status: 'online'}; } };
+  h.ui.update({energy_aura: slot});
+  assert.equal(serialized, 0);
+  assert.equal(h.get('source-catalog-grid').innerHTML, before);
+  h.setPanel('official-sources-panel');
+  h.ui.activate('official-sources-panel');
+  assert.match(h.get('source-catalog-grid').innerHTML, /123/);
 });

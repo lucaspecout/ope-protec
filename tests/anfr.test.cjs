@@ -18,7 +18,7 @@ function harness(overrides = {}) {
     return nodes.get(id);
   };
   const context = vm.createContext({
-    document: { querySelectorAll: () => [] },
+    document: { getElementById: () => null, querySelectorAll: () => [] },
     setRiskText: (id, text, level) => Object.assign(get(id), { textContent: text, level }),
     setText: (id, text) => { get(id).textContent = text; },
     setHtml: (id, html) => { get(id).innerHTML = html; },
@@ -332,4 +332,26 @@ test('ANFR recovery arriving during an older HTTP response supplies the current 
   assert.equal(points.filter((point) => point.type === 'anfr_antenna').length, 1);
   assert.equal(h.context.telecomAnfrRevision, h.context.anfrMapRevision(h.context.cachedExternalRisksSnapshot.anfr_isere));
   assert.equal(h.timers.length, 0);
+});
+
+test('collapsed interconnection details never serialize large raw datasets', () => {
+  const { context, get } = harness({ formatApiJson: () => assert.fail('Collapsed JSON was formatted') });
+  context.renderApiInterconnections({anfr_isere: previous});
+  assert.match(get('api-raw-list').innerHTML, /data-service-key="anfr_isere"/);
+  assert.match(get('api-raw-list').innerHTML, /<pre><\/pre>/);
+});
+
+test('expanded interconnection details stay open and refresh only their raw payload', () => {
+  const formatted = [];
+  const { context, get } = harness({
+    document: { querySelectorAll: () => [], getElementById: id => id === 'api-raw-list' ? {
+      querySelectorAll: () => [{dataset: {serviceKey: 'anfr_isere'}}],
+    } : null },
+    formatApiJson: payload => { formatted.push(payload); return 'expanded-json'; },
+  });
+  context.renderApiInterconnections({anfr_isere: previous});
+  assert.equal(formatted.length, 1);
+  assert.equal(formatted[0].supports_total, 124);
+  assert.match(get('api-raw-list').innerHTML, /data-service-key="anfr_isere" open/);
+  assert.match(get('api-raw-list').innerHTML, /expanded-json/);
 });
