@@ -28,6 +28,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from .config import settings
+from . import audit
 from .database import Base, SessionLocal, engine, get_db
 from .models import AlertHistory, AppSetting, AuditLog, IncidentEvent, InstitutionPoint, MapAnnotation, MapPoint, Municipality, MunicipalityDocument, OperationalLog, RiverStation, User
 from .schemas import (
@@ -332,6 +333,13 @@ def prune_audit_logs(db: Session) -> None:
 @app.middleware("http")
 async def audit_log_middleware(request: Request, call_next):
     started_at = monotonic()
+    context = {}
+    if request.method in ("POST", "PATCH", "PUT") and request.headers.get("content-type", "").startswith("application/json"):
+        try:
+            if 0 < int(request.headers.get("content-length", "0")) <= 65536:
+                context = audit.safe_context(await request.json())
+        except (ValueError, TypeError):
+            pass
     try:
         response = await call_next(request)
     except Exception as exc:
@@ -353,34 +361,47 @@ async def audit_log_middleware(request: Request, call_next):
         method in ("POST", "PATCH", "PUT", "DELETE")
         or (method == "GET" and "/export/" in path)
     )
-    if should_log and not path.startswith(("/static", "/health")):
+    if should_log and request.scope.get("route") is not None and not path.startswith(("/static", "/health")):
         username = _get_request_username(request)
         ip = _get_client_ip(request)
         action = f"{method} {path}"
         resource_type = _path_resource_type(path)
         status_code = response.status_code
-        details = json.dumps({
-            "query_keys": sorted(set(request.query_params.keys())),
+        actor = getattr(request.state, "audit_actor", None)
+        details_data = {
+            "actor": actor or {}, "context": context,
+            "action_label": audit.action_label(method, path),
+            "target": {str(key): str(value)[:160] for key, value in request.path_params.items()},
+            "reason": getattr(request.state, "audit_reason", None),
+            "duration_ms": round((monotonic() - started_at) * 1000, 1),
             "user_agent": str(request.headers.get("user-agent") or "")[:220],
-            "referer": str(request.headers.get("referer") or "").split('?')[0][:220],
-        }, ensure_ascii=False)
+        }
 
         def _write():
             db = None
             try:
                 db = SessionLocal()
+                if not actor and path != "/auth/login":
+                    try:
+                        auth = request.headers.get("authorization", "")
+                        token = request.cookies.get(session_security.COOKIE) or (auth[7:].strip() if auth.lower().startswith("bearer ") else "")
+                        verified_user = session_security.authenticate(db, token)
+                        details_data["actor"] = audit.actor_snapshot(verified_user)
+                    except HTTPException:
+                        pass
+                resolved_username = (details_data["actor"] or {}).get("username") or username
                 db.add(AuditLog(
-                    username=username,
+                    username=resolved_username,
                     action=action,
                     resource_type=resource_type,
-                    details=details,
+                    details=json.dumps(details_data, ensure_ascii=False),
                     ip_address=ip,
                     status_code=status_code,
                 ))
                 prune_audit_logs(db)
                 db.commit()
             except Exception:
-                pass
+                logger.exception("Unable to persist audit event %s", action)
             finally:
                 if db:
                     db.close()
@@ -583,15 +604,8 @@ def _check_and_record_alert(key: str, new_data: dict) -> None:
 
 # ── Audit helpers ────────────────────────────────────────────────────────────
 def _get_request_username(request: Request) -> str:
-    try:
-        auth = request.headers.get("Authorization", "")
-        tok = request.cookies.get(session_security.COOKIE) or (auth[7:].strip() if auth.startswith("Bearer ") else "")
-        if not tok:
-            return "anonymous"
-        payload = jwt.decode(tok, settings.secret_key, algorithms=["HS256"])
-        return str(payload.get("sub") or "anonymous")
-    except Exception:
-        return "anonymous"
+    actor = getattr(request.state, "audit_actor", None) or {}
+    return actor.get("username") or getattr(request.state, "audit_login_username", None) or "anonymous"
 
 
 def _get_client_ip(request: Request) -> str:
@@ -602,14 +616,7 @@ def _get_client_ip(request: Request) -> str:
 
 
 def _path_resource_type(path: str) -> str:
-    if "/auth/" in path:        return "auth"
-    if "/municipalities" in path: return "municipalities"
-    if "/logs" in path:         return "logs"
-    if "/events" in path:       return "events"
-    if "/map" in path:          return "map"
-    if "/notifications" in path: return "notifications"
-    if "/users" in path:        return "users"
-    return "api"
+    return audit.resource_type(path)
 
 
 def bump_map_annotations_revision() -> int:
@@ -833,6 +840,7 @@ def touch_user_site_access(user: User, db: Session, force: bool = False) -> None
 
 def get_current_user(request: Request, token: str | None = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
     user = session_security.authenticate(db, session_security.request_token(request, token))
+    request.state.audit_actor = audit.actor_snapshot(user)
     touch_user_site_access(user, db)
     return user
 
@@ -2066,28 +2074,12 @@ def delete_user(user_id: int, db: Session = Depends(get_db), actor: User = Depen
 async def login(request: Request, response: Response, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     session_security.check_origin(request)
     ip = _get_client_ip(request)
+    request.state.audit_login_username = form_data.username.strip()[:120]
     from .login_throttle import login_throttle
     login_throttle.check(ip, form_data.username, _redis)
 
     def _audit(status: int, detail: str | None = None):
-        def _write():
-            db2 = SessionLocal()
-            try:
-                db2.add(AuditLog(
-                    username=form_data.username,
-                    action="POST /auth/login",
-                    resource_type="auth",
-                    details=detail,
-                    ip_address=ip,
-                    status_code=status,
-                ))
-                prune_audit_logs(db2)
-                db2.commit()
-            except Exception:
-                pass
-            finally:
-                db2.close()
-        asyncio.get_event_loop().run_in_executor(None, _write)
+        request.state.audit_reason = detail
 
     username = form_data.username.strip()
     password_plain = form_data.password
@@ -2138,8 +2130,8 @@ async def login(request: Request, response: Response, form_data: OAuth2PasswordR
         logger.exception("Database error during login for %s", username)
         _audit(503, "Base de donnees temporairement indisponible")
         raise HTTPException(503, "Connexion temporairement indisponible. Réessayez dans quelques instants.") from exc
-    _audit(200)
     access_token = session_security.create_session(db, user)
+    request.state.audit_actor = {"username": user.username, "user_id": user.id, "user_role": user.role, "user_municipality": user.municipality_name, "auth_source": user.auth_source, "identity_verified": True}
     browser_session = request.headers.get('x-session-mode') == 'cookie'
     if browser_session:
         session_security.set_cookies(response, request, access_token)
@@ -2176,6 +2168,11 @@ def logout_session(request: Request, response: Response, bearer: str | None = De
         token_value=session_security.request_token(request,bearer)
     else:
         token_value=bearer or ''
+    try:
+        user = session_security.authenticate(db, token_value)
+        request.state.audit_actor = {"username": user.username, "user_id": user.id, "user_role": user.role, "user_municipality": user.municipality_name, "auth_source": user.auth_source, "identity_verified": True}
+    except HTTPException:
+        pass
     session_security.revoke(db,token_value)
     session_security.clear_cookies(response)
     return {'status':'logged_out'}
@@ -4343,6 +4340,13 @@ def get_alerts_history(
 # FEATURE 15 — Journal d'audit
 # ══════════════════════════════════════════════════════════════════════════════
 
+def audit_visible_query(db: Session, include_noise: bool = False):
+    q = db.query(AuditLog)
+    if not include_noise:
+        q = q.filter(AuditLog.username != "anonymous")
+    return q
+
+
 @app.get("/api/audit")
 def get_audit_log(
     limit: int = Query(100, ge=1, le=500),
@@ -4352,12 +4356,14 @@ def get_audit_log(
     resource_type: str | None = Query(None),
     method: str | None = Query(None),
     status: str | None = Query(None),
+    include_noise: bool = Query(False),
     sort_by: str = Query("created_at"),
     sort_dir: str = Query("desc"),
     db: Session = Depends(get_db),
     _: User = Depends(require_roles("admin")),
 ):
-    q = db.query(AuditLog, User.role, User.municipality_name).outerjoin(User, User.username == AuditLog.username)
+    base = audit_visible_query(db, include_noise)
+    q = base.add_columns(User.role, User.municipality_name).outerjoin(User, User.username == AuditLog.username)
     if username:
         q = q.filter(AuditLog.username == username)
     if resource_type:
@@ -4366,7 +4372,7 @@ def get_audit_log(
         normalized_method = method.upper().strip()
         q = q.filter(AuditLog.action.ilike(f"{normalized_method} %"))
     if status == "success":
-        q = q.filter(AuditLog.status_code >= 200, AuditLog.status_code < 400)
+        q = q.filter(AuditLog.status_code >= 200, AuditLog.status_code < 300)
     elif status == "error":
         q = q.filter(AuditLog.status_code >= 400)
     elif status == "warning":
@@ -4394,44 +4400,30 @@ def get_audit_log(
     rows = q.offset(offset).limit(limit).all()
     users = [
         username
-        for (username,) in db.query(AuditLog.username).distinct().order_by(AuditLog.username.asc()).limit(300).all()
+        for (username,) in base.with_entities(AuditLog.username).distinct().order_by(AuditLog.username.asc()).limit(300).all()
         if username
     ]
     resource_types = [
         resource
-        for (resource,) in db.query(AuditLog.resource_type).filter(AuditLog.resource_type.isnot(None)).distinct().order_by(AuditLog.resource_type.asc()).all()
+        for (resource,) in base.with_entities(AuditLog.resource_type).filter(AuditLog.resource_type.isnot(None)).distinct().order_by(AuditLog.resource_type.asc()).all()
         if resource
     ]
 
-    items = [
-        {
-            "id": a.id,
-            "username": a.username,
-            "user_role": role,
-            "user_municipality": municipality_name,
-            "action": a.action,
-            "method": (a.action or "").split(" ", 1)[0] if a.action else "",
-            "path": (a.action or "").split(" ", 1)[1] if " " in (a.action or "") else a.action,
-            "resource_type": a.resource_type,
-            "details": a.details,
-            "ip_address": a.ip_address,
-            "status_code": a.status_code,
-            "created_at": a.created_at.isoformat() + "Z",
-        }
-        for a, role, municipality_name in rows
-    ]
+    items = [audit.serialize(a, role, municipality_name) for a, role, municipality_name in rows]
     return {"items": items, "total": total, "users": users, "resource_types": resource_types}
 
 
 @app.get("/api/audit/export/csv")
 def export_audit_csv(
     days: int = Query(30, ge=1, le=90),
+    include_noise: bool = Query(False),
     db: Session = Depends(get_db),
     _: User = Depends(require_roles("admin")),
 ):
     since = datetime.utcnow() - timedelta(days=days)
     logs = (
-        db.query(AuditLog)
+        audit_visible_query(db, include_noise)
+        .add_columns(User.role, User.municipality_name).outerjoin(User, User.username == AuditLog.username)
         .filter(AuditLog.created_at >= since)
         .order_by(AuditLog.created_at.desc())
         .all()
@@ -4439,11 +4431,14 @@ def export_audit_csv(
 
     def _csv_field(value) -> str:
         text_value = "" if value is None else str(value)
+        if text_value.startswith(("=", "+", "-", "@", "\t", "\r")):
+            text_value = "'" + text_value
         return '"' + text_value.replace('"', '""') + '"'
 
     def _csv():
-        yield "id,username,action,resource_type,details,ip_address,status_code,created_at\n"
-        for a in logs:
+        yield "id,username,action,resource_type,details,ip_address,status_code,created_at,user_role,user_municipality,action_label,outcome\n"
+        for a, role, municipality in logs:
+            item = audit.serialize(a, role, municipality)
             fields = [
                 str(a.id),
                 a.username,
@@ -4453,6 +4448,7 @@ def export_audit_csv(
                 a.ip_address or "",
                 str(a.status_code or ""),
                 a.created_at.isoformat() + "Z",
+                item["user_role"], item["user_municipality"], item["action_label"], item["outcome"],
             ]
             yield ",".join(_csv_field(field) for field in fields) + "\n"
 

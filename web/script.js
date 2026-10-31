@@ -19082,7 +19082,7 @@ async function _renderLocalWeatherModal(data, lat, lon) {
 // FEATURE 15 — Journal d'audit
 // ════════════════════════════════════════════════════════════════════════════
 
-const auditState = { logs: [], selectedId: null, total: 0 };
+const auditState = { logs: [], selectedId: null, total: 0, requestId: 0 };
 
 function auditModuleLabel(type = '') {
   return {
@@ -19094,6 +19094,9 @@ function auditModuleLabel(type = '') {
     map: 'Carte',
     interconnections: 'Interconnexions',
     audit: 'Audit',
+    notifications: 'Notifications',
+    agents: 'Agents',
+    api: 'Autres services',
   }[type] || type || 'Autre';
 }
 
@@ -19126,6 +19129,7 @@ function syncAuditSelectOptions(selectId, values = [], placeholder = '') {
 }
 
 async function loadAuditLog() {
+  const requestId = ++auditState.requestId;
   const searchFilter = (document.getElementById('audit-search-filter')?.value || '').trim();
   const userFilter = document.getElementById('audit-user-filter')?.value || '';
   const typeFilter = document.getElementById('audit-type-filter')?.value || '';
@@ -19141,8 +19145,10 @@ async function loadAuditLog() {
   if (typeFilter) params.set('resource_type', typeFilter);
   if (methodFilter) params.set('method', methodFilter);
   if (statusFilter) params.set('status', statusFilter);
+  if (document.getElementById('audit-noise-filter')?.checked) params.set('include_noise', 'true');
   try {
     const data = await api(`/api/audit?${params.toString()}`, { bypassCache: true, cacheTtlMs: 0 });
+    if (requestId !== auditState.requestId) return;
     const logs = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
     auditState.logs = logs;
     auditState.total = Number(data?.total ?? logs.length);
@@ -19152,6 +19158,7 @@ async function loadAuditLog() {
     renderAuditLog(logs, auditState.total);
     renderAuditDetails(logs.find((log) => String(log.id) === String(auditState.selectedId)) || null);
   } catch (err) {
+    if (requestId !== auditState.requestId) return;
     if (el) el.innerHTML = `<p class="error" style="padding:1rem">Erreur : ${escapeHtml(sanitizeErrorMessage(err.message))}</p>`;
   }
 }
@@ -19161,9 +19168,9 @@ function renderAuditLog(logs, total = logs.length) {
   const summary = document.getElementById('audit-summary');
   if (!el) return;
   const errors = logs.filter((log) => Number(log.status_code || 0) >= 400).length;
-  const users = new Set(logs.map((log) => log.username).filter(Boolean)).size;
+  const users = new Set(logs.map((log) => log.username).filter((name) => name && name !== 'anonymous')).size;
   const modules = new Set(logs.map((log) => log.resource_type).filter(Boolean)).size;
-  if (summary) summary.innerHTML = `<span>${logs.length}/${total} ligne(s)</span><span>${users} utilisateur(s)</span><span>${modules} module(s)</span><span>${errors} erreur(s)</span>`;
+  if (summary) summary.innerHTML = `<span>${logs.length}/${total} ligne(s)</span><span>${users} utilisateur(s)</span><span>${modules} module(s)</span><span>${errors} erreur(s) sur les lignes affichées</span>`;
   if (!logs.length) {
     el.innerHTML = '<p class="muted" style="padding:1rem">Aucune action enregistrée pour cette recherche.</p>';
     return;
@@ -19176,15 +19183,35 @@ function renderAuditLog(logs, total = logs.length) {
       const userMeta = [a.user_role ? roleLabel(a.user_role) : '', a.user_municipality || ''].filter(Boolean).join(' · ');
       return `<tr${selected} data-audit-id="${escapeHtml(String(a.id))}">
         <td>${escapeHtml(auditDateLabel(a.created_at))}</td>
-        <td><strong>${escapeHtml(a.username || 'inconnu')}</strong>${userMeta ? `<br><span class="muted">${escapeHtml(userMeta)}</span>` : ''}</td>
+        <td><strong>${escapeHtml(a.username === 'anonymous' ? 'Non authentifié' : (a.username || 'Inconnu'))}</strong>${userMeta ? `<br><span class="muted">${escapeHtml(userMeta)}</span>` : ''}</td>
         <td>${escapeHtml(auditModuleLabel(a.resource_type))}</td>
-        <td><span class="audit-chip audit-chip--neutral">${escapeHtml(auditMethodLabel(a.method))}</span></td>
+        <td><span class="audit-chip audit-chip--neutral">${escapeHtml(a.action_label || auditMethodLabel(a.method))}</span></td>
         <td class="audit-path" title="${escapeHtml(a.path || a.action || '')}">${escapeHtml(a.path || a.action || '-')}</td>
-        <td><span class="audit-chip audit-chip--${status.css}">${escapeHtml(status.label)}</span></td>
+        <td><span class="audit-chip audit-chip--${status.css}">${escapeHtml(a.outcome || status.label)} (${escapeHtml(status.label)})</span></td>
         <td>${escapeHtml(a.ip_address || '-')}</td>
       </tr>`;
     }).join('')}</tbody>
   </table>`;
+}
+
+function auditContextLabel(key) {
+  return { name: 'Nom', title: 'Titre', username: 'Compte concerné', role: 'Rôle demandé',
+    municipality_name: 'Commune', municipality_id: 'ID commune', event_id: 'ID événement', user_id: 'ID utilisateur',
+    log_id: 'ID main courante', file_id: 'ID document', point_id: 'ID point', annotation_id: 'ID annotation', rule_id: 'ID règle', status: 'Statut', type: 'Type',
+    crisis_mode: 'Mode crise', enabled: 'Activé', service_key: 'Service' }[key] || key;
+}
+
+function auditResultLabel(code) {
+  if (!Number(code)) return 'Résultat non documenté';
+  if (Number(code) === 401) return 'Authentification requise ou identifiants refusés';
+  if (Number(code) === 403) return 'Accès refusé';
+  if (Number(code) === 404) return 'Ressource introuvable';
+  if (Number(code) === 422) return 'Données invalides';
+  if (Number(code) === 429) return 'Trop de tentatives';
+  if (Number(code) >= 500) return 'Erreur du serveur';
+  if (Number(code) >= 400) return 'Action refusée';
+  if (Number(code) >= 300) return 'Redirection';
+  return 'Action réussie';
 }
 
 function renderAuditDetails(log) {
@@ -19197,18 +19224,28 @@ function renderAuditDetails(log) {
   }
   const status = auditStatusMeta(log.status_code);
   el.classList.remove('muted');
-  el.innerHTML = `<h4>${escapeHtml(auditModuleLabel(log.resource_type))}</h4>
-    <span class="audit-chip audit-chip--${status.css}">HTTP ${escapeHtml(status.label)}</span>
+  const target = Object.entries(log.target || {}).map(([key, value]) => `${auditContextLabel(key)} : ${value}`).join(' · ');
+  const context = Object.entries(log.context || {}).map(([key, value]) => `${auditContextLabel(key)} : ${String(value)}`).join(' ; ');
+  const identity = log.identity_verified === true ? 'Identité vérifiée' : log.path === '/auth/login' && Number(log.status_code) >= 400 ? 'Identifiant saisi, connexion refusée' : 'Identité non documentée dans cet historique';
+  el.innerHTML = `<h4>${escapeHtml(log.action_label || auditModuleLabel(log.resource_type))}</h4>
+    <span class="audit-chip audit-chip--${status.css}">${escapeHtml(log.outcome || "HTTP")} (${escapeHtml(status.label)})</span>
     <dl>
       <dt>Heure</dt><dd>${escapeHtml(auditDateLabel(log.created_at))}</dd>
-      <dt>Utilisateur</dt><dd>${escapeHtml(log.username || 'inconnu')}</dd>
+      <dt>Utilisateur</dt><dd>${escapeHtml(log.username === 'anonymous' ? 'Non authentifié' : (log.username || 'Inconnu'))}</dd>
       <dt>Rôle</dt><dd>${escapeHtml(log.user_role ? roleLabel(log.user_role) : '-')}</dd>
       <dt>Commune</dt><dd>${escapeHtml(log.user_municipality || '-')}</dd>
+      <dt>Identité</dt><dd>${escapeHtml(identity)}</dd>
+      <dt>ID compte</dt><dd>${escapeHtml(String(log.user_id ?? '-'))}</dd>
+      <dt>Annuaire</dt><dd>${escapeHtml(log.auth_source || '-')}</dd>
       <dt>Méthode</dt><dd>${escapeHtml(log.method || '-')}</dd>
-      <dt>Action</dt><dd>${escapeHtml(log.action || '-')}</dd>
+      <dt>Action</dt><dd>${escapeHtml(log.action_label || log.action || '-')}</dd>
       <dt>Chemin</dt><dd>${escapeHtml(log.path || '-')}</dd>
       <dt>IP</dt><dd>${escapeHtml(log.ip_address || '-')}</dd>
-      <dt>Détail</dt><dd>${escapeHtml(log.details || '-')}</dd>
+      <dt>Ressource</dt><dd>${escapeHtml(target || log.path || '-')}</dd>
+      <dt>Contexte</dt><dd>${escapeHtml(context || 'Aucun contexte supplémentaire enregistré')}</dd>
+      <dt>Résultat</dt><dd>${escapeHtml(log.reason || auditResultLabel(log.status_code))}</dd>
+      <dt>Durée</dt><dd>${escapeHtml(log.duration_ms == null ? '-' : `${log.duration_ms} ms`)}</dd>
+      <dt>Navigateur</dt><dd>${escapeHtml(log.user_agent || '-')}</dd>
     </dl>`;
 }
 
@@ -19219,7 +19256,7 @@ function renderAuditDetails(log) {
   const userFilter = document.getElementById('audit-user-filter');
   if (userFilter) userFilter.addEventListener('change', loadAuditLog);
 
-  ['audit-type-filter', 'audit-method-filter', 'audit-status-filter', 'audit-sort-select', 'audit-limit-select'].forEach((id) => {
+  ['audit-noise-filter', 'audit-type-filter', 'audit-method-filter', 'audit-status-filter', 'audit-sort-select', 'audit-limit-select'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', loadAuditLog);
   });
 
@@ -19262,7 +19299,7 @@ function renderAuditDetails(log) {
   if (exportLink && typeof token !== 'undefined') {
     exportLink.addEventListener('click', async (e) => {
       e.preventDefault();
-      const url = '/api/audit/export/csv?days=30';
+      const url = `/api/audit/export/csv?days=30&include_noise=${Boolean(document.getElementById('audit-noise-filter')?.checked)}`;
       const response = await queueApiRequest(() => fetchWithTimeout(url, { headers: token && token !== COOKIE_SESSION ? { Authorization: `Bearer ${token}` } : {} }));
       if (!response.ok) {
         const summary = document.getElementById('audit-summary');

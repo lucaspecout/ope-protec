@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
-  <link rel="stylesheet" href="/styles.css?v=20261024-water-modes" />
+  <link rel="stylesheet" href="/styles.css?v=20261031-audit" />
   <link rel="stylesheet" href="/official_sources.css?v=20261024-scroll-fix" />
   <link rel="stylesheet" href="/api_credentials.css?v=20261020" />
   <link rel="stylesheet" href="/public_sources.css?v=20261020" />
@@ -1518,9 +1518,9 @@
           <div class="flux-header" style="margin-bottom:1rem">
             <div>
               <h3>Journal d'audit · Traçabilité</h3>
-              <p class="muted">Toutes les actions (écriture, suppression, export) effectuées par les utilisateurs.</p>
+              <p class="muted">Connexions, modifications, suppressions et exports. Les 500 derniers événements sont conservés ; les requêtes non authentifiées sont masquées par défaut.</p>
             </div>
-            <a id="audit-export-link" href="/api/audit/export/csv?days=30" class="btn ghost" style="font-size:.85rem;padding:.35rem .75rem">⬇ Exporter CSV</a>
+            <a id="audit-export-link" href="/api/audit/export/csv?days=30" class="btn ghost" style="font-size:.85rem;padding:.35rem .75rem">⬇ Exporter CSV (30 jours)</a>
           </div>
           <div class="audit-toolbar">
             <input id="audit-search-filter" type="search" placeholder="Rechercher action, utilisateur, IP, détail..." />
@@ -1554,6 +1554,7 @@
             </select>
             <button id="audit-refresh-btn" type="button">Actualiser</button>
           </div>
+          <label class="audit-noise-toggle"><input id="audit-noise-filter" type="checkbox" /> Inclure les requêtes non authentifiées (historique technique)</label>
           <div id="audit-summary" class="audit-summary muted"></div>
           <div class="audit-layout">
             <div id="audit-list" class="audit-table-wrap"></div>
@@ -1649,6 +1650,6 @@
   <script defer src="/public_sources.js?v=20261024-unified"></script>
   <script defer src="/api_credentials.js?v=20261020"></script>
   <script defer src="/map_filters.js?v=20261021-map-menu"></script>
-  <script defer src="/script.js?v=20261025-map-boundary-fix"></script>
+  <script defer src="/script.js?v=20261031-audit"></script>
 </body>
 </html>
